@@ -9,7 +9,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 # mandatory dependencies
 python = "^3.9.18"
-scanpy = "1.9.5"
+scanpy = "1.10.2"
 numpy = "1.26.4"
 dask-image = "2023.8.1"
 parse = "1.19.1"
