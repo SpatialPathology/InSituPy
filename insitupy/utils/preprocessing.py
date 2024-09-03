@@ -80,6 +80,7 @@ def reduce_dimensions_anndata(adata,
     
     # Determine the prefix for the data
     data_prefix = layer if layer else "raw"
+   
 
     if batch_correction_key is None:
         # dimensionality reduction
