@@ -13,8 +13,10 @@ from rasterio.features import rasterize
 from zarr.errors import ArrayNotFoundError
 
 from insitupy._core.dataclasses import (AnnotationsData, BoundariesData,
-                                        CellData, RegionsData)
-from insitupy.utils.io import read_baysor_polygons, read_json
+                                        CellData, RegionsData, ShapesData)
+from insitupy.io.baysor import read_baysor_polygons
+from insitupy.io.files import read_json
+from insitupy.utils.utils import convert_to_list
 
 
 def read_baysor_cells(
@@ -182,28 +184,50 @@ def read_celldata(
     return celldata
 
 
-def read_regionsdata(
+# def read_shapesdata(
+#     path: Union[str, os.PathLike, Path],
+# ):
+#     path = Path(path)
+#     metadata = read_json(path / "metadata.json")
+#     keys = metadata.keys()
+#     files = [path / f"{k}.geojson" for k in keys]
+#     data = RegionsData(files, keys)
+
+#     for k, f in zip(keys, files):
+#         data.add_data(data=f, key=k)
+
+#     # overwrite metadata
+#     data.metadata = metadata
+#     return data
+
+
+def read_shapesdata(
     path: Union[str, os.PathLike, Path],
+    mode: Literal["annotations", "regions", "shapes"],
 ):
     path = Path(path)
+
+    # read metadata and retrieve keys and files from it
     metadata = read_json(path / "metadata.json")
     keys = metadata.keys()
     files = [path / f"{k}.geojson" for k in keys]
-    data = RegionsData(files, keys)
 
-    # overwrite metadata
-    data.metadata = metadata
-    return data
+    # check which type of ShapesData is read here
+    if mode == "annotations":
+        data = AnnotationsData()
+    elif mode == "regions":
+        data = RegionsData()
+    elif mode == "shapes":
+        data = ShapesData()
+    else:
+        ValueError(f"Unknown `mode`: {mode}")
 
+    # make sure files and keys are a list
+    files = convert_to_list(files)
+    keys = convert_to_list(keys)
 
-def read_annotationsdata(
-    path: Union[str, os.PathLike, Path],
-):
-    path = Path(path)
-    metadata = read_json(path / "metadata.json")
-    keys = metadata.keys()
-    files = [path / f"{k}.geojson" for k in keys]
-    data = AnnotationsData(files, keys)
+    for k, f in zip(keys, files):
+        data.add_data(data=f, key=k)
 
     # overwrite metadata
     data.metadata = metadata

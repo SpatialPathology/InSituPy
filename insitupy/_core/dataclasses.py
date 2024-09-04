@@ -13,8 +13,7 @@ import pandas as pd
 import zarr
 from anndata import AnnData
 from parse import *
-from shapely import Polygon, affinity
-from shapely.geometry.multipolygon import MultiPolygon
+from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import __version__
 from insitupy.utils.utils import convert_int_to_xenium_hex
@@ -22,8 +21,8 @@ from insitupy.utils.utils import convert_int_to_xenium_hex
 from .._exceptions import InvalidDataTypeError, InvalidFileTypeError
 from ..images.io import read_image, write_ome_tiff, write_zarr
 from ..images.utils import create_img_pyramid, crop_dask_array_or_pyramid
-from ..utils.geo import parse_geopandas, write_qupath_geojson
-from ..utils.io import check_overwrite_and_remove_if_true, write_dict_to_json
+from ..io.files import check_overwrite_and_remove_if_true, write_dict_to_json
+from ..io.geo import parse_geopandas, write_qupath_geojson
 from ..utils.utils import convert_to_list, decode_robust_series
 from ..utils.utils import textformat as tf
 from ._mixins import DeepCopyMixin, GetMixin
@@ -34,6 +33,8 @@ class ShapesData(DeepCopyMixin, GetMixin):
     Object to store annotations.
     '''
     default_assert_uniqueness = False
+    # default_skip_multipolygons = False
+    default_polygons_only = False
     shape_name = "shapes"
     repr_color = tf.Cyan
     def __init__(self,
@@ -41,11 +42,27 @@ class ShapesData(DeepCopyMixin, GetMixin):
                  keys: Optional[List[str]] = None,
                  pixel_size: float = 1,
                  assert_uniqueness: Optional[bool] = None,
+                #  skip_multipolygons: Optional[bool] = None,
+                 polygons_only: Optional[bool] = None
                  # shape_name: Optional[str] = None
                  ) -> None:
 
         # create dictionary for metadata
         self.metadata = {}
+
+        # set configuration of ShapesData
+        if assert_uniqueness is None:
+            self.assert_uniqueness = self.default_assert_uniqueness
+        else:
+            self.assert_uniqueness = assert_uniqueness
+
+        # if skip_multipolygons is None:
+        #     self.skip_multipolygons = self.default_skip_multipolygons
+
+        if polygons_only is None:
+            self.polygons_only = self.default_polygons_only
+        else:
+            self.polygons_only = polygons_only
 
         if files is not None:
             # make sure files and keys are a list
@@ -53,16 +70,12 @@ class ShapesData(DeepCopyMixin, GetMixin):
             keys = convert_to_list(keys)
             assert len(files) == len(keys), "Number of files does not match number of keys."
 
-            if assert_uniqueness is None:
-                assert_uniqueness = self.default_assert_uniqueness
-
             if files is not None:
                 for key, file in zip(keys, files):
                     # read annotation and store in dictionary
-                    self.add_shapes(data=file,
+                    self.add_data(data=file,
                                         key=key,
-                                        pixel_size=pixel_size,
-                                        assert_uniqueness=assert_uniqueness
+                                        scale_factor=(pixel_size, pixel_size),
                                         )
 
     def __repr__(self):
@@ -105,7 +118,13 @@ class ShapesData(DeepCopyMixin, GetMixin):
             annot_df = dataframe
 
         if len(annot_df.index.unique()) != len(annot_df.name.unique()):
-            warnings.warn(message=f"Names of {self.shape_name} for key '{key}' were not unique. Key was skipped.")
+            warnings.warn(
+                message=
+                (
+                    f"The names of the {self.shape_name} for key '{key}' were not unique and thus "
+                    f"the key was skipped. In regions only one geometry per class is allowed."
+                    )
+                )
             return False
         else:
             if verbose:
@@ -114,42 +133,64 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
     def _update_metadata(self,
                          keys: Union[str, Literal["all"]] = "all",
-                         analyzed: bool = False
+                         analyzed: bool = False,
+                         verbose: bool = False
                          ):
 
         if keys == "all":
             keys = list(self.metadata.keys())
 
         keys = convert_to_list(keys)
-
+        keys_to_remove = []
         for key in keys:
-            # retrieve dataframe
-            annot_df = getattr(self, key)
-
-            # record metadata information
-            self.metadata[key][f"n_{self.shape_name}"] = len(annot_df)  # number of annotations
-
             try:
-                self.metadata[key]["classes"] = annot_df['name'].unique().tolist()  # annotation classes
-            except KeyError:
-                self.metadata[key]["classes"] = ["unnamed"]
+                # retrieve dataframe
+                annot_df = getattr(self, key)
+            except AttributeError:
+                self.metadata.pop(key)
+                if verbose:
+                    print(f'Removed {key}', flush=True)
+            else:
+                # record metadata information
+                self.metadata[key][f"n_{self.shape_name}"] = len(annot_df)  # number of annotations
 
-            self.metadata[key]["analyzed"] = tf.Tick if analyzed else ""  # whether this annotation has been used in the annotate() function
+                try:
+                    self.metadata[key]["classes"] = annot_df['name'].unique().tolist()  # annotation classes
+                except KeyError:
+                    self.metadata[key]["classes"] = ["unnamed"]
 
+                self.metadata[key]["analyzed"] = tf.Tick if analyzed else ""  # whether this annotation has been used in the annotate() function
 
-    def add_shapes(self,
-                   data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
+    def add_data(self,
+                    data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
                                 str, os.PathLike, Path],
-                   key: str,
-                   pixel_size: Optional[float] = 1,
-                   verbose: bool = False,
-                   assert_uniqueness: bool = False
+                    key: str,
+                    scale_factor: Optional[Tuple[float, float]] = None,
+                    verbose: bool = False,
                    ):
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
 
-        # convert pixel coordinates to metric units
-        new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
+        if "scale" not in new_df.columns:
+            # add scale factor to data
+            if scale_factor is None:
+                warnings.warn("No `scale_factor` added to data.")
+            new_df["scale"] = [scale_factor] * len(new_df)
+        else:
+            if verbose:
+                print("Scale inferred from file.", flush=True)
+
+        # determine the type of layer that needs to be used in napari later
+        layer_types = []
+        for geom in new_df["geometry"]:
+            if isinstance(geom, Point) or isinstance(geom, MultiPoint):
+                layer_types.append("Points")
+            else:
+                layer_types.append("Shapes")
+        new_df["layer_type"] = layer_types
+
+        # # convert pixel coordinates to metric units
+        # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
 
         if not hasattr(self, key):
             # if key does not exist yet, the new df is the whole annotation dataframe
@@ -176,28 +217,36 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
         if new_annotations_added:
             add = True
-            if assert_uniqueness:
-                # if len(annot_df.index.unique()) != len(annot_df.name.unique()):
-                #     warnings.warn(message=f"Names of {self.shape_name} for key '{key}' were not unique. Key was skipped.")
-                #     add = False
-                # else:
-                #     if verbose:
-                #         print(f"Names of {self.shape_name} for key '{key}' are unique.")
-
+            if self.assert_uniqueness:
                 # check if the shapes data for this key is unique (same number of names than indices)
-                is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=verbose)
+                is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
 
                 if not is_unique:
                     add = False
 
-            # check if any of the shapes are shapely MultiPolygons
-            is_not_multipolygon = [not isinstance(p, MultiPolygon) for p in annot_df.geometry]
-            if not np.all(is_not_multipolygon):
-                annot_df = annot_df.loc[is_not_multipolygon]
-                warnings.warn(
-                    f"Some {self.shape_name} were a shapely 'MultiPolygon' objects and skipped.",
-                    stacklevel=2
-                    )
+            # if self.skip_multipolygons:
+            #     # check if any of the shapes are shapely MultiPolygons
+            #     is_not_multipolygon = [not isinstance(p, MultiPolygon) for p in annot_df.geometry]
+            #     if not np.all(is_not_multipolygon):
+            #         annot_df = annot_df.loc[is_not_multipolygon]
+            #         warnings.warn(
+            #             f"Some {self.shape_name} were a shapely 'MultiPolygon' objects and skipped.",
+            #             stacklevel=2
+            #             )
+
+            if self.polygons_only:
+                # check if any of the shapes are shapely MultiPolygons
+                is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
+                if np.any(is_not_polygon):
+                    annot_df = annot_df.loc[is_not_polygon]
+                    warnings.warn(
+                        f"Some {self.shape_name} were not pure Polygon objects and skipped.",
+                        stacklevel=2
+                        )
+
+            # check that the dataframe is not empty
+            if len(annot_df) == 0:
+                add = False
 
             if add:
                 # add dataframe to AnnotationData object
@@ -246,6 +295,13 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
         self.metadata = new_metadata
 
+        self._update_metadata()
+
+    def remove_data(self,
+                   key_to_remove: str):
+        delattr(self, key_to_remove)
+        self._update_metadata()
+
     def save(self,
              path: Union[str, os.PathLike, Path],
              overwrite: bool = False
@@ -285,6 +341,8 @@ class AnnotationsData(ShapesData):
                  pixel_size: float = 1
                  ) -> None:
         self.default_assert_uniqueness = False
+        # self.default_skip_multipolygons = False
+        self.default_polygons_only = False
         self.shape_name = "annotations"
         self.repr_color = tf.Cyan
 
@@ -297,6 +355,8 @@ class RegionsData(ShapesData):
                  pixel_size: float = 1
                  ) -> None:
         self.default_assert_uniqueness = True
+        # self.default_skip_multipolygons = True # MultiPolygons are not allowed in regions
+        self.default_polygons_only = True
         self.shape_name = "regions"
         self.repr_color = tf.Yellow
 

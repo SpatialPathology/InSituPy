@@ -21,12 +21,12 @@ from dask_image.imread import imread
 from geopandas import GeoDataFrame
 from parse import *
 from scipy.sparse import issparse
-from shapely import Polygon
-from shapely.geometry.polygon import Polygon
+from shapely import Point, Polygon
+from shapely.affinity import scale as scale_func
 from tqdm import tqdm
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import ISPY_METADATA_FILE
+from insitupy._constants import ISPY_METADATA_FILE, REGIONS_SYMBOL
 from insitupy._core._save import _save_images
 from insitupy._core._xenium import (_read_binned_expression,
                                     _read_boundaries_from_xenium,
@@ -34,10 +34,10 @@ from insitupy._core._xenium import (_read_binned_expression,
                                     _restructure_transcripts_dataframe)
 from insitupy._exceptions import UnknownOptionError
 from insitupy.images import ImageRegistration, deconvolve_he, resize_image
-from insitupy.io.io import (read_annotationsdata, read_baysor_cells,
-                            read_baysor_transcripts, read_celldata,
-                            read_regionsdata)
-from insitupy.utils.io import read_json, save_and_show_figure
+from insitupy.io.files import read_json, write_dict_to_json
+from insitupy.io.io import (read_baysor_cells, read_baysor_transcripts,
+                            read_celldata, read_shapesdata)
+from insitupy.io.plots import save_and_show_figure
 from insitupy.utils.preprocessing import (normalize_anndata,
                                           reduce_dimensions_anndata)
 from insitupy.utils.utils import get_nrows_maxcols
@@ -47,9 +47,10 @@ from .._exceptions import (ModalityNotFoundError, NotOneElementError,
                            WrongNapariLayerTypeError, XeniumDataMissingObject,
                            XeniumDataRepeatedCropError)
 from ..images.utils import create_img_pyramid
-from ..utils.io import (check_overwrite_and_remove_if_true, read_json,
-                        write_dict_to_json)
-from ..utils.utils import convert_to_list
+from ..io.files import check_overwrite_and_remove_if_true, read_json
+from ..plotting import expr_along_obs_val
+from ..utils.utils import (convert_napari_shape_to_polygon_or_line,
+                           convert_to_list)
 from ..utils.utils import textformat as tf
 from ._layers import _create_points_layer
 from ._save import (_save_alt, _save_annotations, _save_cells, _save_images,
@@ -59,11 +60,11 @@ from .dataclasses import AnnotationsData, CellData, ImageData, RegionsData
 # optional packages that are not always installed
 if WITH_NAPARI:
     import napari
-    from napari.layers import Layer, Shapes
-    from napari.layers.shapes.shapes import Shapes
+    from napari.layers import Layer, Points, Shapes
 
+    #from napari.layers.shapes.shapes import Shapes
     from ._layers import _add_annotations_as_layer
-    from ._widgets import _initialize_widgets, add_new_annotations_widget
+    from ._widgets import _initialize_widgets, add_new_geometries_widget
 
 
 class InSituData:
@@ -168,49 +169,76 @@ class InSituData:
         with open(metadata_path, "w") as metafile:
             metafile.write(metadata_json)
 
-    def assign_annotations(self,
-                annotation_keys: str = "all",
-                add_annotation_masks: bool = False
-                ):
+    def _remove_empty_modalities(self):
+        try:
+            # check if anything really added to regions and if not, remove it again
+            if len(self.regions.metadata) == 0:
+                self.remove_modality("regions")
+        except AttributeError:
+            pass
+        try:
+            # check if anything really added to annotations and if not, remove it again
+            if len(self.annotations.metadata) == 0:
+                self.remove_modality("annotations")
+        except AttributeError:
+            pass
+
+    def assign_geometries(self,
+                          modality: Literal["annotations", "regions"],
+                          keys: Union[str, Literal["all"]] = "all",
+                          add_masks: bool = False,
+                          overwrite: bool = True
+                          ):
         '''
         Function to assign the annotations to the anndata object in XeniumData.matrix.
         Annotation information is added to the DataFrame in `.obs`.
         '''
         # assert that prerequisites are met
-        assert hasattr(self, "cells"), "No .cells attribute available. Run `load_cells()`."
-        assert hasattr(self, "annotations"), "No .annotations attribute available. Run `load_annotations()`."
+        try:
+            geom_attr = getattr(self, modality)
+        except AttributeError:
+            raise ModalityNotFoundError(modality=modality)
 
-        if annotation_keys == "all":
-            annotation_keys = self.annotations.metadata.keys()
+        try:
+            cell_attr = self.cells
+        except AttributeError:
+            raise ModalityNotFoundError("cells")
+
+        if keys == "all":
+            keys = geom_attr.metadata.keys()
 
         # make sure annotation keys are a list
-        annotation_keys = convert_to_list(annotation_keys)
+        keys = convert_to_list(keys)
 
         # convert coordinates into shapely Point objects
-        x = self.cells.matrix.obsm["spatial"][:, 0]
-        y = self.cells.matrix.obsm["spatial"][:, 1]
-        points = gpd.points_from_xy(x, y)
+        x = cell_attr.matrix.obsm["spatial"][:, 0]
+        y = cell_attr.matrix.obsm["spatial"][:, 1]
+        cells = gpd.points_from_xy(x, y)
 
         # iterate through annotation keys
-        for annotation_key in annotation_keys:
-            print(f"Assigning key '{annotation_key}'...")
+        for key in keys:
+            print(f"Assigning key '{key}'...")
             # extract pandas dataframe of current key
-            annot = getattr(self.annotations, annotation_key)
+            geom_df = getattr(geom_attr, key)
 
             # get unique list of annotation names
-            annot_names = annot.name.unique()
+            geom_names = geom_df.name.unique()
 
             # initiate dataframe as dictionary
             df = {}
 
             # iterate through names
-            for n in annot_names:
-                polygons = annot[annot.name == n].geometry.tolist()
+            for n in geom_names:
+                polygons = geom_df[geom_df["name"] == n]["geometry"].tolist()
+                scales = geom_df[geom_df["name"] == n]["scale"].tolist()
 
                 in_poly = []
-                for poly in polygons:
+                for poly, scale in zip(polygons, scales):
+                    # scale the polygon
+                    poly = scale_func(poly, xfact=scale[0], yfact=scale[1], origin=(0,0))
+
                     # check if which of the points are inside the current annotation polygon
-                    in_poly.append(poly.contains(points))
+                    in_poly.append(poly.contains(cells))
 
                 # check if points were in any of the polygons
                 in_poly_res = np.array(in_poly).any(axis=0)
@@ -220,82 +248,56 @@ class InSituData:
 
             # convert into pandas dataframe
             df = pd.DataFrame(df)
-            df.index = self.cells.matrix.obs_names
+            df.index = cell_attr.matrix.obs_names
 
             # create annotation from annotation masks
-            df[f"annotation-{annotation_key}"] = [" & ".join(annot_names[row.values]) if np.any(row.values) else np.nan for i, row in df.iterrows()]
+            col_name = f"{modality}-{key}"
+            df[col_name] = [" & ".join(geom_names[row.values]) if np.any(row.values) else np.nan for i, row in df.iterrows()]
 
-            if add_annotation_masks:
-                self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df, left_index=True, right_index=True)
-            else:
-                self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df.iloc[:, -1], left_index=True, right_index=True)
+            add = True
+            if col_name in self.cells.matrix.obs:
+                if overwrite:
+                    self.cells.matrix.obs.drop(col_name, axis=1, inplace=True)
+                    print(f'Existing column "{col_name}" is overwritten.', flush=True)
+                    add = True
+                else:
+                    warn(f'Column "{col_name}" exists already in `xd.cells.matrix.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
+                    add = False
 
-            # save that the current key was analyzed
-            self.annotations.metadata[annotation_key]["analyzed"] = tf.TICK
+            if add:
+                if add_masks:
+                    self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df, left_index=True, right_index=True)
+                else:
+                    self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df.iloc[:, -1], left_index=True, right_index=True)
 
-    def assign_regions(self,
-                       region_keys: str = "all",
-                       ):
-        '''
-        Function to assign the annotations to the anndata object in XeniumData.matrix.
-        Annotation information is added to the DataFrame in `.obs`.
-        '''
-        # assert that prerequisites are met
-        try:
-            regions = self.regions
-        except AttributeError:
-            raise ModalityNotFoundError("regions")
+                # save that the current key was analyzed
+                geom_attr.metadata[key]["analyzed"] = tf.TICK
 
-        try:
-            cells = self.cells
-        except AttributeError:
-            raise ModalityNotFoundError("cells")
+    def assign_annotations(
+        self,
+        keys: Union[str, Literal["all"]] = "all",
+        add_masks: bool = False,
+        overwrite: bool = True
+    ):
+        self.assign_geometries(
+            modality="annotations",
+            keys=keys,
+            add_masks=add_masks,
+            overwrite=overwrite
+        )
 
-        if region_keys == "all":
-            region_keys = regions.metadata.keys()
-
-        # make sure annotation keys are a list
-        region_keys = convert_to_list(region_keys)
-
-        # convert coordinates into shapely Point objects
-        x = cells.matrix.obsm["spatial"][:, 0]
-        y = cells.matrix.obsm["spatial"][:, 1]
-        points = gpd.points_from_xy(x, y)
-
-        # iterate through annotation keys
-        for reg_key in region_keys:
-            print(f"Assigning key '{reg_key}'...")
-            # check that the names are unique
-            regions._check_uniqueness(key=reg_key)
-
-            # extract pandas dataframe of current key
-            reg = getattr(regions, reg_key)
-
-            # get unique list of annotation names
-            annot_names = reg.name.unique()
-
-            # initiate dataframe as dictionary
-            df = {}
-
-            # iterate through names
-            for n in tqdm(annot_names):
-                poly = reg[reg.name == n].geometry.iloc[0]
-
-                df[n] = poly.contains(points)
-
-            # convert into pandas dataframe
-            df = pd.DataFrame(df)
-            df.index = self.cells.matrix.obs_names
-
-            # create annotation from annotation masks
-            print("Adding information to `.obs`...")
-            obs_key = f"region-{reg_key}"
-            self.cells.matrix.obs[obs_key] = [" & ".join(annot_names[row.values]) if np.any(row.values) else np.nan for i, row in df.iterrows()]
-
-            # save that the current key was analyzed
-            self.regions.metadata[reg_key]["analyzed"] = tf.TICK
-
-            print(f"Information added to `.obs['{obs_key}']`.")
+    def assign_regions(
+        self,
+        keys: Union[str, Literal["all"]] = "all",
+        add_masks: bool = False,
+        overwrite: bool = True
+    ):
+        self.assign_geometries(
+            modality="regions",
+            keys=keys,
+            add_masks=add_masks,
+            overwrite=overwrite
+        )
 
     def copy(self):
         '''
@@ -468,11 +470,17 @@ class InSituData:
                 empty_alt_hist_dict = {k: [] for k in _self.metadata["history"]["alt"].keys()}
                 _self.metadata["history"]["alt"] = empty_alt_hist_dict
 
+        # sometimes modalities like annotations or regions can be empty in the meantime
+        # here such empty modalities are removed
+        _self._remove_empty_modalities()
+
         if inplace:
             if hasattr(self, "viewer"):
                 del _self.viewer # delete viewer
         else:
             return _self
+
+
 
 
     def hvg(self,
@@ -670,7 +678,7 @@ class InSituData:
             p = self.metadata["data"]["annotations"]
         except KeyError:
             raise ModalityNotFoundError(modality="annotations")
-        self.annotations = read_annotationsdata(path=self.path / p)
+        self.annotations = read_shapesdata(path=self.path / p, mode="annotations")
 
 
     def import_annotations(self,
@@ -682,10 +690,23 @@ class InSituData:
         # add annotations object
         files = convert_to_list(files)
         keys = convert_to_list(keys)
-        self.annotations = AnnotationsData(files=files,
-                                           keys=keys,
-                                           pixel_size=self.metadata["xenium"]['pixel_size']
-                                           )
+        pixel_size = self.metadata["xenium"]['pixel_size']
+
+        if not hasattr(self, "annotations"):
+            self.annotations = AnnotationsData()
+
+        for key, file in zip(keys, files):
+            # read annotation and store in dictionary
+            self.annotations.add_data(data=file,
+                                      key=key,
+                                      scale_factor=(pixel_size, pixel_size)
+                                      )
+
+        # # check if anything really added to annotations and if not, remove it again
+        # if len(self.annotations.metadata) == 0:
+        #     self.remove_modality("annotations")
+
+        self._remove_empty_modalities()
 
     def load_regions(self):
         print("Loading regions...", flush=True)
@@ -693,7 +714,7 @@ class InSituData:
             p = self.metadata["data"]["regions"]
         except KeyError:
             raise ModalityNotFoundError(modality="regions")
-        self.regions = read_regionsdata(path=self.path / p)
+        self.regions = read_shapesdata(path=self.path / p, mode="regions")
 
     def import_regions(self,
                     files: Optional[Union[str, os.PathLike, Path]],
@@ -704,7 +725,27 @@ class InSituData:
         # add regions object
         files = convert_to_list(files)
         keys = convert_to_list(keys)
-        self.regions = RegionsData(files=files, keys=keys, pixel_size=self.metadata["xenium"]['pixel_size'])
+        pixel_size = self.metadata["xenium"]['pixel_size']
+
+        if not hasattr(self, "regions"):
+            self.regions = RegionsData()
+
+        for key, file in zip(keys, files):
+            # read annotation and store in dictionary
+            self.regions.add_data(data=file,
+                                key=key,
+                                scale_factor=(pixel_size, pixel_size),
+                                )
+
+        # self.regions = RegionsData(files=files,
+        #                            keys=keys,
+        #                            pixel_size=self.metadata["xenium"]['pixel_size'])
+
+        # # check if anything really added to regions and if not, remove it again
+        # if len(self.regions.metadata) == 0:
+        #     self.remove_modality("regions")
+
+        self._remove_empty_modalities()
 
 
     def load_cells(self):
@@ -1241,7 +1282,7 @@ class InSituData:
         files = list(self.quicksave_dir.glob(f"*{uid}*"))
 
         if len(files) == 1:
-            ad = read_annotationsdata(files[0] / "annotations")
+            ad = read_shapesdata(files[0] / "annotations", mode="annotations")
         elif len(files) == 0:
             print(f"No quicksave with uid '{uid}' found. Use `.list_quicksaves()` to list all available quicksaves.")
         else:
@@ -1254,17 +1295,17 @@ class InSituData:
             annotations = self.annotations = AnnotationsData()
         else:
             for k in ad.metadata.keys():
-                annotations.add_shapes(getattr(ad, k), k, verbose=True)
+                annotations.add_data(getattr(ad, k), k, verbose=True)
 
 
     def show(self,
         keys: Optional[str] = None,
-        annotation_keys: Optional[str] = None,
+        # annotation_keys: Optional[str] = None,
         point_size: int = 6,
         scalebar: bool = True,
         pixel_size: float = None, # if none, extract from metadata
         unit: str = "µm",
-        cmap_annotations: str ="Dark2",
+        # cmap_annotations: str ="Dark2",
         grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"],
         return_viewer: bool = False,
         widgets_max_width: int = 200
@@ -1370,49 +1411,18 @@ class InSituData:
                     # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
                     self.viewer.add_layer(Layer.create(*layer))
 
-        # optionally add annotations
-        if annotation_keys is not None:
-            # get colorcycle for region annotations
-            cmap_annot = matplotlib.colormaps[cmap_annotations]
-            cc_annot = cmap_annot.colors
-
-            if annotation_keys == "all":
-                annotation_keys = self.annotations.metadata.keys()
-            annotation_keys = convert_to_list(annotation_keys)
-            for annotation_key in annotation_keys:
-                annot_df = getattr(self.annotations, annotation_key)
-
-                # get classes
-                classes = annot_df['name'].unique()
-
-                # iterate through classes
-                for cl in classes:
-                    # generate layer name
-                    layer_name = f"*{cl} ({annotation_key})"
-
-                    # get dataframe for this class
-                    class_df = annot_df[annot_df["name"] == cl]
-
-                    if layer_name not in self.viewer.layers:
-                        # add layer to viewer
-                        _add_annotations_as_layer(
-                            dataframe=class_df,
-                            viewer=self.viewer,
-                            layer_name=layer_name
-                        )
-
         # WIDGETS
         try:
             cells = self.cells
         except AttributeError:
             # add annotation widget to napari
-            annot_widget = add_new_annotations_widget()
+            annot_widget = add_new_geometries_widget()
             annot_widget.max_height = 100
             annot_widget.max_width = widgets_max_width
-            self.viewer.window.add_dock_widget(annot_widget, name="Add annotations", area="right")
+            self.viewer.window.add_dock_widget(annot_widget, name="Add geometries", area="right")
         else:
             # initialize the widgets
-            show_points_widget, locate_cells_widget, add_region_widget, show_annotations_widget, show_boundaries_widget, select_data = _initialize_widgets(xdata=self)
+            show_points_widget, locate_cells_widget, show_geometries_widget, show_boundaries_widget, select_data = _initialize_widgets(xdata=self)
 
             # add widgets to napari window
             if select_data is not None:
@@ -1436,20 +1446,20 @@ class InSituData:
                 locate_cells_widget.max_width = widgets_max_width
 
             # add annotation widget to napari
-            annot_widget = add_new_annotations_widget()
-            annot_widget.max_height = 100
+            annot_widget = add_new_geometries_widget()
+            #annot_widget.max_height = 100
             annot_widget.max_width = widgets_max_width
-            self.viewer.window.add_dock_widget(annot_widget, name="Add annotations", area="right")
+            self.viewer.window.add_dock_widget(annot_widget, name="Add geometries", area="right")
 
-            if add_region_widget is not None:
-                self.viewer.window.add_dock_widget(add_region_widget, name="Show regions", area="right")
-                add_region_widget.max_height = 100
-                add_region_widget.max_width = widgets_max_width
+            # if show_region_widget is not None:
+            #     self.viewer.window.add_dock_widget(show_region_widget, name="Show regions", area="right")
+            #     show_region_widget.max_height = 100
+            #     show_region_widget.max_width = widgets_max_width
 
-            if show_annotations_widget is not None:
-                self.viewer.window.add_dock_widget(show_annotations_widget, name="Show annotations", area="right", tabify=True)
-                show_annotations_widget.max_height = 100
-                show_annotations_widget.max_width = widgets_max_width
+            if show_geometries_widget is not None:
+                self.viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
+                #show_annotations_widget.max_height = 100
+                show_geometries_widget.max_width = widgets_max_width
 
 
         # EVENTS
@@ -1476,16 +1486,17 @@ class InSituData:
                 # print(layer.properties)
 
         for layer in self.viewer.layers:
-            if isinstance(layer, Shapes):
+            if isinstance(layer, Shapes) or isinstance(layer, Points):
                 layer.events.data.connect(_update_uid)
                 #layer.metadata = layer.properties
 
         # Connect the function to all shapes layers in the viewer
         def connect_to_all_shapes_layers(event):
             layer = event.source[event.index]
-            if event is not None and isinstance(layer, Shapes):
-                # print('Annotation layer added')
-                layer.events.data.connect(_update_uid)
+            if event is not None:
+                if isinstance(layer, Shapes) or isinstance(layer, Points):
+                    # print('Annotation layer added')
+                    layer.events.data.connect(_update_uid)
 
         # Connect the function to any new layers added to the viewer
         self.viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
@@ -1501,27 +1512,48 @@ class InSituData:
         if return_viewer:
             return self.viewer
 
-    def store_annotations(self,
-                        name_pattern = "*{class_name} ({annot_key})",
-                        uid_col: str = "id"
-                        ):
-        '''
-        Function to extract annotation layers from shapes layers and store them in the XeniumData object.
-        '''
+    def store_geometries(self,
+                         name_pattern = "{type_symbol} {class_name} ({annot_key})",
+                         uid_col: str = "id"
+                         ):
+        """
+        Extracts geometric layers from shapes and points layers in the napari viewer
+        and stores them in the XeniumData object as annotations or regions.
+
+        Args:
+            name_pattern (str): A format string used to parse the layer names.
+                It should contain placeholders for 'type_symbol', 'class_name',
+                and 'annot_key'.
+            uid_col (str): The name of the column used to store unique identifiers
+                for the geometries. Default is "id".
+
+        Raises:
+            AttributeError: If the viewer is not initialized, an error message
+                prompts the user to open a napari viewer using the `.show()` method.
+
+        Notes:
+            - The function iterates through the layers in the viewer and checks if
+            they are instances of Shapes or Points.
+            - It extracts the geometric data, colors, and other relevant properties
+            to create a GeoDataFrame.
+            - The GeoDataFrame is then added to the annotations or regions of the
+            XeniumData object based on the type of layer.
+            - If the layer is classified as a region but is a point layer, a warning
+            is issued, and the layer is skipped.
+        """
         try:
             viewer = self.viewer
         except AttributeError as e:
             print(f"{str(e)}. Use `.show()` first to open a napari viewer.")
 
-        # iterate through layers and save them as annotation if they meet requirements
+        # iterate through layers and save them as annotation or region if they meet requirements
         layers = viewer.layers
-        collection_dict = {}
+        #collection_dict = {}
         for layer in layers:
-            if not isinstance(layer, Shapes):
-                pass
-            else:
+            if isinstance(layer, Shapes) or isinstance(layer, Points):
                 name_parsed = parse(name_pattern, layer.name)
                 if name_parsed is not None:
+                    type_symbol = name_parsed.named["type_symbol"]
                     annot_key = name_parsed.named["annot_key"]
                     class_name = name_parsed.named["class_name"]
 
@@ -1530,26 +1562,74 @@ class InSituData:
                         self.annotations = AnnotationsData() # initialize empty object
 
                     # extract shapes coordinates and colors
-                    shapes = layer.data
+                    layer_data = layer.data
                     colors = layer.edge_color.tolist()
+                    scale = layer.scale
 
-                    # scale coordinates
-                    #shapes = [elem / self.metadata["pixel_size"] for elem in shapes]
+                    checks_passed = True
+                    is_region_layer = False
+                    object_type = "annotation"
+                    if type_symbol == REGIONS_SYMBOL:
+                        is_region_layer = True
+                        object_type = "region"
+                        if isinstance(layer, Points):
+                            warn(f'Layer "{layer.name}" is a point layer and at the same time classified as "Region". This is not allowed. Skipped this layer.')
+                            checks_passed = False
 
-                    # build annotation GeoDataFrame
-                    annot_df = {
-                        uid_col: layer.properties["uid"],
-                        "objectType": "annotation",
-                        "geometry": [Polygon(np.stack([ar[:, 1], ar[:, 0]], axis=1)) for ar in shapes],  # switch x/y
-                        "name": class_name,
-                        "color": [[int(elem[e]*255) for e in range(3)] for elem in colors]
-                    }
+                    if checks_passed:
+                        if isinstance(layer, Shapes):
+                            # extract shape types
+                            shape_types = layer.shape_type
+                            # build annotation GeoDataFrame
+                            geom_df = {
+                                uid_col: layer.properties["uid"],
+                                "objectType": object_type,
+                                #"geometry": [Polygon(np.stack([ar[:, 1], ar[:, 0]], axis=1)) for ar in layer_data],  # switch x/y
+                                "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
+                                "name": class_name,
+                                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
+                                #"scale": [scale] * len(layer_data),
+                                #"layer_type": ["Shapes"] * len(layer_data)
+                            }
 
-                    # generate GeoDataFrame
-                    annot_df = GeoDataFrame(annot_df, geometry="geometry")
+                        elif isinstance(layer, Points):
+                            # build annotation GeoDataFrame
+                            geom_df = {
+                                uid_col: layer.properties["uid"],
+                                "objectType": object_type,
+                                "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
+                                "name": class_name,
+                                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
+                                #"scale": [scale] * len(layer_data),
+                                #"layer_type": ["Points"] * len(layer_data)
+                            }
 
-                    # add annotations
-                    self.annotations.add_shapes(data=annot_df, key=annot_key, verbose=True)
+                        # generate GeoDataFrame
+                        geom_df = GeoDataFrame(geom_df, geometry="geometry")
+
+                        if is_region_layer:
+                            if not hasattr(self, "regions"):
+                                self.regions = RegionsData()
+
+                            # add regions
+                            self.regions.add_data(data=geom_df,
+                                                  key=annot_key,
+                                                  verbose=True,
+                                                  scale_factor=scale)
+                        else:
+                            if not hasattr(self, "annotations"):
+                                self.annotations = AnnotationsData()
+
+                            # add annotations
+                            self.annotations.add_data(data=geom_df,
+                                                      key=annot_key,
+                                                      verbose=True,
+                                                      scale_factor=scale)
+
+            else:
+                pass
+
+        self._remove_empty_modalities()
 
     def plot_binned_expression(
         self,
@@ -1608,6 +1688,35 @@ class InSituData:
         else:
             return fig, axs
 
+    def plot_expr_along_obs_val(
+        self,
+        keys: str,
+        obs_val: str,
+        groupby: Optional[str] = None,
+        method: Literal["lowess", "loess"] = 'loess',
+        stderr: bool = False,
+        savepath=None,
+        return_data=False,
+        **kwargs
+        ):
+        # retrieve anndata object from InSituData
+        adata = self.cells.matrix
+
+        results = expr_along_obs_val(
+            adata=adata,
+            keys=keys,
+            obs_val=obs_val,
+            groupby=groupby,
+            method=method,
+            stderr=stderr,
+            savepath=savepath,
+            return_data=return_data
+            **kwargs
+            )
+
+        if return_data:
+            return results
+
     def reload(self):
         data_meta = self.metadata["data"]
         current_modalities = [m for m in MODALITIES if hasattr(self, m) and m in data_meta]
@@ -1637,17 +1746,17 @@ class InSituData:
 
         for cat in ["annotations", "cells", "regions"]:
             dirs_to_remove = []
-            if hasattr(self, cat):
-                files = sorted((self.path / cat).glob("*"))
-                if len(files) > 1:
-                    dirs_to_remove = files[:-1]
+            #if hasattr(self, cat):
+            files = sorted((self.path / cat).glob("*"))
+            if len(files) > 1:
+                dirs_to_remove = files[:-1]
 
-                    for d in dirs_to_remove:
-                        shutil.rmtree(d)
+                for d in dirs_to_remove:
+                    shutil.rmtree(d)
 
-                    print(f"Removed {len(dirs_to_remove)} entries from '.{cat}'.") if verbose else None
-                else:
-                    print(f"No history found for '{cat}'.") if verbose else None
+                print(f"Removed {len(dirs_to_remove)} entries from '.{cat}'.") if verbose else None
+            else:
+                print(f"No history found for '{cat}'.") if verbose else None
 
     def remove_modality(self,
                         modality: str
@@ -1902,3 +2011,74 @@ def register_images(
         # free RAM
         del imreg_complete, imreg_selected, image, template, nuclei_img
     gc.collect()
+
+
+def calc_distance_of_cells_from(
+    data: InSituData,
+    annotation_key: str,
+    annotation_class: str,
+    region_key: Optional[str] = None,
+    region_name: Optional[str] = None,
+    key_to_save: Optional[str] = None
+    ):
+
+    """
+    Calculate the distance of cells from a specified annotation class within a given region and save the results.
+
+    This function calculates the distance of each cell in the spatial data to the closest point
+    of a specified annotation class. The distances are then saved in the cell data matrix.
+
+    Args:
+        data (InSituData): The input data containing cell and annotation information.
+        annotation_key (str): The key to retrieve the annotation information.
+        annotation_class (Optional[str]): The specific annotation class to calculate distances from.
+        region_key: (Optional[str]): If not None, `region_key` is used together with `region_name` to determine the region in which cells are considered
+                                     for the analysis.
+        region_name: (Optional[str]): If not None, `region_name` is used together with `region_key` to determine the region in which cells are considered
+                                     for the analysis.
+        key_to_save (Optional[str]): The key under which to save the calculated distances in the cell data matrix.
+                                     If None, a default key is generated based on the annotation class.
+
+    Returns:
+        None
+    """
+    if region_name is None:
+        print(f'Calculate the distance of cells from the annotation "{annotation_class}"')
+        region_mask = [True] * len(data.cells.matrix)
+    else:
+        assert region_key is not None, "`region_key` must not be None if `region_name` is not None."
+        print(f'Calculate the distance of cells from the annotation "{annotation_class}" within region "{region_name}"')
+        region_col_name = f'regions-{region_key}'
+
+        if region_col_name not in data.cells.matrix.obs.columns:
+            data.assign_regions(keys=region_key)
+
+        # generate mask for selected region
+        region_mask = data.cells.matrix.obs[region_col_name] == region_name
+
+    # create geopandas points from cells
+    x = data.cells.matrix.obsm["spatial"][:, 0][region_mask]
+    y = data.cells.matrix.obsm["spatial"][:, 1][region_mask]
+    indices = data.cells.matrix.obs_names[region_mask]
+    cells = gpd.points_from_xy(x, y)
+
+    # retrieve annotation information
+    annot_df = data.annotations.get(annotation_key)
+    class_df = annot_df[annot_df["name"] == annotation_class]
+
+    # calculate distance of cells to their closest point
+    scaled_geometries = [
+        scale_func(geometry, xfact=scale[0], yfact=scale[1], origin=(0,0))
+        for geometry, scale in zip(class_df["geometry"], class_df["scale"])
+        ]
+    dists = np.array([cells.distance(geometry) for geometry in scaled_geometries])
+    min_dists = dists.min(axis=0)
+
+    # add indices to minimum distances
+    min_dists = pd.Series(min_dists, index=indices)
+
+    # add results to CellData
+    if key_to_save is None:
+        key_to_save = f"dist_from_{annotation_class}"
+    data.cells.matrix.obs[key_to_save] = min_dists
+    print(f'Save distances to `.cells.matrix.obs["{key_to_save}"]`')

@@ -9,7 +9,7 @@ from parse import *
 from insitupy import __version__
 from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._core.insitudata import InSituData
-from insitupy.utils.io import read_json
+from insitupy.io.files import read_json
 
 
 def read_xenium(

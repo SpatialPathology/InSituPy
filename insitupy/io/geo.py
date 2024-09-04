@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 
+from ..utils.utils import convert_to_list
+
 # force geopandas to use shapely. Default in future versions of geopandas.
 os.environ['USE_PYGEOS'] = '0'
 
@@ -57,8 +59,19 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     # annotation geojsons contain a classification column where each entry is a dict with name and color of the annotation
     if "classification" in dataframe.columns:
         # Flatten the "classification" column into separate "name" and "color" columns
-        dataframe["name"] = [elem["name"] if elem is not None else "unclassified" for elem in dataframe["classification"]]
-        dataframe["color"] = [elem["color"] if elem is not None else [0,0,0] for elem in dataframe["classification"]]
+        try:
+            dataframe["name"] = [elem["name"] if pd.notnull(elem) else "unclassified" for elem in dataframe["classification"]]
+        except KeyError:
+            pass
+        try:
+            dataframe["color"] = [elem["color"] if pd.notnull(elem) else [0,0,0] for elem in dataframe["classification"]]
+        except KeyError:
+            pass
+
+        try:
+            dataframe["scale"] = [elem["scale"] if pd.notnull(elem) else (1,1) for elem in dataframe["classification"]]
+        except KeyError:
+            pass
 
         # Remove the redundant "classification" column
         dataframe = dataframe.drop(["classification"], axis=1)
@@ -80,8 +93,10 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
     - dataframe (geopandas.GeoDataFrame): The input GeoDataFrame containing "name" and "color" columns.
     - file (Union[str, os.PathLike, Path]): The file path (as a string or pathlib.Path) where the GeoJSON data will be saved.
     """
+    columns_to_move = ["name", "color", "scale"]
+    if np.any([elem in dataframe.columns for elem in columns_to_move]):
+        existing_columns_to_move = [elem for elem in columns_to_move if elem in dataframe.columns]
 
-    if np.all([elem in dataframe.columns for elem in ["name", "color"]]):
         # Initialize an empty list to store dictionaries for each row
         classification_list = []
 
@@ -89,8 +104,15 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
         for _, row in dataframe.iterrows():
             # Create a dictionary with "name" and "color" entries for each row
             classification_dict = {}
-            for column in ["name", "color"]:
-                classification_dict[column] = row[column]
+
+            for column in existing_columns_to_move:
+                entry = row[column]
+
+                # convert numpy arrays to lists
+                if isinstance(entry, np.ndarray):
+                    entry = convert_to_list(entry)
+
+                classification_dict[column] = entry
             # Append the dictionary to the list
             classification_list.append(classification_dict)
 
@@ -98,7 +120,13 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
         dataframe["classification"] = classification_list
 
         # Remove the original "name" and "color" columns
-        dataframe = dataframe.drop(["name", "color"], axis=1)
+        dataframe = dataframe.drop(existing_columns_to_move, axis=1)
+
+    # try:
+    #     # remove scale column
+    #     dataframe = dataframe.drop("scale", axis=1)
+    # except KeyError:
+    #     pass
 
     # Write the GeoDataFrame to a GeoJSON file
     dataframe.to_file(file, driver="GeoJSON")

@@ -84,3 +84,43 @@ def has_valid_labels(ax):
         if artist.get_label() and not artist.get_label().startswith('_'):
             return True
     return False
+
+def is_valid_rgb_tuple(value):
+    """
+    Check if a value is a valid RGB tuple.
+
+    A valid RGB tuple is defined as a list or tuple containing three integers,
+    each in the range of 0 to 255.
+
+    Parameters:
+    value (list or tuple): The value to check.
+
+    Returns:
+    bool: True if the value is a valid RGB tuple, False otherwise.
+    """
+    if isinstance(value, (list, tuple)) and len(value) == 3:
+        return all(isinstance(v, int) and 0 <= v <= 255 for v in value)
+    return False
+
+def check_rgb_column(df, column_name):
+    """
+    Check if a specified column in a DataFrame contains only valid RGB tuples.
+
+    This function checks if the specified column exists in the DataFrame and
+    verifies that all entries in the column are valid RGB tuples.
+
+    Parameters:
+    df (pd.DataFrame): The DataFrame to check.
+    column_name (str): The name of the column to validate.
+
+    Returns:
+    bool: True if all values in the column are valid RGB tuples, False otherwise.
+
+    Raises:
+    ValueError: If the specified column does not exist in the DataFrame.
+    """
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' does not exist in the DataFrame.")
+
+    # Check if all values in the specified column are valid RGB tuples
+    return df[column_name].apply(is_valid_rgb_tuple).all()

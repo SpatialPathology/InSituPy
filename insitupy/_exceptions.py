@@ -129,6 +129,7 @@ class InvalidFileTypeError(Exception):
                  received_type: Type,
                  message: Optional[str] = None
                  ):
+        # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
         allowed_types = [str(elem) for elem in allowed_types]
         received_type = str(received_type)
@@ -143,6 +144,7 @@ class InvalidDataTypeError(Exception):
                  received_type: Type,
                  message: Optional[str] = None
                  ):
+        # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
         allowed_types = [str(elem) for elem in allowed_types]
         received_type = str(received_type)

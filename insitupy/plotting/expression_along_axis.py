@@ -1,61 +1,115 @@
-from typing import Literal, Optional
+import os
+from numbers import Number
+from typing import Literal, Optional, Tuple
 
 import pandas as pd
+import seaborn as sns
 from anndata import AnnData
 from matplotlib import pyplot as plt
+from matplotlib.axes._axes import Axes
+from matplotlib.figure import Figure
 from scipy.stats import zscore
 from tqdm import tqdm
 
+from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
+
 from .._core._checks import check_raw, has_valid_labels
-from ..utils._calc import smooth_fit
-from ..utils.io import save_and_show_figure
+from ..io.plots import save_and_show_figure
+from ..utils._regression import smooth_fit
 from ..utils.utils import get_nrows_maxcols
 
 
-def expr_along_obs_val(adata: AnnData,
-                       keys: str,
-                       x_category: str,
-                       groupby: Optional[str],
-                       splitby: str = None,
-                       hue: str = None,
-                       method: Literal["lowess", "loess"] = 'loess',
-                       stderr: bool = False,
-                       loess_bootstrap: bool = True,
-                       n_bootstraps_iterations: int = 100,
-                       xmin=None,
-                       xmax=None,
-                       cmap="tab10",
-                       linewidth=8,
-                       extra_cats=None,
-                       normalize=False,
-                       nsteps=100,
-                       show_progress=False,
-                       use_raw=False,
-                       max_cols=4,
-                       xlabel=None,ylabel=None,
-                       vline=None, hline=None, vlinewidth=4,
-                       #values_into_title=None, title_suffix='',
-                       custom_titles=None,
-                       legend_fontsize=24,
-                       plot_legend=True,
-                       xlabel_fontsize=28, ylabel_fontsize=28, title_fontsize=20, tick_fontsize=24,
-                       figsize=(8,6),
-                       savepath=None, save_only=False, show=True, axis=None, return_data=False, fig=None,
-                       dpi_save=300,
-                       smooth=True,
-                       **kwargs
-                       ):
+def expr_along_obs_val(
+    adata: AnnData,
+    keys: str,
+    obs_val: str,
+    groupby: Optional[str] = None,
+    splitby: str = None,
+    hue: str = None,
+    method: Literal["lowess", "loess"] = 'loess',
+    stderr: bool = False,
+    loess_bootstrap: bool = True,
+    n_bootstraps_iterations: int = 100,
+    xmin=None,
+    xmax=None,
+    cmap="tab10",
+    linewidth=8,
+    extra_cats=None,
+    normalize=False,
+    nsteps=100,
+    show_progress=False,
+    use_raw=False,
+    max_cols=4,
+    xlabel=None,ylabel=None,
+    vline=None, hline=None, vlinewidth=4,
+    #values_into_title=None, title_suffix='',
+    custom_titles=None,
+    legend_fontsize=24,
+    plot_legend=True,
+    xlabel_fontsize=28, ylabel_fontsize=28, title_fontsize=20, tick_fontsize=24,
+    figsize=(8,6),
+    savepath: Optional[os.PathLike] = None,
+    save_only: bool = False,
+    show: bool = True,
+    return_data: bool = False,
+    fig: Optional[Figure] = None,
+    axis: Optional[Axes] = None,
+    dpi_save: int = 300,
+    smooth=True,
+    **kwargs
+    ):
+    """
+    Plot gene expression values along a specified observation category.
 
-    '''
-    Plot the expression of a gene as a function of an observation value (e.g. the automatic expression histology value
-    given by SpatialDE).
-    Grouping by one other observation is possible.
+    Args:
+        adata (AnnData): Annotated data matrix.
+        keys (str): Keys for the gene expression values to be plotted.
+        obs_val (str): Observation category to be plotted on the x-axis.
+        groupby (Optional[str]): Observation category to group by.
+        splitby (str, optional): Observation category to split by.
+        hue (str, optional): Observation category to color by.
+        method (Literal["lowess", "loess"], optional): Smoothing method to use. Defaults to 'loess'.
+        stderr (bool, optional): Whether to plot standard error. Defaults to False.
+        loess_bootstrap (bool, optional): Whether to use bootstrap for loess smoothing. Defaults to True.
+        n_bootstraps_iterations (int, optional): Number of bootstrap iterations for loess smoothing. Defaults to 100.
+        xmin (optional): Minimum x value for plotting.
+        xmax (optional): Maximum x value for plotting.
+        cmap (str, optional): Colormap to use for plotting. Defaults to "tab10".
+        linewidth (int, optional): Line width for plotting. Defaults to 8.
+        extra_cats (optional): Additional observation categories to include in the plot.
+        normalize (bool, optional): Whether to normalize the expression values. Defaults to False.
+        nsteps (int, optional): Number of steps for smoothing. Defaults to 100.
+        show_progress (bool, optional): Whether to show progress bar. Defaults to False.
+        use_raw (bool, optional): Whether to use raw data. Defaults to False.
+        max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
+        xlabel (optional): Label for the x-axis.
+        ylabel (optional): Label for the y-axis.
+        vline (optional): Vertical lines to add to the plot.
+        hline (optional): Horizontal lines to add to the plot.
+        vlinewidth (int, optional): Line width for vertical lines. Defaults to 4.
+        custom_titles (optional): Custom titles for the plots.
+        legend_fontsize (int, optional): Font size for the legend. Defaults to 24.
+        plot_legend (bool, optional): Whether to plot the legend. Defaults to True.
+        xlabel_fontsize (int, optional): Font size for the x-axis label. Defaults to 28.
+        ylabel_fontsize (int, optional): Font size for the y-axis label. Defaults to 28.
+        title_fontsize (int, optional): Font size for the plot titles. Defaults to 20.
+        tick_fontsize (int, optional): Font size for the axis ticks. Defaults to 24.
+        figsize (tuple, optional): Figure size. Defaults to (8, 6).
+        savepath (optional): Path to save the plot.
+        save_only (bool, optional): Whether to only save the plot without showing. Defaults to False.
+        show (bool, optional): Whether to show the plot. Defaults to True.
+        axis (optional): Axis to plot on.
+        return_data (bool, optional): Whether to return the data instead of plotting. Defaults to False.
+        fig (optional): Figure to plot on.
+        dpi_save (int, optional): DPI for saving the plot. Defaults to 300.
+        smooth (bool, optional): Whether to apply smoothing. Defaults to True.
+        **kwargs: Additional arguments for smoothing.
 
-    Future ideas:
-        -   Include the possibility of plotting categorical values like leiden plot (stacked line plot as done with
-            the radial expression and different cell types)
-
-    '''
+    Returns:
+        Union[DataFrame, Tuple[Figure, Axes]]:
+            If return_data is True, returns a DataFrame with the smoothed data.
+            Otherwise, returns the figure and axes of the plot.
+    """
 
     # check type of input
     if isinstance(keys, dict):
@@ -67,8 +121,19 @@ def expr_along_obs_val(adata: AnnData,
     # make inputs to lists
     keys = [keys] if isinstance(keys, str) else list(keys)
 
+    # remove NaNs `obs_val` column
+    adata_obs = adata.obs.copy()
+    not_na_and_not_zero_mask = adata_obs[obs_val].notna() & adata_obs[obs_val] > 0
+    adata_obs = adata_obs[not_na_and_not_zero_mask]
+
+    # check whether to plot raw data
+    X, var, var_names = check_raw(adata, use_raw=use_raw)
+
+    # remove rows from X which were NaN above
+    X = X[not_na_and_not_zero_mask]
+
     if hue is not None:
-        hue_cats = list(adata.obs[hue].unique())
+        hue_cats = list(adata_obs[hue].unique())
         cmap_colors = plt.get_cmap(cmap)
         color_dict = {a: cmap_colors(i) for i, a in enumerate(hue_cats)}
 
@@ -102,30 +167,27 @@ def expr_along_obs_val(adata: AnnData,
 
         if groupby is not None:
             # select data per group
-            groups = adata.obs[groupby].unique()
+            groups = adata_obs[groupby].unique()
         else:
             groups = [None]
 
         added_to_legend = []
-
-        # check if plotting raw data
-        X, var, var_names = check_raw(adata, use_raw=use_raw)
 
         group_collection = {}
         for group in groups:
             #partial = extract_groups(adata, groupby=groupby, groups=group)
 
             if group is not None:
-                group_mask = adata.obs[groupby] == group
-                group_obs = adata.obs.loc[group_mask, :].copy()
+                group_mask = adata_obs[groupby] == group
+                group_obs = adata_obs.loc[group_mask, :].copy()
             else:
-                group_mask = [True] * len(adata.obs)
-                group_obs = adata.obs
+                group_mask = [True] * len(adata_obs)
+                group_obs = adata_obs
 
             if hue is not None:
-                _hue = adata.obs.loc[group_mask, hue][0]
+                _hue = adata_obs.loc[group_mask, hue][0]
 
-            # hue_data = adata.obs.loc[group_mask, hue].copy()
+            # hue_data = adata_obs.loc[group_mask, hue].copy()
             # print(hue_data)
 
             # select only group values from matrix
@@ -133,7 +195,10 @@ def expr_along_obs_val(adata: AnnData,
 
             if splitby is None:
                 # select x value
-                x = group_obs.loc[:, x_category].values
+                x = group_obs.loc[:, obs_val].values
+                # if xmin is None:
+                #     xmin = x[x>0].min()
+                #     print(xmin, flush=True)
 
                 if keys_grouped:
                     # extract expression values of all keys in the group
@@ -161,6 +226,7 @@ def expr_along_obs_val(adata: AnnData,
                     y = group_obs.loc[:, key].values.copy()
                 else:
                     print("Key '{}' not found.".format(key))
+                    break
 
                 if smooth:
                     # do smooth fitting
@@ -175,20 +241,21 @@ def expr_along_obs_val(adata: AnnData,
                     df = pd.DataFrame({"x": x, "y_pred": y})
 
                 if extra_cats is not None:
-                    df = df.join(adata.obs.loc[group_mask, extra_cats].reset_index(drop=True))
+                    df = df.join(adata_obs.loc[group_mask, extra_cats].reset_index(drop=True))
 
             else:
                 splits = group_obs[splitby].unique()
                 df_collection = {}
 
                 # get min and max values for x values
-                x = group_obs[x_category].values
+                x = group_obs[obs_val].values
                 xmin = x.min()
                 xmax = x.max()
+
                 for split in splits:
                     # extract x values
                     split_mask = group_obs[splitby] == split
-                    x = group_obs.loc[split_mask, x_category].values
+                    x = group_obs.loc[split_mask, obs_val].values
 
                     # extract expression values as y
                     idx = var.index.get_loc(key)
@@ -275,7 +342,7 @@ def expr_along_obs_val(adata: AnnData,
 
         if not return_data:
             if xlabel is None:
-                xlabel = x_category
+                xlabel = obs_val
             if ylabel is None:
                 ylabel = "Gene expression"
 
@@ -302,9 +369,12 @@ def expr_along_obs_val(adata: AnnData,
                     axs[i].legend().remove()
 
         if return_data:
-            # collect data
-            group_collection = pd.concat(group_collection)
-            data_collection[key] = group_collection
+            if len(group_collection) > 0:
+                # collect data
+                group_collection = pd.concat(group_collection)
+                data_collection[key] = group_collection
+            else:
+                pass
 
 
 
@@ -330,3 +400,40 @@ def expr_along_obs_val(adata: AnnData,
             save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=True)
         else:
             return fig, axs
+
+def cell_abundance_along_obs_val(
+    adata: AnnData,
+    obs_val: str,
+    groupby: Optional[str] = None,
+    xmin: Number = 0,
+    savepath: Optional[os.PathLike] = None,
+    figsize: Tuple = (8,6),
+    save_only: bool = False,
+    dpi_save: int = 300,
+    histplot_multiple: str = "stack",
+    histplot_element: str = "bars"
+    ):
+    # get data for plotting
+    data = adata.obs[[obs_val, groupby]].dropna()
+
+    # remove zeros
+    data = data[data[obs_val] > xmin].copy()
+
+    # Create the histogram
+    fig, ax = plt.subplots(1,1, figsize=(figsize[0], figsize[1]))
+    h = sns.histplot(data=data, x=obs_val,
+                hue=groupby, palette=DEFAULT_CATEGORICAL_CMAP.colors,
+                multiple=histplot_multiple, element=histplot_element,
+                alpha=1, ax=ax
+                )
+
+    # Move the legend outside of the plot
+    sns.move_legend(h, "upper left", bbox_to_anchor=(1, 1))
+
+    # save or show figure
+    save_and_show_figure(savepath=savepath,
+                         fig=h.get_figure(),
+                         save_only=save_only,
+                         dpi_save=dpi_save,
+                         tight=True
+                         )

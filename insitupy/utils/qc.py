@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from .io import read_json, save_and_show_figure
+from ..io.files import read_json
+from ..io.plots import save_and_show_figure
 from .utils import get_nrows_maxcols
 
 
