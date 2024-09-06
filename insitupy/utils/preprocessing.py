@@ -9,39 +9,81 @@ from insitupy import __version__
 from insitupy.utils._scanorama import scanorama
 
 from .._core._checks import check_integer_counts
+from copy import deepcopy
+from typing import List, Literal, Dict
+from anndata import AnnData
 
 
-def normalize_anndata(adata,
-              transformation_method: Literal["log1p", "sqrt"] = "log1p",
-              verbose: bool = True
-              ) -> None:
-    # check if the matrix consists of raw integer counts
-    check_integer_counts(adata.X)
 
-    # store raw counts in layer
-    print("Store raw counts in anndata.layers['counts']...") if verbose else None
+def normalize_and_transform_anndata(adata: AnnData,
+                      transformation_methods: List[Literal["log1p", "sqrt", "pearson_residuals"]],
+                      verbose: bool = True
+                      ) -> Dict[str, AnnData]:
+    """
+    Normalize and transform the data in an AnnData object based on specified methods.
+
+    Args:
+        adata (AnnData): The AnnData object to be normalized and transformed.
+        transformation_methods (List[str]): List of transformation methods to apply.
+            Options are ["log1p", "sqrt", "pearson_residuals"].
+        verbose (bool, optional): If True, prints progress messages. Default is True.
+
+    Returns:
+        Dict[str, AnnData]: A dictionary where keys are transformation methods and values are the 
+                            transformed AnnData objects.
+    """
+
+    # Check if the matrix consists of raw integer counts
+    #check_integer_counts(adata.X)
+
+    # Store raw counts in the original adata for comparison
+    if verbose:
+        print("Store raw counts in anndata.layers['counts']...")
     adata.layers['counts'] = adata.X.copy()
 
-    # preprocessing according to napari tutorial in squidpy
-    print(f"Normalization, {transformation_method}-transformation...") if verbose else None
+    # Normalize total counts for each transformation
     sc.pp.normalize_total(adata)
     adata.layers['norm_counts'] = adata.X.copy()
 
-    # transform either using log transformation or square root transformation
-    if transformation_method == "log1p":
-        sc.pp.log1p(adata)
-    elif transformation_method == "sqrt":
+    # Dictionary to store different transformations
+    transformed_data = {}
+
+    for method in transformation_methods:
+        if verbose:
+            print(f"Applying transformation: {method}")
+
+        # Copy the original AnnData object for each transformation
+        adata_copy = adata.copy()
+
+        # Apply the selected transformation method
+        if method == "log1p":
+            sc.pp.log1p(adata_copy)
+
+        elif method == "sqrt_1":
         # Suggested in stlearn tutorial (https://stlearn.readthedocs.io/en/latest/tutorials/Xenium_PSTS.html)
-        X = adata.X.toarray()
-        adata.X = csr_matrix(np.sqrt(X) + np.sqrt(X + 1))
-    else:
-        raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt"]')
+            X = adata_copy.X.toarray()
+            adata_copy.X = csr_matrix(X + np.sqrt(X + 1))
 
+        elif method == "sqrt_2":
+            X = adata_copy.X.toarray()
+            adata_copy.X = csr_matrix(np.sqrt(X))
 
-def reduce_dimensions_anndata(adata,
+        elif method == "pearson_residuals":
+            # Applying the Pearson residuals transformation
+            analytic_pearson = sc.experimental.pp.normalize_pearson_residuals(adata_copy, layer="counts", inplace=False)
+            adata_copy.X = csr_matrix(analytic_pearson["X"])
+
+        else:
+            raise ValueError(f'`transformation_method` {method} is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"]')
+
+        # Store the transformed AnnData object in the results dictionary
+        transformed_data[method] = adata_copy
+
+    return transformed_data
+
+def reduce_dimensions_anndata(data,
                               umap: bool = True,
                               tsne: bool = False,
-                              layer: Optional[str] = None,
                               batch_correction_key: Optional[str] = None,
                               perform_clustering: bool = True,
                               verbose: bool = True,
@@ -50,96 +92,102 @@ def reduce_dimensions_anndata(adata,
                               **kwargs
                               ) -> None:
     """
-    Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques, optionally performing batch correction.
+    Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques,
+    optionally performing batch correction.
 
     Args:
+        data (Union[AnnData, Dict[str, AnnData]]):
+            Either a single AnnData object or a dictionary where keys are labels
+            (e.g., transformation methods) and values are AnnData objects to process.
         umap (bool, optional):
             If True, perform UMAP dimensionality reduction. Default is True.
         tsne (bool, optional):
-            If True, perform t-SNE dimensionality reduction. Default is True.
-        layer (str, optional): 
-            Specifies the layer of the AnnData object to operate on. Default is None (uses adata.X).
+            If True, perform t-SNE dimensionality reduction. Default is False.
         batch_correction_key (str, optional):
-            Batch key for performing batch correction using scanorama. Default is None, indicating no batch correction.
+            Batch key for performing batch correction using scanorama.
+            Default is None, indicating no batch correction.
+        perform_clustering (bool, optional):
+            If True, perform Leiden clustering. Default is True.
         verbose (bool, optional):
-            If True, print progress messages during dimensionality reduction. Default is True.
+            If True, print progress messages during dimensionality reduction.
+            Default is True.
         tsne_lr (int, optional):
             Learning rate for t-SNE. Default is 1000.
         tsne_jobs (int, optional):
             Number of CPU cores to use for t-SNE computation. Default is 8.
         **kwargs:
-            Additional keyword arguments to be passed to scanorama function if batch correction is performed.
+            Additional keyword arguments to be passed to the scanorama function
+            if batch correction is performed.
 
     Raises:
         ValueError: If an invalid `batch_correction_key` is provided.
 
     Returns:
-        None: This method modifies the input matrix in place, reducing its dimensionality using specified techniques and
-            batch correction if applicable. It does not return any value.
+        None: This method modifies the input AnnData object(s) in place, reducing
+        their dimensionality using specified techniques and batch correction if
+        applicable. It does not return any value.
     """
-    
-    # Determine the prefix for the data
-    data_prefix = layer if layer else "raw"
-   
 
-    if batch_correction_key is None:
-        # dimensionality reduction
-        print("Dimensionality reduction...") if verbose else None
+    # Helper function to perform dimensionality reduction on a single AnnData object
+    def process_anndata(adata, label):
+        if verbose:
+            print(f"Processing {label}...")
 
-        # perform PCA with the specified layer
-        sc.pp.pca(adata, layer=layer)
+        if batch_correction_key is None:
+            # Dimensionality reduction without batch correction
+            if verbose:
+                print("Performing PCA...")
+            sc.pp.pca(adata)
 
-        # Manually rename the PCA results with the prefix. Future scanpy version will include an argument
-        # key_added to do this automatically
-        adata.obsm[f'{data_prefix}_pca'] = adata.obsm['X_pca']
-        del adata.obsm['X_pca']
+            if umap:
+                if verbose:
+                    print("Computing neighbors and UMAP...")
+                sc.pp.neighbors(adata)
+                sc.tl.umap(adata)
 
-        adata.varm[f'{data_prefix}_PCs'] = adata.varm['PCs']
-        del adata.varm['PCs']
+            if tsne:
+                if verbose:
+                    print("Performing t-SNE...")
+                sc.tl.tsne(adata, n_jobs=tsne_jobs, learning_rate=tsne_lr)
 
-        adata.uns[f'{data_prefix}_pca'] = adata.uns['pca']
-        del adata.uns['pca']
-        
-        if umap:
-            # Perform neighbors analysis with the specified prefix
-            sc.pp.neighbors(adata, use_rep=f'{data_prefix}_pca', key_added=f'{data_prefix}_neighbors')
+        else:
+            # Dimensionality reduction with batch correction
+            if verbose:
+                print("Performing PCA for batch correction...")
+            sc.pp.pca(adata)
 
-            # Perform UMAP using the custom neighbors key
-            sc.tl.umap(adata, neighbors_key=f'{data_prefix}_neighbors')
-            
-            # Rename and store UMAP results with the appropriate prefix
-            adata.obsm[f'{data_prefix}_umap'] = adata.obsm['X_umap']
-            del adata.obsm['X_umap']
+            neigh_uncorr_key = 'neighbors_uncorrected'
+            sc.pp.neighbors(adata, key_added=neigh_uncorr_key)
 
-            adata.uns[f'{data_prefix}_umap'] = adata.uns['umap']
-            del adata.uns['umap']
-        
-        if tsne:
-            # Perform t-SNE using the PCA results with the specified prefix
-            sc.tl.tsne(adata, n_jobs=tsne_jobs, learning_rate=tsne_lr, use_rep=f'{data_prefix}_pca', key_added=f'{data_prefix}_tsne')
+            if perform_clustering:
+                if verbose:
+                    print("Performing initial clustering...")
+                sc.tl.leiden(adata, neighbors_key=neigh_uncorr_key, key_added='leiden_uncorrected')
 
-    else:
-        # PCA for batch correction
-        sc.pp.pca(adata, layer=layer)
+            # Batch correction using scanorama
+            if verbose:
+                print(f"Batch correction using scanorama for {batch_correction_key}...")
+            hvgs = list(adata.var_names[adata.var['highly_variable']])
+            adata = scanorama(adata, batch_key=batch_correction_key, hvg=hvgs, verbose=False, **kwargs)
 
-        neigh_uncorr_key = f'{data_prefix}_neighbors_uncorrected'
-        sc.pp.neighbors(adata, use_rep=f'{data_prefix}_pca', key_added=neigh_uncorr_key)
+            # Dimensionality reduction after batch correction
+            if verbose:
+                print("Computing neighbors and embeddings after batch correction...")
+            sc.pp.neighbors(adata, use_rep="X_scanorama")
+            sc.tl.umap(adata)
+            if tsne:
+                sc.tl.tsne(adata, use_rep="X_scanorama", n_jobs=tsne_jobs, learning_rate=tsne_lr)
 
         if perform_clustering:
-            # Clustering
-            sc.tl.leiden(adata, neighbors_key=neigh_uncorr_key, key_added=f'{data_prefix}_leiden_uncorrected')
+            if verbose:
+                print("Performing Leiden clustering...")
+            sc.tl.leiden(adata)
 
-        # Batch correction
-        print(f"Batch correction using scanorama for {batch_correction_key}...") if verbose else None
-        hvgs = list(adata.var_names[adata.var['highly_variable']])
-        adata = scanorama(adata, batch_key=batch_correction_key, hvg=hvgs, verbose=False, **kwargs)
-
-        # Find neighbors and reduce dimensions
-        sc.pp.neighbors(adata, use_rep="X_scanorama", key_added=f'{data_prefix}_scanorama_neighbors')
-        sc.tl.umap(adata, neighbors_key=f'{data_prefix}_scanorama_neighbors', key_added=f'{data_prefix}_scanorama_umap')
-        sc.tl.tsne(adata, use_rep="X_scanorama", key_added=f'{data_prefix}_scanorama_tsne')
-
-    if perform_clustering:
-        # Clustering
-        print("Leiden clustering...") if verbose else None
-        sc.tl.leiden(adata, neighbors_key=f'{data_prefix}_neighbors', key_added=f'{data_prefix}_leiden')
+    # Check if data is a dictionary of AnnData objects
+    if isinstance(data, dict):
+        # Iterate over each AnnData object in the dictionary
+        for label, adata in data.items():
+            process_anndata(adata, label)
+    else:
+        # Data is a single AnnData object
+        process_anndata(data, 'adata')
