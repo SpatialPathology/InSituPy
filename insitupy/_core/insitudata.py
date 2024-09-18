@@ -888,49 +888,48 @@ class InSituData:
             transcript_dataframe = pd.read_parquet(self.path / transcript_filename)
 
             self.transcripts = _restructure_transcripts_dataframe(transcript_dataframe)
-    
 
-    def sctransform(self, verbose: bool = True):
+
+    def sctransform(self, verbose: bool = True) -> None:
         """
-        Apply SCTransform to the Xenium data in this instance.
-        Modifies the `AnnData` objects stored in the `InSituData` (both main and alternative modalities)
-        by applying SCTransform.
+            Apply SCTransform to the Xenium data in this instance.
+            Modifies the `AnnData` objects stored in the `InSituData` (both main and alternative modalities)
+            by applying SCTransform.
 
-        Args:
-            verbose (bool): If True, print progress messages. Default is True.
+            Args:
+                verbose (bool): If True, print progress messages. Default is True.
 
-        Returns:
-            None: This method modifies the input matrix in place by applying SCTransform.
+            Returns:
+                None: This method modifies the input matrix in place by applying SCTransform.
         """
-    try:
-        # Retrieve the main cell data (ensure the modality exists)
-        cells = self.cells
-    except AttributeError:
-        raise ModalityNotFoundError(modality="cells")
+        try:
+            # Retrieve the main cell data (ensure the modality exists)
+            cells = self.cells
+        except AttributeError:
+            raise ModalityNotFoundError(modality="cells")
 
-    if verbose:
-        print("Applying SCTransform to the main modality (cells.matrix)...")
-    self.cells.matrix = sctransform_anndata(adata=cells.matrix, verbose=verbose)
+        if verbose:
+            print("Applying SCTransform to the main modality (cells.matrix)...")
+        self.cells.matrix = sctransform_anndata(adata=cells.matrix, verbose=verbose)
 
-    # Apply SCTransform to alternative modalities if they exist
-    try:
-        alt = self.alt
-    except AttributeError:
-        # If no alternative modalities exist, simply pass
-        if verbose:
-            print("No alternative modalities found.")
-        pass
-    else:
-        if verbose:
-            print("Found `.alt` modality. Applying SCTransform to alternative modalities...")
-        for key, alt_cells in alt.items():
+        # Apply SCTransform to alternative modalities if they exist
+        try:
+            alt = self.alt
+        except AttributeError:
+            # If no alternative modalities exist, simply pass
             if verbose:
-                print(f"\tApplying SCTransform to `.alt['{key}']` modality...")
-            alt_cells.matrix = sctransform_anndata(adata=alt_cells.matrix, verbose=verbose)
+                print("No alternative modalities found.")
+            pass
+        else:
+            if verbose:
+                print("Found `.alt` modality. Applying SCTransform to alternative modalities...")
+            for key, alt_cells in alt.items():
+                if verbose:
+                    print(f"\tApplying SCTransform to `.alt['{key}']` modality...")
+                alt_cells.matrix = sctransform_anndata(adata=alt_cells.matrix, verbose=verbose)
 
-    if verbose:
-        print("SCTransform completed for all modalities.")
-
+        if verbose:
+            print("SCTransform completed for all modalities.")
 
    
     def reduce_dimensions(self,
