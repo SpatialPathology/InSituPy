@@ -172,7 +172,7 @@ def reduce_dimensions_anndata(adata,
 anndata2ri.activate()
 pandas2ri.activate()
 
-def sctransform_anndata(adata):
+def sctransform_anndata(adata, verbose=True):
     """
     Function to perform SCTransform on an AnnData object using Seurat and return the transformed AnnData object.
     
