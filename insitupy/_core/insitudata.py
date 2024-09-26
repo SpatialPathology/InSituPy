@@ -933,18 +933,6 @@ class InSituData:
 
    
     def reduce_dimensions(self,
-<<<<<<< HEAD
-                        umap: bool = True,
-                        tsne: bool = True,
-                        layer: Optional[str] = None,
-                        batch_correction_key: Optional[str] = None,
-                        perform_clustering: bool = True,
-                        verbose: bool = True,
-                        tsne_lr: int = 1000,
-                        tsne_jobs: int = 8,
-                        **kwargs
-                        ):
-=======
                           umap: bool = True,
                           tsne: bool = False,
                           batch_correction_key: Optional[str] = None,
@@ -953,7 +941,6 @@ class InSituData:
                           tsne_lr: int = 1000,
                           tsne_jobs: int = 8,
                           **kwargs):
->>>>>>> test_scanpy_version
         """
         Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques, optionally performing batch correction.
 
@@ -961,13 +948,7 @@ class InSituData:
             umap (bool, optional):
                 If True, perform UMAP dimensionality reduction. Default is True.
             tsne (bool, optional):
-<<<<<<< HEAD
-                If True, perform t-SNE dimensionality reduction. Default is True.
-            layer (str, optional): 
-                Specifies the layer of the AnnData object to operate on. Default is None (uses adata.X).
-=======
                 If True, perform t-SNE dimensionality reduction. Default is False.
->>>>>>> test_scanpy_version
             batch_correction_key (str, optional):
                 Batch key for performing batch correction using scanorama. Default is None, indicating no batch correction.
             verbose (bool, optional):
@@ -992,15 +973,10 @@ class InSituData:
         except AttributeError:
             raise ModalityNotFoundError(modality="cells")
 
-<<<<<<< HEAD
-        reduce_dimensions_anndata(adata=cells.matrix,
-                                  umap=umap, tsne=tsne, layer=layer, 
-=======
         # Perform dimensionality reduction on the main modality (cells.matrix)
         print("Reducing dimensions for the main modality (cells.matrix)...") if verbose else None
         reduce_dimensions_anndata(data=cells.matrix,
                                   umap=umap, tsne=tsne,
->>>>>>> test_scanpy_version
                                   batch_correction_key=batch_correction_key,
                                   perform_clustering=perform_clustering,
                                   verbose=verbose,
@@ -1066,18 +1042,6 @@ class InSituData:
         except AttributeError:
             pass
         else:
-<<<<<<< HEAD
-            print("Found `.alt` modality.")
-            for k, cells in alt.items():
-                print(f"\tReducing dimensions in `.alt['{k}']...")
-                reduce_dimensions_anndata(adata=cells.matrix,
-                                        umap=umap, tsne=tsne, layer=layer,
-                                        batch_correction_key=batch_correction_key,
-                                        perform_clustering=perform_clustering,
-                                        verbose=verbose,
-                                        tsne_lr=tsne_lr, tsne_jobs=tsne_jobs
-                                        )
-=======
             print("Found `.alt` modality. Comparing transformations for alternative modalities...") if verbose else None
             for key, alt_cells in alt.items():
                 print(f"\tComparing transformations for `.alt['{key}']` modality...")
@@ -1095,7 +1059,6 @@ class InSituData:
         # Return the results (could be extended to return HTML reports or visualizations as needed)
         return all_results
 
->>>>>>> test_scanpy_version
 
 
     def saveas(self,
