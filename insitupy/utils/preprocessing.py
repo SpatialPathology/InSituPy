@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import base64
 from io import BytesIO
-
+import warnings
 import anndata2ri
 import rpy2.robjects as ro
 from rpy2.robjects.packages import importr
@@ -230,6 +230,8 @@ def sctransform_anndata(adata, verbose=True):
     
     return transformed_adata
     
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*incompatible with float64.*")
+
 
 def compare_transformations_anndata(adata: AnnData,
                                     transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
@@ -244,7 +246,7 @@ def compare_transformations_anndata(adata: AnnData,
         transformation_methods (List[str]): List of transformation methods to apply.
             Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
         verbose (bool, optional): If True, prints progress messages. Default is True.
-        output_path (str, optional): The path where the HTML report will be saved. Default is "normalization_results.html".
+        output_path (str, optional): The path where the HTML report will be saved. The default is normalization_results.html
 
     Returns:
         pd.DataFrame: A DataFrame with comparison metrics for each transformation method.

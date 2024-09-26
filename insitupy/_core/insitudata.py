@@ -1002,17 +1002,18 @@ class InSituData:
                                           **kwargs)
                 
     def compare_transformations(self,
-                                transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"]],
-                                verbose=True,
-                                **kwargs):
+                            transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
+                            verbose=True,
+                            output_path: str = "normalization_results.html",
+                            **kwargs):
         """
         Compare transformations for the main modality (`cells.matrix`) and any alternative modalities (`.alt`).
 
         Args:
-            methods (List[str]): List of transformation methods to apply. 
-                Options are ["log1p", "sqrt", "pearson_residuals"].
-            perform_clustering (bool, optional): If True, performs clustering on the data. Default is True.
+            transformation_methods (List[str]): List of transformation methods to apply. 
+                Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
             verbose (bool, optional): If True, prints progress messages. Default is True.
+            output_path (str, optional): The path where the HTML report will be saved. Default is "normalization_results.html".
             **kwargs: Additional keyword arguments for flexibility in passing to comparison functions.
 
         Returns:
@@ -1027,9 +1028,10 @@ class InSituData:
         # Compare transformations for the main modality (cells.matrix)
         print("Comparing transformations for the main modality (cells.matrix)...") if verbose else None
         main_results = compare_transformations_anndata(adata=cells.matrix,
-                                               transformation_methods=transformation_methods,
-                                               verbose=verbose,
-                                               **kwargs)
+                                                    transformation_methods=transformation_methods,
+                                                    verbose=verbose,
+                                                    output_path=output_path,  # Pass the output_path argument
+                                                    **kwargs)
 
         # To store all results
         all_results = {'main': main_results}
@@ -1043,14 +1045,20 @@ class InSituData:
             print("Found `.alt` modality. Comparing transformations for alternative modalities...") if verbose else None
             for key, alt_cells in alt.items():
                 print(f"\tComparing transformations for `.alt['{key}']` modality...")
+                
+                # Define the output path for each alternative modality
+                alt_output_path = output_path.replace(".html", f"_{key}.html")  # To create separate reports for each alt modality
+
                 alt_results = compare_transformations_anndata(adata=alt_cells.matrix,
-                                                      transformation_methods=transformation_methods,
-                                                      verbose=verbose,
-                                                      **kwargs)
+                                                            transformation_methods=transformation_methods,
+                                                            verbose=verbose,
+                                                            output_path=alt_output_path,  # Pass a unique output path for each alternative modality
+                                                            **kwargs)
                 all_results[key] = alt_results
 
         # Return the results (could be extended to return HTML reports or visualizations as needed)
         return all_results
+
 
 
     def saveas(self,
