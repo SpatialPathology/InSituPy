@@ -212,17 +212,19 @@ def sctransform_anndata(adata):
     
 
 def compare_transformations_anndata(adata: AnnData,
-                                    transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"]],
-                                    verbose: bool = True) -> pd.DataFrame:
+                                    transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
+                                    verbose: bool = True,
+                                    output_path: str = "normalization_results.html") -> pd.DataFrame:
     """
     Normalize and transform the data in an AnnData object based on specified methods, 
-    and then compare the transformed results.
+    and then compare the transformed results, including SCTransform.
 
     Args:
         adata (AnnData): The AnnData object to be normalized and transformed.
         transformation_methods (List[str]): List of transformation methods to apply.
-            Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"].
+            Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
         verbose (bool, optional): If True, prints progress messages. Default is True.
+        output_path (str, optional): The path where the HTML report will be saved. Default is "normalization_results.html".
 
     Returns:
         pd.DataFrame: A DataFrame with comparison metrics for each transformation method.
@@ -266,8 +268,12 @@ def compare_transformations_anndata(adata: AnnData,
             analytic_pearson = sc.experimental.pp.normalize_pearson_residuals(adata_copy, layer="counts", inplace=False)
             adata_copy.X = csr_matrix(analytic_pearson["X"])
 
+        elif method == "sctransform":
+            # Applying SCTransform using the custom function
+            adata_copy = sctransform_anndata(adata_copy)
+
         else:
-            raise ValueError(f'`transformation_method` {method} is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"]')
+            raise ValueError(f'`transformation_method` {method} is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]')
 
         # Store the transformed AnnData object in the results dictionary
         transformed_data[method] = adata_copy
@@ -399,9 +405,9 @@ def compare_transformations_anndata(adata: AnnData,
     </html>
     """
 
-    # Save the HTML file
-    with open("normalization_results.html", "w") as file:
+    # Save the HTML file to the specified output path
+    with open(output_path, "w") as file:
         file.write(full_html)
 
-    print("HTML report created and saved as 'normalization_results.html'")
+    print(f"HTML report created and saved as '{output_path}'")
     return results_df
