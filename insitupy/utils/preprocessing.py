@@ -168,11 +168,13 @@ def reduce_dimensions_anndata(adata,
         sc.tl.leiden(adata, neighbors_key=f'{data_prefix}_neighbors', key_added=f'{data_prefix}_leiden')
 
 # Activate pandas to R conversion
+# Activate the automatic conversion between AnnData and Seurat using anndata2ri
 anndata2ri.activate()
+pandas2ri.activate()
 
 def sctransform_anndata(adata):
     """
-    Function to perform SCTransform on an AnnData object and return the transformed AnnData object.
+    Function to perform SCTransform on an AnnData object using Seurat and return the transformed AnnData object.
     
     Args:
         adata (AnnData): The AnnData object to be transformed.
@@ -181,33 +183,37 @@ def sctransform_anndata(adata):
         AnnData: The transformed AnnData object.
     """
     
+    import tempfile
+    from rpy2.robjects.packages import importr
+
+    # Import necessary R libraries
+    seurat = importr('Seurat')
+    sctransform = importr('sctransform')
+    singlecell_experiment = importr('SingleCellExperiment')
+    
     # Step 1: Save AnnData object to a temporary file
     with tempfile.NamedTemporaryFile(suffix=".h5ad", delete=False) as temp_file:
         temp_file_path = temp_file.name
         adata.write_h5ad(temp_file_path)
     
     print(f"AnnData object saved temporarily at: {temp_file_path}")
-    
-    # Step 2: Run R code using rpy2 to load AnnData into Seurat, perform SCTransform, and convert back to AnnData
-    ro.r('library(anndataR)')
-    ro.r('library(Seurat)')
-    ro.r('library(sctransform)')
-    
-    # Load the AnnData object into Seurat and apply SCTransform
+
+    # Step 2: Load the AnnData file into Seurat and apply SCTransform
     ro.globalenv['temp_file_path'] = temp_file_path
-    ro.r('adata_Seurat <- read_h5ad(temp_file_path, to="Seurat")')
-    ro.r('adata_Seurat <- adata_Seurat[, unname(which(colSums(GetAssayData(adata_Seurat)) != 0))]')  # Remove zero-count columns
-    ro.r('seurat_sctransform <- SCTransform(adata_Seurat)')
-    
-    # Convert the transformed Seurat object back to AnnData
-    ro.r('transformed_anndata <- as(assay(seurat_sctransform), "AnnData")')
-    
-    # Retrieve the transformed AnnData object from R
-    transformed_adata = ro.r('transformed_anndata')
+    ro.r('seurat_obj <- read_h5ad(temp_file_path, to="Seurat")')
+    ro.r('seurat_obj <- seurat_obj[, unname(which(colSums(GetAssayData(seurat_obj)) != 0))]')  # Remove zero-count columns
+    ro.r('seurat_obj <- SCTransform(seurat_obj)')
+
+    # Step 3: Convert Seurat object to SingleCellExperiment (SCE)
+    ro.r('sce_obj <- as.SingleCellExperiment(seurat_obj)')
+
+    # Step 4: Automatically convert SCE to AnnData and return it to Python
+    transformed_adata = ro.globalenv['sce_obj']  # This is now a Python AnnData object
 
     print("SCTransform transformation completed and returned as AnnData.")
     
     return transformed_adata
+
 
     
 
