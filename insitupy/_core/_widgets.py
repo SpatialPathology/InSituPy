@@ -12,7 +12,12 @@ import insitupy._core.config as config
 from insitupy import WITH_NAPARI
 from insitupy._core._layers import _create_points_layer, _update_points_layer
 
+from .._constants import (POINTS_SYMBOL, REGION_CMAP, REGIONS_SYMBOL,
+                          SHAPES_SYMBOL)
 from ..images.utils import create_img_pyramid
+from ._callbacks import (_set_show_names_based_on_geom_type,
+                         _update_classes_on_key_change,
+                         _update_keys_based_on_geom_type)
 
 if WITH_NAPARI:
     import napari
@@ -29,7 +34,7 @@ if WITH_NAPARI:
         viewer = xdata.viewer
 
         if not hasattr(xdata, "cells"):
-            add_points_widget = None
+            add_cells_widget = None
             move_to_cell_widget = None
             add_boundaries_widget = None
         else:
@@ -64,7 +69,7 @@ if WITH_NAPARI:
             def update_widgets_on_data_change(event=None):
                 config.current_data_name = select_data.data_name.value
                 config._refresh_widgets_after_data_change(xdata,
-                                                    add_points_widget,
+                                                    add_cells_widget,
                                                     add_boundaries_widget)
 
             if len(config.masks) > 0:
@@ -109,7 +114,7 @@ if WITH_NAPARI:
                 size={'label': 'Size [µm]'},
                 recent={'choices': [""], 'label': "Recent:"},
                 )
-            def add_points_widget(
+            def add_cells_widget(
                 key="genes",
                 value=None,
                 size=6,
@@ -183,9 +188,10 @@ if WITH_NAPARI:
                             new_name=new_layer_name,
                         )
 
-            @add_points_widget.key.changed.connect
+            @add_cells_widget.key.changed.connect
+            @add_cells_widget.call_button.changed.connect
             def update_values_on_key_change(event=None):
-                _update_values_on_key_change(add_points_widget)
+                _update_values_on_key_change(add_cells_widget)
 
             @magicgui(
                 call_button='Show',
@@ -225,133 +231,54 @@ if WITH_NAPARI:
             def callback(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer
                 config._refresh_widgets_after_data_change(xdata,
-                                                        points_widget=add_points_widget,
+                                                        points_widget=add_cells_widget,
                                                         boundaries_widget=add_boundaries_widget
                                                         )
-            if add_points_widget is not None:
-                add_points_widget.call_button.clicked.connect(callback)
+            if add_cells_widget is not None:
+                add_cells_widget.call_button.clicked.connect(callback)
             if add_boundaries_widget is not None:
                 add_boundaries_widget.call_button.clicked.connect(callback)
 
-
-        if not hasattr(xdata, "regions"):
-            show_regions_widget = None
+        if not (hasattr(xdata, "annotations") | hasattr(xdata, "regions")):
+            show_geometries_widget = None
         else:
-            # get colormap for regions
-            cmap_regions = matplotlib.colormaps["tab10"]
+            # check which geometries are available
+            choices = ["Annotations", "Regions"]
+            choices = [ch for ch in choices if hasattr(xdata, ch.lower())]
 
-            def _update_region_on_key_change(widget):
-                current_key = widget.key.value
-                widget.region.choices = sorted(xdata.regions.metadata[current_key]['classes'])
-                pass
+            # extract geometry object
+            geom = getattr(xdata, choices[0].lower())
 
-            # extract region keys
-            region_keys = list(xdata.regions.metadata.keys())
-            first_region_key = list(region_keys)[0] # for dropdown menu
-            #first_regions = xdata.regions.metadata[first_region_key]['classes']
-
-            @magicgui(
-                call_button='Show',
-                key={"choices": region_keys, "label": "Key:"},
-                #region={"choices": first_regions, "label": "Regions:"}
-            )
-            def show_regions_widget(
-                key,
-                tolerance: Number = 5,
-                # region
-                ):
-                layer_name = f"region-{key}"
-
-                if layer_name not in viewer.layers:
-                    # get geopandas dataframe with regions
-                    reg_df = getattr(xdata.regions, key)
-
-                    # simplify polygons for visualization
-                    reg_df["geometry"] = reg_df["geometry"].simplify(tolerance)
-
-                    # iterate through shapes and collect them as list
-                    shapes_list = []
-                    uids_list = []
-                    names_list = []
-                    for uid, row in reg_df.iterrows():
-                        # get coordinates
-                        polygon = row["geometry"]
-
-                        if isinstance(polygon, MultiPolygon):
-                            raise TypeError("Region is a shapely 'MultiPolygon'. This is not supported in regions. Make sure to only have simple polygons as regions.")
-
-                        # extract exterior coordinates from shapely object
-                        # Note: the last coordinate is removed since it is identical with the first
-                        # in shapely objects, leading sometimes to visualization bugs in napari
-                        exterior_array = np.array([polygon.exterior.coords.xy[1].tolist()[:-1],
-                                                polygon.exterior.coords.xy[0].tolist()[:-1]]).T
-
-                        # collect data
-                        shapes_list.append(exterior_array)
-                        uids_list.append(uid)
-                        names_list.append(row["name"])
-
-                    # determine hexcolor for this region key
-                    hexcolor = rgb2hex([elem / 255 for elem in cmap_regions(region_keys.index(key))])
-                    hexcolor = rgb2hex(cmap_regions(region_keys.index(key)))
-
-                    text = {
-                        'string': '{name}',
-                        'anchor': 'upper_left',
-                        #'translation': [-5, 0],
-                        'size': 8,
-                        'color': hexcolor,
-                        }
-
-                    viewer.add_shapes(
-                        shapes_list,
-                        name=layer_name,
-                        properties={
-                            'uid': uids_list,
-                            'name': names_list
-                        },
-                        shape_type="polygon",
-                        edge_width=10,
-                        edge_color=hexcolor,
-                        face_color='transparent',
-                        text=text
-                        )
-                else:
-                    print(f"Key '{key}' already in layer list.")
-
-            @show_regions_widget.key.changed.connect
-            def update_region_on_key_change(event=None):
-                _update_region_on_key_change(show_regions_widget)
-
-        if not hasattr(xdata, "annotations"):
-            show_annotations_widget = None
-        else:
-            # get colorcycle for region annotations
-            cmap_annotations = "Dark2"
-            cmap_annot = matplotlib.colormaps[cmap_annotations]
-            cc_annot = cmap_annot.colors
-
-            def _update_classes_on_key_change(widget):
-                current_key = widget.key.value
-                widget.annot_class.choices = ["all"] + sorted(xdata.annotations.metadata[current_key]['classes'])
-
-            # extract region keys
-            annot_keys = list(xdata.annotations.metadata.keys())
+            # extract annotations keys
+            annot_keys = list(geom.metadata.keys())
             first_annot_key = list(annot_keys)[0] # for dropdown menu
-            first_classes = ["all"] + sorted(xdata.annotations.metadata[first_annot_key]['classes'])
+            first_classes = ["all"] + sorted(geom.metadata[first_annot_key]['classes'])
 
             @magicgui(
                 call_button='Show',
+                geom_type={"choices": choices, "label": "Type:"},
                 key={"choices": annot_keys, "label": "Key:"},
-                annot_class={"choices": first_classes, "label": "Class:"}
+                annot_class={"choices": first_classes, "label": "Class:"},
+                show_names={'label': 'Show names'}
             )
-            def show_annotations_widget(key,
-                                    annot_class,
-                                    tolerance: Number = 2
-                                    ):
+            def show_geometries_widget(
+                geom_type,
+                key,
+                annot_class,
+                tolerance: Number = 2,
+                show_names: bool = False
+                ):
 
-                # get annotation dataframe
-                annot_df = getattr(xdata.annotations, key)
+                if geom_type == "Annotations":
+                    # get annotation dataframe
+                    annot_df = getattr(xdata.annotations, key)
+                    all_keys = list(xdata.annotations.metadata.keys())
+                elif geom_type == "Regions":
+                    # get regions dataframe
+                    annot_df = getattr(xdata.regions, key)
+                    all_keys = list(xdata.regions.metadata.keys())
+                else:
+                    TypeError(f"Unknown geometry type: {geom_type}")
 
                 if annot_class == "all":
                     # get classes
@@ -359,66 +286,158 @@ if WITH_NAPARI:
                 else:
                     classes = [annot_class]
 
+                # # check which layer types are in the dataframe
+                # layer_types = annot_df["layer_type"].unique()
+
                 # iterate through classes
                 for cl in classes:
-                    # generate layer name
-                    layer_name = f"*{cl} ({key})"
+                    # for layer_type in layer_types:
+                    #     # generate layer name
+                    #     if geom_type == "Annotations":
+                    #         if layer_type == "Shapes":
+                    #             layer_type_symbol = SHAPES_SYMBOL
+                    #         elif layer_type == "Points":
+                    #             layer_type_symbol = POINTS_SYMBOL
+                    #         else:
+                    #             TypeError(f"Unknown layer type: {layer_type}")
+                    #     else:
+                    #         layer_type_symbol = REGIONS_SYMBOL
+
+                    layer_name = f"{cl} ({key})"
 
                     if layer_name not in viewer.layers:
                         # get dataframe for this class
-                        class_df = annot_df.loc[annot_df["name"] == cl]
+                        class_df = annot_df[annot_df["name"] == cl].copy()
 
                         # simplify polygons for visualization
                         class_df["geometry"] = class_df["geometry"].simplify(tolerance)
+
+                        # extract scale
+                        scale_factor = class_df.iloc[0]["scale"]
+
+                        if not "color" in class_df.columns:
+                            # create a RGB color with range 0-255 for this key
+                            rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
+                        else:
+                            rgb_color = None
 
                         # add layer to viewer
                         _add_annotations_as_layer(
                             dataframe=class_df,
                             viewer=viewer,
-                            layer_name=layer_name
+                            layer_name=layer_name,
+                            scale_factor=scale_factor,
+                            rgb_color=rgb_color,
+                            show_names=show_names
                         )
 
             # connect key change with update function
-            @show_annotations_widget.key.changed.connect
-            def update_classes_on_key_change(event=None):
-                _update_classes_on_key_change(show_annotations_widget)
+            @show_geometries_widget.geom_type.changed.connect
+            @show_geometries_widget.key.changed.connect
+            @show_geometries_widget.call_button.clicked.connect
+            @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
+            @viewer.layers.events.inserted.connect # or remoed. Therefore, this update is necessary
+            def update_annotation_widget_after_changes(event=None):
+                _update_keys_based_on_geom_type(show_geometries_widget, xdata=xdata)
+                _update_classes_on_key_change(show_geometries_widget, xdata=xdata)
+                _set_show_names_based_on_geom_type(show_geometries_widget)
 
-
-
-        return add_points_widget, move_to_cell_widget, show_regions_widget, show_annotations_widget, add_boundaries_widget, select_data #add_genes, add_observations
+        return add_cells_widget, move_to_cell_widget, show_geometries_widget, add_boundaries_widget, select_data #add_genes, add_observations
 
 
     @magic_factory(
-        call_button='Add annotation layer',
+        call_button='Add geometry layer',
+        key={"choices": ["Geometric annotations", "Point annotations", "Regions"], "label": "Type:"},
         annot_key={'label': 'Key:'},
         class_name={'label': 'Class:'}
         )
-    def add_new_annotations_widget(
-        annot_key: str = "",
-        class_name: str = ""
+    def add_new_geometries_widget(
+        key: str = "Geometric annotations",
+        annot_key: str = "TestKey",
+        class_name: str = "TestClass",
     ) -> napari.types.LayerDataTuple:
-        # generate name
-        name_pattern: str = "*{class_name} ({annot_key})"
-        name = name_pattern.format(class_name=class_name, annot_key=annot_key)
+        # name pattern of layer name
+        name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
 
         if (class_name != "") & (annot_key != ""):
-            # generate shapes layer for annotation
-            layer = (
-                [],
-                {
-                    'name': name,
-                    'shape_type': 'polygon',
-                    'edge_width': 10,
-                    'edge_color': "red",
-                    'face_color': 'transparent',
-                    'properties': {
-                        'uid': np.array([], dtype='object')
-                    }
-                    },
-                'shapes'
-                )
+            if key == "Geometric annotations":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=SHAPES_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
 
-            add_new_annotations_widget.class_name.value = ""
+                # generate shapes layer for annotation
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'shape_type': 'polygon',
+                        'edge_width': 40,
+                        'edge_color': 'red',
+                        'face_color': 'transparent',
+                        'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object')
+                        }
+                        },
+                    'shapes'
+                    )
+            elif key == "Point annotations":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=POINTS_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
+
+                # generate points layer for annotation
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'size': 100,
+                        'edge_color': 'black',
+                        'face_color': 'blue',
+                        'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object')
+                        }
+                        },
+                    'points'
+                    )
+
+            elif key == "Regions":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=REGIONS_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
+
+                # generate shapes layer for annotation
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'shape_type': 'polygon',
+                        'edge_width': 40,
+                        'edge_color': '#ffaa00ff',
+                        'face_color': 'transparent',
+                        'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object')
+                        }
+                        },
+                    'shapes'
+                    )
+
+            else:
+                layer = None
+
+            # reset class name to nothing
+            add_new_geometries_widget.class_name.value = ""
 
             return layer
 

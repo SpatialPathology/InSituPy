@@ -18,7 +18,8 @@ if WITH_NAPARI:
 
     # set viewer configurations
     def set_viewer_config(
-        xdata
+        xdata,
+        pixel_size_param = None
         ):
         if current_data_name == "main":
             # access adata, viewer and metadata from xeniumdata
@@ -54,7 +55,6 @@ if WITH_NAPARI:
             "obsm": obsm_cats
         }
 
-
         # get point coordinates
         global points
         points = np.flip(adata.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
@@ -72,6 +72,14 @@ if WITH_NAPARI:
             b = getattr(boundaries, n)
             if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
                 masks.append(n)
+
+        # get image metadata
+        global pixel_size
+        if pixel_size_param is None:
+            first_key = list(xdata.images.metadata.keys())[0]
+            pixel_size = xdata.images.metadata[first_key]["pixel_size"]
+        else:
+            pixel_size = pixel_size_param
 
     def _refresh_widgets_after_data_change(xdata, points_widget, boundaries_widget):
         set_viewer_config(xdata)

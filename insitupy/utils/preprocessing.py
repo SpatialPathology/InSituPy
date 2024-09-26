@@ -1,22 +1,35 @@
 from typing import Literal, Optional
-
 import numpy as np
 import scanpy as sc
 from parse import *
 from scipy.sparse import csr_matrix
-
 from insitupy import __version__
 from insitupy.utils._scanorama import scanorama
+from .._core._checks import check_integer_counts
+from copy import deepcopy
+from typing import List, Literal, Dict
+from anndata import AnnData
+from scipy.stats import skew, kurtosis, norm, probplot, shapiro, anderson, kstest
+import matplotlib.pyplot as plt
+import pandas as pd
+import base64
+from io import BytesIO
+import warnings
+import anndata2ri
+import rpy2.robjects as ro
+from rpy2.robjects.packages import importr
+from rpy2.robjects import pandas2ri
 
-from .._core._checks import check_raw
+from scipy.sparse import csr_matrix
 
+import tempfile
 
-def normalize_anndata(adata,
-              transformation_method: Literal["log1p", "sqrt"] = "log1p",
+def normalize_and_transform_anndata(adata,
+              transformation_method: Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"] = "log1p",
               verbose: bool = True
               ) -> None:
     # check if the matrix consists of raw integer counts
-    check_raw(adata.X)
+    check_integer_counts(adata.X)
 
     # store raw counts in layer
     print("Store raw counts in anndata.layers['counts']...") if verbose else None
@@ -30,12 +43,26 @@ def normalize_anndata(adata,
     # transform either using log transformation or square root transformation
     if transformation_method == "log1p":
         sc.pp.log1p(adata)
-    elif transformation_method == "sqrt":
+    elif transformation_method == "sqrt_1":
         # Suggested in stlearn tutorial (https://stlearn.readthedocs.io/en/latest/tutorials/Xenium_PSTS.html)
         X = adata.X.toarray()
         adata.X = csr_matrix(np.sqrt(X) + np.sqrt(X + 1))
+
+    elif transformation_method == "sqrt_2":
+     
+        X = adata.X.toarray()
+        adata.X = csr_matrix(np.sqrt(X))
+    
+    elif transformation_method == "pearson_residuals":
+        # Applying the Pearson residuals transformation
+        analytic_pearson = sc.experimental.pp.normalize_pearson_residuals(adata, layer="counts", inplace=False)
+        adata.X = csr_matrix(analytic_pearson["X"])
+
+    
     else:
-        raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt"]')
+        raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt_1", "sqrt_2", "analytic_pearson_residuals"]')
+
+
 
 
 def reduce_dimensions_anndata(adata,
@@ -142,3 +169,271 @@ def reduce_dimensions_anndata(adata,
         # Clustering
         print("Leiden clustering...") if verbose else None
         sc.tl.leiden(adata, neighbors_key=f'{data_prefix}_neighbors', key_added=f'{data_prefix}_leiden')
+<<<<<<< HEAD
+=======
+
+# Activate pandas to R conversion
+# Activate the automatic conversion between AnnData and Seurat using anndata2ri
+# Activate the automatic conversion between AnnData and Seurat using anndata2ri
+anndata2ri.activate()
+pandas2ri.activate()
+
+def sctransform_anndata(adata, verbose=True):
+    """
+    Function to perform SCTransform on an AnnData object using Seurat and return the transformed AnnData object.
+    
+    Args:
+        adata (AnnData): The AnnData object to be transformed.
+        verbose (bool): If True, prints progress messages.
+    
+    Returns:
+        AnnData: The transformed AnnData object.
+    """
+    
+    import tempfile
+    from rpy2.robjects.packages import importr
+
+    # Import necessary R libraries
+    seurat = importr('Seurat')
+    sctransform = importr('sctransform')
+    anndata_r = importr('anndataR')  # Load anndataR to use read_h5ad
+    singlecell_experiment = importr('SingleCellExperiment')
+
+    if verbose:
+        print("Starting SCTransform...")
+
+    # Step 1: Save AnnData object to a temporary file
+    with tempfile.NamedTemporaryFile(suffix=".h5ad", delete=False) as temp_file:
+        temp_file_path = temp_file.name
+        adata.write_h5ad(temp_file_path)
+    
+    if verbose:
+        print(f"AnnData object saved temporarily at: {temp_file_path}")
+
+    # Step 2: Load the AnnData file into Seurat using anndataR and apply SCTransform
+    ro.globalenv['temp_file_path'] = temp_file_path
+    ro.r('seurat_obj <- read_h5ad(temp_file_path, to="Seurat")')  # Use read_h5ad from anndataR
+    ro.r('seurat_obj <- seurat_obj[, unname(which(colSums(GetAssayData(seurat_obj)) != 0))]')  # Remove zero-count columns
+    ro.r('seurat_obj <- SCTransform(seurat_obj)')
+
+    if verbose:
+        print("SCTransform applied to Seurat object.")
+
+    # Step 3: Convert Seurat object to SingleCellExperiment (SCE)
+    ro.r('sce_obj <- as.SingleCellExperiment(seurat_obj)')
+
+    if verbose:
+        print("Converted Seurat object to SingleCellExperiment.")
+
+    # Step 4: Automatically convert SCE to AnnData and return it to Python
+    transformed_adata = ro.globalenv['sce_obj']  # This is now a Python AnnData object
+
+    if verbose:
+        print("SCTransform transformation completed and returned as AnnData.")
+    
+    return transformed_adata
+    
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*incompatible with float64.*")
+
+
+def compare_transformations_anndata(adata: AnnData,
+                                    transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
+                                    verbose: bool = True,
+                                    output_path: str = "normalization_results.html") -> pd.DataFrame:
+    """
+    Normalize and transform the data in an AnnData object based on specified methods, 
+    and then compare the transformed results, including SCTransform.
+
+    Args:
+        adata (AnnData): The AnnData object to be normalized and transformed.
+        transformation_methods (List[str]): List of transformation methods to apply.
+            Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
+        verbose (bool, optional): If True, prints progress messages. Default is True.
+        output_path (str, optional): The path where the HTML report will be saved. The default is normalization_results.html
+
+    Returns:
+        pd.DataFrame: A DataFrame with comparison metrics for each transformation method.
+    """
+
+    # Step 1: Normalize and transform the data using the specified methods
+    if verbose:
+        print("Store raw counts in anndata.layers['counts']...")
+    
+    # Store raw counts for comparison
+    adata.layers['counts'] = adata.X.copy()
+
+    # Normalize total counts
+    sc.pp.normalize_total(adata, target_sum=250)
+    adata.layers['norm_counts'] = adata.X.copy()
+
+    # Dictionary to store different transformations
+    transformed_data = {}
+
+    for method in transformation_methods:
+        if verbose:
+            print(f"Applying transformation: {method}")
+
+        # Copy the original AnnData object for each transformation
+        adata_copy = adata.copy()
+
+        # Apply the selected transformation method
+        if method == "log1p":
+            sc.pp.log1p(adata_copy)
+
+        elif method == "sqrt_1":
+            X = adata_copy.X.toarray()
+            adata_copy.X = csr_matrix(X + np.sqrt(X + 1))
+
+        elif method == "sqrt_2":
+            X = adata_copy.X.toarray()
+            adata_copy.X = csr_matrix(np.sqrt(X))
+
+        elif method == "pearson_residuals":
+            # Applying the Pearson residuals transformation
+            analytic_pearson = sc.experimental.pp.normalize_pearson_residuals(adata_copy, layer="counts", inplace=False)
+            adata_copy.X = csr_matrix(analytic_pearson["X"])
+
+        elif method == "sctransform":
+            # Applying SCTransform using the custom function
+            adata_copy = sctransform_anndata(adata_copy)
+
+        else:
+            raise ValueError(f'`transformation_method` {method} is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]')
+
+        # Store the transformed AnnData object in the results dictionary
+        transformed_data[method] = adata_copy
+
+    # Step 2: Compare the transformations and generate the plots
+    results = {}
+    plots = []
+
+    # Store raw counts for comparison
+    raw_counts = adata.layers["counts"].toarray().sum(axis=1)
+
+    for method, transformed_adata in transformed_data.items():
+        if verbose:
+            print(f"Processing {method}...")
+
+        # Extract the transformed counts
+        transformed_counts = transformed_adata.X.toarray().sum(axis=1)
+
+        # Check for NaNs and handle them
+        if np.isnan(transformed_counts).any():
+            print(f"Warning: NaN values found in {method} transformation. Replacing NaNs with 0.")
+            transformed_counts = np.nan_to_num(transformed_counts)
+
+        # Plot Histogram of both raw and transformed counts overlaid with a normal distribution
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+
+        # Histogram of the data
+        axs[0].hist(transformed_counts, bins=50, density=True, alpha=0.6, color='g', label=f'{method} counts')
+
+        # Overlay normal distribution
+        mean, std_dev = np.mean(transformed_counts), np.std(transformed_counts)
+        x = np.linspace(mean - 4*std_dev, mean + 4*std_dev, 1000)
+        y = norm.pdf(x, mean, std_dev)
+        axs[0].plot(x, y, label='Normal Distribution', color='blue')
+
+        axs[0].set_title(f'{method} transformation - Histogram with Normal Overlay')
+        axs[0].legend()
+
+        # Q-Q plot
+        probplot(transformed_counts, dist="norm", plot=axs[1])
+        axs[1].set_title(f'Q-Q Plot - {method}')
+
+        # Save the plot to a string buffer
+        buf = BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close(fig)
+        buf.seek(0)
+
+        image_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+        plots.append(f'<img src="data:image/png;base64,{image_base64}" alt="{method} plot"/>')
+
+        # Skewness
+        skewness = skew(transformed_counts)
+
+        # Kurtosis
+        kurt = kurtosis(transformed_counts)  # Excess kurtosis
+
+        # Mean Absolute Deviation (MAD)
+        mad = np.mean(np.abs(transformed_counts - np.mean(transformed_counts)))
+
+        # Coefficient of Variation (CV)
+        cv = np.std(transformed_counts) / np.mean(transformed_counts)
+
+        # Shapiro-Wilk test
+        shapiro_stat, shapiro_p = shapiro(transformed_counts)
+
+        # Anderson-Darling test
+        anderson_stat = anderson(transformed_counts)
+
+        # Kolmogorov-Smirnov test
+        ks_stat, ks_p = kstest(transformed_counts, 'norm', args=(mean, std_dev))
+
+        # Store results for comparison
+        results[method] = {
+            "skewness": skewness,
+            "kurtosis": kurt,
+            "mad": mad,
+            "cv": cv,
+            "shapiro_stat": shapiro_stat,
+            "shapiro_p": shapiro_p,
+            "anderson_stat": anderson_stat.statistic,
+            "ks_stat": ks_stat,
+            "ks_p": ks_p
+        }
+
+    # Convert results dictionary to a DataFrame for easier comparison
+    results_df = pd.DataFrame(results).T  # Transpose to have methods as rows
+
+    # Highlight the best methods and create HTML table
+    def highlight_best_method(results_df):
+        # Copy the DataFrame to avoid modifying the original
+        highlighted_df = results_df.copy()
+
+        # Create temporary columns for absolute skewness and kurtosis
+        highlighted_df['skewness_abs'] = np.abs(highlighted_df['skewness'])
+        highlighted_df['kurtosis_abs'] = np.abs(highlighted_df['kurtosis'])
+
+        # Define the "better" criteria for each metric:
+        metrics_to_minimize = ['mad', 'cv', 'skewness_abs', 'kurtosis_abs', 'shapiro_stat', 'anderson_stat', 'ks_stat']
+
+        # Highlight the best values by setting the background color
+        for metric in metrics_to_minimize:
+            best_value_index = highlighted_df[metric].idxmin()
+            highlighted_df.loc[best_value_index, metric.replace('_abs', '')] = (
+                f'<div style="background-color:lightgreen">{results_df.loc[best_value_index, metric.replace("_abs", "")]}</div>'
+            )
+
+        # Drop temporary columns
+        highlighted_df = highlighted_df.drop(columns=['skewness_abs', 'kurtosis_abs'])
+
+        # Convert the entire DataFrame to HTML with escape=False to allow HTML tags
+        return highlighted_df.to_html(escape=False)
+
+    results_html = highlight_best_method(results_df)
+
+    # Generate the final HTML report
+    full_html = f"""
+    <html>
+    <head>
+        <title>Transformation Results</title>
+    </head>
+    <body>
+        <h1>Transformation Comparison Results</h1>
+        <h2>Summary Table</h2>
+        {results_html}
+        <h2>Transformation Method Plots</h2>
+        {"<br>".join(plots)}
+    </body>
+    </html>
+    """
+
+    # Save the HTML file to the specified output path
+    with open(output_path, "w") as file:
+        file.write(full_html)
+
+    print(f"HTML report created and saved as '{output_path}'")
+    return results_df
+>>>>>>> test_scanpy_version

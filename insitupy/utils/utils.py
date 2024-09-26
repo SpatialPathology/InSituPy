@@ -3,9 +3,12 @@ import os
 from datetime import datetime
 from uuid import uuid4
 
+import matplotlib.pyplot as plt
+import numpy as np
 from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
 from parse import datetime
+from shapely import LineString, Point, Polygon, affinity
 
 from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
                                  XENIUM_INT_TO_HEX_CONV_DICT)
@@ -225,3 +228,95 @@ def convert_xenium_hex_to_int(hex_repr):
     dec = int(hex_repr, 16)
 
     return dec, dataset_suffix
+
+
+def create_ellipse_from_bbox(corner_coords):
+    """
+    Create an ellipse from a bounding box defined by its corner coordinates.
+
+    Parameters:
+    corner_coords (list of tuples): A list containing the coordinates of the four corners
+                                     of the bounding box in the format [(x1, y1), (x2, y2),
+                                     (x3, y3), (x4, y4)].
+
+    Returns:
+    shapely.geometry.Polygon: A Shapely polygon representing the ellipse.
+    """
+    # Unpack the corner coordinates
+    x_coords = [coord[0] for coord in corner_coords]
+    y_coords = [coord[1] for coord in corner_coords]
+
+    # Calculate the bounding box's min and max coordinates
+    x_min = min(x_coords)
+    x_max = max(x_coords)
+    y_min = min(y_coords)
+    y_max = max(y_coords)
+
+    # Calculate the center of the bounding box
+    center_x = (x_min + x_max) / 2
+    center_y = (y_min + y_max) / 2
+
+    # Calculate the semi-major and semi-minor axes
+    semi_major = (x_max - x_min) / 2
+    semi_minor = (y_max - y_min) / 2
+
+    # Create a unit circle centered at the origin
+    unit_circle = Point(0, 0).buffer(1)  # Create a unit circle
+
+    # Scale the unit circle to create the ellipse
+    ellipse = affinity.scale(unit_circle, xfact=semi_major, yfact=semi_minor)
+
+    # Translate the ellipse to the center of the bounding box
+    ellipse = affinity.translate(ellipse, xoff=center_x, yoff=center_y)
+
+    return ellipse
+
+def convert_napari_shape_to_polygon_or_line(napari_shape_data, shape_type):
+    """
+    Convert shape data from Napari format to a Shapely polygon or line.
+
+    This function takes shape data in the format used by Napari and converts it
+    into a Shapely geometry object, which can be either a polygon, an ellipse,
+    or a line string, depending on the specified shape type.
+
+    Parameters:
+    napari_shape_data (numpy.ndarray): An array of shape data, where each row
+                                        represents a point (y, x) in the Napari
+                                        coordinate system.
+    shape_type (str): A string indicating the type of shape to create.
+                      Accepted values are:
+                      - "polygon": Converts the shape data to a Shapely Polygon.
+                      - "ellipse": Converts the shape data to a Shapely Polygon
+                                   representing an ellipse based on the bounding box.
+                      - "path": Converts the shape data to a Shapely LineString.
+
+    Returns:
+    shapely.geometry.Polygon or shapely.geometry.LineString: A Shapely geometry
+    object representing the converted shape.
+
+    Raises:
+    TypeError: If the provided shape_type is not one of the accepted values.
+    """
+    if shape_type == "polygon":
+        result = Polygon(np.stack([napari_shape_data[:, 1], napari_shape_data[:, 0]], axis=1))
+    elif shape_type == "ellipse":
+        result = create_ellipse_from_bbox(np.flip(napari_shape_data, axis=1))
+    elif shape_type == "path":
+        result = LineString(np.flip(napari_shape_data, axis=1))
+    else:
+        TypeError(f"Shape has an unknown type: {shape_type}")
+
+    return result
+
+def exclude_index(array, exclude_index):
+    """
+    Exclude the element at the specified index from the array.
+
+    Args:
+        array (np.ndarray): The input NumPy array.
+        exclude_index (int): The index of the element to exclude.
+
+    Returns:
+        np.ndarray: A new array with the element at exclude_index excluded.
+    """
+    return np.concatenate((array[:exclude_index], array[exclude_index+1:]))
