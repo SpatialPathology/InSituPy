@@ -16,10 +16,13 @@ To install InSituPy within a conda environment, you can follow these steps:
    git clone https://github.com/jwrth/InSituPy.git
    ```
 
-2. Navigate to the cloned repository:
+2. Navigate to the cloned repository and select the right branch. Since the repository is under very active development it can make sense to use the `dev` branch including also the most recent developments:
 
    ```bash
    cd InSituPy
+
+   # Optionally: switch to dev branch
+   git checkout dev
    ```
 
 3. Create and activate a conda environment:
