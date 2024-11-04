@@ -52,7 +52,7 @@ def sctransform_anndata(adata, layer=None, **kwargs):
     for k, v in kwargs.items():
         r.assign(k, v)
     kwargs_str = ', '.join([f'{k}={k}' for k in kwargs.keys()])
-    r(f'seurat_obj <- SCTransform(seurat_obj,vst.flavor="v2", {kwargs_str})')
+    r(f'seurat_obj <- SCTransform(seurat_obj,vst.flavor="v2", do.correct.umi = FALSE, {kwargs_str})')
 
    
 
