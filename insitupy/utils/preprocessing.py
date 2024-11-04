@@ -16,76 +16,62 @@ import base64
 from io import BytesIO
 import warnings
 import anndata2ri
-import rpy2.robjects as ro
 from rpy2.robjects.packages import importr
-from rpy2.robjects import pandas2ri
+from rpy2.robjects import r, pandas2ri
+import numpy as np
 
 from scipy.sparse import csr_matrix
 
 import tempfile
 
 
-# Activate pandas to R conversion
-# Activate the automatic conversion between AnnData and Seurat using anndata2ri
-# Activate the automatic conversion between AnnData and Seurat using anndata2ri
+
+
 anndata2ri.activate()
 pandas2ri.activate()
 
-def sctransform_anndata(adata, verbose=True):
-    """
-    Function to perform SCTransform on an AnnData object using Seurat and return the transformed AnnData object.
-    
-    Args:
-        adata (AnnData): The AnnData object to be transformed.
-        verbose (bool): If True, prints progress messages.
-    
-    Returns:
-        AnnData: The transformed AnnData object.
-    """
-    
-    import tempfile
-    from rpy2.robjects.packages import importr
+def sctransform_anndata(adata, layer=None, **kwargs):
+    if layer:
+        mat = adata.layers[layer]
+    else:
+        mat = adata.X
 
-    # Import necessary R libraries
+    # Set names for the input matrix
+    cell_names = adata.obs_names
+    gene_names = adata.var_names
+    r.assign('mat', mat.T)
+    r.assign('cell_names', cell_names)
+    r.assign('gene_names', gene_names)
+    r('colnames(mat) <- cell_names')
+    r('rownames(mat) <- gene_names')
+
     seurat = importr('Seurat')
-    sctransform = importr('sctransform')
-    anndata_r = importr('anndataR')  # Load anndataR to use read_h5ad
-    singlecell_experiment = importr('SingleCellExperiment')
+    r('seurat_obj <- CreateSeuratObject(mat)')
 
-    if verbose:
-        print("Starting SCTransform...")
+    # Run
+    for k, v in kwargs.items():
+        r.assign(k, v)
+    kwargs_str = ', '.join([f'{k}={k}' for k in kwargs.keys()])
+    r(f'seurat_obj <- SCTransform(seurat_obj,vst.flavor="v2", {kwargs_str})')
 
-    # Step 1: Save AnnData object to a temporary file
-    with tempfile.NamedTemporaryFile(suffix=".h5ad", delete=False) as temp_file:
-        temp_file_path = temp_file.name
-        adata.write_h5ad(temp_file_path)
-    
-    if verbose:
-        print(f"AnnData object saved temporarily at: {temp_file_path}")
+   
 
-    # Step 2: Load the AnnData file into Seurat using anndataR and apply SCTransform
-    ro.globalenv['temp_file_path'] = temp_file_path
-    ro.r('seurat_obj <- read_h5ad(temp_file_path, to="Seurat")')  # Use read_h5ad from anndataR
-    ro.r('seurat_obj <- seurat_obj[, unname(which(colSums(GetAssayData(seurat_obj)) != 0))]')  # Remove zero-count columns
-    ro.r('seurat_obj <- SCTransform(seurat_obj)')
+    # Prevent partial SCT output because of default min.genes messing up layer addition
+    r('diffDash <- setdiff(rownames(seurat_obj), rownames(mat))')
+    r('diffDash <- gsub("-", "_", diffDash)')
+    r('diffScore <- setdiff(rownames(mat), rownames(seurat_obj))')
+    filtout_genes = np.array(r('setdiff(diffScore, diffDash)'))
 
-    if verbose:
-        print("SCTransform applied to Seurat object.")
+    filtout_indicator = np.in1d(adata.var_names, filtout_genes)
+    adata = adata[:, ~filtout_indicator]
 
-    # Step 3: Convert Seurat object to SingleCellExperiment (SCE)
-    ro.r('sce_obj <- as.SingleCellExperiment(seurat_obj)')
+    # Extract the SCT data and add it as a new layer in the original anndata object
+    sct_data = np.asarray(r['as.matrix'](r('seurat_obj@assays$SCT@data')))
+    adata.layers["SCT_adata"] = sct_data.T
+    sct_data = np.asarray(r['as.matrix'](r('seurat_obj@assays$SCT@counts')))
+    adata.layers['counts'] = sct_data.T
+    return adata
 
-    if verbose:
-        print("Converted Seurat object to SingleCellExperiment.")
-
-    # Step 4: Automatically convert SCE to AnnData and return it to Python
-    transformed_adata = ro.globalenv['sce_obj']  # This is now a Python AnnData object
-
-    if verbose:
-        print("SCTransform transformation completed and returned as AnnData.")
-    
-    return transformed_adata
-    
 
 def normalize_and_transform_anndata(adata,
                                     transformation_method: Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"] = "log1p",
