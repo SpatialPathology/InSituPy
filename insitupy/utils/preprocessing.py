@@ -20,6 +20,7 @@ from rpy2.robjects.packages import importr
 from rpy2.robjects import r, pandas2ri
 import numpy as np
 
+from scipy.sparse import issparse
 from scipy.sparse import csr_matrix
 
 import tempfile
@@ -67,9 +68,11 @@ def sctransform_anndata(adata, layer=None, **kwargs):
 
     # Extract the SCT data and add it as a new layer in the original anndata object
     sct_data = np.asarray(r['as.matrix'](r('seurat_obj@assays$SCT@data')))
-    adata.layers["SCT_adata"] = sct_data.T
+    adata.layers["norm_counts"] = sct_data.T
     sct_data = np.asarray(r['as.matrix'](r('seurat_obj@assays$SCT@counts')))
     adata.layers['counts'] = sct_data.T
+    adata.X = adata.layers["norm_counts"] 
+
     return adata
 
 
@@ -117,9 +120,9 @@ def normalize_and_transform_anndata(adata,
         adata.X = csr_matrix(analytic_pearson["X"])
 
     elif transformation_method == "sctransform":
-        # Apply SCTransform by calling the sctransform_anndata function
+        # Apply SCTransform by calling the sctransform_anndata function on raw counts
         print("Applying SCTransform...") if verbose else None
-        adata = sctransform_anndata(adata, verbose=verbose)
+        adata = sctransform_anndata(adata, layer="counts", verbose=verbose)
     
     else:
         raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]')
@@ -295,7 +298,7 @@ def compare_transformations_anndata(adata: AnnData,
 
         elif method == "sctransform":
             # Applying SCTransform using the custom function
-            adata_copy = sctransform_anndata(adata_copy)
+            adata_copy = sctransform_anndata(adata_copy, layer="counts")
 
         else:
             raise ValueError(f'`transformation_method` {method} is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]')
@@ -315,8 +318,11 @@ def compare_transformations_anndata(adata: AnnData,
             print(f"Processing {method}...")
 
         # Extract the transformed counts
-        transformed_counts = transformed_adata.X.toarray().sum(axis=1)
-
+        # Check if the data is sparse
+        if issparse(transformed_adata.X):
+            transformed_counts = transformed_adata.X.toarray().sum(axis=1)
+        else:
+            transformed_counts = transformed_adata.X.sum(axis=1)
         # Check for NaNs and handle them
         if np.isnan(transformed_counts).any():
             print(f"Warning: NaN values found in {method} transformation. Replacing NaNs with 0.")
