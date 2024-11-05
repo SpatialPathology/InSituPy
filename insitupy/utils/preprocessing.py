@@ -1,35 +1,34 @@
-from typing import Literal, Optional
+import base64
+import tempfile
+import warnings
+from copy import deepcopy
+from io import BytesIO
+from typing import Dict, List, Literal, Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scanpy as sc
+from anndata import AnnData
 from parse import *
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, issparse
+from scipy.stats import (anderson, kstest, kurtosis, norm, probplot, shapiro,
+                         skew)
+
 from insitupy import __version__
 from insitupy.utils._scanorama import scanorama
+
 from .._core._checks import check_integer_counts
-from copy import deepcopy
-from typing import List, Literal, Dict
-from anndata import AnnData
-from scipy.stats import skew, kurtosis, norm, probplot, shapiro, anderson, kstest
-import matplotlib.pyplot as plt
-import pandas as pd
-import base64
-from io import BytesIO
-import warnings
-import anndata2ri
-from rpy2.robjects.packages import importr
-from rpy2.robjects import r, pandas2ri
-import numpy as np
 
-from scipy.sparse import issparse
-from scipy.sparse import csr_matrix
-
-import tempfile
-
-
-
-
-anndata2ri.activate()
-pandas2ri.activate()
+try:
+    import anndata2ri
+    from rpy2.robjects import pandas2ri, r
+    from rpy2.robjects.packages import importr
+except ImportError:
+    print("Not all packages required for sctransform are installed. Following packages are needed: anndata2ri, rpy2")
+else:
+    anndata2ri.activate()
+    pandas2ri.activate()
 
 def sctransform_anndata(adata, layer=None, **kwargs):
     if layer:
@@ -55,7 +54,7 @@ def sctransform_anndata(adata, layer=None, **kwargs):
     kwargs_str = ', '.join([f'{k}={k}' for k in kwargs.keys()])
     r(f'seurat_obj <- SCTransform(seurat_obj,vst.flavor="v2", do.correct.umi = FALSE, {kwargs_str})')
 
-   
+
 
     # Prevent partial SCT output because of default min.genes messing up layer addition
     r('diffDash <- setdiff(rownames(seurat_obj), rownames(mat))')
@@ -71,7 +70,7 @@ def sctransform_anndata(adata, layer=None, **kwargs):
     adata.layers["norm_counts"] = sct_data.T
     sct_data = np.asarray(r['as.matrix'](r('seurat_obj@assays$SCT@counts')))
     adata.layers['counts'] = sct_data.T
-    adata.X = adata.layers["norm_counts"] 
+    adata.X = adata.layers["norm_counts"]
 
     return adata
 
@@ -82,13 +81,13 @@ def normalize_and_transform_anndata(adata,
                                     ) -> None:
     """
     Normalize and transform the data in an AnnData object based on the selected transformation method.
-    
+
     Args:
         adata (AnnData): The AnnData object to be normalized and transformed.
         transformation_method (str): The transformation method to apply. Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
         verbose (bool): If True, prints progress messages.
     """
-    
+
     # Check if the matrix consists of raw integer counts (optional: you may need to implement the check_integer_counts function)
     # check_integer_counts(adata.X)
 
@@ -113,7 +112,7 @@ def normalize_and_transform_anndata(adata,
     elif transformation_method == "sqrt_2":
         X = adata.X.toarray()
         adata.X = csr_matrix(np.sqrt(X))
-    
+
     elif transformation_method == "pearson_residuals":
         # Applying the Pearson residuals transformation
         analytic_pearson = sc.experimental.pp.normalize_pearson_residuals(adata, layer="counts", inplace=False)
@@ -123,7 +122,7 @@ def normalize_and_transform_anndata(adata,
         # Apply SCTransform by calling the sctransform_anndata function on raw counts
         print("Applying SCTransform...") if verbose else None
         adata = sctransform_anndata(adata, layer="counts", verbose=verbose)
-    
+
     else:
         raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]')
 
@@ -209,7 +208,7 @@ def compare_transformations_anndata(adata: AnnData,
                                     verbose: bool = True,
                                     output_path: str = "normalization_results.html") -> pd.DataFrame:
     """
-    Normalize and transform the data in an AnnData object based on specified methods, 
+    Normalize and transform the data in an AnnData object based on specified methods,
     and then compare the transformed results, including SCTransform.
 
     Args:
@@ -226,7 +225,7 @@ def compare_transformations_anndata(adata: AnnData,
     # Step 1: Normalize and transform the data using the specified methods
     if verbose:
         print("Store raw counts in anndata.layers['counts']...")
-    
+
     # Store raw counts for comparison
     adata.layers['counts'] = adata.X.copy()
 

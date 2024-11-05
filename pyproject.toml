@@ -35,6 +35,8 @@ loompy = "3.0.7"
 napari = {extras = ["all"], version = "0.4.18", optional = true}
 scikit-misc = "0.3.1"
 adjusttext = "^1.2.0"
+anndata2ri = "^1.3.2"
+toml = "^0.10.2"
 
 [tool.poetry.extras]
 napari = ["napari"]

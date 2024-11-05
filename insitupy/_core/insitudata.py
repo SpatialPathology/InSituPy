@@ -11,7 +11,6 @@ from uuid import uuid4
 from warnings import warn
 
 import geopandas as gpd
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -21,13 +20,8 @@ from dask_image.imread import imread
 from geopandas import GeoDataFrame
 from parse import *
 from scipy.sparse import issparse
-from shapely import Point, Polygon
+from shapely import Point
 from shapely.affinity import scale as scale_func
-from tqdm import tqdm
-import anndata2ri
-import tempfile
-import rpy2.robjects as ro
-from anndata import AnnData
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import ISPY_METADATA_FILE, REGIONS_SYMBOL
@@ -42,8 +36,10 @@ from insitupy.io.files import read_json, write_dict_to_json
 from insitupy.io.io import (read_baysor_cells, read_baysor_transcripts,
                             read_celldata, read_shapesdata)
 from insitupy.io.plots import save_and_show_figure
-from insitupy.utils.preprocessing import (normalize_and_transform_anndata,
-                                          reduce_dimensions_anndata, compare_transformations_anndata, sctransform_anndata)
+from insitupy.utils.preprocessing import (compare_transformations_anndata,
+                                          normalize_and_transform_anndata,
+                                          reduce_dimensions_anndata,
+                                          sctransform_anndata)
 from insitupy.utils.utils import get_nrows_maxcols
 
 from .._constants import CACHE, ISPY_METADATA_FILE, MODALITIES
@@ -931,7 +927,7 @@ class InSituData:
         if verbose:
             print("SCTransform completed for all modalities.")
 
-   
+
     def reduce_dimensions(self,
                           umap: bool = True,
                           tsne: bool = False,
@@ -1000,7 +996,7 @@ class InSituData:
                                           verbose=verbose,
                                           tsne_lr=tsne_lr, tsne_jobs=tsne_jobs,
                                           **kwargs)
-                
+
     def compare_transformations(self,
                             transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
                             verbose=True,
@@ -1010,7 +1006,7 @@ class InSituData:
         Compare transformations for the main modality (`cells.matrix`) and any alternative modalities (`.alt`).
 
         Args:
-            transformation_methods (List[str]): List of transformation methods to apply. 
+            transformation_methods (List[str]): List of transformation methods to apply.
                 Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
             verbose (bool, optional): If True, prints progress messages. Default is True.
             output_path (str, optional): The path where the HTML report will be saved. Default is "normalization_results.html".
@@ -1045,7 +1041,7 @@ class InSituData:
             print("Found `.alt` modality. Comparing transformations for alternative modalities...") if verbose else None
             for key, alt_cells in alt.items():
                 print(f"\tComparing transformations for `.alt['{key}']` modality...")
-                
+
                 # Define the output path for each alternative modality
                 alt_output_path = output_path.replace(".html", f"_{key}.html")  # To create separate reports for each alt modality
 
