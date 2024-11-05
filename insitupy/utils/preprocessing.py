@@ -1,4 +1,5 @@
 import base64
+import os
 import tempfile
 import warnings
 from copy import deepcopy
@@ -20,15 +21,23 @@ from insitupy.utils._scanorama import scanorama
 
 from .._core._checks import check_integer_counts
 
-try:
-    import anndata2ri
-    from rpy2.robjects import pandas2ri, r
-    from rpy2.robjects.packages import importr
-except ImportError:
-    print("Not all packages required for sctransform are installed. Following packages are needed: anndata2ri, rpy2")
+# check if a R HOME path is specified in os.environ
+# this is important to make sure that the anndata2ri import will work
+if 'R_HOME' not in os.environ:
+    warnings.warn(
+        f"R_HOME environment variable is not set. Please set it to ensure anndata2ri import works correctly. "
+        f"You can set it using the following code:\n\nimport os\nos.environ['R_HOME'] = 'C:\\Program Files\\R\\R-4.4.1'"
+        )
 else:
-    anndata2ri.activate()
-    pandas2ri.activate()
+    try:
+        import anndata2ri
+        from rpy2.robjects import pandas2ri, r
+        from rpy2.robjects.packages import importr
+    except ImportError:
+        print("Not all packages required for sctransform are installed. Following packages are needed: anndata2ri, rpy2")
+    else:
+        anndata2ri.activate()
+        pandas2ri.activate()
 
 def sctransform_anndata(adata, layer=None, **kwargs):
     if layer:
