@@ -16,6 +16,7 @@ from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import __version__
+from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
 from insitupy.utils.utils import convert_int_to_xenium_hex
 
 from .._exceptions import InvalidDataTypeError, InvalidFileTypeError
@@ -37,13 +38,15 @@ class ShapesData(DeepCopyMixin, GetMixin):
     default_polygons_only = False
     shape_name = "shapes"
     repr_color = tf.Cyan
+    default_forbidden_names = None
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
                  pixel_size: float = 1,
                  assert_uniqueness: Optional[bool] = None,
                 #  skip_multipolygons: Optional[bool] = None,
-                 polygons_only: Optional[bool] = None
+                 polygons_only: Optional[bool] = None,
+                 forbidden_names: Optional[List[str]] = None
                  # shape_name: Optional[str] = None
                  ) -> None:
 
@@ -63,6 +66,11 @@ class ShapesData(DeepCopyMixin, GetMixin):
             self.polygons_only = self.default_polygons_only
         else:
             self.polygons_only = polygons_only
+
+        if forbidden_names is None:
+            self.forbidden_names = self.default_forbidden_names
+        else:
+            self.forbidden_names = forbidden_names
 
         if files is not None:
             # make sure files and keys are a list
@@ -171,6 +179,11 @@ class ShapesData(DeepCopyMixin, GetMixin):
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
 
+        if self.forbidden_names is not None:
+            new_names = new_df["name"].tolist()
+            if np.any([elem in new_names for elem in self.forbidden_names]):
+                raise ValueError(f"One of the forbidden names for annotations ({self.forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
+
         if "scale" not in new_df.columns:
             # add scale factor to data
             if scale_factor is None:
@@ -223,16 +236,6 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
                 if not is_unique:
                     add = False
-
-            # if self.skip_multipolygons:
-            #     # check if any of the shapes are shapely MultiPolygons
-            #     is_not_multipolygon = [not isinstance(p, MultiPolygon) for p in annot_df.geometry]
-            #     if not np.all(is_not_multipolygon):
-            #         annot_df = annot_df.loc[is_not_multipolygon]
-            #         warnings.warn(
-            #             f"Some {self.shape_name} were a shapely 'MultiPolygon' objects and skipped.",
-            #             stacklevel=2
-            #             )
 
             if self.polygons_only:
                 # check if any of the shapes are shapely MultiPolygons
@@ -298,8 +301,16 @@ class ShapesData(DeepCopyMixin, GetMixin):
         self._update_metadata()
 
     def remove_data(self,
-                   key_to_remove: str):
-        delattr(self, key_to_remove)
+                   key_to_remove: str,
+                   classes_to_remove: Union[Literal["all"], List[str], str] = "all"
+                   ):
+        if classes_to_remove == "all":
+            delattr(self, key_to_remove)
+        else:
+            classes_to_remove = convert_to_list(classes_to_remove)
+            geom_df = self.get(key_to_remove)
+            setattr(self, key_to_remove, geom_df[~geom_df.name.isin(classes_to_remove)])
+
         self._update_metadata()
 
     def save(self,
@@ -345,6 +356,7 @@ class AnnotationsData(ShapesData):
         self.default_polygons_only = False
         self.shape_name = "annotations"
         self.repr_color = tf.Cyan
+        self.default_forbidden_names = FORBIDDEN_ANNOTATION_NAMES
 
         ShapesData.__init__(self, files, keys, pixel_size)
 

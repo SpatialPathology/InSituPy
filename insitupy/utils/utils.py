@@ -297,14 +297,14 @@ def convert_napari_shape_to_polygon_or_line(napari_shape_data, shape_type):
     Raises:
     TypeError: If the provided shape_type is not one of the accepted values.
     """
-    if shape_type == "polygon":
+    if (shape_type == "polygon") or (shape_type == "rectangle"):
         result = Polygon(np.stack([napari_shape_data[:, 1], napari_shape_data[:, 0]], axis=1))
     elif shape_type == "ellipse":
         result = create_ellipse_from_bbox(np.flip(napari_shape_data, axis=1))
     elif shape_type == "path":
         result = LineString(np.flip(napari_shape_data, axis=1))
     else:
-        TypeError(f"Shape has an unknown type: {shape_type}")
+        raise TypeError(f"Shape has an unknown type: {shape_type}")
 
     return result
 

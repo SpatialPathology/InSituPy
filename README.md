@@ -8,15 +8,32 @@ InSituPy is a Python package designed to facilitate the analysis of in situ sequ
 
 ## Installation
 
-To install InSituPy within a conda environment, you can follow these steps:
+### Prerequisites
 
-1. Clone the repository to your local machine:
+1. **Create and activate a conda environment:**
+
+   ```bash
+   conda create --name insitupy python=3.9
+   conda activate insitupy
+   ```
+
+2. **(Windows Only)** Download and install the `annoy` package from the provided wheel file. If your Python version is different from `3.9`, make sure to download the correct wheel [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#annoy) and adapt the installation code accordingly:
+
+   ```bash
+   pip install wheels\annoy-1.17.0-cp39-cp39-win_amd64.whl
+   ```
+
+   *(Note: Skip this step if you're on Mac or Linux.)*
+
+### Method 1: Installation from Cloned Repository
+
+1. **Clone the repository to your local machine:**
 
    ```bash
    git clone https://github.com/jwrth/InSituPy.git
    ```
 
-2. Navigate to the cloned repository and select the right branch. Since the repository is under very active development it can make sense to use the `dev` branch including also the most recent developments:
+2. **Navigate to the cloned repository and select the right branch:**
 
    ```bash
    cd InSituPy
@@ -25,22 +42,7 @@ To install InSituPy within a conda environment, you can follow these steps:
    git checkout dev
    ```
 
-3. Create and activate a conda environment:
-
-   ```bash
-   conda create --name insitupy python=3.9
-   conda activate insitupy
-   ```
-
-4. **(Windows Only)** Download and install the `annoy` package from the provided wheel file. If your Python version is different from `3.9`, make sure to download the correct wheel [here](https://www.lfd.uci.edu/~gohlke/pythonlibs/#annoy) and adapt the installation code accordingly:
-
-   ```bash
-   pip install wheels\annoy-1.17.0-cp39-cp39-win_amd64.whl
-   ```
-
-   *(Note: Skip this step if you're on Mac or Linux.)*
-
-5. Install the rest of the required packages using `pip` within the conda environment:
+3. **Install the required packages using `pip` within the conda environment:**
 
    ```bash
    # for installation without napari use
@@ -51,6 +53,21 @@ To install InSituPy within a conda environment, you can follow these steps:
 
    # for developmental purposes add the -e flag
    pip install -e .[napari]
+   ```
+
+### Method 2: Direct Installation from GitHub
+
+1. **Install directly from GitHub:**
+
+   ```bash
+   # for installation without napari use
+   pip install git+https://github.com/jwrth/InSituPy.git
+
+   # for installation with napari use
+   pip install git+https://github.com/jwrth/InSituPy.git#egg=InSituPy[napari]
+
+   # for developmental purposes, use the dev branch
+   pip install git+https://github.com/jwrth/InSituPy.git@dev#egg=InSituPy[napari]
    ```
 
 Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).

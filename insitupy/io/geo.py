@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 from typing import Union
 
@@ -59,6 +60,14 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     # annotation geojsons contain a classification column where each entry is a dict with name and color of the annotation
     if "classification" in dataframe.columns:
         # Flatten the "classification" column into separate "name" and "color" columns
+        if "name" in dataframe.columns:
+            warnings.warn(
+                (
+                    f"The geometries contain both a 'name' (set e.g. by 'Set properties' in QuPath) and a 'classification name'.\n"
+                    f"Currently, the `read_qupath_geojson` function overwrites the name with the classification name and saves it in a column named just 'name'.\n"
+                    f"This behavior might change in the future."
+                )
+                )
         try:
             dataframe["name"] = [elem["name"] if pd.notnull(elem) else "unclassified" for elem in dataframe["classification"]]
         except KeyError:

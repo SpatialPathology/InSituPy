@@ -10,12 +10,14 @@ from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
+import anndata
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import seaborn as sns
+from anndata._core.anndata import AnnData
 from dask_image.imread import imread
 from geopandas import GeoDataFrame
 from parse import *
@@ -24,7 +26,8 @@ from shapely import Point
 from shapely.affinity import scale as scale_func
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import ISPY_METADATA_FILE, REGIONS_SYMBOL
+from insitupy._constants import ISPY_METADATA_FILE, LOAD_FUNCS, REGIONS_SYMBOL
+from insitupy._core._checks import _check_assignment, _substitution_func
 from insitupy._core._save import _save_images
 from insitupy._core._xenium import (_read_binned_expression,
                                     _read_boundaries_from_xenium,
@@ -36,11 +39,14 @@ from insitupy.io.files import read_json, write_dict_to_json
 from insitupy.io.io import (read_baysor_cells, read_baysor_transcripts,
                             read_celldata, read_shapesdata)
 from insitupy.io.plots import save_and_show_figure
+from insitupy.plotting import volcano_plot
+from insitupy.utils import create_deg_dataframe
+from insitupy.utils.deg import create_deg_dataframe
 from insitupy.utils.preprocessing import (compare_transformations_anndata,
                                           normalize_and_transform_anndata,
                                           reduce_dimensions_anndata,
                                           sctransform_anndata)
-from insitupy.utils.utils import get_nrows_maxcols
+from insitupy.utils.utils import convert_to_list, get_nrows_maxcols
 
 from .._constants import CACHE, ISPY_METADATA_FILE, MODALITIES
 from .._exceptions import (ModalityNotFoundError, NotOneElementError,
@@ -184,9 +190,10 @@ class InSituData:
             pass
 
     def assign_geometries(self,
-                          modality: Literal["annotations", "regions"],
+                          geometry_type: Literal["annotations", "regions"],
                           keys: Union[str, Literal["all"]] = "all",
                           add_masks: bool = False,
+                          add_to_obs: bool = False,
                           overwrite: bool = True
                           ):
         '''
@@ -195,9 +202,9 @@ class InSituData:
         '''
         # assert that prerequisites are met
         try:
-            geom_attr = getattr(self, modality)
+            geom_attr = getattr(self, geometry_type)
         except AttributeError:
-            raise ModalityNotFoundError(modality=modality)
+            raise ModalityNotFoundError(modality=geometry_type)
 
         try:
             cell_attr = self.cells
@@ -225,7 +232,7 @@ class InSituData:
             geom_names = geom_df.name.unique()
 
             # initiate dataframe as dictionary
-            df = {}
+            data = {}
 
             # iterate through names
             for n in geom_names:
@@ -244,34 +251,50 @@ class InSituData:
                 in_poly_res = np.array(in_poly).any(axis=0)
 
                 # collect results
-                df[n] = in_poly_res
+                data[n] = in_poly_res
 
             # convert into pandas dataframe
-            df = pd.DataFrame(df)
-            df.index = cell_attr.matrix.obs_names
+            data = pd.DataFrame(data)
+            data.index = cell_attr.matrix.obs_names
 
-            # create annotation from annotation masks
-            col_name = f"{modality}-{key}"
-            df[col_name] = [" & ".join(geom_names[row.values]) if np.any(row.values) else np.nan for i, row in df.iterrows()]
+            # transform data into one column
+            column_to_add = [" & ".join(geom_names[row.values]) if np.any(row.values) else "unassigned" for _, row in data.iterrows()]
 
-            add = True
-            if col_name in self.cells.matrix.obs:
-                if overwrite:
-                    self.cells.matrix.obs.drop(col_name, axis=1, inplace=True)
-                    print(f'Existing column "{col_name}" is overwritten.', flush=True)
-                    add = True
-                else:
-                    warn(f'Column "{col_name}" exists already in `xd.cells.matrix.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
-                    add = False
+            if add_to_obs:
+                # create annotation from annotation masks
+                col_name = f"{geometry_type}-{key}"
+                data[col_name] = column_to_add
 
-            if add:
-                if add_masks:
-                    self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df, left_index=True, right_index=True)
-                else:
-                    self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=df.iloc[:, -1], left_index=True, right_index=True)
+                if col_name in self.cells.matrix.obs:
+                    if overwrite:
+                        self.cells.matrix.obs.drop(col_name, axis=1, inplace=True)
+                        print(f'Existing column "{col_name}" is overwritten.', flush=True)
+                        add = True
+                    else:
+                        warn(f'Column "{col_name}" exists already in `xd.cells.matrix.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
+                        add = False
+
+                if add:
+                    if add_masks:
+                        self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=data, left_index=True, right_index=True)
+                    else:
+                        self.cells.matrix.obs = pd.merge(left=self.cells.matrix.obs, right=data.iloc[:, -1], left_index=True, right_index=True)
+
+                    # save that the current key was analyzed
+                    geom_attr.metadata[key]["analyzed"] = tf.TICK
+            else:
+                # add to obsm
+                obsm_keys = self.cells.matrix.obsm.keys()
+                if geometry_type not in obsm_keys:
+                    # add empty pandas dataframe with obs_names as index
+                    self.cells.matrix.obsm[geometry_type] = pd.DataFrame(index=self.cells.matrix.obs_names)
+
+                self.cells.matrix.obsm[geometry_type][key] = column_to_add
 
                 # save that the current key was analyzed
                 geom_attr.metadata[key]["analyzed"] = tf.TICK
+
+                print(f"Added results to `.cells.matrix.obsm[{geometry_type}]", flush=True)
 
     def assign_annotations(
         self,
@@ -280,7 +303,7 @@ class InSituData:
         overwrite: bool = True
     ):
         self.assign_geometries(
-            modality="annotations",
+            geometry_type="annotations",
             keys=keys,
             add_masks=add_masks,
             overwrite=overwrite
@@ -293,7 +316,7 @@ class InSituData:
         overwrite: bool = True
     ):
         self.assign_geometries(
-            modality="regions",
+            geometry_type="regions",
             keys=keys,
             add_masks=add_masks,
             overwrite=overwrite
@@ -323,50 +346,90 @@ class InSituData:
         return self_copy
 
     def crop(self,
-            shape_layer: Optional[str] = None,
-            xlim: Optional[Tuple[int, int]] = None,
-            ylim: Optional[Tuple[int, int]] = None,
-            inplace: bool = False
+             region_tuple: Optional[Tuple[str, str]] = None,
+             layer_name: Optional[str] = None,
+             xlim: Optional[Tuple[int, int]] = None,
+             ylim: Optional[Tuple[int, int]] = None,
+             inplace: bool = False
             ):
-        '''
-        Function to crop the XeniumData object.
-        '''
-        if shape_layer is not None:
-            try:
-                # extract shape layer for cropping from napari viewer
-                crop_shape = self.viewer.layers[shape_layer]
-            except KeyError:
-                raise KeyError(f"Shape layer selected for cropping ('{shape_layer}') was not found in layers.")
+        """
+        Crop the data based on the provided parameters.
 
-            # check the type of the element
-            if not isinstance(crop_shape, napari.layers.Shapes):
-                raise WrongNapariLayerTypeError(found=type(crop_shape), wanted=napari.layers.Shapes)
+        Args:
+            region_tuple (Optional[Tuple[str, str]]): A tuple specifying the region to crop.
+            layer_name (Optional[str]): The name of the layer to use for cropping.
+            xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
+            ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
+            inplace (bool): If True, modify the data in place. Otherwise, return a new cropped data.
+
+        Raises:
+            ValueError: If none of region_tuple, layer_name, or xlim/ylim are provided.
+        """
+        if layer_name is None and region_tuple is None and (xlim is None or ylim is None):
+            raise ValueError("At least one of shape_layer, region_tuple, or xlim/ylim must be provided.")
+
+        # retrieve pixel size of data
+        pixel_size = self.metadata["xenium"]["pixel_size"]
+
+        if region_tuple is not None:
+
+            # extract regions dataframe
+            region_key = region_tuple[0]
+            region_name = region_tuple[1]
+            region_df = self.regions.get(region_key)
+
+            # extract geometry
+            geometry = region_df[region_df["name"] == region_name]["geometry"].item()
 
             use_shape = True
+
+        elif layer_name is not None:
+            try:
+                # extract shape layer for cropping from napari viewer
+                layer = self.viewer.layers[layer_name]
+            except KeyError:
+                raise KeyError(f"Shape layer selected for cropping ('{layer_name}') was not found in layers.")
+
+            # check the type of the element
+            if not isinstance(layer, napari.layers.Shapes):
+                raise WrongNapariLayerTypeError(found=type(layer), wanted=napari.layers.Shapes)
+
+            # make sure the layer contains only one element
+            if len(layer.data) != 1:
+                raise NotOneElementError(layer.data)
+
+            # select the shape from list
+            crop_window = layer.data[0].copy()
+            # crop_window *= pixel_size
+            shape_type = layer.shape_type[0]
+
+            geometry = convert_napari_shape_to_polygon_or_line(
+                napari_shape_data=crop_window,
+                shape_type=shape_type
+                )
+
+            use_shape = True
+
         else:
             # if xlim or ylim is not none, assert that both are not None
             if xlim is not None or ylim is not None:
                 assert np.all([elem is not None for elem in [xlim, ylim]])
                 use_shape = False
 
-        # assert that either shape_layer is given or xlim/ylim
-        assert np.any([elem is not None for elem in [shape_layer, xlim, ylim]]), "No values given for either `shape_layer` or `xlim/ylim`."
+        # # assert that either shape_layer is given or xlim/ylim
+        # assert np.any([elem is not None for elem in [shape_layer, xlim, ylim]]), "No values given for either `shape_layer` or `xlim/ylim`."
 
         if use_shape:
-            # extract shape layer for cropping from napari viewer
-            crop_shape = self.viewer.layers[shape_layer]
+            # convert to metric unit (normally µm)
+            geometry = scale_func(geometry, xfact=pixel_size, yfact=pixel_size, origin=(0,0))
 
-            # check the structure of the shape object
-            if len(crop_shape.data) != 1:
-                raise NotOneElementError(crop_shape.data)
+            # extract x and y limits from the geometry
+            bounding_box = geometry.bounds # (minx, miny, maxx, maxy)
+            xlim = (bounding_box[0], bounding_box[2])
+            ylim = (bounding_box[1], bounding_box[3])
 
-            # select the shape from list
-            crop_window = crop_shape.data[0].copy()
-            crop_window *= self.metadata["xenium"]["pixel_size"] # convert to metric unit (normally µm)
-
-            # extract x and y limits from the shape (assuming a rectangle)
-            xlim = (crop_window[:, 1].min(), crop_window[:, 1].max())
-            ylim = (crop_window[:, 0].min(), crop_window[:, 0].max())
+            # xlim = (crop_window[:, 1].min(), crop_window[:, 1].max())
+            # ylim = (crop_window[:, 0].min(), crop_window[:, 0].max())
 
         # make sure there are no negative values in the limits
         xlim = tuple(np.clip(xlim, a_min=0, a_max=None))
@@ -445,10 +508,17 @@ class InSituData:
             _self.images.crop(xlim=xlim, ylim=ylim)
 
         if hasattr(_self, "annotations"):
-            _self.annotations.crop(xlim=xlim, ylim=ylim)
+
+            _self.annotations.crop(
+                xlim=tuple([elem / pixel_size for elem in xlim]), # transform back to pixel coordinates before cropping
+                ylim=tuple([elem / pixel_size for elem in ylim])
+                )
 
         if hasattr(_self, "regions"):
-            _self.regions.crop(xlim=xlim, ylim=ylim)
+            _self.regions.crop(
+                xlim=tuple([elem / pixel_size for elem in xlim]), # transform back to pixel coordinates before cropping
+                ylim=tuple([elem / pixel_size for elem in ylim])
+            )
 
         # add information about cropping to metadata
         if "cropping_history" not in _self.metadata:
@@ -531,8 +601,9 @@ class InSituData:
         sc.pp.highly_variable_genes(self.cells.matrix, batch_key=hvg_batch_key, flavor=hvg_flavor, layer=hvg_layer, n_top_genes=hvg_n_top_genes)
 
 
-    def normalize(self,
+    def normalize_and_transform(self,
                 transformation_method: Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"] = "log1p",
+                target_sum: int = 250,
                 normalize_alt: bool = True,
                 verbose: bool = True
                 ) -> None:
@@ -560,7 +631,11 @@ class InSituData:
         except AttributeError:
             raise ModalityNotFoundError(modality="cells")
 
-        normalize_and_transform_anndata(adata=cells.matrix, transformation_method=transformation_method, verbose=verbose)
+        normalize_and_transform_anndata(
+            adata=cells.matrix,
+            transformation_method=transformation_method,
+            target_sum=target_sum,
+            verbose=verbose)
 
         try:
             alt = self.alt
@@ -660,11 +735,11 @@ class InSituData:
     def load_all(self,
                  skip: Optional[str] = None,
                  ):
-        # extract read functions
-        read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
-        read_funcs = [elem for elem in read_funcs if elem not in ["load_all", "load_quicksave"]]
+        # # extract read functions
+        # read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
+        # read_funcs = [elem for elem in read_funcs if elem not in ["load_all", "load_quicksave"]]
 
-        for f in read_funcs:
+        for f in LOAD_FUNCS:
             if skip is None or skip not in f:
                 func = getattr(self, f)
                 try:
@@ -737,14 +812,6 @@ class InSituData:
                                 scale_factor=(pixel_size, pixel_size),
                                 )
 
-        # self.regions = RegionsData(files=files,
-        #                            keys=keys,
-        #                            pixel_size=self.metadata["xenium"]['pixel_size'])
-
-        # # check if anything really added to regions and if not, remove it again
-        # if len(self.regions.metadata) == 0:
-        #     self.remove_modality("regions")
-
         self._remove_empty_modalities()
 
 
@@ -805,6 +872,8 @@ class InSituData:
                 img_names = list(self.metadata["data"]["images"].keys())
             else:
                 img_names = convert_to_list(names)
+
+            print(img_names)
 
             # get file paths and names
             img_files = [v for k,v in self.metadata["data"]["images"].items() if k in img_names]
@@ -944,7 +1013,9 @@ class InSituData:
             umap (bool, optional):
                 If True, perform UMAP dimensionality reduction. Default is True.
             tsne (bool, optional):
-                If True, perform t-SNE dimensionality reduction. Default is False.
+                If True, perform t-SNE dimensionality reduction. Default is True.
+            layer (str, optional):
+                Specifies the layer of the AnnData object to operate on. Default is None (uses adata.X).
             batch_correction_key (str, optional):
                 Batch key for performing batch correction using scanorama. Default is None, indicating no batch correction.
             verbose (bool, optional):
@@ -969,10 +1040,8 @@ class InSituData:
         except AttributeError:
             raise ModalityNotFoundError(modality="cells")
 
-        # Perform dimensionality reduction on the main modality (cells.matrix)
-        print("Reducing dimensions for the main modality (cells.matrix)...") if verbose else None
-        reduce_dimensions_anndata(data=cells.matrix,
-                                  umap=umap, tsne=tsne,
+        reduce_dimensions_anndata(adata=cells.matrix,
+                                  umap=umap, tsne=tsne, layer=layer,
                                   batch_correction_key=batch_correction_key,
                                   perform_clustering=perform_clustering,
                                   verbose=verbose,
@@ -987,82 +1056,24 @@ class InSituData:
             pass
         else:
             print("Found `.alt` modality.")
-            for key, alt_cells in alt.items():
-                print(f"\tReducing dimensions for `.alt['{key}']` modality...")
-                reduce_dimensions_anndata(data=alt_cells.matrix,
-                                          umap=umap, tsne=tsne,
-                                          batch_correction_key=batch_correction_key,
-                                          perform_clustering=perform_clustering,
-                                          verbose=verbose,
-                                          tsne_lr=tsne_lr, tsne_jobs=tsne_jobs,
-                                          **kwargs)
+            for k, cells in alt.items():
+                print(f"\tReducing dimensions in `.alt['{k}']...")
 
-    def compare_transformations(self,
-                            transformation_methods: List[Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"]],
-                            verbose=True,
-                            output_path: str = "normalization_results.html",
-                            **kwargs):
-        """
-        Compare transformations for the main modality (`cells.matrix`) and any alternative modalities (`.alt`).
-
-        Args:
-            transformation_methods (List[str]): List of transformation methods to apply.
-                Options are ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"].
-            verbose (bool, optional): If True, prints progress messages. Default is True.
-            output_path (str, optional): The path where the HTML report will be saved. Default is "normalization_results.html".
-            **kwargs: Additional keyword arguments for flexibility in passing to comparison functions.
-
-        Returns:
-            Results DataFrame: Returns a DataFrame with the comparison metrics of the transformations.
-        """
-        try:
-            # Get the main modality (cells.matrix)
-            cells = self.cells
-        except AttributeError:
-            raise ModalityNotFoundError(modality="cells")
-
-        # Compare transformations for the main modality (cells.matrix)
-        print("Comparing transformations for the main modality (cells.matrix)...") if verbose else None
-        main_results = compare_transformations_anndata(adata=cells.matrix,
-                                                    transformation_methods=transformation_methods,
-                                                    verbose=verbose,
-                                                    output_path=output_path,  # Pass the output_path argument
-                                                    **kwargs)
-
-        # To store all results
-        all_results = {'main': main_results}
-
-        # Compare transformations for any alternative modalities (if they exist)
-        try:
-            alt = self.alt
-        except AttributeError:
-            pass
-        else:
-            print("Found `.alt` modality. Comparing transformations for alternative modalities...") if verbose else None
-            for key, alt_cells in alt.items():
-                print(f"\tComparing transformations for `.alt['{key}']` modality...")
-
-                # Define the output path for each alternative modality
-                alt_output_path = output_path.replace(".html", f"_{key}.html")  # To create separate reports for each alt modality
-
-                alt_results = compare_transformations_anndata(adata=alt_cells.matrix,
-                                                            transformation_methods=transformation_methods,
-                                                            verbose=verbose,
-                                                            output_path=alt_output_path,  # Pass a unique output path for each alternative modality
-                                                            **kwargs)
-                all_results[key] = alt_results
-
-        # Return the results (could be extended to return HTML reports or visualizations as needed)
-        return all_results
-
-
+                reduce_dimensions_anndata(adata=cells.matrix,
+                                        umap=umap, tsne=tsne, layer=layer,
+                                        batch_correction_key=batch_correction_key,
+                                        perform_clustering=perform_clustering,
+                                        verbose=verbose,
+                                        tsne_lr=tsne_lr, tsne_jobs=tsne_jobs
+                                        )
 
     def saveas(self,
             path: Union[str, os.PathLike, Path],
             overwrite: bool = False,
             zip_output: bool = False,
             images_as_zarr: bool = True,
-            zarr_zipped: bool = False
+            zarr_zipped: bool = False,
+            verbose: bool = True
             ):
         '''
         Function to save the XeniumData object.
@@ -1080,7 +1091,7 @@ class InSituData:
             zippath = path / (path.stem + ".zip")
             check_overwrite_and_remove_if_true(path=zippath, overwrite=overwrite)
 
-        print(f"Saving data to {str(path)}")
+        print(f"Saving data to {str(path)}") if verbose else None
 
         # create output directory if it does not exist yet
         path.mkdir(parents=True, exist_ok=True)
@@ -1183,7 +1194,7 @@ class InSituData:
             shutil.make_archive(path, 'zip', path, verbose=False)
             shutil.rmtree(path) # delete directory
 
-        print("Saved.")
+        print("Saved.") if verbose else None
 
     def save(self,
              path: Optional[Union[str, os.PathLike, Path]] = None,
@@ -1423,7 +1434,7 @@ class InSituData:
             pixel_size = 1
 
         # create viewer
-        self.viewer = napari.Viewer()
+        self.viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id}")
 
         try:
             image_keys = self.images.metadata.keys()
@@ -1942,7 +1953,7 @@ def register_images(
         image = image[0]
 
     # read images in XeniumData object
-    data.load_images(names=template_image_name)
+    data.load_images(names=template_image_name, load_cell_segmentation_images=False)
     template = data.images.nuclei[0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
 
     # extract OME metadata
@@ -2187,3 +2198,160 @@ def calc_distance_of_cells_from(
         key_to_save = f"dist_from_{annotation_class}"
     data.cells.matrix.obs[key_to_save] = min_dists
     print(f'Save distances to `.cells.matrix.obs["{key_to_save}"]`')
+
+
+def differential_gene_expression(
+    data: InSituData,
+    annotation_tuple: Union[Tuple[str, str], Tuple[str, str]], # tuple of annotation key and names
+    reference_data: Optional[InSituData] = None, # if comparing across two InSituData objects this argument can be used
+    reference_tuple: Union[Literal["rest"], Tuple[str, str], Tuple[str, str]] = "rest",
+    obs_tuple: Optional[Tuple[str, str]] = None,
+    region_tuple: Optional[Union[Tuple[str, str], Tuple[str, str]]] = None,
+    # reference: str = "rest",
+    plot_volcano: bool = True,
+    comb_col_name: str = "combined_annotation_column",
+    method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
+    ignore_duplicate_assignments: bool = False,
+    force_assignment: bool = False,
+    **kwargs
+    ):
+    # extract annotation information
+    annotation_key = annotation_tuple[0]
+    annotation_name = annotation_tuple[1]
+
+    # extract information from reference tuple
+    if reference_tuple == "rest":
+        assert reference_data is None, "If `reference_tuple` is 'rest', `reference_data` must be None."
+        reference_key = None
+        reference_name = "rest"
+    elif isinstance(reference_tuple, tuple) & (len(reference_tuple) == 2):
+        reference_key = reference_tuple[0]
+        reference_name = reference_tuple[1]
+    else:
+        raise ValueError("`reference_tuple` is neither 'rest' nor a 2-tuple.")
+
+    _check_assignment(data=data, key=annotation_key, force_assignment=force_assignment, modality="annotations")
+
+    # check if the reference needs to be checked
+    check_reference_during_substitution = True if reference_data is None else False
+
+    if region_tuple is not None:
+        assert reference_data is None, "If `region_tuple` is given, `reference_data` must be None."
+
+        region_key = region_tuple[0]
+        region_name = region_tuple[1]
+
+        # assign region
+        _check_assignment(data=data, key=region_key, force_assignment=force_assignment, modality="regions")
+
+    # extract main anndata
+    adata1 = data.cells.matrix.copy()
+
+    if region_tuple is not None:
+        # select only one region
+        region_mask = [region_name in elem for elem in adata1.obsm["regions"][region_key]]
+        assert np.any(region_mask), f"Region '{region_name}' not found in key '{region_key}'."
+
+        print(f"Restrict analysis to region '{region_name}' from key '{region_key}'.", flush=True)
+        adata1 = adata1[region_mask].copy()
+
+
+    col_with_id = adata1.obsm["annotations"].apply(
+        func=lambda row: _substitution_func(
+            row=row,
+            annotation_key=annotation_key,
+            annotation_name=annotation_name,
+            reference_name=reference_name,
+            check_reference=check_reference_during_substitution,
+            ignore_duplicate_assignments=ignore_duplicate_assignments
+            ), axis=1
+        )
+
+    # check that the annotation_name exists inside the column
+    assert np.any(col_with_id == annotation_name), f"annotation_name '{annotation_name}' not found under annotation_key '{annotation_key}'."
+
+    # mark the annotations with 1 or 2 depending if it is adata1 or adata2
+    if reference_data is not None:
+        # add a 1- in front of the annotation to differentiate it later from the reference data
+        col_with_id = col_with_id.apply(func=lambda x: f"1-{x}")
+
+    # add the column to obs
+    adata1.obs[comb_col_name] = col_with_id
+
+    if reference_data is not None:
+        # process reference_data if it is not None
+        if reference_tuple is None:
+            reference_tuple = annotation_tuple
+
+        _check_assignment(data=reference_data, key=reference_key, force_assignment=force_assignment, modality="annotations")
+
+        # extract reference anndata
+        adata2 = reference_data.cells.matrix.copy()
+        # repeat the same as for adata1 for adata2
+        col_with_id_ref = adata2.obsm["annotations"].apply(
+            func=lambda row: _substitution_func(
+                row=row,
+                annotation_key=reference_key,
+                annotation_name=reference_name,
+                reference_name=None,
+                check_reference=check_reference_during_substitution,
+                ignore_duplicate_assignments=ignore_duplicate_assignments
+                ), axis=1
+            )
+        col_with_id_ref = col_with_id_ref.apply(func=lambda x: f"2-{x}")
+
+        # check that the reference_name exists inside the column
+        assert np.any(col_with_id_ref == f"2-{reference_name}"), f"reference_name '{reference_name}' not found under reference_key '{reference_key}'."
+
+        # add column to obs
+        adata2.obs[comb_col_name] = col_with_id_ref
+
+        # combine anndatas
+        adata_combined = anndata.concat([adata1, adata2])
+
+        # create settings for rank_genes_groups
+        rgg_groups = [f"1-{annotation_name}"]
+        rgg_reference = f"2-{reference_name}"
+
+        # create plot title for later
+        plot_title = f"'{annotation_name}' in {data.sample_id} vs. '{reference_name}' in {reference_data.sample_id}"
+
+    else:
+        adata_combined = adata1
+        rgg_groups = [annotation_name]
+        rgg_reference = reference_name
+
+        plot_title = f"'{annotation_name}' in {data.sample_id} vs. '{reference_name}' in {data.sample_id}"
+
+    if obs_tuple is not None:
+        # filter for observation value
+        adata_combined = adata_combined[adata_combined.obs[obs_tuple[0]] == obs_tuple[1]].copy()
+
+    # add column to .obs for its use in rank_genes_groups()
+    adata_combined.obs = adata_combined.obs.filter([comb_col_name]) # empty obs
+    #adata_combined.obs[comb_col_name] = adata_combined.obsm["annotations"][comb_col_name]
+    print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}'.")
+    sc.tl.rank_genes_groups(adata=adata_combined,
+                            groupby=comb_col_name,
+                            groups=rgg_groups,
+                            reference=rgg_reference,
+                            method=method,
+                            )
+
+    # create dataframe from results
+    res_dict = create_deg_dataframe(
+        adata=adata_combined, groups=None,
+    )
+    df = res_dict[rgg_groups[0]]
+
+    if plot_volcano:
+        volcano_plot(
+            data=df,
+            title=plot_title,
+            **kwargs
+            )
+    else:
+        return {
+            "results": df,
+            "params": adata_combined.uns["rank_genes_groups"]["params"]
+        }

@@ -197,53 +197,34 @@ class bootstrap_loess:
 
 
 def smooth_fit(xs: np.ndarray, ys: np.ndarray,
-    #x_to_fit_on: Optional[List] = None,
-    #dist_thrs: Optional[float] = None,
-    xmin: Optional[float] = None,
-    xmax: Optional[float] = None,
-    #stepsize: Optional[float] = None,
-    nsteps: Optional[float] = None,
-    method: Literal["lowess", "loess"] = "loess",
-    stderr: bool = True,
-    loess_bootstrap: bool = True,
-    K: int = 100
-    ):
+               xmin: Optional[float] = None,
+               xmax: Optional[float] = None,
+               nsteps: Optional[float] = None,
+               method: Literal["lowess", "loess"] = "loess",
+               stderr: bool = True,
+               loess_bootstrap: bool = True,
+               K: int = 100) -> pd.DataFrame:
+    """
+    Smooths a curve using LOESS or LOWESS methods.
 
-    """Smooth curve using loess
+    This function performs curve fitting using either the `skmisc.loess` or
+    `statsmodels.nonparametric.smoothers_lowess.sm_lowess` methods. Points
+    outside the specified `xmin` and `xmax` range are excluded.
+    Adapted from https://github.com/almaan/ST-mLiver.
 
-    will perform curve fitting using skmisc.loess,
-    points above 'dist_thrs' will be excluded.
-    Parameters:
-    ----------
-    xs : np.ndarray
-        x values
-    ys : np.ndarray
-        y values
-    min: Optional[float]
-        exclude (x,y) tuples were x < min
-    max: Optional[float]
-        exclude (x,y) tuples were x > max
-    nsteps = Optional[float]
-        Number of steps x is divided into for the prediction.
-    method: str
-        Which method to use for the smoothing. Options: "loess" or "lowess".
-        "loess": Uses `skmisc.loess`. This is not implemented for Windows.
-        "lowess": Uses `statsmodels.nonparametric.smoothers_lowess.sm_lowess` which is available on all tested platforms.
-    stderr: bool
-        Whether to calculate standard deviation of the prediction. Depends on the method used:
-        "loess": Standard deviation returned by package is used.
-        "lowess" Bootstrapping is used to estimate a confidence interval.
-    K: int
-        Only needed for `method="lowess"`. Determines number of bootstrapping cycles.
+    Args:
+        xs (np.ndarray): The x values.
+        ys (np.ndarray): The y values.
+        xmin (Optional[float]): Minimum x value to include in the fit. Defaults to None.
+        xmax (Optional[float]): Maximum x value to include in the fit. Defaults to None.
+        nsteps (Optional[float]): Number of steps x is divided into for the prediction. Defaults to None.
+        method (Literal["lowess", "loess"]): The smoothing method to use. Options are "loess" or "lowess". Defaults to "loess".
+        stderr (bool): Whether to calculate standard errors of the prediction. Defaults to True.
+        loess_bootstrap (bool): Whether to use bootstrapping for LOESS standard error calculation. Defaults to True.
+        K (int): Number of bootstrapping cycles for LOWESS. Only needed if `method` is "lowess". Defaults to 100.
 
     Returns:
-    -------
-    A tuple with included x and y-values (xs',ys'), as well
-    as fitted y-values (ys_hat) together with associated
-    standard errors. The tuple is on the form
-    (xs',ys',y_hat,std_err)
-
-    From: https://github.com/almaan/ST-mLiver
+        pd.DataFrame: A DataFrame containing the predicted y values and associated standard errors and confidence intervals.
     """
 
     # check method

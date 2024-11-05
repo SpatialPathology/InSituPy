@@ -15,6 +15,13 @@ CACHE = Path.home() / ".cache/InSituPy/"
 
 # modalities
 MODALITIES = ["annotations", "cells", "images", "regions", "transcripts"]
+LOAD_FUNCS = [
+    'load_annotations',
+    'load_cells',
+    'load_images',
+    'load_regions',
+    'load_transcripts'
+    ]
 
 # naming
 ISPY_METADATA_FILE = ".ispy"
@@ -34,3 +41,6 @@ REGIONS_SYMBOL = "\U0001F30D" # 🌍
 palettes = CustomPalettes()
 DEFAULT_CATEGORICAL_CMAP = palettes.tab20_mod
 REGION_CMAP = matplotlib.colormaps["tab10"]
+
+# annotations
+FORBIDDEN_ANNOTATION_NAMES = ["rest"]

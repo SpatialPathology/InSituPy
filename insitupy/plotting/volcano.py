@@ -1,10 +1,24 @@
+import os
+from numbers import Number
+from pathlib import Path
+from typing import Union
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from adjustText import adjust_text
 
+from insitupy.io.plots import save_and_show_figure
 
-def volcano_plot(data, significance_threshold=0.05, fold_change_threshold=1):
+
+def volcano_plot(data,
+                 significance_threshold: Number = 0.05,
+                 fold_change_threshold: Number = 1,
+                 title: str = "Volcano Plot",
+                 savepath: Union[str, os.PathLike, Path] = None,
+                 save_only: bool = False,
+                 dpi_save: int = 300,
+                 ):
     """
     Create a volcano plot from the DataFrame and label the top 20 most significant up and down-regulated genes.
 
@@ -33,7 +47,7 @@ def volcano_plot(data, significance_threshold=0.05, fold_change_threshold=1):
                 alpha=0.5, color=colors)
 
     # Add labels and title
-    plt.title('Volcano Plot', fontsize=16)
+    plt.title(title, fontsize=16)
     plt.xlabel('$\mathregular{Log_2}$ fold change', fontsize=14)
     plt.ylabel('$\mathregular{-Log_10}$ p-value', fontsize=14)
 
@@ -67,4 +81,6 @@ def volcano_plot(data, significance_threshold=0.05, fold_change_threshold=1):
     # Adjust text to avoid overlap
     adjust_text(texts, arrowprops=dict(arrowstyle='->', color='gray', lw=0.5))
 
+    # save and show figure
+    save_and_show_figure(savepath=savepath, fig=plt.gcf(), save_only=save_only, dpi_save=dpi_save)
     plt.show()

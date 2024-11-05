@@ -86,6 +86,7 @@ def sctransform_anndata(adata, layer=None, **kwargs):
 
 def normalize_and_transform_anndata(adata,
                                     transformation_method: Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals", "sctransform"] = "log1p",
+                                    target_sum: int = None, # defaults to median of total counts of cells
                                     verbose: bool = True
                                     ) -> None:
     """
@@ -106,7 +107,7 @@ def normalize_and_transform_anndata(adata,
 
     # Preprocessing according to napari tutorial in squidpy
     print(f"Normalization, {transformation_method}-transformation...") if verbose else None
-    sc.pp.normalize_total(adata)
+    sc.pp.normalize_total(adata, target_sum=target_sum)
     adata.layers['norm_counts'] = adata.X.copy()
 
     # Apply the selected transformation method

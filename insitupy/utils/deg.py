@@ -1,10 +1,17 @@
+from typing import List, Optional, Union
+
 import numpy as np
 import pandas as pd
+from anndata._core.anndata import AnnData
 
 from insitupy.utils.utils import convert_to_list
 
 
-def create_deg_dataframe(adata, groups=None, key='rank_genes_groups'):
+def create_deg_dataframe(
+    adata: AnnData,
+    groups: Optional[str] = None,
+    key: str = 'rank_genes_groups'
+    ) -> dict:
     """
     Create a DataFrame of differentially expressed genes from rank_genes_groups results.
     Can be used to plot a volcano plot using `plot_volcano`.
@@ -48,3 +55,4 @@ def create_deg_dataframe(adata, groups=None, key='rank_genes_groups'):
         volcano_data_dict[group] = volcano_data
 
     return volcano_data_dict
+

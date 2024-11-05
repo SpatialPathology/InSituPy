@@ -1,3 +1,5 @@
+from typing import Literal
+
 import anndata
 import numpy as np
 from scipy.sparse import issparse
@@ -124,3 +126,59 @@ def check_rgb_column(df, column_name):
 
     # Check if all values in the specified column are valid RGB tuples
     return df[column_name].apply(is_valid_rgb_tuple).all()
+
+
+def _check_assignment(
+    data, key, force_assignment, modality: Literal["annotations", "regions"]
+):
+    try:
+        column = data.cells.matrix.obsm[modality].columns
+    except KeyError:
+        do_assignment = True
+    else:
+        if key in column:
+            do_assignment = False
+        else:
+            do_assignment = True
+
+    if do_assignment or force_assignment:
+        if modality == "annotations":
+            # assign annotations
+            data.assign_annotations(keys=key)
+        elif modality == "regions":
+            # assign regions
+            data.assign_regions(keys=key)
+    else:
+        print(f"{modality.capitalize()} with key '{key} have already been assigned to `data`.")
+
+
+def _substitution_func(
+    row,
+    annotation_key,
+    annotation_name,
+    check_reference,
+    reference_name=None,
+    ignore_duplicate_assignments=False
+    ):
+    elem = row[annotation_key]
+    # check_reference = False
+    # if reference_name is not None:
+    #     check_reference = True
+    try:
+        split_name = elem.split(" & ")
+        if annotation_name in split_name:
+            if check_reference:
+                if reference_name in split_name:
+                    if not ignore_duplicate_assignments:
+                        raise ValueError(f"Cell '{row.name}' was found to belong to both the annotation and the reference. To ignore this and use only the annotation assignment, use `ignore_duplicate_assignments=True`. Assignment that was found is: {elem}")
+                    else:
+                        return annotation_name
+                else:
+                    return annotation_name
+            else:
+                return annotation_name
+        else:
+            # TODO: Here also the reference name must be kept - does it really? Only if both annotation and reference are in the same dataset
+            return elem
+    except AttributeError:
+        return elem

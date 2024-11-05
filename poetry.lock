@@ -3805,13 +3805,13 @@ scipy = ">=1.0.0"
 
 [[package]]
 name = "scanpy"
-version = "1.10.2"
+version = "1.10.3"
 description = "Single-Cell Analysis in Python."
 optional = false
 python-versions = ">=3.9"
 files = [
-    {file = "scanpy-1.10.2-py3-none-any.whl", hash = "sha256:2ad4348e214b1dd0db5a4cf21d73695be11b8f5f0ef47508d3075525d9d1c7c6"},
-    {file = "scanpy-1.10.2.tar.gz", hash = "sha256:5d1649e73ac35e3ad02b455d8a16fdb16d4c8dc27330e696f4cd4e27f2d879be"},
+    {file = "scanpy-1.10.3-py3-none-any.whl", hash = "sha256:d8fa60a6b7f8ab994fe70d2e5106d9b0b9980bf2f65d40f66a12a49db3dbc249"},
+    {file = "scanpy-1.10.3.tar.gz", hash = "sha256:0a644d8fa173ac1c62aed4255de7031bf7501c7ad4441cf6ce99cd638b32f880"},
 ]
 
 [package.dependencies]
@@ -3824,7 +3824,7 @@ matplotlib = ">=3.6"
 natsort = "*"
 networkx = ">=2.7"
 numba = ">=0.56"
-numpy = ">=1.23,<2"
+numpy = ">=1.23"
 packaging = ">=21.3"
 pandas = ">=1.5"
 patsy = "*"
@@ -3839,10 +3839,10 @@ umap-learn = ">0.5.0"
 
 [package.extras]
 bbknn = ["bbknn"]
-dask = ["dask[array] (>=2022.09.2)"]
-dask-ml = ["dask-ml", "dask[array] (>=2022.09.2)"]
-dev = ["pre-commit", "setuptools-scm"]
-doc = ["dask", "igraph", "ipython (>=7.20)", "matplotlib (!=3.6.1)", "myst-nb (>=1)", "myst-parser (>=2)", "nbsphinx (>=0.9)", "readthedocs-sphinx-search", "sam-algorithm", "scanpydoc (>=0.13.4)", "setuptools", "sphinx (>=7)", "sphinx-autodoc-typehints (>=1.25.2)", "sphinx-book-theme (>=1.1.0)", "sphinx-copybutton", "sphinx-design", "sphinxcontrib-bibtex", "sphinxext-opengraph"]
+dask = ["dask[array] (>=2022.09.2,<2024.8.0)"]
+dask-ml = ["dask-ml", "dask[array] (>=2022.09.2,<2024.8.0)"]
+dev = ["pre-commit", "setuptools-scm", "towncrier"]
+doc = ["dask", "igraph", "ipython (>=7.20)", "matplotlib (!=3.6.1)", "myst-nb (>=1)", "myst-parser (>=2)", "nbsphinx (>=0.9)", "readthedocs-sphinx-search", "sam-algorithm", "scanpydoc (>=0.14.1)", "setuptools", "sphinx (>=7)", "sphinx-autodoc-typehints (>=1.25.2)", "sphinx-book-theme (>=1.1.0)", "sphinx-copybutton", "sphinx-design", "sphinx-tabs", "sphinxcontrib-bibtex", "sphinxext-opengraph"]
 harmony = ["harmonypy"]
 leiden = ["igraph (>=0.10)", "leidenalg (>=0.9.0)"]
 louvain = ["igraph", "louvain (>=0.6.0,!=0.6.2)"]
@@ -3852,8 +3852,8 @@ rapids = ["cudf (>=0.9)", "cugraph (>=0.9)", "cuml (>=0.9)"]
 scanorama = ["scanorama"]
 scrublet = ["scikit-image"]
 skmisc = ["scikit-misc (>=0.1.3)"]
-test = ["dask[array] (>=2022.09.2)", "igraph (>=0.10)", "leidenalg (>=0.9.0)", "profimp", "pytest (>=8.2)", "pytest-cov", "pytest-mock", "pytest-nunit", "scikit-image", "zarr"]
-test-full = ["dask-ml", "dask[array] (>=2022.09.2)", "harmonypy", "igraph", "igraph (>=0.10)", "leidenalg (>=0.9.0)", "louvain (>=0.6.0,!=0.6.2)", "magic-impute (>=2.0)", "profimp", "pytest (>=8.2)", "pytest-cov", "pytest-mock", "pytest-nunit", "scanorama", "scikit-image", "scikit-misc (>=0.1.3)", "zappy", "zarr"]
+test = ["dask[array] (>=2022.09.2,<2024.8.0)", "igraph (>=0.10)", "leidenalg (>=0.9.0)", "profimp", "pytest (>=8.2)", "pytest-cov", "pytest-mock", "pytest-nunit", "scikit-image", "zarr"]
+test-full = ["dask-ml", "dask[array] (>=2022.09.2,<2024.8.0)", "harmonypy", "igraph", "igraph (>=0.10)", "leidenalg (>=0.9.0)", "louvain (>=0.6.0,!=0.6.2)", "magic-impute (>=2.0)", "profimp", "pytest (>=8.2)", "pytest-cov", "pytest-mock", "pytest-nunit", "scanorama", "scikit-image", "scikit-misc (>=0.1.3)", "zappy", "zarr"]
 test-min = ["profimp", "pytest (>=8.2)", "pytest-cov", "pytest-mock", "pytest-nunit"]
 
 [[package]]
@@ -4903,4 +4903,4 @@ napari = ["napari"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9.18"
-content-hash = "0b0ee255c1a264b3815996ab32f2130c72f531870bde21e6533eb5cad6257b03"
+content-hash = "e2f24878ae948efdfbadccf71a64846765feb0cd1131bf93c59ebc5a0365cd34"

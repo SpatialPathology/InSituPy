@@ -1,0 +1,65 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "015fee93-0f10-4f1d-9e6e-a51eb5aec09f",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [0, 0],
+            [12754, 0],
+            [12754, 8995],
+            [0, 8995],
+            [0, 0]
+          ]
+        ]
+      },
+      "properties": {
+        "objectType": "annotation",
+        "name": "Region 1"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "15c5c51a-296f-4e02-8df8-c0ccda55df18",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [23485, 10273],
+            [35416, 10273],
+            [35416, 23040],
+            [23485, 23040],
+            [23485, 10273]
+          ]
+        ]
+      },
+      "properties": {
+        "objectType": "annotation",
+        "name": "Region 3"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "d09a5220-723a-4fc6-9cd3-6d77af398fad",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7581, 10765],
+            [21738, 10765],
+            [21738, 19705],
+            [7581, 19705],
+            [7581, 10765]
+          ]
+        ]
+      },
+      "properties": {
+        "objectType": "annotation",
+        "name": "Region 2"
+      }
+    }
+  ]
+}
