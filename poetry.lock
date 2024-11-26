@@ -67,6 +67,27 @@ doc = ["IPython", "awkward (>=2.0.7)", "myst_parser", "nbsphinx", "scanpydoc[the
 test = ["awkward (>=2.3)", "boltons", "dask[array]", "joblib", "loompy (>=3.0.5)", "matplotlib", "openpyxl", "pytest (>=6.0)", "pytest-cov (>=2.10)", "pytest_memray", "scanpy", "scikit-learn", "zarr"]
 
 [[package]]
+name = "anndata2ri"
+version = "1.3.2"
+description = ""
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "anndata2ri-1.3.2-py3-none-any.whl", hash = "sha256:8baf5afee129a1a3f12f85d6978a9fb00c531b0473481ff76684ff99e3bdfdf6"},
+    {file = "anndata2ri-1.3.2.tar.gz", hash = "sha256:34a767b16abfac1aacb6edcd394eaf565f53fff6de3e6f47961a3901d3890d93"},
+]
+
+[package.dependencies]
+anndata = "*"
+rpy2 = ">=3.5.2"
+tzlocal = "*"
+
+[package.extras]
+dev = ["pre-commit", "setuptools-scm"]
+doc = ["lxml", "scanpydoc[theme,typehints]", "sphinx (>=3.0)"]
+test = ["pygments", "pytest", "pytest-faulthandler", "scanpy"]
+
+[[package]]
 name = "annoy"
 version = "1.17.0"
 description = "Approximate Nearest Neighbors in C++/Python optimized for memory usage and loading/saving to disk."
@@ -271,7 +292,7 @@ files = [
 name = "cffi"
 version = "1.16.0"
 description = "Foreign Function Interface for Python calling C code."
-optional = true
+optional = false
 python-versions = ">=3.8"
 files = [
     {file = "cffi-1.16.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:6b3d6606d369fc1da4fd8c357d026317fbb9c9b75d36dc16e90e84c26854b088"},
@@ -2982,7 +3003,7 @@ numpy = ">=1.16.6"
 name = "pycparser"
 version = "2.21"
 description = "C parser in Python"
-optional = true
+optional = false
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 files = [
     {file = "pycparser-2.21-py2.py3-none-any.whl", hash = "sha256:8ee45429555515e1f6b185e78100aea234072576aa43ab53aefcae078162fca9"},
@@ -3733,6 +3754,33 @@ files = [
     {file = "rpds_py-0.10.3-pp39-pypy39_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:e8d0f0eca087630d58b8c662085529781fd5dc80f0a54eda42d5c9029f812599"},
     {file = "rpds_py-0.10.3.tar.gz", hash = "sha256:fcc1ebb7561a3e24a6588f7c6ded15d80aec22c66a070c757559b57b17ffd1cb"},
 ]
+
+[[package]]
+name = "rpy2"
+version = "3.5.16"
+description = "Python interface to the R language (embedded R)"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "rpy2-3.5.16-cp310-cp310-macosx_11_0_x86_64.whl", hash = "sha256:c748fc74ba01a51f6aca0a5f9e7bf637cd09413ffa031dd79b49b7a9fe97770b"},
+    {file = "rpy2-3.5.16-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:f076b34bd79f62ae583e75acc1b305ba73a6639ea5c9a44dc53896709ccd8ba0"},
+    {file = "rpy2-3.5.16-cp38-cp38-macosx_11_0_x86_64.whl", hash = "sha256:3bb396851710856c6544c4278988b2abfe01d5a392278e5157b97148e62079c4"},
+    {file = "rpy2-3.5.16-cp39-cp39-macosx_11_0_x86_64.whl", hash = "sha256:c067769dbade7faccdc8d2181ae5e29329fe0e66289fb291436a546da2f5e881"},
+    {file = "rpy2-3.5.16.tar.gz", hash = "sha256:837e2f74583658a5c4c339761a73f9434f33ef9ced3e30c64da7562165c2801b"},
+]
+
+[package.dependencies]
+cffi = ">=1.15.1"
+jinja2 = "*"
+packaging = {version = "*", markers = "platform_system == \"Windows\""}
+tzlocal = "*"
+
+[package.extras]
+all = ["ipython", "numpy", "pandas (>=1.3.5)", "pytest"]
+pandas = ["numpy", "pandas (>=1.3.5)"]
+test = ["ipython", "numpy", "pandas (>=1.3.5)", "pytest"]
+test-minimal = ["coverage", "pytest (>=8)", "pytest-cov"]
+types = ["mypy", "types-tzlocal"]
 
 [[package]]
 name = "scanorama"
@@ -4588,6 +4636,23 @@ files = [
     {file = "tzdata-2023.3-py2.py3-none-any.whl", hash = "sha256:7e65763eef3120314099b6939b5546db7adce1e7d6f2e179e3df563c70511eda"},
     {file = "tzdata-2023.3.tar.gz", hash = "sha256:11ef1e08e54acb0d4f95bdb1be05da659673de4acbd21bf9c69e94cc5e907a3a"},
 ]
+
+[[package]]
+name = "tzlocal"
+version = "5.2"
+description = "tzinfo object for the local timezone"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "tzlocal-5.2-py3-none-any.whl", hash = "sha256:49816ef2fe65ea8ac19d19aa7a1ae0551c834303d5014c6d5a62e4cbda8047b8"},
+    {file = "tzlocal-5.2.tar.gz", hash = "sha256:8d399205578f1a9342816409cc1e46a93ebd5755e39ea2d85334bea911bf0e6e"},
+]
+
+[package.dependencies]
+tzdata = {version = "*", markers = "platform_system == \"Windows\""}
+
+[package.extras]
+devenv = ["check-manifest", "pytest (>=4.3)", "pytest-cov", "pytest-mock (>=3.3)", "zest.releaser"]
 
 [[package]]
 name = "umap-learn"

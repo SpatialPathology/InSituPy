@@ -12,7 +12,6 @@ from warnings import warn
 
 import anndata
 import geopandas as gpd
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -23,9 +22,8 @@ from dask_image.imread import imread
 from geopandas import GeoDataFrame
 from parse import *
 from scipy.sparse import issparse
-from shapely import Point, Polygon
+from shapely import Point
 from shapely.affinity import scale as scale_func
-from tqdm import tqdm
 
 import insitupy._core.config as config
 from insitupy import WITH_NAPARI, __version__
@@ -45,8 +43,10 @@ from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting import volcano_plot
 from insitupy.utils import create_deg_dataframe
 from insitupy.utils.deg import create_deg_dataframe
-from insitupy.utils.preprocessing import (normalize_and_transform_anndata,
-                                          reduce_dimensions_anndata)
+from insitupy.utils.preprocessing import (compare_transformations_anndata,
+                                          normalize_and_transform_anndata,
+                                          reduce_dimensions_anndata,
+                                          sctransform_anndata)
 from insitupy.utils.utils import convert_to_list, get_nrows_maxcols
 
 from .._constants import CACHE, ISPY_METADATA_FILE, MODALITIES
@@ -603,7 +603,7 @@ class InSituData:
 
 
     def normalize_and_transform(self,
-                transformation_method: Literal["log1p", "sqrt"] = "log1p",
+                transformation_method: Literal["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"] = "log1p",
                 target_sum: int = 250,
                 normalize_alt: bool = True,
                 verbose: bool = True
@@ -621,7 +621,7 @@ class InSituData:
                 If True, print progress messages during normalization. Default is True.
 
         Raises:
-            ValueError: If `transformation_method` is not one of ["log1p", "sqrt"].
+            ValueError: If `transformation_method` is not one of ["log1p", "sqrt_1", "sqrt_2", "pearson_residuals"].
 
         Returns:
             None: This method modifies the input matrix in place, normalizing the data based on the specified method.
@@ -956,17 +956,57 @@ class InSituData:
             self.transcripts = _restructure_transcripts_dataframe(transcript_dataframe)
 
 
+    def sctransform(self, verbose: bool = True) -> None:
+        """
+            Apply SCTransform to the Xenium data in this instance.
+            Modifies the `AnnData` objects stored in the `InSituData` (both main and alternative modalities)
+            by applying SCTransform.
+
+            Args:
+                verbose (bool): If True, print progress messages. Default is True.
+
+            Returns:
+                None: This method modifies the input matrix in place by applying SCTransform.
+        """
+        try:
+            # Retrieve the main cell data (ensure the modality exists)
+            cells = self.cells
+        except AttributeError:
+            raise ModalityNotFoundError(modality="cells")
+
+        if verbose:
+            print("Applying SCTransform to the main modality (cells.matrix)...")
+        self.cells.matrix = sctransform_anndata(adata=cells.matrix, verbose=verbose)
+
+        # Apply SCTransform to alternative modalities if they exist
+        try:
+            alt = self.alt
+        except AttributeError:
+            # If no alternative modalities exist, simply pass
+            if verbose:
+                print("No alternative modalities found.")
+            pass
+        else:
+            if verbose:
+                print("Found `.alt` modality. Applying SCTransform to alternative modalities...")
+            for key, alt_cells in alt.items():
+                if verbose:
+                    print(f"\tApplying SCTransform to `.alt['{key}']` modality...")
+                alt_cells.matrix = sctransform_anndata(adata=alt_cells.matrix, verbose=verbose)
+
+        if verbose:
+            print("SCTransform completed for all modalities.")
+
+
     def reduce_dimensions(self,
-                        umap: bool = True,
-                        tsne: bool = True,
-                        layer: Optional[str] = None,
-                        batch_correction_key: Optional[str] = None,
-                        perform_clustering: bool = True,
-                        verbose: bool = True,
-                        tsne_lr: int = 1000,
-                        tsne_jobs: int = 8,
-                        **kwargs
-                        ):
+                          umap: bool = True,
+                          tsne: bool = False,
+                          batch_correction_key: Optional[str] = None,
+                          perform_clustering: bool = True,
+                          verbose: bool = True,
+                          tsne_lr: int = 1000,
+                          tsne_jobs: int = 8,
+                          **kwargs):
         """
         Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques, optionally performing batch correction.
 
@@ -986,7 +1026,7 @@ class InSituData:
             tsne_jobs (int, optional):
                 Number of CPU cores to use for t-SNE computation. Default is 8.
             **kwargs:
-                Additional keyword arguments to be passed to scanorama function if batch correction is performed.
+                Additional keyword arguments to be passed to the scanorama function if batch correction is performed.
 
         Raises:
             ValueError: If an invalid `batch_correction_key` is provided.
@@ -996,6 +1036,7 @@ class InSituData:
                 batch correction if applicable. It does not return any value.
         """
         try:
+            # Retrieve the main cell data
             cells = self.cells
         except AttributeError:
             raise ModalityNotFoundError(modality="cells")
@@ -1005,12 +1046,14 @@ class InSituData:
                                   batch_correction_key=batch_correction_key,
                                   perform_clustering=perform_clustering,
                                   verbose=verbose,
-                                  tsne_lr=tsne_lr, tsne_jobs=tsne_jobs
-                                  )
+                                  tsne_lr=tsne_lr, tsne_jobs=tsne_jobs,
+                                  **kwargs)
 
+        # If there are alternative modalities (e.g., `.alt`), apply dimensionality reduction to them
         try:
             alt = self.alt
         except AttributeError:
+            # If no alternative modalities exist, simply pass
             pass
         else:
             print("Found `.alt` modality.")
