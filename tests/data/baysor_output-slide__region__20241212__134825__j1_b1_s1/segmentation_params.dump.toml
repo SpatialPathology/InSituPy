@@ -1,0 +1,29 @@
+# CLI params: `/dss/dsshome1/05/ge52qoz2/baysor/baysor_output-slide__region__20241212__134825__j1_b1_s1/transcripts_filtered.csv :cell_id_renamed -x x_location -y y_location -z z_location -g feature_name -m 15 --prior-segmentation-confidence 0.5 --output /dss/dsshome1/05/ge52qoz2/baysor/baysor_output-slide__region__20241212__134825__j1_b1_s1 -p --save-polygons geojson`
+[data]
+x = "x_location"
+y = "y_location"
+z = "z_location"
+gene = "feature_name"
+force_2d = false
+min_molecules_per_gene = 1
+exclude_genes = ""
+min_molecules_per_cell = 15
+min_molecules_per_segment = 4
+confidence_nn_id = 8
+
+[segmentation]
+scale = -1.0
+scale_std = "25%"
+estimate_scale_from_centers = true
+n_clusters = 4
+prior_segmentation_confidence = 0.5
+iters = 500
+n_cells_init = 0
+nuclei_genes = ""
+cyto_genes = ""
+new_component_weight = 0.2
+new_component_fraction = 0.3
+
+[plotting]
+gene_composition_neigborhood = 0
+min_pixels_per_cell = 15

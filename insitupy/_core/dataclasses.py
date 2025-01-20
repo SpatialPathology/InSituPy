@@ -28,19 +28,14 @@ from ..io.files import check_overwrite_and_remove_if_true, write_dict_to_json
 from ..io.geo import parse_geopandas, write_qupath_geojson
 from ..utils.utils import convert_to_list, decode_robust_series
 from ..utils.utils import textformat as tf
-from ._mixins import DeepCopyMixin, GetMixin
+from ._mixins import DeepCopyMixin
 
 
-class ShapesData(DeepCopyMixin, GetMixin):
+class ShapesData(DeepCopyMixin):
     '''
     Object to store annotations.
     '''
-    default_assert_uniqueness = False
     # default_skip_multipolygons = False
-    default_polygons_only = False
-    shape_name = "shapes"
-    repr_color = tf.Cyan
-    default_forbidden_names = None
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -48,33 +43,40 @@ class ShapesData(DeepCopyMixin, GetMixin):
                  assert_uniqueness: Optional[bool] = None,
                 #  skip_multipolygons: Optional[bool] = None,
                  polygons_only: Optional[bool] = None,
-                 forbidden_names: Optional[List[str]] = None
-                 # shape_name: Optional[str] = None
+                 forbidden_names: Optional[List[str]] = None,
+                 shape_name: Optional[str] = None
                  ) -> None:
 
+        self._default_assert_uniqueness = False
+        self._default_polygons_only = False
+        self._repr_color = tf.Cyan
+        self._default_forbidden_names = None
 
+        self._shape_name = shape_name if shape_name is not None else "shapes"
 
         # create dictionary for metadata
-        self.metadata = {}
+        self._metadata = {}
+
+        self._data =dict()
 
         # set configuration of ShapesData
         if assert_uniqueness is None:
-            self.assert_uniqueness = self.default_assert_uniqueness
+            self._assert_uniqueness = self._default_assert_uniqueness
         else:
-            self.assert_uniqueness = assert_uniqueness
+            self._assert_uniqueness = assert_uniqueness
 
         # if skip_multipolygons is None:
         #     self.skip_multipolygons = self.default_skip_multipolygons
 
         if polygons_only is None:
-            self.polygons_only = self.default_polygons_only
+            self._polygons_only = self._default_polygons_only
         else:
-            self.polygons_only = polygons_only
+            self._polygons_only = polygons_only
 
         if forbidden_names is None:
-            self.forbidden_names = self.default_forbidden_names
+            self._forbidden_names = self._default_forbidden_names
         else:
-            self.forbidden_names = forbidden_names
+            self._forbidden_names = forbidden_names
 
         if files is not None:
             # make sure files and keys are a list
@@ -94,17 +96,17 @@ class ShapesData(DeepCopyMixin, GetMixin):
                                         )
 
     def __repr__(self):
-        if len(self.metadata) > 0:
+        if len(self._metadata) > 0:
             repr_strings = []
-            for l, m in self.metadata.items():
+            for l, m in self._metadata.items():
                 # add ' to classes
                 classes = [f"'{elem}'" for elem in m["classes"]]
                 lc = len(classes)
 
                 # create string
                 r = (
-                    f'{tf.Bold}{l}:{tf.ResetAll}\t{m[f"n_{self.shape_name}"]} '
-                    f'{self.shape_name}, {lc} '
+                    f'{tf.Bold}{l}:{tf.ResetAll}\t{m[f"n_{self._shape_name}"]} '
+                    f'{self._shape_name}, {lc} '
                     f'{"classes" if lc>1 else "class"} '
                 )
                 if lc < 10:
@@ -118,8 +120,20 @@ class ShapesData(DeepCopyMixin, GetMixin):
             s = "\n".join(repr_strings)
         else:
             s = ""
-        repr = f"{self.repr_color}{tf.Bold}{self.shape_name}{tf.ResetAll}\n{s}"
+        repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
         return repr
+    
+
+    def __getitem__(self, key):
+        return self._data.get(key)
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @metadata.setter
+    def metadata(self, value: dict):
+        self._metadata = value
 
     def _check_uniqueness(self,
                           dataframe: Optional[gpd.GeoDataFrame] = None,
@@ -128,7 +142,7 @@ class ShapesData(DeepCopyMixin, GetMixin):
                           ) -> bool:
 
         if dataframe is None:
-            annot_df = getattr(self, key)
+            annot_df = self[key]
         else:
             annot_df = dataframe
 
@@ -136,14 +150,14 @@ class ShapesData(DeepCopyMixin, GetMixin):
             warnings.warn(
                 message=
                 (
-                    f"The names of the {self.shape_name} for key '{key}' were not unique and thus "
+                    f"The names of the {self._shape_name} for key '{key}' were not unique and thus "
                     f"the key was skipped. In regions only one geometry per class is allowed."
                     )
                 )
             return False
         else:
             if verbose:
-                print(f"Names of {self.shape_name} for key '{key}' are unique.")
+                print(f"Names of {self._shape_name} for key '{key}' are unique.")
             return True
 
     def _update_metadata(self,
@@ -153,28 +167,26 @@ class ShapesData(DeepCopyMixin, GetMixin):
                          ):
 
         if keys == "all":
-            keys = list(self.metadata.keys())
+            keys = list(self._metadata.keys())
 
         keys = convert_to_list(keys)
         keys_to_remove = []
         for key in keys:
-            try:
-                # retrieve dataframe
-                annot_df = getattr(self, key)
-            except AttributeError:
-                self.metadata.pop(key)
+            if self[key] is None:
+                self._metadata.pop(key)
                 if verbose:
                     print(f'Removed {key}', flush=True)
             else:
+                annot_df = self[key]
                 # record metadata information
-                self.metadata[key][f"n_{self.shape_name}"] = len(annot_df)  # number of annotations
+                self._metadata[key][f"n_{self._shape_name}"] = len(annot_df)  # number of annotations
 
                 try:
-                    self.metadata[key]["classes"] = annot_df['name'].unique().tolist()  # annotation classes
+                    self._metadata[key]["classes"] = annot_df['name'].unique().tolist()  # annotation classes
                 except KeyError:
-                    self.metadata[key]["classes"] = ["unnamed"]
+                    self._metadata[key]["classes"] = ["unnamed"]
 
-                self.metadata[key]["analyzed"] = tf.Tick if analyzed else ""  # whether this annotation has been used in the annotate() function
+                self._metadata[key]["analyzed"] = tf.Tick if analyzed else ""  # whether this annotation has been used in the annotate() function
 
     def add_data(self,
                     data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
@@ -190,14 +202,14 @@ class ShapesData(DeepCopyMixin, GetMixin):
         if "name" not in new_df.columns:
             new_df["name"] = ["None"] * len(new_df)
 
-        if self.forbidden_names is not None:
+        if self._forbidden_names is not None:
             try:
                 new_names = new_df["name"].tolist()
             except KeyError:
                 pass
             else:
-                if np.any([elem in new_names for elem in self.forbidden_names]):
-                    raise ValueError(f"One of the forbidden names for annotations ({self.forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
+                if np.any([elem in new_names for elem in self._forbidden_names]):
+                    raise ValueError(f"One of the forbidden names for annotations ({self._forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
 
         # convert geometries into unit (e.g. µm) values
         new_df["geometry"] = new_df["geometry"].scale(xfact=scale_factor, yfact=scale_factor, origin=(0,0))
@@ -223,7 +235,7 @@ class ShapesData(DeepCopyMixin, GetMixin):
         # # convert pixel coordinates to metric units
         # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
 
-        if not hasattr(self, key):
+        if key not in self._data.keys():
             # if key does not exist yet, the new df is the whole annotation dataframe
             annot_df = new_df
 
@@ -234,7 +246,7 @@ class ShapesData(DeepCopyMixin, GetMixin):
             new_n = len(annot_df)
         else:
             # concatenate old and new annoation dataframe
-            annot_df = getattr(self, key)
+            annot_df = self[key]
             old_n = len(annot_df)
             annot_df = pd.concat([annot_df, new_df], ignore_index=False)
 
@@ -248,20 +260,20 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
         if new_annotations_added:
             add = True
-            if self.assert_uniqueness:
+            if self._assert_uniqueness:
                 # check if the shapes data for this key is unique (same number of names than indices)
                 is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
 
                 if not is_unique:
                     add = False
 
-            if self.polygons_only:
+            if self._polygons_only:
                 # check if any of the shapes are shapely MultiPolygons
                 is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
                 if np.any(is_not_polygon):
                     annot_df = annot_df.loc[is_not_polygon]
                     warnings.warn(
-                        f"Some {self.shape_name} were not pure Polygon objects and skipped.",
+                        f"Some {self._shape_name} were not pure Polygon objects and skipped.",
                         stacklevel=2
                         )
 
@@ -271,17 +283,17 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
             if add:
                 # add dataframe to AnnotationData object
-                setattr(self, key, annot_df)
+                self._data[key] = annot_df
 
                 # add new entry to metadata
-                self.metadata[key] = {}
+                self._metadata[key] = {}
 
                 # update metadata
                 self._update_metadata(keys=key, analyzed=False)
 
                 if verbose:
                     # report
-                    print(f"Added {new_n - old_n} new {self.shape_name} to {existing_str}key '{key}'")
+                    print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
 
     def crop(self,
              xlim, ylim
@@ -289,8 +301,8 @@ class ShapesData(DeepCopyMixin, GetMixin):
         limit_poly = Polygon([(xlim[0], ylim[0]), (xlim[1], ylim[0]), (xlim[1], ylim[1]), (xlim[0], ylim[1])])
 
         new_metadata = {}
-        for i, n in enumerate(self.metadata.keys()):
-            shapesdf = getattr(self, n)
+        for i, n in enumerate(self._metadata.keys()):
+            shapesdf = self[n]
 
             # select annotations that intersect with the selected area
             mask = [limit_poly.intersects(elem) for elem in shapesdf["geometry"]]
@@ -302,19 +314,19 @@ class ShapesData(DeepCopyMixin, GetMixin):
             # check if there are annotations left or if it has to be deleted
             if len(shapesdf) > 0:
                 # add new dataframe back to annotations object
-                setattr(self, n, shapesdf)
+                self._data[n] = shapesdf
 
                 # update metadata
                 new_metadata[n] = {}
-                new_metadata[n][f"n_{self.shape_name}"] = len(shapesdf)
+                new_metadata[n][f"n_{self._shape_name}"] = len(shapesdf)
                 new_metadata[n]["classes"] = shapesdf.name.unique().tolist()
-                new_metadata[n]["analyzed"] = self.metadata[n]["analyzed"]  # analyzed information is just copied
+                new_metadata[n]["analyzed"] = self._metadata[n]["analyzed"]  # analyzed information is just copied
 
             else:
                 # delete annotations
-                delattr(self, n)
+                del self._data[n]
 
-        self.metadata = new_metadata
+        self._metadata = new_metadata
 
         self._update_metadata()
 
@@ -323,11 +335,11 @@ class ShapesData(DeepCopyMixin, GetMixin):
                    classes_to_remove: Union[Literal["all"], List[str], str] = "all"
                    ):
         if classes_to_remove == "all":
-            delattr(self, key_to_remove)
+            del self._data[key_to_remove]
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
-            geom_df = self.get(key_to_remove)
-            setattr(self, key_to_remove, geom_df[~geom_df.name.isin(classes_to_remove)])
+            geom_df = self[key_to_remove]
+            self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
 
         self._update_metadata()
 
@@ -349,8 +361,8 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
         # if metadata is not None:
         #     metadata["annotations"] = {}
-        for n in self.metadata.keys():
-            df = getattr(self, n)
+        for n in self._metadata.keys():
+            df = self[n]
             # annot_file = annot_path / f"{n}.parquet"
             # annot_df.to_parquet(annot_file)
             shapes_file = path / f"{n}.geojson"
@@ -361,7 +373,7 @@ class ShapesData(DeepCopyMixin, GetMixin):
 
         # save AnnotationData metadata
         shape_meta_path = path / f"metadata.json"
-        write_dict_to_json(dictionary=self.metadata, file=shape_meta_path)
+        write_dict_to_json(dictionary=self._metadata, file=shape_meta_path)
 
 class AnnotationsData(ShapesData):
     def __init__(self,
@@ -369,14 +381,14 @@ class AnnotationsData(ShapesData):
                  keys: Optional[List[str]] = None,
                  pixel_size: Optional[float] = None
                  ) -> None:
-        self.default_assert_uniqueness = False
+        self._default_assert_uniqueness = False
         # self.default_skip_multipolygons = False
-        self.default_polygons_only = False
-        self.shape_name = "annotations"
-        self.repr_color = tf.Cyan
-        self.default_forbidden_names = FORBIDDEN_ANNOTATION_NAMES
+        self._default_polygons_only = False
+        self._shape_name = "annotations"
+        self._repr_color = tf.Cyan
+        self._default_forbidden_names = FORBIDDEN_ANNOTATION_NAMES
 
-        ShapesData.__init__(self, files, keys, pixel_size)
+        ShapesData.__init__(self, files, keys, pixel_size, shape_name=self._shape_name)
 
 class RegionsData(ShapesData):
     def __init__(self,
@@ -384,15 +396,15 @@ class RegionsData(ShapesData):
                  keys: Optional[List[str]] = None,
                  pixel_size: Optional[float] = None
                  ) -> None:
-        self.default_assert_uniqueness = True
+        self._default_assert_uniqueness = True
         # self.default_skip_multipolygons = True # MultiPolygons are not allowed in regions
-        self.default_polygons_only = True
-        self.shape_name = "regions"
-        self.repr_color = tf.Yellow
+        self._default_polygons_only = True
+        self._shape_name = "regions"
+        self._repr_color = tf.Yellow
 
-        ShapesData.__init__(self, files, keys, pixel_size)
+        ShapesData.__init__(self, files, keys, pixel_size, shape_name=self._shape_name)
 
-class BoundariesData(DeepCopyMixin, GetMixin):
+class BoundariesData(DeepCopyMixin):
     '''
     Object to read and load boundaries of cells and nuclei.
     '''
@@ -408,14 +420,16 @@ class BoundariesData(DeepCopyMixin, GetMixin):
             cell_ids (Optional[da.core.Array]): _description_
             seg_mask_value (Optional[da.core.Array]): _description_
         """
-        self.metadata = {}
+        self._metadata = {}
 
         # store cell ids
-        self.cell_ids = cell_ids
-        self.seg_mask_value = seg_mask_value
+        self._cell_ids = cell_ids
+        self._seg_mask_value = seg_mask_value
+
+        self._data = dict()
 
     def __repr__(self):
-        labels = list(self.metadata.keys())
+        labels = list(self._metadata.keys())
         if len(labels) == 0:
             repr = f"Empty BoundariesData object"
         else:
@@ -424,6 +438,24 @@ class BoundariesData(DeepCopyMixin, GetMixin):
             for l in labels:
                 repr += f"\n{tf.SPACER+tf.Bold+l+tf.ResetAll}"
         return repr
+    
+    def __getitem__(self, key):
+        return self._data.get(key)
+
+    def __setitem__(self, key: str, item):
+        self._data[key] = item
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @property
+    def cell_ids(self):
+        return self._cell_ids
+
+    @property
+    def seg_mask_value(self):
+        return self._seg_mask_value
 
     def add_boundaries(self,
                        data: Optional[Union[dict, List[str]]],
@@ -448,11 +480,11 @@ class BoundariesData(DeepCopyMixin, GetMixin):
 
         for l, df in zip(labels, data):
             if isinstance(df, pd.DataFrame) or isinstance(df, da.core.Array) or np.all([isinstance(elem, da.core.Array) for elem in df]):
-                if l not in self.metadata or overwrite:
+                if l not in self._metadata or overwrite:
                     # add to object
-                    setattr(self, l, df)
-                    self.metadata[l] = {}
-                    self.metadata[l]["pixel_size"] = pixel_size
+                    self._data[l] = df
+                    self._metadata[l] = {}
+                    self._metadata[l]["pixel_size"] = pixel_size
                 else:
                     raise KeyError(f"Label '{l}' exists already in BoundariesData object. To overwrite, set 'overwrite' argument to True.")
             else:
@@ -469,9 +501,9 @@ class BoundariesData(DeepCopyMixin, GetMixin):
         # make sure cell ids are a list
         cell_ids = convert_to_list(cell_ids)
 
-        for n, meta in self.metadata.items():
+        for n, meta in self._metadata.items():
             # get dataframe
-            data = getattr(self, n)
+            data = self[n]
 
             try:
                 # get pixel size
@@ -492,13 +524,13 @@ class BoundariesData(DeepCopyMixin, GetMixin):
                 data["vertex_y"] -= ylim[0]
 
             # add to object
-            setattr(self, n, data)
+            self._data[n] = data
 
     def convert_to_shapely_objects(self):
-        for n in self.metadata.keys():
+        for n in self._metadata.keys():
             print(f"Converting `{n}` to GeoPandas DataFrame with shapely objects.")
             # retrief dataframe with boundary coordinates
-            df = getattr(self, n)
+            df = self[n]
 
             if isinstance(df, pd.DataFrame):
                 # convert xy coordinates into shapely Point objects
@@ -510,7 +542,7 @@ class BoundariesData(DeepCopyMixin, GetMixin):
                 df.index = decode_robust_series(df.index)  # convert byte strings in index
 
                 # add to object
-                setattr(self, n, pd.DataFrame(df))
+                self._data[n] = pd.DataFrame(df)
             else:
                 print(f"Boundaries element `{n} was no Dataframe. Skipped.")
 
@@ -526,8 +558,8 @@ class BoundariesData(DeepCopyMixin, GetMixin):
 
         with zarr.ZipStore(bound_file, mode='w') if suffix == "zarr.zip" else zarr.DirectoryStore(bound_file) as dirstore:
             # for conditional 'with' see also: https://stackoverflow.com/questions/27803059/conditional-with-statement-in-python
-            for n in self.metadata.keys():
-                bound_data = getattr(self, n)
+            for n in self._metadata.keys():
+                bound_data = self[n]
 
                 # check data
                 if isinstance(bound_data, list):
@@ -549,7 +581,7 @@ class BoundariesData(DeepCopyMixin, GetMixin):
 
                 # add boundaries metadata to zarr.zip
                 store = zarr.open(dirstore, mode="a")
-                store[f"masks/{n}"].attrs.put(self.metadata[n])
+                store[f"masks/{n}"].attrs.put(self._metadata[n])
 
                 # save keys in insitupy metadata
                 #metadata["boundaries"]["keys"].append(n)
@@ -557,10 +589,10 @@ class BoundariesData(DeepCopyMixin, GetMixin):
             # save paths in insitupy metadata
             #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
 
-            self.cell_ids.to_zarr(dirstore, component="cell_id")
+            self._cell_ids.to_zarr(dirstore, component="cell_id")
 
-            if self.seg_mask_value is not None:
-                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value")
+            if self._seg_mask_value is not None:
+                self._seg_mask_value.to_zarr(dirstore, component="seg_mask_value")
 
         # # add version to metadata
         # metadata_to_save = self.metadata.copy()
@@ -569,7 +601,7 @@ class BoundariesData(DeepCopyMixin, GetMixin):
         # # save metadata
         # write_dict_to_json(dictionary=metadata_to_save, file=path / ".boundariesdata")
 
-class CellData(DeepCopyMixin, GetMixin):
+class CellData(DeepCopyMixin):
     '''
     Data object containing an AnnData object and a boundary object which are kept in sync.
     '''
@@ -578,28 +610,48 @@ class CellData(DeepCopyMixin, GetMixin):
                boundaries: Optional[BoundariesData],
                config: dict = {}
                ):
-        self.matrix = matrix
-        self.config = config
+        self._matrix = matrix
+        self._config = config
 
         if boundaries is not None:
-            self.boundaries = boundaries
-            self.entries = ["matrix", "boundaries"]
+            self._boundaries = boundaries
+            self._entries = ["matrix", "boundaries"]
         else:
-            self.boundaries = None
-            self.entries = ["matrix"]
+            self._boundaries = None
+            self._entries = ["matrix"]
 
     def __repr__(self):
         repr = (
             f"{tf.Bold+'matrix'+tf.ResetAll}\n"
-            f"{tf.SPACER+self.matrix.__repr__()}"
+            f"{tf.SPACER+self._matrix.__repr__()}"
         )
 
-        if self.boundaries is not None:
-            bound_repr = self.boundaries.__repr__()
+        if self._boundaries is not None:
+            bound_repr = self._boundaries.__repr__()
 
             repr += f"\n{tf.Bold+'boundaries'+tf.ResetAll}\n" + tf.SPACER + bound_repr.replace("\n", f"\n{tf.SPACER}")
         return repr
 
+    @property
+    def matrix(self):
+        return self._matrix
+
+    @matrix.setter
+    def matrix(self, value: AnnData):
+        self._matrix = value
+
+    @property
+    def config(self):
+        return self._config
+
+    @property
+    def boundaries(self):
+        return self._boundaries
+
+    @property
+    def entries(self):
+        return self._entries
+    
     def copy(self):
         '''
         Function to generate a deep copy of the current object.
@@ -629,15 +681,12 @@ class CellData(DeepCopyMixin, GetMixin):
 
         # write matrix to file
         mtx_file = path / "matrix.h5ad"
-        self.matrix.write(mtx_file)
+        self._matrix.write(mtx_file)
         celldata_metadata["matrix"] = Path(relpath(mtx_file, path)).as_posix()
 
         # save boundaries
-        try:
-            boundaries = self.boundaries
-        except AttributeError:
-            pass
-        else:
+        if self._boundaries is not None:
+            boundaries = self._boundaries
             if boundaries_zipped:
                 bound_file = path / "boundaries.zarr.zip"
             else:
@@ -654,10 +703,8 @@ class CellData(DeepCopyMixin, GetMixin):
         celldata_metadata["version"] = __version__
 
         # add configurations
-        try:
-            celldata_metadata["config"] = self.config
-        except AttributeError:
-            pass
+        if self._config is not None:
+            celldata_metadata["config"] = self._config
 
         # save metadata
         write_dict_to_json(dictionary=celldata_metadata, file=path / ".celldata")
@@ -674,14 +721,12 @@ class CellData(DeepCopyMixin, GetMixin):
         3. Select only matrix cell IDs which are also in boundaries and filter for them
         '''
         # get cell IDs from matrix
-        matrix_cell_ids_hex = self.matrix.obs_names.astype(str)
+        matrix_cell_ids_hex = self._matrix.obs_names.astype(str)
 
-        try:
-            boundaries = self.boundaries
-        except AttributeError:
+        if self._boundaries is None:
             print('No `boundaries` attribute found in CellData found.')
-            pass
         else:
+            boundaries = self._boundaries
             # retrieve cell_ids of boundaries
             try:
                 # this assumes the new version of data with integers representing hex code
@@ -708,7 +753,7 @@ class CellData(DeepCopyMixin, GetMixin):
 
             for n in boundaries.metadata.keys():
                 # get data
-                bound_data = getattr(boundaries, n)
+                bound_data = boundaries[n]
 
                 if isinstance(bound_data, list):
                     synced_bound_data = []
@@ -731,7 +776,7 @@ class CellData(DeepCopyMixin, GetMixin):
                 else:
                     warnings.warn(f"Unknown data type for boundaries key '{n}'. Skipped synchronization of cell ids.")
                 # add to object
-                setattr(self.boundaries, n, synced_bound_data)
+                self._boundaries[n] = synced_bound_data
 
             print(f"Successfully synchronized.")
 
@@ -744,20 +789,18 @@ class CellData(DeepCopyMixin, GetMixin):
         '''
 
         # move origin again to 0 by subtracting the lower limits from the coordinates
-        cell_coords = self.matrix.obsm['spatial'].copy()
+        cell_coords = self._matrix.obsm['spatial'].copy()
         cell_coords[:, 0] += x
         cell_coords[:, 1] += y
-        self.matrix.obsm['spatial'] = cell_coords
+        self._matrix.obsm['spatial'] = cell_coords
 
-        try:
-            boundaries = self.boundaries
-        except AttributeError:
+        if self._boundaries is None:
             print('No `boundaries` attribute found in CellData found.')
-            pass
         else:
+            boundaries = self._boundaries
             for n in boundaries.metadata.keys():
                 # get dataframe
-                df = getattr(boundaries, n)
+                df = boundaries[n]
 
                 if isinstance(df, pd.DataFrame):
                     # re-center to 0
@@ -765,10 +808,83 @@ class CellData(DeepCopyMixin, GetMixin):
                     df["vertex_y"] += y
 
                     # add to object
-                    setattr(self.boundaries, n, df)
+                    setattr(self._boundaries, n, df)
+
+class MultiCellData(DeepCopyMixin):
+    '''
+    Data object containing multiple CellData objects.
+    '''
+    def __init__(self):
+        self._data = dict()
+        self._key_main = None
+
+    def __repr__(self):
+        if self._key_main is not None:
+            repr = (
+                f"{tf.Bold+'Main CellData: '+tf.ResetAll}"
+                f"{self._key_main}\n"
+                f"{self._data[self._key_main].__repr__()}\n"
+            )
+        for key in self._data.keys():
+            if key != self._key_main:
+                repr += f"{tf.Bold+'Alternative CellData: '+tf.ResetAll}"
+                repr += f"{key}\n"
+                repr += f"{self._data[key].__repr__()}\n"
+        return repr
+    
+    def __getitem__(self, key):
+        if key == "main":
+            return self._data.get(self._key_main)
+        else:
+            return self._data.get(key)
+
+    def __setitem__(self, key: str, item):
+        self._data[key] = item
+
+    @property
+    def is_main(self):
+        return self._is_main
+
+    def add_celldata(self,
+                     cd: CellData,
+                     key: str,
+                     is_main: bool = False):
+        if key in self._data.keys():
+            print(f"Overwriting {key}.")
+        self._data[key] = cd
+        if is_main:
+            self._key_main = key
+
+    def save(self,
+             path: Union[str, os.PathLike, Path],
+             boundaries_zipped: bool = False,
+             boundaries_as_pyramid: bool = True,
+             overwrite: bool = False,
+             ):
+
+        path = Path(path)
+        multicelldata_metadata = {"key_main": self._key_main, "all_keys": list(self._data.keys())}
+        # check if the output file should be overwritten
+        check_overwrite_and_remove_if_true(path, overwrite=overwrite)
+
+        # create directory
+        path.mkdir(parents=True, exist_ok=True)
+        for key in self._data.keys():
+            save_path = path / key
+            self._data[key].save(save_path, boundaries_zipped, boundaries_as_pyramid, overwrite)
 
 
-class ImageData(DeepCopyMixin, GetMixin):
+        # add version to metadata
+        multicelldata_metadata["version"] = __version__
+
+        # save metadata
+        write_dict_to_json(dictionary=multicelldata_metadata, file=path / ".multicelldata")
+
+    def get_all_keys(self):
+        return self._data.keys()
+
+
+class ImageData(DeepCopyMixin):
     '''
     Object to read and load images.
     '''
@@ -782,8 +898,9 @@ class ImageData(DeepCopyMixin, GetMixin):
         # self.path = path
 
         # iterate through files and load them
-        self.names = []
-        self.metadata = {}
+        self._names = []
+        self._metadata = {}
+        self._data = dict()
 
         if img_files is not None:
             # convert arguments to lists
@@ -801,13 +918,24 @@ class ImageData(DeepCopyMixin, GetMixin):
                     )
 
     def __repr__(self):
-        if len(self.metadata) > 0:
-            repr_strings = [f"{tf.Bold}{n}:{tf.ResetAll}\t{metadata['shape']}" for n,metadata in self.metadata.items()]
+        if len(self._metadata) > 0:
+            repr_strings = [f"{tf.Bold}{n}:{tf.ResetAll}\t{metadata['shape']}" for n,metadata in self._metadata.items()]
             s = "\n".join(repr_strings)
         else:
             s = "empty"
         repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
         return repr
+    
+    def __getitem__(self, key):
+        return self._data.get(key)
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    @property
+    def names(self):
+        return self._names
 
     def add_image(
         self,
@@ -818,17 +946,17 @@ class ImageData(DeepCopyMixin, GetMixin):
         ome_meta: Optional[dict] = None,
         overwrite: bool = False
         ):
-        if name in self.names:
+        if name in self._names:
             if not overwrite:
                 print(f"`ImageData` object contains already an image with name '{name}'. Image is not added.")
                 do_addition = False
             else:
                 # remove attribute with current name
-                delattr(self, name)
+                del self._data[name]
 
                 # remove from name list and metadata
-                self.names = [elem for elem in self.names if elem != name]
-                self.metadata.pop(name, None)
+                self._names = [elem for elem in self._names if elem != name]
+                self._metadata.pop(name, None)
 
                 do_addition = True
         else:
@@ -859,40 +987,41 @@ class ImageData(DeepCopyMixin, GetMixin):
                 raise ValueError(f"`image` is neither a dask array nor an existing path.")
 
             # set attribute and add names to object
-            setattr(self, name, img)
-            self.names.append(name)
+            self._data[name] = img
+            self._names.append(name)
 
             # retrieve metadata
             img_shape = img[0].shape if isinstance(img, list) else img.shape
             img_max = img[0].max() if isinstance(img, list) else img.max()
-            img_max = int(img_max)
+            img_max = img_max.compute() if isinstance(img, da.Array) else img_max
+            #img_max = int(img_max)
 
             # save metadata
-            self.metadata[name] = {}
-            self.metadata[name]["filename"] = filename
-            self.metadata[name]["shape"] = img_shape  # store shape
-            self.metadata[name]["axes"] = axes
-            self.metadata[name]["OME"] = ome_meta
+            self._metadata[name] = {}
+            self._metadata[name]["filename"] = filename
+            self._metadata[name]["shape"] = img_shape  # store shape
+            self._metadata[name]["axes"] = axes
+            self._metadata[name]["OME"] = ome_meta
 
             # add universal pixel size to metadata
             try:
-                self.metadata[name]['pixel_size'] = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
+                self._metadata[name]['pixel_size'] = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
             except KeyError:
-                self.metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
+                self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
 
             # check whether the image is RGB or not
             if len(img_shape) == 3:
-                self.metadata[name]["rgb"] = True
+                self._metadata[name]["rgb"] = True
             elif len(img_shape) == 2:
-                self.metadata[name]["rgb"] = False
+                self._metadata[name]["rgb"] = False
             else:
                 raise ValueError(f"Unknown image shape: {img_shape}")
 
             # get image contrast limits
-            if self.metadata[name]["rgb"]:
-                self.metadata[name]["contrast_limits"] = (0, 255)
+            if self._metadata[name]["rgb"]:
+                self._metadata[name]["contrast_limits"] = (0, 255)
             else:
-                self.metadata[name]["contrast_limits"] = (0, img_max)
+                self._metadata[name]["contrast_limits"] = (0, img_max)
 
 
     def load(self,
@@ -902,26 +1031,26 @@ class ImageData(DeepCopyMixin, GetMixin):
         Load images into memory.
         '''
         if which == "all":
-            which = self.img_names
+            which = self._img_names
 
         # make sure which is a list
         which = convert_to_list(which)
         for n in which:
-            img_loaded = getattr(self, n).compute()
-            setattr(self, n, img_loaded)
+            img_loaded = self[n].compute()
+            self._data[n] = img_loaded
 
     def crop(self,
              xlim: Optional[Tuple[int, int]],
              ylim: Optional[Tuple[int, int]]
              ):
         # extract names from metadata
-        names = list(self.metadata.keys())
+        names = list(self._metadata.keys())
         for n in names:
             # extract the image pyramid
-            img_data = getattr(self, n)
+            img_data = self[n]
 
             # extract pixel size
-            pixel_size = self.metadata[n]['pixel_size']
+            pixel_size = self._metadata[n]['pixel_size']
 
             cropped_img_data = crop_dask_array_or_pyramid(
                 data=img_data,
@@ -931,16 +1060,16 @@ class ImageData(DeepCopyMixin, GetMixin):
             )
 
             # save cropping properties in metadata
-            self.metadata[n]["cropping_xlim"] = xlim
-            self.metadata[n]["cropping_ylim"] = ylim
+            self._metadata[n]["cropping_xlim"] = xlim
+            self._metadata[n]["cropping_ylim"] = ylim
 
             try:
-                self.metadata[n]["shape"] = cropped_img_data.shape
+                self._metadata[n]["shape"] = cropped_img_data.shape
             except AttributeError:
-                self.metadata[n]["shape"] = cropped_img_data[0].shape
+                self._metadata[n]["shape"] = cropped_img_data[0].shape
 
             # add cropped pyramid to object
-            setattr(self, n, cropped_img_data)
+            self._data[n] = cropped_img_data
 
     def save(self,
              output_folder: Union[str, os.PathLike, Path],
@@ -976,7 +1105,7 @@ class ImageData(DeepCopyMixin, GetMixin):
         output_folder = Path(output_folder)
 
         if keys_to_save is None:
-            keys_to_save = list(self.metadata.keys())
+            keys_to_save = list(self._metadata.keys())
         else:
             keys_to_save = convert_to_list(keys_to_save)
 
@@ -989,10 +1118,10 @@ class ImageData(DeepCopyMixin, GetMixin):
         if return_savepaths:
             savepaths = {}
 
-        for n, img_metadata in self.metadata.items():
+        for n, img_metadata in self._metadata.items():
             if n in keys_to_save:
                 # extract image
-                img = getattr(self, n)
+                img = self[n]
                 new_img_metadata = img_metadata.copy()
 
                 axes = new_img_metadata['axes']

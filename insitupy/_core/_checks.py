@@ -145,7 +145,7 @@ def _check_assignment(
     data, key, force_assignment, modality: Literal["annotations", "regions"]
 ):
     try:
-        column = data.cells.matrix.obsm[modality].columns
+        column = data.cells["main"].matrix.obsm[modality].columns
     except KeyError:
         do_assignment = True
     else:

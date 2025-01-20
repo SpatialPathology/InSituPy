@@ -35,7 +35,7 @@ if WITH_NAPARI:
         # access viewer from xeniumdata
         viewer = xdata.viewer
 
-        if not hasattr(xdata, "cells"):
+        if xdata.cells is None:
             add_cells_widget = None
             move_to_cell_widget = None
             add_boundaries_widget = None,
@@ -49,14 +49,7 @@ if WITH_NAPARI:
                                         )
             config.init_recent_selections()
 
-            data_names = ["main"]
-            try:
-                alt = xdata.alt
-            except AttributeError:
-                pass
-            else:
-                for k in alt.keys():
-                    data_names.append(k)
+            data_names = xdata.cells.get_all_keys()
 
             @magicgui(
                 call_button=False,
@@ -89,7 +82,7 @@ if WITH_NAPARI:
 
                     if layer_name not in viewer.layers:
                         # get geopandas dataframe with regions
-                        mask = getattr(config.boundaries, key)
+                        mask = config.boundaries[key]
 
                         # get metadata for mask
                         metadata = config.boundaries.metadata
@@ -310,13 +303,17 @@ if WITH_NAPARI:
 
             viewer.layers.selection.events.active.connect(callback_update_legend)
 
-        if not (hasattr(xdata, "annotations") | hasattr(xdata, "regions")):
+        if xdata.annotations is None and xdata.regions is None:
             show_geometries_widget = None
         else:
             # check which geometries are available
-            choices = ["Annotations", "Regions"]
-            choices = [ch for ch in choices if hasattr(xdata, ch.lower())]
-
+            if xdata.annotations is not None:
+                if xdata.regions is not None:
+                    choices = ["Annotations", "Regions"]
+                else:
+                    choices = ["Annotations"]
+            else:
+                choices = ["Regions"]
             # extract geometry object
             geom = getattr(xdata, choices[0].lower())
 
@@ -346,11 +343,11 @@ if WITH_NAPARI:
 
                     if geom_type == "Annotations":
                         # get annotation dataframe
-                        annot_df = getattr(xdata.annotations, key)
+                        annot_df = xdata.annotations[key]
                         all_keys = list(xdata.annotations.metadata.keys())
                     elif geom_type == "Regions":
                         # get regions dataframe
-                        annot_df = getattr(xdata.regions, key)
+                        annot_df = xdata.regions[key]
                         all_keys = list(xdata.regions.metadata.keys())
                     else:
                         TypeError(f"Unknown geometry type: {geom_type}")

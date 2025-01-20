@@ -1,0 +1,121 @@
+{
+    "image-label": {
+        "version": "0.4"
+    },
+    "multiscales": [
+        {
+            "axes": [
+                {
+                    "name": "y",
+                    "type": "space"
+                },
+                {
+                    "name": "x",
+                    "type": "space"
+                }
+            ],
+            "coordinateTransformations": [
+                {
+                    "input": {
+                        "axes": [
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "yx"
+                    },
+                    "output": {
+                        "axes": [
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "global"
+                    },
+                    "type": "identity"
+                }
+            ],
+            "datasets": [
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                1.0,
+                                1.0
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "0"
+                },
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                2.0,
+                                2.000345542501728
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "1"
+                },
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                4.002272727272727,
+                                4.000691085003456
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "2"
+                },
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                8.004545454545454,
+                                8.006915629322268
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "3"
+                },
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                16.009090909090908,
+                                16.03601108033241
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "4"
+                }
+            ],
+            "name": "cell_labels",
+            "version": "0.4"
+        }
+    ],
+    "spatialdata_attrs": {
+        "version": "0.1"
+    }
+}

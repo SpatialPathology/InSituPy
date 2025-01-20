@@ -29,14 +29,14 @@ if WITH_NAPARI:
         if current_data_name == "main":
             # access adata, viewer and metadata from xeniumdata
             global adata
-            adata = xdata.cells.matrix
+            adata = xdata.cells["main"].matrix
             global boundaries
-            boundaries = xdata.cells.boundaries
+            boundaries = xdata.cells["main"].boundaries
             global viewer
             viewer = xdata.viewer
         else:
-            adata = xdata.alt[current_data_name].matrix
-            boundaries = xdata.alt[current_data_name].boundaries
+            adata = xdata.cells[current_data_name].matrix
+            boundaries = xdata.cells[current_data_name].boundaries
 
         # get keys from var_names, obs and obsm
         global genes, observations, value_dict
@@ -76,7 +76,7 @@ if WITH_NAPARI:
         global masks
         masks = []
         for n in boundaries.metadata.keys():
-            b = getattr(boundaries, n)
+            b = boundaries[n]
             if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
                 masks.append(n)
 

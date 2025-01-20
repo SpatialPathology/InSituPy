@@ -1,0 +1,1814 @@
+{
+    "metadata": {
+        ".zgroup": {
+            "zarr_format": 2
+        },
+        "images/.zgroup": {
+            "zarr_format": 2
+        },
+        "images/morphology_focus/.zattrs": {
+            "multiscales": [
+                {
+                    "axes": [
+                        {
+                            "name": "c",
+                            "type": "channel"
+                        },
+                        {
+                            "name": "y",
+                            "type": "space"
+                        },
+                        {
+                            "name": "x",
+                            "type": "space"
+                        }
+                    ],
+                    "coordinateTransformations": [
+                        {
+                            "input": {
+                                "axes": [
+                                    {
+                                        "name": "c",
+                                        "type": "channel"
+                                    },
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "cyx"
+                            },
+                            "output": {
+                                "axes": [
+                                    {
+                                        "name": "c",
+                                        "type": "channel"
+                                    },
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "global"
+                            },
+                            "type": "identity"
+                        }
+                    ],
+                    "datasets": [
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        1.0,
+                                        1.0
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "0"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        2.0,
+                                        2.000345542501728
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "1"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        4.002272727272727,
+                                        4.000691085003456
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "2"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        8.004545454545454,
+                                        8.006915629322268
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "3"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        16.009090909090908,
+                                        16.03601108033241
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "4"
+                        }
+                    ],
+                    "metadata": {
+                        "omero": {
+                            "channels": [
+                                {
+                                    "label": "DAPI"
+                                }
+                            ]
+                        }
+                    },
+                    "name": "/images/morphology_focus",
+                    "version": "0.4"
+                }
+            ],
+            "omero": {
+                "channels": [
+                    {
+                        "label": "DAPI"
+                    }
+                ]
+            },
+            "spatialdata_attrs": {
+                "version": "0.1"
+            }
+        },
+        "images/morphology_focus/.zgroup": {
+            "zarr_format": 2
+        },
+        "images/morphology_focus/0/.zarray": {
+            "chunks": [
+                1,
+                3522,
+                4096
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u2",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                3522,
+                5789
+            ],
+            "zarr_format": 2
+        },
+        "images/morphology_focus/1/.zarray": {
+            "chunks": [
+                1,
+                1761,
+                2894
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u2",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                1761,
+                2894
+            ],
+            "zarr_format": 2
+        },
+        "images/morphology_focus/2/.zarray": {
+            "chunks": [
+                1,
+                880,
+                1447
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u2",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                880,
+                1447
+            ],
+            "zarr_format": 2
+        },
+        "images/morphology_focus/3/.zarray": {
+            "chunks": [
+                1,
+                440,
+                723
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u2",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                440,
+                723
+            ],
+            "zarr_format": 2
+        },
+        "images/morphology_focus/4/.zarray": {
+            "chunks": [
+                1,
+                220,
+                361
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u2",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1,
+                220,
+                361
+            ],
+            "zarr_format": 2
+        },
+        "labels/.zattrs": {
+            "labels": [
+                "nucleus_labels",
+                "cell_labels"
+            ]
+        },
+        "labels/.zgroup": {
+            "zarr_format": 2
+        },
+        "labels/cell_labels/.zattrs": {
+            "image-label": {
+                "version": "0.4"
+            },
+            "multiscales": [
+                {
+                    "axes": [
+                        {
+                            "name": "y",
+                            "type": "space"
+                        },
+                        {
+                            "name": "x",
+                            "type": "space"
+                        }
+                    ],
+                    "coordinateTransformations": [
+                        {
+                            "input": {
+                                "axes": [
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "yx"
+                            },
+                            "output": {
+                                "axes": [
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "global"
+                            },
+                            "type": "identity"
+                        }
+                    ],
+                    "datasets": [
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        1.0
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "0"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        2.0,
+                                        2.000345542501728
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "1"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        4.002272727272727,
+                                        4.000691085003456
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "2"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        8.004545454545454,
+                                        8.006915629322268
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "3"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        16.009090909090908,
+                                        16.03601108033241
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "4"
+                        }
+                    ],
+                    "name": "cell_labels",
+                    "version": "0.4"
+                }
+            ],
+            "spatialdata_attrs": {
+                "version": "0.1"
+            }
+        },
+        "labels/cell_labels/.zgroup": {
+            "zarr_format": 2
+        },
+        "labels/cell_labels/0/.zarray": {
+            "chunks": [
+                3522,
+                4096
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                3522,
+                5789
+            ],
+            "zarr_format": 2
+        },
+        "labels/cell_labels/1/.zarray": {
+            "chunks": [
+                1761,
+                2894
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1761,
+                2894
+            ],
+            "zarr_format": 2
+        },
+        "labels/cell_labels/2/.zarray": {
+            "chunks": [
+                880,
+                1447
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                880,
+                1447
+            ],
+            "zarr_format": 2
+        },
+        "labels/cell_labels/3/.zarray": {
+            "chunks": [
+                440,
+                723
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                440,
+                723
+            ],
+            "zarr_format": 2
+        },
+        "labels/cell_labels/4/.zarray": {
+            "chunks": [
+                220,
+                361
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                220,
+                361
+            ],
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/.zattrs": {
+            "image-label": {
+                "version": "0.4"
+            },
+            "multiscales": [
+                {
+                    "axes": [
+                        {
+                            "name": "y",
+                            "type": "space"
+                        },
+                        {
+                            "name": "x",
+                            "type": "space"
+                        }
+                    ],
+                    "coordinateTransformations": [
+                        {
+                            "input": {
+                                "axes": [
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "yx"
+                            },
+                            "output": {
+                                "axes": [
+                                    {
+                                        "name": "y",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    },
+                                    {
+                                        "name": "x",
+                                        "type": "space",
+                                        "unit": "unit"
+                                    }
+                                ],
+                                "name": "global"
+                            },
+                            "type": "identity"
+                        }
+                    ],
+                    "datasets": [
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        1.0,
+                                        1.0
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "0"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        2.0,
+                                        2.000345542501728
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "1"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        4.002272727272727,
+                                        4.000691085003456
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "2"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        8.004545454545454,
+                                        8.006915629322268
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "3"
+                        },
+                        {
+                            "coordinateTransformations": [
+                                {
+                                    "scale": [
+                                        16.009090909090908,
+                                        16.03601108033241
+                                    ],
+                                    "type": "scale"
+                                }
+                            ],
+                            "path": "4"
+                        }
+                    ],
+                    "name": "nucleus_labels",
+                    "version": "0.4"
+                }
+            ],
+            "spatialdata_attrs": {
+                "version": "0.1"
+            }
+        },
+        "labels/nucleus_labels/.zgroup": {
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/0/.zarray": {
+            "chunks": [
+                3522,
+                4096
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                3522,
+                5789
+            ],
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/1/.zarray": {
+            "chunks": [
+                1761,
+                2894
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                1761,
+                2894
+            ],
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/2/.zarray": {
+            "chunks": [
+                880,
+                1447
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                880,
+                1447
+            ],
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/3/.zarray": {
+            "chunks": [
+                440,
+                723
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                440,
+                723
+            ],
+            "zarr_format": 2
+        },
+        "labels/nucleus_labels/4/.zarray": {
+            "chunks": [
+                220,
+                361
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<u4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                220,
+                361
+            ],
+            "zarr_format": 2
+        },
+        "points/.zgroup": {
+            "zarr_format": 2
+        },
+        "points/transcripts/.zattrs": {
+            "axes": [
+                "x",
+                "y",
+                "z"
+            ],
+            "coordinateTransformations": [
+                {
+                    "input": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "z",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "xyz"
+                    },
+                    "output": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "z",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "global"
+                    },
+                    "scale": [
+                        4.705882352941177,
+                        4.705882352941177,
+                        1.0
+                    ],
+                    "type": "scale"
+                }
+            ],
+            "encoding-type": "ngff:points",
+            "spatialdata_attrs": {
+                "feature_key": "feature_name",
+                "instance_key": "cell_id",
+                "version": "0.1"
+            }
+        },
+        "points/transcripts/.zgroup": {
+            "zarr_format": 2
+        },
+        "shapes/.zgroup": {
+            "zarr_format": 2
+        },
+        "shapes/cell_boundaries/.zattrs": {
+            "axes": [
+                "x",
+                "y"
+            ],
+            "coordinateTransformations": [
+                {
+                    "input": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "xy"
+                    },
+                    "output": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "global"
+                    },
+                    "scale": [
+                        4.705882352941177,
+                        4.705882352941177
+                    ],
+                    "type": "scale"
+                }
+            ],
+            "encoding-type": "ngff:shapes",
+            "spatialdata_attrs": {
+                "version": "0.2"
+            }
+        },
+        "shapes/cell_boundaries/.zgroup": {
+            "zarr_format": 2
+        },
+        "shapes/cell_circles/.zattrs": {
+            "axes": [
+                "x",
+                "y"
+            ],
+            "coordinateTransformations": [
+                {
+                    "input": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "xy"
+                    },
+                    "output": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "global"
+                    },
+                    "scale": [
+                        4.705882352941177,
+                        4.705882352941177
+                    ],
+                    "type": "scale"
+                }
+            ],
+            "encoding-type": "ngff:shapes",
+            "spatialdata_attrs": {
+                "version": "0.2"
+            }
+        },
+        "shapes/cell_circles/.zgroup": {
+            "zarr_format": 2
+        },
+        "shapes/nucleus_boundaries/.zattrs": {
+            "axes": [
+                "x",
+                "y"
+            ],
+            "coordinateTransformations": [
+                {
+                    "input": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "xy"
+                    },
+                    "output": {
+                        "axes": [
+                            {
+                                "name": "x",
+                                "type": "space",
+                                "unit": "unit"
+                            },
+                            {
+                                "name": "y",
+                                "type": "space",
+                                "unit": "unit"
+                            }
+                        ],
+                        "name": "global"
+                    },
+                    "scale": [
+                        4.705882352941177,
+                        4.705882352941177
+                    ],
+                    "type": "scale"
+                }
+            ],
+            "encoding-type": "ngff:shapes",
+            "spatialdata_attrs": {
+                "version": "0.2"
+            }
+        },
+        "shapes/nucleus_boundaries/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/.zattrs": {
+            "encoding-type": "anndata",
+            "encoding-version": "0.1.0",
+            "instance_key": "cell_id",
+            "region": "cell_circles",
+            "region_key": "region",
+            "spatialdata-encoding-type": "ngff:regions_table",
+            "version": "0.1"
+        },
+        "tables/table/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/X/.zattrs": {
+            "encoding-type": "csr_matrix",
+            "encoding-version": "0.1.0",
+            "shape": [
+                23,
+                5006
+            ]
+        },
+        "tables/table/X/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/X/data/.zarray": {
+            "chunks": [
+                29
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f4",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                29
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/X/indices/.zarray": {
+            "chunks": [
+                29
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                29
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/X/indptr/.zarray": {
+            "chunks": [
+                24
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i4",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                24
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/layers/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/layers/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/obs/.zattrs": {
+            "_index": "_index",
+            "column-order": [
+                "cell_id",
+                "transcript_counts",
+                "control_probe_counts",
+                "genomic_control_counts",
+                "control_codeword_counts",
+                "unassigned_codeword_counts",
+                "deprecated_codeword_counts",
+                "total_counts",
+                "cell_area",
+                "nucleus_area",
+                "nucleus_count",
+                "segmentation_method",
+                "region",
+                "z_level",
+                "cell_labels"
+            ],
+            "encoding-type": "dataframe",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/obs/_index/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/_index/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/cell_area/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f8",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/cell_area/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/cell_id/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/cell_id/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/cell_labels/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/cell_labels/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/control_codeword_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/control_codeword_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/control_probe_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/control_probe_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/deprecated_codeword_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/deprecated_codeword_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/genomic_control_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/genomic_control_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/nucleus_area/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f8",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/nucleus_area/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/nucleus_count/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f8",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/nucleus_count/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/region/.zattrs": {
+            "encoding-type": "categorical",
+            "encoding-version": "0.2.0",
+            "ordered": false
+        },
+        "tables/table/obs/region/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/obs/region/categories/.zarray": {
+            "chunks": [
+                1
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                1
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/region/categories/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/region/codes/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|i1",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/region/codes/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/segmentation_method/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/segmentation_method/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/total_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/total_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/transcript_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/transcript_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/unassigned_codeword_counts/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<i8",
+            "fill_value": 0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/unassigned_codeword_counts/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obs/z_level/.zarray": {
+            "chunks": [
+                23
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f8",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obs/z_level/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obsm/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/obsm/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/obsm/spatial/.zarray": {
+            "chunks": [
+                23,
+                2
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "<f8",
+            "fill_value": 0.0,
+            "filters": null,
+            "order": "C",
+            "shape": [
+                23,
+                2
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/obsm/spatial/.zattrs": {
+            "encoding-type": "array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/obsp/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/obsp/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/uns/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/uns/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/uns/spatialdata_attrs/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/uns/spatialdata_attrs/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/uns/spatialdata_attrs/instance_key/.zarray": {
+            "chunks": [],
+            "compressor": null,
+            "dimension_separator": "/",
+            "dtype": "<U7",
+            "fill_value": "",
+            "filters": null,
+            "order": "C",
+            "shape": [],
+            "zarr_format": 2
+        },
+        "tables/table/uns/spatialdata_attrs/instance_key/.zattrs": {
+            "encoding-type": "string",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/uns/spatialdata_attrs/region/.zarray": {
+            "chunks": [],
+            "compressor": null,
+            "dimension_separator": "/",
+            "dtype": "<U12",
+            "fill_value": "",
+            "filters": null,
+            "order": "C",
+            "shape": [],
+            "zarr_format": 2
+        },
+        "tables/table/uns/spatialdata_attrs/region/.zattrs": {
+            "encoding-type": "string",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/uns/spatialdata_attrs/region_key/.zarray": {
+            "chunks": [],
+            "compressor": null,
+            "dimension_separator": "/",
+            "dtype": "<U6",
+            "fill_value": "",
+            "filters": null,
+            "order": "C",
+            "shape": [],
+            "zarr_format": 2
+        },
+        "tables/table/uns/spatialdata_attrs/region_key/.zattrs": {
+            "encoding-type": "string",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/var/.zattrs": {
+            "_index": "_index",
+            "column-order": [
+                "gene_ids",
+                "feature_types",
+                "genome"
+            ],
+            "encoding-type": "dataframe",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/var/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/var/_index/.zarray": {
+            "chunks": [
+                5006
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                5006
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/var/_index/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/var/feature_types/.zarray": {
+            "chunks": [
+                5006
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                5006
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/var/feature_types/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/var/gene_ids/.zarray": {
+            "chunks": [
+                5006
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                5006
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/var/gene_ids/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/var/genome/.zarray": {
+            "chunks": [
+                5006
+            ],
+            "compressor": {
+                "blocksize": 0,
+                "clevel": 5,
+                "cname": "lz4",
+                "id": "blosc",
+                "shuffle": 1
+            },
+            "dimension_separator": "/",
+            "dtype": "|O",
+            "fill_value": 0,
+            "filters": [
+                {
+                    "id": "vlen-utf8"
+                }
+            ],
+            "order": "C",
+            "shape": [
+                5006
+            ],
+            "zarr_format": 2
+        },
+        "tables/table/var/genome/.zattrs": {
+            "encoding-type": "string-array",
+            "encoding-version": "0.2.0"
+        },
+        "tables/table/varm/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/varm/.zgroup": {
+            "zarr_format": 2
+        },
+        "tables/table/varp/.zattrs": {
+            "encoding-type": "dict",
+            "encoding-version": "0.1.0"
+        },
+        "tables/table/varp/.zgroup": {
+            "zarr_format": 2
+        }
+    },
+    "zarr_consolidated_format": 1
+}

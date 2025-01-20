@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "insitupy"
-version = "0.3.0"
+version = "0.3.3"
 description = "Package introducing the InSituPy framework to comprehensively analyze In Situ Sequencing data."
 license = "BSD-3-Clause"
 authors = ["jwrth <j.wirth@tum.de>"]

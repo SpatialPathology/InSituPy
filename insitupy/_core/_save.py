@@ -64,38 +64,6 @@ def _save_cells(cells,
         # move new paths to data
         metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
 
-def _save_alt(attr,
-              path,
-              metadata,
-              boundaries_zipped=False
-              ):
-    # create path for cells
-    alt_path = path / "alt"
-
-    for k, celldata in attr.items():
-        uid = _generate_time_based_uid()
-        cells_path = alt_path / k / uid
-        # save cells to path and write info to metadata
-        celldata.save(cells_path, boundaries_zipped=boundaries_zipped)
-
-        if metadata is not None:
-            # setup the alt section in metadata
-            if "alt" not in metadata["data"]:
-                metadata["data"]["alt"] = {}
-            if "alt" not in metadata["history"]:
-                metadata["history"]["alt"] = {}
-            if k not in metadata["history"]["alt"]:
-                metadata["history"]["alt"][k] = []
-
-            try:
-                # move old celldata paths to history
-                old_path = metadata["data"]["alt"][k]
-            except KeyError:
-                pass
-            else:
-                metadata["history"]["alt"][k].append(old_path)
-
-            metadata["data"]["alt"][k] = Path(relpath(cells_path, path)).as_posix()
 
 def _save_transcripts(transcripts, path, metadata):
     # create file path

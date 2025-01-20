@@ -1,0 +1,4 @@
+region_name,therapy,organ,test,region_key
+Region1,drugC,liver,negative,key1
+Region3,drugE,spleen,positive,key2
+Region2,drugD,lung,test,key3
