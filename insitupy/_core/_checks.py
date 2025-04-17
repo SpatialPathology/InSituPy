@@ -164,10 +164,10 @@ def _check_assignment(
     if do_assignment or force_assignment:
         if modality == "annotations":
             # assign annotations
-            data.assign_annotations(keys=key)
+            data.assign_annotations(keys=key, cells_layers=cells_layer)
         elif modality == "regions":
             # assign regions
-            data.assign_regions(keys=key)
+            data.assign_regions(keys=key, cells_layers=cells_layer)
     else:
         if verbose:
             print(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")
