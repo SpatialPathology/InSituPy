@@ -21,6 +21,7 @@ from parse import *
 from pyarrow import ArrowInvalid
 from scipy.sparse import issparse
 from shapely import Point
+from tqdm import tqdm
 
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
@@ -32,7 +33,7 @@ from insitupy.images.utils import _get_contrast_limits
 from insitupy.io.files import read_json, write_dict_to_json
 from insitupy.io.io import (read_baysor_cells, read_baysor_transcripts,
                             read_multicelldata, read_shapesdata)
-from insitupy.plotting.plots import plot_colorlegend
+from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
 from .._constants import CACHE, ISPY_METADATA_FILE, MODALITIES
@@ -429,9 +430,11 @@ class InSituData:
         x = celldata.matrix.obsm["spatial"][:, 0]
         y = celldata.matrix.obsm["spatial"][:, 1]
         cells = gpd.points_from_xy(x, y)
+        cells = gpd.GeoSeries(cells)
 
         # iterate through annotation keys
         for key in keys:
+            print(key)
             print(f"Assigning key '{key}'...")
             # extract pandas dataframe of current key
             geom_df = geom_attr[key]
@@ -451,10 +454,11 @@ class InSituData:
             data = {}
 
             # iterate through names
-            for n in geom_names:
+            for n in tqdm(geom_names):
                 polygons = geom_df[geom_df["name"] == n]["geometry"].tolist()
 
-                in_poly = [poly.contains(cells) for poly in polygons]
+                #in_poly = [poly.contains(cells) for poly in polygons]
+                in_poly = [fast_query_points_within_polygon(poly, cells) for poly in polygons]
 
                 # check if points were in any of the polygons
                 in_poly_res = np.array(in_poly).any(axis=0)
@@ -511,31 +515,44 @@ class InSituData:
     def assign_annotations(
         self,
         keys: Union[str, Literal["all"]] = "all",
+        cells_layers: Optional[Union[List[str], str]] = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
-         for key in self._cells.get_all_keys():
+        if cells_layers is None:
+            layers_list = self._cells.get_all_keys()
+        else:
+            layers_list = convert_to_list(cells_layers)
+
+        for l in layers_list:
+            print(l)
             self.assign_geometries(
                 geometry_type="annotations",
                 keys=keys,
                 add_masks=add_masks,
                 overwrite=overwrite,
-                cells_layer=key
+                cells_layer=l
             )
 
     def assign_regions(
         self,
         keys: Union[str, Literal["all"]] = "all",
+        cells_layers: Optional[Union[List[str], str]] = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
-        for key in self._cells.get_all_keys():
+        if cells_layers is None:
+            layers_list = self._cells.get_all_keys()
+        else:
+            layers_list = convert_to_list(cells_layers)
+
+        for l in layers_list:
             self.assign_geometries(
                 geometry_type="regions",
                 keys=keys,
                 add_masks=add_masks,
                 overwrite=overwrite,
-                cells_layer=key
+                cells_layer=l
             )
 
     def copy(self, keep_path: bool = False):
@@ -1164,6 +1181,7 @@ class InSituData:
         from_canvas: bool = False,
         max_per_row: int = 10
         ):
+        from insitupy.plotting.plots import plot_colorlegend
 
         if from_canvas:
             # Check if static_canvas exists
