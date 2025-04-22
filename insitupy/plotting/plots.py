@@ -1,20 +1,20 @@
 import os
 import textwrap
-import warnings
 from pathlib import Path
 from typing import Literal, Optional, Union
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.lines import Line2D
 from napari.viewer import Viewer
 
 import insitupy._core._config as _config
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
-from insitupy._core._checks import _check_assignment
+from insitupy._core._checks import _check_assignment, _is_experiment
+from insitupy._core._utils import _get_cell_layer
+from insitupy._core.insitudata import InSituData
+from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
-from insitupy.plotting._colors import (_add_colorlegend_to_axis, _data_to_rgba,
-                                       create_cmap_mapping)
+from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import get_nrows_maxcols
 
 
@@ -69,12 +69,11 @@ def plot_colorlegend(
     save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
     plt.show()
 
-
 def plot_cellular_composition(
-    data,
+    data: Union[InSituData, InSituExperiment],
     cell_type_col: str,
-    key: str,
     cells_layer: Optional[str] = None,
+    key: Optional[str] = None,
     modality: Literal["regions", "annotations"] = "regions",
     plot_type: Literal["pie", "bar", "barh"] = "barh",
     force_assignment: bool = False,
@@ -86,7 +85,6 @@ def plot_cellular_composition(
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
-    layer: str = "main"
     ):
 
     """
@@ -119,7 +117,7 @@ def plot_cellular_composition(
         ValueError: If the specified key or modality is not found in the data.
 
     Example:
-        >>> compositions = plot_cell_composition(data, cell_type_col="cell_type", key="region_1", plot_type="bar", return_data=True)
+        >>> compositions = plot_cellular_composition(data, cell_type_col="cell_type", key="region_1", plot_type="bar", return_data=True)
         >>> print(compositions)
     """
     if adjust_labels:
@@ -128,31 +126,54 @@ def plot_cellular_composition(
         except ImportError:
             raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
 
-    # check whether the cells were already assigned to the requested annotation
-    _check_assignment(data=data, cells_layer=cells_layer, key=key, force_assignment=force_assignment, modality=modality)
+    # check data
+    is_experiment = _is_experiment(data)
+    if is_experiment:
+        exp = data
+    else:
+        exp = InSituExperiment()
+        exp.add(data, metadata={"sample_id": data.sample_id})
 
-    # retrieve data
-    try:
-        adata = data.cells[layer].matrix
-    except:
-        raise ValueError(f"No {layer} layers in InSituData.cells")
-    assignment_series = adata.obsm[modality][key]
-    cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+    # retrieve cell type compositions
+    compositions_dict = {}
+    for m, d in exp.iterdata():
+        celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer, verbose=True)
+        adata = celldata.matrix
 
-    # calculate compositions
-    compositions = {}
-    for cat in cats:
-        idx = assignment_series[assignment_series == cat].index
-        compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=True) * 100 # calculate percentage
-    compositions = pd.DataFrame(compositions)
+        if key is not None:
+            # check whether the cells were already assigned to the requested annotation
+            _check_assignment(data=d, cells_layer=cells_layer, key=key, force_assignment=force_assignment, modality=modality)
+
+            assignment_series = adata.obsm[modality][key]
+            cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+
+            # calculate compositions
+            compositions = {}
+            for cat in cats:
+                idx = assignment_series[assignment_series == cat].index
+                compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=True) * 100 # calculate percentage
+            compositions = pd.DataFrame(compositions)
+        else:
+            compositions = pd.DataFrame(
+                {
+                    "total": adata.obs[cell_type_col].value_counts(normalize=True) * 100
+                    }
+                )
+
+        # collect data
+        compositions_dict[m["sample_id"]] = compositions
+
+    # concatenate results
+    compositions_df = pd.concat(compositions_dict, axis=1)
 
     # Define a function to display percentages above the threshold
-    def autopct_func(pct):
+    def _autopct_func(pct):
         return ('%1.1f%%' % pct) if pct > label_threshold else ''
 
+    n_cats = compositions.shape[1]
     if plot_type == "pie":
         # Plot pie charts for each area
-        n_plots, nrows, ncols = get_nrows_maxcols(len(cats), max_cols)
+        n_plots, nrows, ncols = get_nrows_maxcols(n_cats, max_cols)
         fig, axs = plt.subplots(nrows, ncols, figsize=(6*ncols,6*nrows))
 
         if n_plots > 1:
@@ -163,7 +184,7 @@ def plot_cellular_composition(
         for i, area in enumerate(compositions.columns):
             if show_labels:
                 wedges, texts, autotexts = axs[i].pie(compositions[area],
-                                                    autopct=autopct_func, pctdistance=1.15,
+                                                    autopct=_autopct_func, pctdistance=1.15,
                                                     colors=DEFAULT_CATEGORICAL_CMAP.colors
                                                     )
             else:
@@ -184,13 +205,13 @@ def plot_cellular_composition(
     elif plot_type in ["bar", "barh"]:
         # Plot a single stacked bar plot
         if plot_type == "bar":
-            fig_width = 1*len(cats)
+            fig_width = 1*n_cats
             fig_height = 6
             ylabel = "%"
             xlabel = modality
         else:
             fig_width = 6
-            fig_height = 1*len(cats)
+            fig_height = 1*n_cats
             ylabel = modality
             xlabel = "%"
         compositions.T.plot(kind=plot_type, stacked=True, figsize=(fig_width, fig_height),
@@ -203,9 +224,6 @@ def plot_cellular_composition(
         plt.legend(title='Cell Types', bbox_to_anchor=(1.05, 1), loc='upper left')
 
     save_and_show_figure(savepath=savepath, fig=plt.gcf(), save_only=save_only, dpi_save=dpi_save, tight=False)
-
-    plt.tight_layout()
-    plt.show()
 
     if return_data:
         return compositions

@@ -434,7 +434,6 @@ class InSituData:
 
         # iterate through annotation keys
         for key in keys:
-            print(key)
             print(f"Assigning key '{key}'...")
             # extract pandas dataframe of current key
             geom_df = geom_attr[key]
@@ -525,7 +524,6 @@ class InSituData:
             layers_list = convert_to_list(cells_layers)
 
         for l in layers_list:
-            print(l)
             self.assign_geometries(
                 geometry_type="annotations",
                 keys=keys,

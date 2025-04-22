@@ -15,7 +15,6 @@ from matplotlib.figure import Figure
 from tqdm import tqdm
 
 import insitupy
-from insitupy import InSituData
 from insitupy._constants import LOAD_FUNCS, MODALITIES, MODALITIES_ABBR
 from insitupy._core._checks import _all_obs_names_unique, is_integer_counts
 from insitupy._core._utils import _get_cell_layer
@@ -24,7 +23,6 @@ from insitupy._core.readers import read_xenium
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy.io.files import check_overwrite_and_remove_if_true
 from insitupy.io.plots import save_and_show_figure
-from insitupy.tools.dge import differential_gene_expression
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 from insitupy.utils.utils import textformat as tf
@@ -239,7 +237,7 @@ class InSituExperiment:
             warnings.warn("Observation names are not unique across all datasets.")
 
     def add(self,
-            data: Union[str, os.PathLike, Path, insitupy.InSituData],
+            data: Union[str, os.PathLike, Path, InSituData],
             mode: Literal["insitupy", "xenium"] = "insitupy",
             metadata: Optional[dict] = None
             ):
@@ -264,7 +262,8 @@ class InSituExperiment:
             else:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
-        assert isinstance(dataset, InSituData), "Loaded dataset is not an InSituData object."
+        from insitupy._core.insitudata import InSituData
+        assert dataset.__class__ is InSituData, "Loaded dataset is not an InSituData object."
 
         # # set a unique ID
         # dataset._set_uid()
@@ -437,6 +436,7 @@ class InSituExperiment:
                     method='wilcoxon'
                 )
         """
+        from insitupy.tools.dge import differential_gene_expression
 
         # get data and extract information about experiment
         target = self.data[target_id]
@@ -830,7 +830,7 @@ class InSituExperiment:
 
     @classmethod
     def from_regions(cls,
-                    data: insitupy.InSituData,
+                    data: InSituData,
                     region_key: str,
                     region_names: Optional[Union[List[str], str]] = None
                     ):

@@ -1,26 +1,23 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
+#from __future__ import annotations  # this prevents circular imports
 
 import gc
 import math
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
-import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
-from anndata import AnnData
 from matplotlib import colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._core._utils import _get_cell_layer
+from insitupy._core.insitudata import InSituData
+from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting._colors import (_add_colorlegend_to_axis,
                                        create_cmap_mapping)
 from insitupy.plotting._objects import (_ConfigSpatialPlot,
                                         _extract_color_values)
-from insitupy.utils._adata import _extract_groups
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -30,7 +27,7 @@ class MultiSpatialPlot:
     Class to render scatter plots of single-cell spatial transcriptomics data.
     '''
     def __init__(self,
-                 data,
+                 data: Union[InSituData, InSituExperiment],
                  keys: Union[str, List[str]],
                  cells_layer: Optional[str] = None,
                  data_ids: Optional[List[int]] = None,
@@ -454,7 +451,7 @@ class MultiSpatialPlot:
                     clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
 def plot_spatial(
-    data,
+    data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
     cells_layer: Optional[str] = None,
     data_ids: Optional[List[int]] = None,
