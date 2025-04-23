@@ -231,7 +231,7 @@ class InSituData:
             if self._images is not None:
                 images_repr = self._images.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+tf.Blue+tf.Bold} images{tf.ResetAll}\n{tf.SPACER}   " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._cells is not None:
@@ -250,13 +250,13 @@ class InSituData:
             if self._annotations is not None:
                 annot_repr = self._annotations.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+tf.Cyan+tf.Bold} annotations{tf.ResetAll}\n{tf.SPACER}   " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._regions is not None:
                 region_repr = self._regions.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+tf.Yellow+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
         return repr
 
@@ -1773,6 +1773,9 @@ class InSituData:
                 func(verbose=verbose)
         else:
             print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
+
+    def get_modality(self, modality: str):
+        return getattr(self, modality)
 
     def get_loaded_modalities(self):
         loaded_modalities = [m for m in MODALITIES if getattr(self, m) is not None]

@@ -45,11 +45,11 @@ class ShapesData(DeepCopyMixin):
                  polygons_only: bool = False,
                  forbidden_names: Optional[List[str]] = None,
                  shape_name: Optional[str] = None,
-                 repr_color = tf.Cyan
+                 #repr_color = tf.Cyan
                  ) -> None:
         # self._default_assert_uniqueness = False
         # self._default_polygons_only = False
-        self._repr_color = repr_color
+        #self._repr_color = repr_color
         # self._default_forbidden_names = None
 
         self._shape_name = shape_name if shape_name is not None else "shapes"
@@ -120,9 +120,9 @@ class ShapesData(DeepCopyMixin):
             s = "\n".join(repr_strings)
         else:
             s = ""
-        repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
-        return repr
 
+        # repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
+        return s
 
     def __getitem__(self, key):
         return self._data.get(key)
@@ -411,7 +411,7 @@ class AnnotationsData(ShapesData):
             polygons_only=False,
             forbidden_names=FORBIDDEN_ANNOTATION_NAMES,
             shape_name="annotations",
-            repr_color=tf.Cyan
+            #repr_color=tf.Cyan
             )
 
 class RegionsData(ShapesData):
@@ -435,7 +435,7 @@ class RegionsData(ShapesData):
             polygons_only=True,
             forbidden_names=None,
             shape_name="regions",
-            repr_color=tf.Yellow
+            #repr_color=tf.Yellow
             )
 
 class BoundariesData(DeepCopyMixin):
@@ -1195,8 +1195,8 @@ class ImageData(DeepCopyMixin):
             s = "\n".join(repr_strings)
         else:
             s = "empty"
-        repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
-        return repr
+        #repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
+        return s
 
     def __getitem__(self, key):
         return self._data.get(key)
