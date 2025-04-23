@@ -5,6 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from insitupy.palettes import CustomPalettes
+from insitupy.utils.utils import textformat as tf
 
 # make sure that images do not exceed limits in c++ (required for cv2::remap function in cv2::warpAffine)
 # see also https://www.geeksforgeeks.org/climits-limits-h-cc/
@@ -24,6 +25,13 @@ LOAD_FUNCS = [
     'load_regions',
     'load_transcripts'
     ]
+MODALITIES_COLOR_DICT = {
+    "images": tf.Blue,
+    "cells": tf.Green,
+    "transcripts": tf.Purple,
+    "annotations": tf.Cyan,
+    "regions": tf.Yellow
+}
 
 # naming
 ISPY_METADATA_FILE = ".ispy"

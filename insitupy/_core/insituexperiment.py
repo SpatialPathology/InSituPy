@@ -236,6 +236,14 @@ class InSituExperiment:
         if not all_obs.index.is_unique:
             warnings.warn("Observation names are not unique across all datasets.")
 
+    def show_modality(self, modality, uid_column: str = "sample_id"):
+        repr_string = ""
+        for meta, data in self.iterdata():
+            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
+            repr_string += f"{tf.SPACER}" + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+
+        print(repr_string)
+
     def add(self,
             data: Union[str, os.PathLike, Path, InSituData],
             mode: Literal["insitupy", "xenium"] = "insitupy",
