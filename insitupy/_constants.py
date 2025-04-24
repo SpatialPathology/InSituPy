@@ -4,8 +4,8 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 
+from insitupy._textformat import textformat as tf
 from insitupy.palettes import CustomPalettes
-from insitupy.utils.utils import textformat as tf
 
 # make sure that images do not exceed limits in c++ (required for cv2::remap function in cv2::warpAffine)
 # see also https://www.geeksforgeeks.org/climits-limits-h-cc/

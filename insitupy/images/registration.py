@@ -21,8 +21,8 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    deconvolve_he, fit_image_to_size_limit,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
+from insitupy._textformat import textformat as tf
 from insitupy.utils.utils import convert_to_list
-from insitupy.utils.utils import textformat as tf
 
 from .._constants import SHRT_MAX
 from .._exceptions import NotEnoughFeatureMatchesError

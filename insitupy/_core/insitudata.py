@@ -37,6 +37,7 @@ from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError)
+from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
@@ -47,7 +48,6 @@ from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import (_crop_transcripts,
                                   convert_napari_shape_to_polygon_or_line,
                                   convert_to_list)
-from insitupy.utils.utils import textformat as tf
 
 # optional packages that are not always installed
 if WITH_NAPARI:
@@ -229,32 +229,32 @@ class InSituData:
             if self._images is not None:
                 images_repr = self._images.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT["images"]+tf.Bold} images{tf.ResetAll}\n{tf.SPACER}   " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['images']+tf.Bold} images{tf.ResetAll}\n{tf.SPACER}   " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._cells is not None:
                 cells_repr = self._cells.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT["cells"]+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._transcripts is not None:
                 trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
 
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT["transcripts"]+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
                 )
 
             if self._annotations is not None:
                 annot_repr = self._annotations.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT["annotations"]+tf.Bold} annotations{tf.ResetAll}\n{tf.SPACER}   " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['annotations']+tf.Bold} annotations{tf.ResetAll}\n{tf.SPACER}   " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._regions is not None:
                 region_repr = self._regions.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT["regions"]+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['regions']+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
         return repr
 

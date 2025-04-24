@@ -21,11 +21,11 @@ from insitupy._core._utils import _get_cell_layer
 from insitupy._core.insitudata import InSituData
 from insitupy._core.readers import read_xenium
 from insitupy._exceptions import ModalityNotFoundError
+from insitupy._textformat import textformat as tf
 from insitupy.io.files import check_overwrite_and_remove_if_true
 from insitupy.io.plots import save_and_show_figure
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
-from insitupy.utils.utils import textformat as tf
 
 
 class InSituExperiment:
@@ -236,13 +236,25 @@ class InSituExperiment:
         if not all_obs.index.is_unique:
             warnings.warn("Observation names are not unique across all datasets.")
 
-    def show_modality(self, modality, uid_column: str = "sample_id"):
-        repr_string = ""
-        for meta, data in self.iterdata():
-            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
-            repr_string += f"{tf.SPACER}" + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+    @property
+    def cells(self):
+        self.show_modality("cells")
 
-        print(repr_string)
+    @property
+    def images(self):
+        self.show_modality("images")
+
+    @property
+    def transcripts(self):
+        self.show_modality("transcripts")
+
+    @property
+    def annotations(self):
+        self.show_modality("annotations")
+
+    @property
+    def regions(self):
+        self.show_modality("regions")
 
     def add(self,
             data: Union[str, os.PathLike, Path, InSituData],
@@ -940,3 +952,11 @@ class InSituExperiment:
         dataset.show()
         if return_viewer:
             return dataset.viewer
+
+    def show_modality(self, modality, uid_column: str = "sample_id"):
+        repr_string = ""
+        for meta, data in self.iterdata():
+            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
+            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+
+        print(repr_string)

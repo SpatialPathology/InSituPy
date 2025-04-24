@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._core._checks import check_integer_counts
-from insitupy.utils.utils import textformat as tf
+from insitupy._textformat import textformat as tf
 
 
 def normalize_and_transform_anndata(
