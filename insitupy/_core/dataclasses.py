@@ -19,6 +19,7 @@ from insitupy import __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
+from insitupy._textformat import textformat as tf
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
@@ -29,7 +30,6 @@ from insitupy.io.files import (check_overwrite_and_remove_if_true,
                                write_dict_to_json)
 from insitupy.io.geo import parse_geopandas, write_qupath_geojson
 from insitupy.utils.utils import convert_to_list, decode_robust_series
-from insitupy.utils.utils import textformat as tf
 
 
 class ShapesData(DeepCopyMixin):
@@ -201,92 +201,93 @@ class ShapesData(DeepCopyMixin):
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
 
-        if "name" not in new_df.columns:
-            new_df["name"] = ["None"] * len(new_df)
+        if new_df is not None:
+            if "name" not in new_df.columns:
+                new_df["name"] = ["None"] * len(new_df)
 
-        if self._forbidden_names is not None:
-            try:
-                new_names = new_df["name"].tolist()
-            except KeyError:
-                pass
+            if self._forbidden_names is not None:
+                try:
+                    new_names = new_df["name"].tolist()
+                except KeyError:
+                    pass
+                else:
+                    if np.any([elem in new_names for elem in self._forbidden_names]):
+                        raise ValueError(f"One of the forbidden names for annotations ({self._forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
+
+            # convert geometries into unit (e.g. µm) values
+            new_df["geometry"] = new_df["geometry"].scale(xfact=scale_factor, yfact=scale_factor, origin=(0,0))
+
+            # determine the type of layer that needs to be used in napari later
+            layer_types = []
+            for geom in new_df["geometry"]:
+                if isinstance(geom, Point) or isinstance(geom, MultiPoint):
+                    layer_types.append("Points")
+                else:
+                    layer_types.append("Shapes")
+            new_df["layer_type"] = layer_types
+
+            # # convert pixel coordinates to metric units
+            # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
+
+            if key not in self._data.keys():
+                # if key does not exist yet, the new df is the whole annotation dataframe
+                annot_df = new_df
+
+                # collect additional variables for reporting
+                new_geometries_added = True # dataframe will be added later
+                existing_str = ""
+                old_n = 0
+                new_n = len(annot_df)
             else:
-                if np.any([elem in new_names for elem in self._forbidden_names]):
-                    raise ValueError(f"One of the forbidden names for annotations ({self._forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
+                # concatenate old and new annoation dataframe
+                annot_df = self[key]
+                old_n = len(annot_df)
+                annot_df = pd.concat([annot_df, new_df], ignore_index=False)
 
-        # convert geometries into unit (e.g. µm) values
-        new_df["geometry"] = new_df["geometry"].scale(xfact=scale_factor, yfact=scale_factor, origin=(0,0))
+                # remove all duplicated shapes - leaving only the newly added
+                annot_df = annot_df[~annot_df.index.duplicated()]
+                new_n = len(annot_df)
 
-        # determine the type of layer that needs to be used in napari later
-        layer_types = []
-        for geom in new_df["geometry"]:
-            if isinstance(geom, Point) or isinstance(geom, MultiPoint):
-                layer_types.append("Points")
-            else:
-                layer_types.append("Shapes")
-        new_df["layer_type"] = layer_types
+                # collect additional variables for reporting
+                new_geometries_added = new_n > old_n
+                existing_str = "existing "
 
-        # # convert pixel coordinates to metric units
-        # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
+            if new_geometries_added:
+                add = True
+                if self._assert_uniqueness:
+                    # check if the shapes data for this key is unique (same number of names than indices)
+                    is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
 
-        if key not in self._data.keys():
-            # if key does not exist yet, the new df is the whole annotation dataframe
-            annot_df = new_df
+                    if not is_unique:
+                        add = False
 
-            # collect additional variables for reporting
-            new_geometries_added = True # dataframe will be added later
-            existing_str = ""
-            old_n = 0
-            new_n = len(annot_df)
-        else:
-            # concatenate old and new annoation dataframe
-            annot_df = self[key]
-            old_n = len(annot_df)
-            annot_df = pd.concat([annot_df, new_df], ignore_index=False)
+                if self._polygons_only:
+                    # check if any of the shapes are not shapely Polygons
+                    is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
+                    if np.any(is_not_polygon):
+                        annot_df = annot_df.loc[is_not_polygon]
+                        warnings.warn(
+                            f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
+                            stacklevel=2
+                            )
 
-            # remove all duplicated shapes - leaving only the newly added
-            annot_df = annot_df[~annot_df.index.duplicated()]
-            new_n = len(annot_df)
-
-            # collect additional variables for reporting
-            new_geometries_added = new_n > old_n
-            existing_str = "existing "
-
-        if new_geometries_added:
-            add = True
-            if self._assert_uniqueness:
-                # check if the shapes data for this key is unique (same number of names than indices)
-                is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
-
-                if not is_unique:
+                # check that the dataframe is not empty
+                if len(annot_df) == 0:
                     add = False
 
-            if self._polygons_only:
-                # check if any of the shapes are not shapely Polygons
-                is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
-                if np.any(is_not_polygon):
-                    annot_df = annot_df.loc[is_not_polygon]
-                    warnings.warn(
-                        f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
-                        stacklevel=2
-                        )
+                if add:
+                    # add dataframe to AnnotationData object
+                    self._data[key] = annot_df
 
-            # check that the dataframe is not empty
-            if len(annot_df) == 0:
-                add = False
+                    # add new entry to metadata
+                    self._metadata[key] = {}
 
-            if add:
-                # add dataframe to AnnotationData object
-                self._data[key] = annot_df
+                    # update metadata
+                    self._update_metadata(keys=key, analyzed=False)
 
-                # add new entry to metadata
-                self._metadata[key] = {}
-
-                # update metadata
-                self._update_metadata(keys=key, analyzed=False)
-
-                if verbose:
-                    # report
-                    print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                    if verbose:
+                        # report
+                        print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
 
     def crop(self,
              shape,
