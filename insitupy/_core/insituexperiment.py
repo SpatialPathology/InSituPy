@@ -703,7 +703,6 @@ class InSituExperiment:
 
         elif isinstance(criteria, str):
             try:
-                print(criteria)
                 result_df = self._metadata.query(criteria)
                 return self[result_df.index]
             except Exception as e:

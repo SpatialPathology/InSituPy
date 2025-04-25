@@ -206,7 +206,11 @@ def calc_cellular_composition(
     # retrieve cell type compositions
     compositions_dict = {}
     for m, d in exp.iterdata():
-        celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer, verbose=True)
+        celldata = _get_cell_layer(
+            cells=d.cells,
+            cells_layer=cells_layer,
+            verbose=False
+            )
         adata = celldata.matrix
         data_name = m[uid_column]
 
@@ -340,7 +344,7 @@ def plot_cellular_composition(
         raise ValueError(f"geom_names has length 0.")
 
     if plot_type == "bar":
-        subplot_width = len(data_names)*0.8
+        subplot_width = 0.5+len(data_names)*1
         subplot_height = 8
     elif plot_type == "barh":
         subplot_width = 8
@@ -362,7 +366,7 @@ def plot_cellular_composition(
         ax = axs[i]
         # Plot a single stacked bar plot
         if plot_type == "bar":
-            fig_width = 1*n_cats
+            # fig_width = 1*n_cats
             # fig_height = 6
             ylabel = "%"
             xlabel = modality
@@ -397,10 +401,11 @@ def plot_cellular_composition(
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],
-            max_per_row=10,
+            max_per_row=np.inf,
             loc='center',
             bbox_to_anchor=(0.5, 0.5),
-            mode="rectangle"
+            mode="rectangle",
+            remove_axis=True
             )
 
     save_and_show_figure(

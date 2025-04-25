@@ -47,7 +47,8 @@ def _add_colorlegend_to_axis(
     loc: str = 'center',
     bbox_to_anchor: tuple = (0.5, 0.5),
     #marker: Optional[str] = 'o',
-    mode: Literal["circle", "rectangle"] = "circle"
+    mode: Literal["circle", "rectangle"] = "circle",
+    remove_axis: bool = True
 ):
     # create function to create handles
     handle_function = _create_handle_function(mode)
@@ -58,28 +59,10 @@ def _add_colorlegend_to_axis(
 
     for label, color in color_dict.items():
         handle = handle_function(color)
-        # if mode == "circle":
-        #     handle = plt.Line2D([0], [0],
-        #                         marker='o',
-        #                         color='w',
-        #                         markerfacecolor=color,
-        #                         markersize=15,
-        #                         markeredgecolor='black',
-        #                         markeredgewidth=1.5
-        #                         )
-        # elif mode == "rectangle":
-        #     handle = plt.Line2D([0], [0],
-        #                         marker='_',
-        #                         color='w',
-        #                         markerfacecolor=None,
-        #                         markersize=15,
-        #                         markeredgecolor=color,
-        #                         markeredgewidth=8
-        #                         )
         handles.append(handle)
         labels.append(label)
 
-    n_col = math.ceil(len(labels) / max_per_row)
+    n_col = max(1, math.ceil(len(labels) / max_per_row))
 
     legend = ax.legend(
         handles, labels,
@@ -88,8 +71,9 @@ def _add_colorlegend_to_axis(
         bbox_to_anchor=bbox_to_anchor
         )
 
-    # Hide the axis
-    ax.set_axis_off()
+    if remove_axis:
+        # Hide the axis
+        ax.set_axis_off()
 
 def _parse_unique_categories(data):
     # retrieve data
