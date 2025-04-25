@@ -1,4 +1,5 @@
 import math
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -50,18 +51,40 @@ def _set_show_names_based_on_geom_type(widget):
 
 
 # Function to update the legend
-def _update_categorical_legend(static_canvas, mapping, label, max_rows: int = 6, marker: str = "o"):
+def _update_categorical_legend(
+    static_canvas,
+    mapping: dict,
+    label: str,
+    max_rows: int = 6,
+    marker: str = "o",
+    marker_mode: Literal["face", "edge"] = "face"
+    ):
 
     # Calculate the number of columns needed
     num_items = len(mapping)
     ncols = math.ceil(num_items / max_rows)
 
+    # prepare figue
     static_canvas.figure.clear()  # Clear the current figure
     axes = static_canvas.figure.subplots()  # Create new axes
-    legend_handles = [Line2D([0], [0],
-                             marker=marker, color='w', label=n,
-                             markerfacecolor=c, markeredgecolor='k',
-                             markersize=7) for n,c in mapping.items()]
+
+    if marker_mode == "face":
+        # create legend handles with face colored
+        legend_handles = [Line2D([0], [0],
+                                marker=marker, color='w', label=n,
+                                markerfacecolor=c, markeredgecolor='k',
+                                markersize=7) for n,c in mapping.items()]
+    elif marker_mode == "edge":
+        # create legend handles with edges colored
+        legend_handles = [Line2D([0], [0],
+                                marker=marker, color='w', label=n,
+                                markerfacecolor='w', markeredgecolor=c,
+                                markeredgewidth=2,
+                                markersize=7) for n,c in mapping.items()]
+    else:
+        raise ValueError(f"marker_mode must be either 'face' or 'edge'. Instead: {marker_mode}")
+
+    # add legend to axis
     axes.legend(handles=legend_handles, loc="center", title=label, ncols=ncols,
                 fontsize=8, title_fontsize=10,
                 labelspacing=0.7, borderpad=0.5)
@@ -106,7 +129,8 @@ def _update_colorlegend():
                     static_canvas=_config.static_canvas,
                     mapping=mapping,
                     label="Points",
-                    marker="o"
+                    marker="o",
+                    marker_mode="face"
                     )
         else:
 
@@ -157,7 +181,8 @@ def _update_colorlegend():
                 static_canvas=_config.static_canvas,
                 mapping=mapping,
                 label="Annotations" if first_char == ANNOTATIONS_SYMBOL else "Regions",
-                marker="s"
+                marker="s",
+                marker_mode="edge"
                 )
     else:
         pass
