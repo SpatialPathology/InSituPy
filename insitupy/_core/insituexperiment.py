@@ -149,24 +149,36 @@ class InSituExperiment:
         """Retrieve a subset of the experiment.
 
         Args:
-            key (int, slice, list, pd.Series): The index, slice, list, or boolean Series to retrieve.
+            key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
+                or Series to retrieve.
 
         Returns:
             InSituExperiment: A new InSituExperiment object with the selected subset.
         """
         if isinstance(key, int):
-            if key > (len(self)-1):
+            if key > (len(self) - 1):
                 raise IndexError(f"Index ({key}) is out of range {len(self)}.")
             key = slice(key, key + 1)
-        elif isinstance(key, list) and all(isinstance(i, bool) for i in key):
-            key = pd.Series(key)
+
+        elif isinstance(key, list):
+            if all(isinstance(i, bool) for i in key):
+                key = pd.Series(key)
+            # If it's a list of indices, we let it pass to iloc below
+
+        elif isinstance(key, pd.Series):
+            if key.dtype != bool:
+                key = key.tolist()
+
+        # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
             new_experiment = InSituExperiment()
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
+
+        # Handle slices, list of ints, ndarray, or Series of ints
         else:
             new_experiment = InSituExperiment()
-            new_experiment._data = self._data[key]
+            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
         # Disconnect object from save path
@@ -668,24 +680,38 @@ class InSituExperiment:
         else:
             return fig, axes
 
-    def query(self, criteria: dict):
+    def query(self, criteria):
         """Query the experiment based on metadata criteria.
 
         Args:
-            criteria (dict): A dictionary where keys are column names and values are lists of categories to select.
+            criteria (dict or str):
+                - A dictionary where keys are column names and values are lists of categories to select.
+                - A string expression to evaluate using pandas.DataFrame.query().
 
         Returns:
             InSituExperiment: A new InSituExperiment object with the selected subset.
         """
-        mask = pd.Series([True] * len(self._metadata))
-        for column, values in criteria.items():
-            values = convert_to_list(values)
-            if column in self._metadata.columns:
-                mask &= self._metadata[column].isin(values)
-            else:
-                raise KeyError(f"Column '{column}' not found in metadata.")
+        if isinstance(criteria, dict):
+            mask = pd.Series([True] * len(self._metadata), index=self._metadata.index)
+            for column, values in criteria.items():
+                values = convert_to_list(values)
+                if column in self._metadata.columns:
+                    mask &= self._metadata[column].isin(values)
+                else:
+                    raise KeyError(f"Column '{column}' not found in metadata.")
+            return self[mask]
 
-        return self[mask]
+        elif isinstance(criteria, str):
+            try:
+                print(criteria)
+                result_df = self._metadata.query(criteria)
+                return self[result_df.index]
+            except Exception as e:
+                raise ValueError(f"Failed to evaluate query expression: {e}")
+
+        else:
+            raise TypeError("Criteria must be either a dictionary or a string.")
+
 
     @classmethod
     def concat(cls, objs, new_col_name=None):
