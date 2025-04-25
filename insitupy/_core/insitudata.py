@@ -340,8 +340,11 @@ class InSituData:
         return self._transcripts
 
     @transcripts.setter
-    def transcripts(self, value: pd.DataFrame):
-        self._transcripts = value
+    def transcripts(self, value: dd.DataFrame):
+        if isinstance(value, dd.DataFrame):
+            self._transcripts = value
+        else:
+            raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
     @transcripts.deleter
     def transcripts(self):
@@ -371,7 +374,10 @@ class InSituData:
 
     @annotations.setter
     def annotations(self, value: AnnotationsData):
-        self._annotations = value
+        if isinstance(value, AnnotationsData):
+            self._annotations = value
+        else:
+            raise ValueError(f"Value must be of type AnnotationsData, but got {type(value)} instead.")
 
     @annotations.deleter
     def annotations(self):
@@ -387,7 +393,10 @@ class InSituData:
 
     @regions.setter
     def regions(self, value: RegionsData):
-        self._regions = value
+        if isinstance(value, RegionsData):
+            self._regions = value
+        else:
+            raise ValueError(f"Value must be of type RegionsData, but got {type(value)} instead.")
 
     @regions.deleter
     def regions(self):
@@ -830,10 +839,11 @@ class InSituData:
 
         for key, file in zip(keys, files):
             # read annotation and store in dictionary
-            self._annotations.add_data(data=file,
-                                      key=key,
-                                      scale_factor=scale_factor
-                                      )
+            self._annotations.add_data(
+                data=file,
+                key=key,
+                scale_factor=scale_factor
+                )
 
         #self._remove_empty_modalities()
 

@@ -200,18 +200,33 @@ def calc_cellular_composition(
         adata = celldata.matrix
 
         if geom_key is not None:
-            # check whether the cells were already assigned to the requested annotation
-            _check_assignment(data=d, cells_layer=cells_layer, key=geom_key, force_assignment=force_assignment, modality=modality)
+            # check whether the key exists in the selected geometry
+            if geom_key in d.get_modality(modality).keys():
+                # check whether the cells were already assigned to the requested geometry
+                _check_assignment(
+                    data=d,
+                    cells_layer=cells_layer,
+                    key=geom_key,
+                    force_assignment=force_assignment,
+                    modality=modality)
 
-            assignment_series = adata.obsm[modality][geom_key]
-            cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+                assignment_series = adata.obsm[modality][geom_key]
+                cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
 
-            # calculate compositions
-            compositions = {}
-            for cat in cats:
-                idx = assignment_series[assignment_series == cat].index
-                compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100 # calculate percentage
-            compositions = pd.DataFrame(compositions)
+                # calculate compositions
+                compositions = {}
+                for cat in cats:
+                    idx = assignment_series[assignment_series == cat].index
+                    compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100 # calculate percentage
+                compositions = pd.DataFrame(compositions)
+
+            else:
+                unique_cats = np.unique(adata.obs["majority_voting_simple"])
+                compositions = pd.DataFrame(
+                    data = {None: [np.nan] * len(unique_cats)},
+                    index = unique_cats
+                )
+
         else:
             compositions = pd.DataFrame(
                 {
