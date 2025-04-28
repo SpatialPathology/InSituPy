@@ -261,8 +261,11 @@ def differential_gene_expression(
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
-            "Target": [elem[1] if isinstance(elem, tuple) else elem for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg],
-            "Reference": [elem[1] if isinstance(elem, tuple) else elem for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg]
+            "Reference": [elem[1] if isinstance(elem, tuple) else elem
+                          for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
+            "Target": [elem[1] if isinstance(elem, tuple) else elem
+                       for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
+
         })
 
         # remove empty rows
