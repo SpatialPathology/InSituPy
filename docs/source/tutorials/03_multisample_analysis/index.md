@@ -8,6 +8,7 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
     :link-type: doc
 
     Notebook introducing the concepts behind the `InSituExperiment` class to analyze multiple samples.
+```
 
 ```{toctree}
 :hidden: false

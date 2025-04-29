@@ -40,7 +40,6 @@ This section provides a detailed, step-by-step demonstration of the preprocessin
     :link-type: doc
 
     Demonstration on how to explore gene expression along an axis of the dataset.
-```
 
 .. card:: 07: Differential gene expression and GO term enrichment analysis
     :link: 07_InSituPy_differential_gene_expression
