@@ -1,6 +1,7 @@
 from typing import Optional, Union
 
 import matplotlib as mpl
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap, rgb2hex
@@ -70,6 +71,28 @@ class CustomPalettes:
         # Turn off *all* ticks & spines, not just the ones with colormaps.
         for ax in axs:
             ax.set_axis_off()
+
+def create_colormap(
+    N,
+    colormaps = [cm.Reds_r, cm.Blues_r, cm.Greens_r, cm.Purples_r, cm.Greys_r]
+    ):
+    """
+    Adapted from: https://stackoverflow.com/questions/72171993/how-to-extend-the-color-palette-in-matplotlib
+    """
+    # extract the following number of colors for each colormap
+    n_cols_per_cm = int(np.ceil(N / len(colormaps)))
+    # discretize the colormap. Note the upper limit of 0.75, so we
+    # avoid too white-ish colors
+    discr = np.linspace(0, 0.75, n_cols_per_cm)
+
+    # extract the colors
+    colors = np.zeros((n_cols_per_cm * len(colormaps), 4))
+    for i, cmap in enumerate(colormaps):
+        colors[i * n_cols_per_cm : (i + 1) * n_cols_per_cm, :] = cmap(discr)
+
+    # convert to hex
+    colors_hex = [rgb2hex(elem) for elem in colors]
+    return colors_hex
 
 
 def cmap2hex(cmap):
