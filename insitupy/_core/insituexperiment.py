@@ -530,18 +530,26 @@ class InSituExperiment:
     def generate_collection(
         self,
         cells_layer: Optional[str],
-        label_col: str = "uid"
+        label_col: str = "uid",
+        make_obs_names_unique: bool = False
         ):
         from anndata.experimental import AnnCollection
 
         adatas = {}
-        for meta, xd in self.iterdata():
+        for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            adatas[meta[label_col]] = celldata.matrix
+            adata = celldata.matrix
+
+            if make_obs_names_unique:
+                adata.obs_names = f"{str(i)}-" + adata.obs_names
+
+            adatas[meta[label_col]] = adata
 
         self._collection = AnnCollection(adatas,
-                                         join_vars='inner', join_obs='inner',
-                                         label=label_col)
+                                         join_vars='inner',
+                                         join_obs='inner',
+                                         label=label_col
+                                         )
 
     def get_n_cells(
         self,
