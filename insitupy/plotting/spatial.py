@@ -230,6 +230,7 @@ class MultiSpatialPlot:
                 meta = None
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
             ad = celldata.matrix
+            annot_df = xd.annotations
 
             if self.name_column is None or meta is None:
                 name = xd.sample_id
@@ -263,9 +264,6 @@ class MultiSpatialPlot:
                         raise ValueError("`len(self.axs.shape)` has wrong shape {}. Requires 1 or 2.".format(len(self.axs.shape)))
                 else:
                     ax = self.ax
-
-                # counter for axis
-                #i+=1
 
                 # get data
                 ConfigData = _ConfigSpatialPlot(

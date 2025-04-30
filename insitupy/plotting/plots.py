@@ -183,12 +183,16 @@ def calc_cellular_composition(
     cell_type_col: str,
     cells_layer: Optional[str] = None,
     geom_key: Optional[str] = None,
+    geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
     uid_column: str = "sample_id",
     normalize: bool = True,
     force_assignment: bool = False,
     fill_missing_categories: bool = True
     ) -> pd.DataFrame:
+
+    if geom_values is not None:
+        geom_values = convert_to_list(geom_values)
 
     # check data
     is_experiment = _is_experiment(data)
@@ -231,6 +235,10 @@ def calc_cellular_composition(
                 # calculate compositions
                 compositions = {}
                 for cat in cats:
+                    if geom_values is not None:
+                        if cat not in geom_values:
+                            # skip this category
+                            continue
                     idx = assignment_series[assignment_series == cat].index
                     compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100 # calculate percentage
                 compositions = pd.DataFrame(compositions)
@@ -286,6 +294,7 @@ def plot_cellular_composition(
     cell_type_col: str,
     cells_layer: Optional[str] = None,
     geom_key: Optional[str] = None,
+    geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
     plot_type: Literal["bar", "barh"] = "barh",
     uid_column: str = "sample_id",
@@ -305,16 +314,7 @@ def plot_cellular_composition(
     This function generates pie charts or a single stacked bar plot to visualize the proportions of different cell types
     within specified regions or annotations. It can optionally save the plot to a file and
     return the composition data.
-
     """
-
-    # if isinstance(palette, ListedColormap):
-    #     color_list = palette.colors
-    # elif isinstance(palette, list):
-    #     color_list = palette
-    # else:
-    #     raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
-
     if isinstance(palette, list):
         palette = ListedColormap(palette)
     elif isinstance(palette, ListedColormap):
@@ -324,7 +324,8 @@ def plot_cellular_composition(
 
     compositions_df = calc_cellular_composition(
         data=data, cell_type_col=cell_type_col,
-        cells_layer=cells_layer, geom_key=geom_key,
+        cells_layer=cells_layer,
+        geom_key=geom_key, geom_values=geom_values,
         modality=modality, uid_column=uid_column,
         normalize=normalize, force_assignment=force_assignment,
     )
@@ -366,15 +367,11 @@ def plot_cellular_composition(
         ax = axs[i]
         # Plot a single stacked bar plot
         if plot_type == "bar":
-            # fig_width = 1*n_cats
-            # fig_height = 6
             ylabel = "%"
-            xlabel = modality
+            xlabel = "Dataset"
             inverty = False
         else:
-            # fig_width = 8
-            # fig_height = 1*n_cats
-            ylabel = modality
+            ylabel = "Dataset"
             xlabel = "%"
             inverty = True
 
