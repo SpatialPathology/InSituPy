@@ -15,19 +15,17 @@ from matplotlib.figure import Figure
 from tqdm import tqdm
 
 import insitupy
-from insitupy import InSituData
 from insitupy._constants import LOAD_FUNCS, MODALITIES, MODALITIES_ABBR
 from insitupy._core._checks import _all_obs_names_unique, is_integer_counts
 from insitupy._core._utils import _get_cell_layer
 from insitupy._core.insitudata import InSituData
 from insitupy._core.readers import read_xenium
 from insitupy._exceptions import ModalityNotFoundError
+from insitupy._textformat import textformat as tf
 from insitupy.io.files import check_overwrite_and_remove_if_true
 from insitupy.io.plots import save_and_show_figure
-from insitupy.tools.dge import differential_gene_expression
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
-from insitupy.utils.utils import textformat as tf
 
 
 class InSituExperiment:
@@ -151,24 +149,36 @@ class InSituExperiment:
         """Retrieve a subset of the experiment.
 
         Args:
-            key (int, slice, list, pd.Series): The index, slice, list, or boolean Series to retrieve.
+            key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
+                or Series to retrieve.
 
         Returns:
             InSituExperiment: A new InSituExperiment object with the selected subset.
         """
         if isinstance(key, int):
-            if key > (len(self)-1):
+            if key > (len(self) - 1):
                 raise IndexError(f"Index ({key}) is out of range {len(self)}.")
             key = slice(key, key + 1)
-        elif isinstance(key, list) and all(isinstance(i, bool) for i in key):
-            key = pd.Series(key)
+
+        elif isinstance(key, list):
+            if all(isinstance(i, bool) for i in key):
+                key = pd.Series(key)
+            # If it's a list of indices, we let it pass to iloc below
+
+        elif isinstance(key, pd.Series):
+            if key.dtype != bool:
+                key = key.tolist()
+
+        # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
             new_experiment = InSituExperiment()
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
+
+        # Handle slices, list of ints, ndarray, or Series of ints
         else:
             new_experiment = InSituExperiment()
-            new_experiment._data = self._data[key]
+            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
         # Disconnect object from save path
@@ -238,8 +248,28 @@ class InSituExperiment:
         if not all_obs.index.is_unique:
             warnings.warn("Observation names are not unique across all datasets.")
 
+    @property
+    def cells(self):
+        self.show_modality("cells")
+
+    @property
+    def images(self):
+        self.show_modality("images")
+
+    @property
+    def transcripts(self):
+        self.show_modality("transcripts")
+
+    @property
+    def annotations(self):
+        self.show_modality("annotations")
+
+    @property
+    def regions(self):
+        self.show_modality("regions")
+
     def add(self,
-            data: Union[str, os.PathLike, Path, insitupy.InSituData],
+            data: Union[str, os.PathLike, Path, InSituData],
             mode: Literal["insitupy", "xenium"] = "insitupy",
             metadata: Optional[dict] = None
             ):
@@ -264,7 +294,8 @@ class InSituExperiment:
             else:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
-        assert isinstance(dataset, InSituData), "Loaded dataset is not an InSituData object."
+        from insitupy._core.insitudata import InSituData
+        assert dataset.__class__ is InSituData, "Loaded dataset is not an InSituData object."
 
         # # set a unique ID
         # dataset._set_uid()
@@ -437,6 +468,7 @@ class InSituExperiment:
                     method='wilcoxon'
                 )
         """
+        from insitupy.tools.dge import differential_gene_expression
 
         # get data and extract information about experiment
         target = self.data[target_id]
@@ -498,18 +530,26 @@ class InSituExperiment:
     def generate_collection(
         self,
         cells_layer: Optional[str],
-        label_col: str = "uid"
+        label_col: str = "uid",
+        make_obs_names_unique: bool = False
         ):
         from anndata.experimental import AnnCollection
 
         adatas = {}
-        for meta, xd in self.iterdata():
+        for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            adatas[meta[label_col]] = celldata.matrix
+            adata = celldata.matrix
+
+            if make_obs_names_unique:
+                adata.obs_names = f"{str(i)}-" + adata.obs_names
+
+            adatas[meta[label_col]] = adata
 
         self._collection = AnnCollection(adatas,
-                                         join_vars='inner', join_obs='inner',
-                                         label=label_col)
+                                         join_vars='inner',
+                                         join_obs='inner',
+                                         label=label_col
+                                         )
 
     def get_n_cells(
         self,
@@ -648,24 +688,37 @@ class InSituExperiment:
         else:
             return fig, axes
 
-    def query(self, criteria: dict):
+    def query(self, criteria):
         """Query the experiment based on metadata criteria.
 
         Args:
-            criteria (dict): A dictionary where keys are column names and values are lists of categories to select.
+            criteria (dict or str):
+                - A dictionary where keys are column names and values are lists of categories to select.
+                - A string expression to evaluate using pandas.DataFrame.query().
 
         Returns:
             InSituExperiment: A new InSituExperiment object with the selected subset.
         """
-        mask = pd.Series([True] * len(self._metadata))
-        for column, values in criteria.items():
-            values = convert_to_list(values)
-            if column in self._metadata.columns:
-                mask &= self._metadata[column].isin(values)
-            else:
-                raise KeyError(f"Column '{column}' not found in metadata.")
+        if isinstance(criteria, dict):
+            mask = pd.Series([True] * len(self._metadata), index=self._metadata.index)
+            for column, values in criteria.items():
+                values = convert_to_list(values)
+                if column in self._metadata.columns:
+                    mask &= self._metadata[column].isin(values)
+                else:
+                    raise KeyError(f"Column '{column}' not found in metadata.")
+            return self[mask]
 
-        return self[mask]
+        elif isinstance(criteria, str):
+            try:
+                result_df = self._metadata.query(criteria)
+                return self[result_df.index]
+            except Exception as e:
+                raise ValueError(f"Failed to evaluate query expression: {e}")
+
+        else:
+            raise TypeError("Criteria must be either a dictionary or a string.")
+
 
     @classmethod
     def concat(cls, objs, new_col_name=None):
@@ -830,7 +883,7 @@ class InSituExperiment:
 
     @classmethod
     def from_regions(cls,
-                    data: insitupy.InSituData,
+                    data: InSituData,
                     region_key: str,
                     region_names: Optional[Union[List[str], str]] = None
                     ):
@@ -932,3 +985,11 @@ class InSituExperiment:
         dataset.show()
         if return_viewer:
             return dataset.viewer
+
+    def show_modality(self, modality, uid_column: str = "sample_id"):
+        repr_string = ""
+        for meta, data in self.iterdata():
+            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
+            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+
+        print(repr_string)

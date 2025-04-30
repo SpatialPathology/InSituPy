@@ -19,6 +19,7 @@ from insitupy import __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
+from insitupy._textformat import textformat as tf
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
@@ -29,7 +30,6 @@ from insitupy.io.files import (check_overwrite_and_remove_if_true,
                                write_dict_to_json)
 from insitupy.io.geo import parse_geopandas, write_qupath_geojson
 from insitupy.utils.utils import convert_to_list, decode_robust_series
-from insitupy.utils.utils import textformat as tf
 
 
 class ShapesData(DeepCopyMixin):
@@ -45,32 +45,14 @@ class ShapesData(DeepCopyMixin):
                  polygons_only: bool = False,
                  forbidden_names: Optional[List[str]] = None,
                  shape_name: Optional[str] = None,
-                 repr_color = tf.Cyan
+                 #repr_color = tf.Cyan
                  ) -> None:
-        # self._default_assert_uniqueness = False
-        # self._default_polygons_only = False
-        self._repr_color = repr_color
-        # self._default_forbidden_names = None
-
         self._shape_name = shape_name if shape_name is not None else "shapes"
 
         # create dictionary for metadata
         self._metadata = {}
-
         self._data =dict()
-
-        # set configuration of ShapesData
-        # if assert_uniqueness is None:
-        #     self._assert_uniqueness = self._default_assert_uniqueness
-        # else:
         self._assert_uniqueness = assert_uniqueness
-
-        # if skip_multipolygons is None:
-        #     self.skip_multipolygons = self.default_skip_multipolygons
-
-        # if polygons_only is None:
-        #     self._polygons_only = self._default_polygons_only
-        # else:
         self._polygons_only = polygons_only
 
         # if forbidden_names is None:
@@ -120,12 +102,12 @@ class ShapesData(DeepCopyMixin):
             s = "\n".join(repr_strings)
         else:
             s = ""
-        repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
-        return repr
 
+        # repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
+        return s
 
     def __getitem__(self, key):
-        return self._data.get(key)
+        return self._data[key]
 
     @property
     def metadata(self):
@@ -201,92 +183,95 @@ class ShapesData(DeepCopyMixin):
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
 
-        if "name" not in new_df.columns:
-            new_df["name"] = ["None"] * len(new_df)
-
-        if self._forbidden_names is not None:
-            try:
-                new_names = new_df["name"].tolist()
-            except KeyError:
-                pass
-            else:
-                if np.any([elem in new_names for elem in self._forbidden_names]):
-                    raise ValueError(f"One of the forbidden names for annotations ({self._forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
-
-        # convert geometries into unit (e.g. µm) values
-        new_df["geometry"] = new_df["geometry"].scale(xfact=scale_factor, yfact=scale_factor, origin=(0,0))
-
-        # determine the type of layer that needs to be used in napari later
-        layer_types = []
-        for geom in new_df["geometry"]:
-            if isinstance(geom, Point) or isinstance(geom, MultiPoint):
-                layer_types.append("Points")
-            else:
-                layer_types.append("Shapes")
-        new_df["layer_type"] = layer_types
-
-        # # convert pixel coordinates to metric units
-        # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
-
-        if key not in self._data.keys():
-            # if key does not exist yet, the new df is the whole annotation dataframe
-            annot_df = new_df
-
-            # collect additional variables for reporting
-            new_geometries_added = True # dataframe will be added later
-            existing_str = ""
-            old_n = 0
-            new_n = len(annot_df)
+        if new_df is None:
+            print(f"Data for key '{key}' was empty. Skipped import.", flush=True)
         else:
-            # concatenate old and new annoation dataframe
-            annot_df = self[key]
-            old_n = len(annot_df)
-            annot_df = pd.concat([annot_df, new_df], ignore_index=False)
+            if "name" not in new_df.columns:
+                new_df["name"] = ["None"] * len(new_df)
 
-            # remove all duplicated shapes - leaving only the newly added
-            annot_df = annot_df[~annot_df.index.duplicated()]
-            new_n = len(annot_df)
+            if self._forbidden_names is not None:
+                try:
+                    new_names = new_df["name"].tolist()
+                except KeyError:
+                    pass
+                else:
+                    if np.any([elem in new_names for elem in self._forbidden_names]):
+                        raise ValueError(f"One of the forbidden names for annotations ({self._forbidden_names}) has been used in the imported dataset. Please change the respective change to prevent interference with downstream functions.")
 
-            # collect additional variables for reporting
-            new_geometries_added = new_n > old_n
-            existing_str = "existing "
+            # convert geometries into unit (e.g. µm) values
+            new_df["geometry"] = new_df["geometry"].scale(xfact=scale_factor, yfact=scale_factor, origin=(0,0))
 
-        if new_geometries_added:
-            add = True
-            if self._assert_uniqueness:
-                # check if the shapes data for this key is unique (same number of names than indices)
-                is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
+            # determine the type of layer that needs to be used in napari later
+            layer_types = []
+            for geom in new_df["geometry"]:
+                if isinstance(geom, Point) or isinstance(geom, MultiPoint):
+                    layer_types.append("Points")
+                else:
+                    layer_types.append("Shapes")
+            new_df["layer_type"] = layer_types
 
-                if not is_unique:
+            # # convert pixel coordinates to metric units
+            # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
+
+            if key not in self._data.keys():
+                # if key does not exist yet, the new df is the whole annotation dataframe
+                annot_df = new_df
+
+                # collect additional variables for reporting
+                new_geometries_added = True # dataframe will be added later
+                existing_str = ""
+                old_n = 0
+                new_n = len(annot_df)
+            else:
+                # concatenate old and new annoation dataframe
+                annot_df = self[key]
+                old_n = len(annot_df)
+                annot_df = pd.concat([annot_df, new_df], ignore_index=False)
+
+                # remove all duplicated shapes - leaving only the newly added
+                annot_df = annot_df[~annot_df.index.duplicated()]
+                new_n = len(annot_df)
+
+                # collect additional variables for reporting
+                new_geometries_added = new_n > old_n
+                existing_str = "existing "
+
+            if new_geometries_added:
+                add = True
+                if self._assert_uniqueness:
+                    # check if the shapes data for this key is unique (same number of names than indices)
+                    is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
+
+                    if not is_unique:
+                        add = False
+
+                if self._polygons_only:
+                    # check if any of the shapes are not shapely Polygons
+                    is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
+                    if np.any(is_not_polygon):
+                        annot_df = annot_df.loc[is_not_polygon]
+                        warnings.warn(
+                            f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
+                            stacklevel=2
+                            )
+
+                # check that the dataframe is not empty
+                if len(annot_df) == 0:
                     add = False
 
-            if self._polygons_only:
-                # check if any of the shapes are not shapely Polygons
-                is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
-                if np.any(is_not_polygon):
-                    annot_df = annot_df.loc[is_not_polygon]
-                    warnings.warn(
-                        f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
-                        stacklevel=2
-                        )
+                if add:
+                    # add dataframe to AnnotationData object
+                    self._data[key] = annot_df
 
-            # check that the dataframe is not empty
-            if len(annot_df) == 0:
-                add = False
+                    # add new entry to metadata
+                    self._metadata[key] = {}
 
-            if add:
-                # add dataframe to AnnotationData object
-                self._data[key] = annot_df
+                    # update metadata
+                    self._update_metadata(keys=key, analyzed=False)
 
-                # add new entry to metadata
-                self._metadata[key] = {}
-
-                # update metadata
-                self._update_metadata(keys=key, analyzed=False)
-
-                if verbose:
-                    # report
-                    print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                    if verbose:
+                        # report
+                        print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
 
     def crop(self,
              shape,
@@ -344,6 +329,9 @@ class ShapesData(DeepCopyMixin):
         if not inplace:
             return _self
 
+    def keys(self):
+        return self._data.keys()
+
     def remove_data(self,
                    key_to_remove: str,
                    classes_to_remove: Union[Literal["all"], List[str], str] = "all"
@@ -395,12 +383,6 @@ class AnnotationsData(ShapesData):
                  keys: Optional[List[str]] = None,
                  pixel_size: Optional[float] = None
                  ) -> None:
-        # self._default_assert_uniqueness = False
-        # # self.default_skip_multipolygons = False
-        # self._default_polygons_only = False
-        # self._shape_name = "annotations"
-        # self._repr_color = tf.Cyan
-        # self._default_forbidden_names = FORBIDDEN_ANNOTATION_NAMES
 
         ShapesData.__init__(
             self,
@@ -411,7 +393,6 @@ class AnnotationsData(ShapesData):
             polygons_only=False,
             forbidden_names=FORBIDDEN_ANNOTATION_NAMES,
             shape_name="annotations",
-            repr_color=tf.Cyan
             )
 
 class RegionsData(ShapesData):
@@ -420,11 +401,6 @@ class RegionsData(ShapesData):
                  keys: Optional[List[str]] = None,
                  pixel_size: Optional[float] = None
                  ) -> None:
-        #self._default_assert_uniqueness = True
-        # self.default_skip_multipolygons = True # MultiPolygons are not allowed in regions
-        #self._default_polygons_only = True
-        #self._shape_name = "regions"
-        # self._repr_color = tf.Yellow
 
         ShapesData.__init__(
             self,
@@ -435,7 +411,6 @@ class RegionsData(ShapesData):
             polygons_only=True,
             forbidden_names=None,
             shape_name="regions",
-            repr_color=tf.Yellow
             )
 
 class BoundariesData(DeepCopyMixin):
@@ -1195,8 +1170,8 @@ class ImageData(DeepCopyMixin):
             s = "\n".join(repr_strings)
         else:
             s = "empty"
-        repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
-        return repr
+        #repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
+        return s
 
     def __getitem__(self, key):
         return self._data.get(key)

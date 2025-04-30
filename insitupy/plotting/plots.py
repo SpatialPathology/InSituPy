@@ -1,21 +1,130 @@
+import math
 import os
-import textwrap
-import warnings
+from numbers import Number
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
-from matplotlib.lines import Line2D
+import seaborn as sns
+from matplotlib.colors import ListedColormap
 from napari.viewer import Viewer
 
 import insitupy._core._config as _config
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
-from insitupy._core._checks import _check_assignment
+from insitupy._core._checks import _check_assignment, _is_experiment
+from insitupy._core._utils import _get_cell_layer
+from insitupy._core.insitudata import InSituData
+from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
-from insitupy.plotting._colors import (_add_colorlegend_to_axis, _data_to_rgba,
-                                       create_cmap_mapping)
-from insitupy.utils.utils import get_nrows_maxcols
+from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba
+from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
+                                  remove_empty_subplots)
+
+
+def _generate_subplots(
+    n_plots: int,
+    n_keys: int,
+    max_cols: int = 4,
+    dpi_display: int = 80,
+    header: Optional[str] = None,
+    subplot_height: Number = 8,
+    subplot_width: Number = 8
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+
+    if n_plots > 1:
+        if n_keys > 1:
+            # determine the layout of the subplots
+            n_rows = n_plots
+            max_cols = n_keys
+            n_plots = n_rows * max_cols
+
+            # create subplots
+            fig, axs = plt.subplots(
+                n_rows, max_cols,
+                figsize=(subplot_width * max_cols, subplot_height * n_rows),
+                dpi=dpi_display)
+            fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
+        elif n_keys == 1:
+            # determine the layout of the subplots
+            n_plots, n_rows, max_cols = get_nrows_maxcols(n_keys=n_plots, max_cols=max_cols)
+            fig, axs = plt.subplots(n_rows, max_cols,
+                                    figsize=(subplot_width * max_cols, subplot_height * n_rows),
+                                    dpi=dpi_display)
+            fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
+
+            if n_plots > 1:
+                axs = axs.ravel()
+            else:
+                axs = np.array([axs])
+
+            remove_empty_subplots(
+                axes=axs,
+                nplots=n_plots,
+                nrows=n_rows,
+                ncols=max_cols
+                )
+        else:
+            raise ValueError(f"n_keys < 1: {n_keys}")
+
+    else:
+        n_plots = n_keys
+        if max_cols is None:
+            max_cols = n_plots
+            n_rows = 1
+        else:
+            if n_plots > max_cols:
+                n_rows = math.ceil(n_plots / max_cols)
+            else:
+                n_rows = 1
+                max_cols = n_plots
+
+        fig, axs = plt.subplots(
+            n_rows, max_cols,
+            figsize=(subplot_width * max_cols, subplot_height * n_rows),
+            dpi=dpi_display)
+
+        if n_plots > 1:
+            axs = axs.ravel()
+        else:
+            axs = np.array([axs])
+
+        # remove axes from empty plots
+        remove_empty_subplots(
+            axes=axs,
+            nplots=n_plots,
+            nrows=n_rows,
+            ncols=max_cols,
+            )
+
+    if header is not None:
+        plt.suptitle(header, fontsize=24, x=0.5, y=1.02)
+
+    return fig, axs
+
+def _generate_experiment_subplots(
+    data,
+    n_keys: int,
+    max_cols: int = 4,
+    dpi_display: int = 80,
+    header: Optional[str] = None
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    try:
+        n_data = len(data)
+    except TypeError:
+        # if the data is an InSituData, it raises a TypeError
+        n_data = 1
+
+    fig, axs = _generate_subplots(
+        n_plots=n_data,
+        n_keys=n_keys,
+        max_cols=max_cols,
+        dpi_display=dpi_display,
+        header=header
+    )
+
+    return fig, axs
 
 
 def plot_colorlegend(
@@ -69,24 +178,134 @@ def plot_colorlegend(
     save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
     plt.show()
 
+def calc_cellular_composition(
+    data: Union[InSituData, InSituExperiment],
+    cell_type_col: str,
+    cells_layer: Optional[str] = None,
+    geom_key: Optional[str] = None,
+    geom_values: Optional[Union[str, List[str]]] = None,
+    modality: Literal["regions", "annotations"] = "regions",
+    uid_column: str = "sample_id",
+    normalize: bool = True,
+    force_assignment: bool = False,
+    fill_missing_categories: bool = True
+    ) -> pd.DataFrame:
+
+    if geom_values is not None:
+        geom_values = convert_to_list(geom_values)
+
+    # check data
+    is_experiment = _is_experiment(data)
+    if is_experiment:
+        exp = data
+    else:
+        exp = InSituExperiment()
+        exp.add(data, metadata={uid_column: data.sample_id})
+
+    all_data_names = exp.metadata[uid_column].values
+
+    if not len(all_data_names) == len(all_data_names):
+        raise ValueError(f"Values in {uid_column} were found to be not unique. Please choose a column with unique values in `.metadata`.")
+
+    # retrieve cell type compositions
+    compositions_dict = {}
+    for m, d in exp.iterdata():
+        celldata = _get_cell_layer(
+            cells=d.cells,
+            cells_layer=cells_layer,
+            verbose=False
+            )
+        adata = celldata.matrix
+        data_name = m[uid_column]
+
+        if geom_key is not None:
+            # check whether the key exists in the selected geometry
+            if geom_key in d.get_modality(modality).keys():
+                # check whether the cells were already assigned to the requested geometry
+                _check_assignment(
+                    data=d,
+                    cells_layer=cells_layer,
+                    key=geom_key,
+                    force_assignment=force_assignment,
+                    modality=modality)
+
+                assignment_series = adata.obsm[modality][geom_key]
+                cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+
+                # calculate compositions
+                compositions = {}
+                for cat in cats:
+                    if geom_values is not None:
+                        if cat not in geom_values:
+                            # skip this category
+                            continue
+                    idx = assignment_series[assignment_series == cat].index
+                    compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100 # calculate percentage
+                compositions = pd.DataFrame(compositions)
+                collect = True
+
+            else:
+                collect = False
+            #     unique_cats = np.unique(adata.obs["majority_voting_simple"])
+            #     compositions = pd.DataFrame(
+            #         data = {None: [np.nan] * len(unique_cats)},
+            #         index = unique_cats
+            #     )
+
+        else:
+            compositions = pd.DataFrame(
+                {
+                    "total": adata.obs[cell_type_col].value_counts(normalize=normalize) * 100
+                    }
+                )
+            collect = True
+
+        if collect:
+            # collect data
+            compositions_dict[data_name] = compositions
+
+
+    # concatenate results
+    compositions_df = pd.concat(compositions_dict, axis=1)
+
+    if fill_missing_categories:
+        # fill dataframe with missing values to get same width in all plots
+        all_categories = compositions_df.columns.levels[1]
+
+        # Create a complete MultiIndex with all combinations
+        full_columns = pd.MultiIndex.from_product(
+            [all_data_names, all_categories],
+            names=compositions_df.columns.names
+            )
+
+        # Reindex the columns to include all combinations
+        compositions_df = compositions_df.reindex(columns=full_columns)
+
+    # swap multi index levels to have annotations/regions on top of samples
+    compositions_df = compositions_df.swaplevel(0, 1, axis=1)
+
+    compositions_df.columns.names = [geom_key, uid_column]
+
+    return compositions_df
+
 
 def plot_cellular_composition(
-    data,
+    data: Union[InSituData, InSituExperiment],
     cell_type_col: str,
-    key: str,
     cells_layer: Optional[str] = None,
+    geom_key: Optional[str] = None,
+    geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
-    plot_type: Literal["pie", "bar", "barh"] = "barh",
+    plot_type: Literal["bar", "barh"] = "barh",
+    uid_column: str = "sample_id",
+    normalize: bool = True,
     force_assignment: bool = False,
     max_cols: int = 4,
     savepath: Union[str, os.PathLike, Path] = None,
-    show_labels: bool = False,
-    adjust_labels: bool = False,
-    label_threshold: float = 2.,
+    palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
-    layer: str = "main"
     ):
 
     """
@@ -95,117 +314,104 @@ def plot_cellular_composition(
     This function generates pie charts or a single stacked bar plot to visualize the proportions of different cell types
     within specified regions or annotations. It can optionally save the plot to a file and
     return the composition data.
-
-    Args:
-        data: The dataset containing cell information.
-        cell_type_col (str): The column name in `adata.obs` that contains cell type information.
-        key (str): The key to access the specific annotation or region in `adata.obsm`.
-        modality (Literal["regions", "annotations"], optional): The modality to use, either "regions" or "annotations". Default is "regions".
-        plot_type (Literal["pie", "bar"], optional): The type of plot to generate, either "pie" or "bar". Default is "pie".
-        force_assignment (bool, optional): If True, forces reassignment of cells to the requested annotation. Default is False.
-        max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
-        savepath (Union[str, os.PathLike, Path], optional): The path to save the plot. If None, the plot is not saved. Default is None.
-        show_labels (bool, optional): If True, displays percentage labels on the pie charts. Default is False.
-        adjust_labels (bool, optional): If True, adjusts the labels to avoid overlap. Default is False.
-        label_threshold (float, optional): The threshold percentage above which labels are displayed. Default is 2.0.
-        return_data (bool, optional): If True, returns the composition data as a DataFrame. Default is False.
-        save_only (bool, optional): If True, only saves the plot without displaying it. Default is False.
-        dpi_save (int, optional): The resolution in dots per inch for the saved plot. Default is 300.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the composition of cell types if `return_data` is True.
-
-    Raises:
-        ValueError: If the specified key or modality is not found in the data.
-
-    Example:
-        >>> compositions = plot_cell_composition(data, cell_type_col="cell_type", key="region_1", plot_type="bar", return_data=True)
-        >>> print(compositions)
     """
-    if adjust_labels:
-        try:
-            from adjustText import adjust_text
-        except ImportError:
-            raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
+    if isinstance(palette, list):
+        palette = ListedColormap(palette)
+    elif isinstance(palette, ListedColormap):
+        pass
+    else:
+        raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
 
-    # check whether the cells were already assigned to the requested annotation
-    _check_assignment(data=data, cells_layer=cells_layer, key=key, force_assignment=force_assignment, modality=modality)
+    compositions_df = calc_cellular_composition(
+        data=data, cell_type_col=cell_type_col,
+        cells_layer=cells_layer,
+        geom_key=geom_key, geom_values=geom_values,
+        modality=modality, uid_column=uid_column,
+        normalize=normalize, force_assignment=force_assignment,
+    )
 
-    # retrieve data
-    try:
-        adata = data.cells[layer].matrix
-    except:
-        raise ValueError(f"No {layer} layers in InSituData.cells")
-    assignment_series = adata.obsm[modality][key]
-    cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+    # retrieve names from data
+    geom_names = compositions_df.columns.levels[0].values
+    data_names = compositions_df.columns.levels[1].values
+    cell_type_names = compositions_df.index.values
 
-    # calculate compositions
-    compositions = {}
-    for cat in cats:
-        idx = assignment_series[assignment_series == cat].index
-        compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=True) * 100 # calculate percentage
-    compositions = pd.DataFrame(compositions)
+    if len(geom_names) == 1:
+        n_plots = 1
+        separate_legend = False
+    elif len(geom_names) > 1:
+        n_plots = len(geom_names) + 1
+        separate_legend = True
+    else:
+        raise ValueError(f"geom_names has length 0.")
 
-    # Define a function to display percentages above the threshold
-    def autopct_func(pct):
-        return ('%1.1f%%' % pct) if pct > label_threshold else ''
+    if plot_type == "bar":
+        subplot_width = 0.5+len(data_names)*1
+        subplot_height = 8
+    elif plot_type == "barh":
+        subplot_width = 8
+        subplot_height = len(data_names)*0.8
+    else:
+        raise ValueError(f"plot_type must be either 'bar' or 'barh'. Instead: {plot_type}")
 
-    if plot_type == "pie":
-        # Plot pie charts for each area
-        n_plots, nrows, ncols = get_nrows_maxcols(len(cats), max_cols)
-        fig, axs = plt.subplots(nrows, ncols, figsize=(6*ncols,6*nrows))
+    # generate the subplots based on number of data
+    fig, axs = _generate_subplots(
+        n_plots=n_plots, n_keys=1,
+        max_cols=max_cols,
+        subplot_width=subplot_width,
+        subplot_height=subplot_height
+    )
 
-        if n_plots > 1:
-            axs = axs.ravel()
-        else:
-            axs = [axs]
-
-        for i, area in enumerate(compositions.columns):
-            if show_labels:
-                wedges, texts, autotexts = axs[i].pie(compositions[area],
-                                                    autopct=autopct_func, pctdistance=1.15,
-                                                    colors=DEFAULT_CATEGORICAL_CMAP.colors
-                                                    )
-            else:
-                wedges, texts = axs[i].pie(compositions[area],
-                                                    colors=DEFAULT_CATEGORICAL_CMAP.colors
-                                                    )
-
-            title_str = textwrap.fill(f'Proportions of Cell Types in {area}', width=20)
-            axs[i].set_title(title_str)
-
-            if adjust_labels:
-                # Adjust text to avoid overlap
-                adjust_text(texts + autotexts, ax=axs[i], arrowprops=dict(arrowstyle="->", color='k', lw=0.5))
-
-        # Add a legend
-        fig.legend(wedges, compositions.index, loc='center left', bbox_to_anchor=(0.92, 0.5))
-
-    elif plot_type in ["bar", "barh"]:
+    for i, geom_name in enumerate(geom_names):
+        compositions = compositions_df.loc[:, geom_name]
+        n_cats = compositions.shape[1]
+        ax = axs[i]
         # Plot a single stacked bar plot
         if plot_type == "bar":
-            fig_width = 1*len(cats)
-            fig_height = 6
             ylabel = "%"
-            xlabel = modality
+            xlabel = "Dataset"
+            inverty = False
         else:
-            fig_width = 6
-            fig_height = 1*len(cats)
-            ylabel = modality
+            ylabel = "Dataset"
             xlabel = "%"
-        compositions.T.plot(kind=plot_type, stacked=True, figsize=(fig_width, fig_height),
-                            width=0.7,
-                            color=DEFAULT_CATEGORICAL_CMAP.colors)
-        plt.gca().invert_yaxis()
-        plt.title('Cell type composition')
-        plt.ylabel(ylabel)
-        plt.xlabel(xlabel)
-        plt.legend(title='Cell Types', bbox_to_anchor=(1.05, 1), loc='upper left')
+            inverty = True
 
-    save_and_show_figure(savepath=savepath, fig=plt.gcf(), save_only=save_only, dpi_save=dpi_save, tight=False)
 
-    plt.tight_layout()
-    plt.show()
+        compositions.T.plot(kind=plot_type, stacked=True,
+                            #figsize=(fig_width, fig_height),
+                            width=0.7, ax=ax, legend=not separate_legend,
+                            #color=color_list
+                            color=palette.colors
+                            )
+
+        if not separate_legend:
+            ax.legend(title='Cell Types', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        if inverty:
+            plt.gca().invert_yaxis()
+        ax.set_title(geom_name)
+        ax.set_ylabel(ylabel)
+        ax.set_xlabel(xlabel)
+
+    if separate_legend:
+        # create legend in additional plot
+        color_dict = {cat: palette(i % palette.N) for i, cat in enumerate(cell_type_names)}
+        _add_colorlegend_to_axis(
+            color_dict=color_dict,
+            ax=axs[len(geom_names)],
+            max_per_row=np.inf,
+            loc='center',
+            bbox_to_anchor=(0.5, 0.5),
+            mode="rectangle",
+            remove_axis=True
+            )
+
+    save_and_show_figure(
+        savepath=savepath,
+        fig=fig,
+        save_only=save_only,
+        dpi_save=dpi_save,
+        tight=separate_legend
+        )
 
     if return_data:
         return compositions

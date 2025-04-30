@@ -203,18 +203,6 @@ def differential_gene_expression(
     else:
         adata_ref = adata_ref_list[0]
 
-    # check before concatenation whether cells with identical names are found in both data and reference
-    if not set(adata_data.obs_names).isdisjoint(set(adata_ref.obs_names)):
-        n_duplicated_cells = len(set(adata_data.obs_names).intersection(set(adata_ref.obs_names)))
-        pct_duplicated_cells = round((n_duplicated_cells / 2) / (len(adata_data) + len(adata_data)) * 100, 1)
-
-        warn(
-            f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells were found to belong to both data and reference. "
-            "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
-            "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
-            "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
-        )
-
     # concatenate and ignore user warning about observations being not unique since we take care of this later by filtering out duplicate values if wanted.
     with catch_warnings():
         filterwarnings("ignore", message="Observation names are not unique. To make them unique, call `.obs_names_make_unique`.")
@@ -226,7 +214,20 @@ def differential_gene_expression(
             label=dge_comparison_column
         )
 
-    if exclude_ambiguous_assignments:
+    if not exclude_ambiguous_assignments:
+        # check whether cells with identical names are found in both data and reference and if yes give a warning
+        if not set(adata_data.obs_names).isdisjoint(set(adata_ref.obs_names)):
+            n_duplicated_cells = len(set(adata_data.obs_names).intersection(set(adata_ref.obs_names)))
+            pct_duplicated_cells = round((n_duplicated_cells / 2) / (len(adata_data) + len(adata_data)) * 100, 1)
+
+            warn(
+                f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells with identical names were found to belong to both data and reference. "
+                "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
+                "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
+                "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
+            )
+
+    else:
         # check whether some cells are in both data and reference
         duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
 
@@ -261,8 +262,11 @@ def differential_gene_expression(
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
-            "Target": [elem[1] if isinstance(elem, tuple) else elem for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg],
-            "Reference": [elem[1] if isinstance(elem, tuple) else elem for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg]
+            "Reference": [elem[1] if isinstance(elem, tuple) else elem
+                          for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
+            "Target": [elem[1] if isinstance(elem, tuple) else elem
+                       for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
+
         })
 
         # remove empty rows

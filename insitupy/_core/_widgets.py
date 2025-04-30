@@ -364,8 +364,9 @@ if WITH_NAPARI:
                         geom_type={"choices": choices, "label": "Type:"},
                         key={"choices": annot_keys, "label": "Key:"},
                         annot_class={"choices": first_classes, "label": "Class:"},
-                        edge_width={'min': 1, 'max': 40, 'step': 10, 'label': 'Edge width:'},
+                        edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
                         opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
+                        tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
                         show_names={'label': 'Show names'}
                     )
                     def show_geometries_widget(
@@ -374,7 +375,7 @@ if WITH_NAPARI:
                         annot_class,
                         edge_width: int = 10,
                         opacity: float = 1,
-                        tolerance: Number = 5,
+                        tolerance: int = 1,
                         show_names: bool = False
                         ):
 

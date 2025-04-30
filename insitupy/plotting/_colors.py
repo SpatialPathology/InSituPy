@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -15,25 +15,54 @@ from insitupy._core._checks import check_raw
 from insitupy.palettes import CustomPalettes
 
 
+def _create_handle_function(mode):
+    if mode == "circle":
+        def handle_function(color):
+            return plt.Line2D([0], [0],
+                               marker='o',
+                               color='w',
+                               markerfacecolor=color,
+                               markersize=15,
+                               markeredgecolor='black',
+                               markeredgewidth=1.5
+                               )
+    elif mode == "rectangle":
+        def handle_function(color):
+            return plt.Line2D([0], [0],
+                               marker='_',
+                               color='w',
+                               markerfacecolor=None,
+                               markersize=15,
+                               markeredgecolor=color,
+                               markeredgewidth=8
+                               )
+    else:
+        raise ValueError("Invalid mode. Choose 'circle' or 'rectangle'.")
+    return handle_function
+
 def _add_colorlegend_to_axis(
     color_dict: dict,
     ax: plt.Axes,
     max_per_row: int = 10,
     loc: str = 'center',
-    bbox_to_anchor: tuple = (0.5, 0.5)
+    bbox_to_anchor: tuple = (0.5, 0.5),
+    #marker: Optional[str] = 'o',
+    mode: Literal["circle", "rectangle"] = "circle",
+    remove_axis: bool = True
 ):
+    # create function to create handles
+    handle_function = _create_handle_function(mode)
+
     # Create legend manually
     handles = []
     labels = []
 
     for label, color in color_dict.items():
-        handle = plt.Line2D([0], [0], marker='o', color='w',
-                            markerfacecolor=color, markersize=15,
-                            markeredgecolor='black', markeredgewidth=1.5)
+        handle = handle_function(color)
         handles.append(handle)
         labels.append(label)
 
-    n_col = math.ceil(len(labels) / max_per_row)
+    n_col = max(1, math.ceil(len(labels) / max_per_row))
 
     legend = ax.legend(
         handles, labels,
@@ -42,8 +71,9 @@ def _add_colorlegend_to_axis(
         bbox_to_anchor=bbox_to_anchor
         )
 
-    # Hide the axis
-    ax.set_axis_off()
+    if remove_axis:
+        # Hide the axis
+        ax.set_axis_off()
 
 def _parse_unique_categories(data):
     # retrieve data

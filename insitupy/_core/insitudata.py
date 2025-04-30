@@ -21,34 +21,33 @@ from parse import *
 from pyarrow import ArrowInvalid
 from scipy.sparse import issparse
 from shapely import Point
+from tqdm import tqdm
 
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import ISPY_METADATA_FILE, LOAD_FUNCS, REGIONS_SYMBOL
-from insitupy._core._save import _save_images
+from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
+                                 MODALITIES, MODALITIES_COLOR_DICT,
+                                 REGIONS_SYMBOL)
+from insitupy._core._layers import _create_points_layer
+from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
+                                  _save_regions, _save_transcripts)
 from insitupy._core._utils import _get_cell_layer
+from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
+                                        MultiCellData, RegionsData)
+from insitupy._exceptions import (InSituDataMissingObject,
+                                  InSituDataRepeatedCropError,
+                                  ModalityNotFoundError)
+from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
-from insitupy.images.utils import _get_contrast_limits
-from insitupy.io.files import read_json, write_dict_to_json
-from insitupy.io.io import (read_baysor_cells, read_baysor_transcripts,
-                            read_multicelldata, read_shapesdata)
-from insitupy.plotting.plots import plot_colorlegend
-from insitupy.utils.utils import _crop_transcripts, convert_to_list
-
-from .._constants import CACHE, ISPY_METADATA_FILE, MODALITIES
-from .._exceptions import (InSituDataMissingObject,
-                           InSituDataRepeatedCropError, ModalityNotFoundError)
-from ..images.utils import create_img_pyramid
-from ..io.files import check_overwrite_and_remove_if_true, read_json
-from ..plotting import expr_along_obs_val
-from ..utils.utils import (convert_napari_shape_to_polygon_or_line,
-                           convert_to_list)
-from ..utils.utils import textformat as tf
-from ._layers import _create_points_layer
-from ._save import (_save_annotations, _save_cells, _save_images,
-                    _save_regions, _save_transcripts)
-from .dataclasses import (AnnotationsData, CellData, ImageData, MultiCellData,
-                          RegionsData)
+from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
+from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
+                               write_dict_to_json)
+from insitupy.io.io import read_multicelldata, read_shapesdata
+from insitupy.plotting import expr_along_obs_val
+from insitupy.utils.geo import fast_query_points_within_polygon
+from insitupy.utils.utils import (_crop_transcripts,
+                                  convert_napari_shape_to_polygon_or_line,
+                                  convert_to_list)
 
 # optional packages that are not always installed
 if WITH_NAPARI:
@@ -230,32 +229,32 @@ class InSituData:
             if self._images is not None:
                 images_repr = self._images.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['images']+tf.Bold} images{tf.ResetAll}\n{tf.SPACER}   " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._cells is not None:
                 cells_repr = self._cells.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+tf.Green+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._transcripts is not None:
                 trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
 
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+tf.Purple+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
                 )
 
             if self._annotations is not None:
                 annot_repr = self._annotations.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['annotations']+tf.Bold} annotations{tf.ResetAll}\n{tf.SPACER}   " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._regions is not None:
                 region_repr = self._regions.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD} " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['regions']+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
         return repr
 
@@ -341,8 +340,11 @@ class InSituData:
         return self._transcripts
 
     @transcripts.setter
-    def transcripts(self, value: pd.DataFrame):
-        self._transcripts = value
+    def transcripts(self, value: dd.DataFrame):
+        if isinstance(value, dd.DataFrame):
+            self._transcripts = value
+        else:
+            raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
     @transcripts.deleter
     def transcripts(self):
@@ -372,7 +374,10 @@ class InSituData:
 
     @annotations.setter
     def annotations(self, value: AnnotationsData):
-        self._annotations = value
+        if isinstance(value, AnnotationsData):
+            self._annotations = value
+        else:
+            raise ValueError(f"Value must be of type AnnotationsData, but got {type(value)} instead.")
 
     @annotations.deleter
     def annotations(self):
@@ -388,7 +393,10 @@ class InSituData:
 
     @regions.setter
     def regions(self, value: RegionsData):
-        self._regions = value
+        if isinstance(value, RegionsData):
+            self._regions = value
+        else:
+            raise ValueError(f"Value must be of type RegionsData, but got {type(value)} instead.")
 
     @regions.deleter
     def regions(self):
@@ -429,6 +437,7 @@ class InSituData:
         x = celldata.matrix.obsm["spatial"][:, 0]
         y = celldata.matrix.obsm["spatial"][:, 1]
         cells = gpd.points_from_xy(x, y)
+        cells = gpd.GeoSeries(cells)
 
         # iterate through annotation keys
         for key in keys:
@@ -451,10 +460,11 @@ class InSituData:
             data = {}
 
             # iterate through names
-            for n in geom_names:
+            for n in tqdm(geom_names):
                 polygons = geom_df[geom_df["name"] == n]["geometry"].tolist()
 
-                in_poly = [poly.contains(cells) for poly in polygons]
+                #in_poly = [poly.contains(cells) for poly in polygons]
+                in_poly = [fast_query_points_within_polygon(poly, cells) for poly in polygons]
 
                 # check if points were in any of the polygons
                 in_poly_res = np.array(in_poly).any(axis=0)
@@ -511,31 +521,43 @@ class InSituData:
     def assign_annotations(
         self,
         keys: Union[str, Literal["all"]] = "all",
+        cells_layers: Optional[Union[List[str], str]] = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
-         for key in self._cells.get_all_keys():
+        if cells_layers is None:
+            layers_list = self._cells.get_all_keys()
+        else:
+            layers_list = convert_to_list(cells_layers)
+
+        for l in layers_list:
             self.assign_geometries(
                 geometry_type="annotations",
                 keys=keys,
                 add_masks=add_masks,
                 overwrite=overwrite,
-                cells_layer=key
+                cells_layer=l
             )
 
     def assign_regions(
         self,
         keys: Union[str, Literal["all"]] = "all",
+        cells_layers: Optional[Union[List[str], str]] = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
-        for key in self._cells.get_all_keys():
+        if cells_layers is None:
+            layers_list = self._cells.get_all_keys()
+        else:
+            layers_list = convert_to_list(cells_layers)
+
+        for l in layers_list:
             self.assign_geometries(
                 geometry_type="regions",
                 keys=keys,
                 add_masks=add_masks,
                 overwrite=overwrite,
-                cells_layer=key
+                cells_layer=l
             )
 
     def copy(self, keep_path: bool = False):
@@ -817,10 +839,11 @@ class InSituData:
 
         for key, file in zip(keys, files):
             # read annotation and store in dictionary
-            self._annotations.add_data(data=file,
-                                      key=key,
-                                      scale_factor=scale_factor
-                                      )
+            self._annotations.add_data(
+                data=file,
+                key=key,
+                scale_factor=scale_factor
+                )
 
         #self._remove_empty_modalities()
 
@@ -1164,6 +1187,7 @@ class InSituData:
         from_canvas: bool = False,
         max_per_row: int = 10
         ):
+        from insitupy.plotting.plots import plot_colorlegend
 
         if from_canvas:
             # Check if static_canvas exists
@@ -1757,6 +1781,9 @@ class InSituData:
                 func(verbose=verbose)
         else:
             print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
+
+    def get_modality(self, modality: str):
+        return getattr(self, modality)
 
     def get_loaded_modalities(self):
         loaded_modalities = [m for m in MODALITIES if getattr(self, m) is not None]
