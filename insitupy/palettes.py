@@ -102,3 +102,6 @@ def cmap2hex(cmap):
     hexlist = [rgb2hex(cmap(i)) for i in range(cmap.N)]
     return hexlist
 
+def map_to_colors(cat_list, palette):
+    color_dict = {cat: rgb2hex(palette(i % palette.N)) for i, cat in enumerate(cat_list)}
+    return color_dict
