@@ -204,7 +204,7 @@ def calc_cellular_composition(
 
     all_data_names = exp.metadata[uid_column].values
 
-    if not len(all_data_names) == len(all_data_names):
+    if not len(all_data_names) == len(np.unique(all_data_names)):
         raise ValueError(f"Values in {uid_column} were found to be not unique. Please choose a column with unique values in `.metadata`.")
 
     # retrieve cell type compositions
