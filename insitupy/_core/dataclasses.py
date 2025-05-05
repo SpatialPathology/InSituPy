@@ -17,6 +17,7 @@ from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
+from insitupy._core._checks import _is_list_of_dask_arrays
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._textformat import textformat as tf
@@ -465,7 +466,13 @@ class BoundariesData(DeepCopyMixin):
         return self._data[key]
 
     def __setitem__(self, key: str, item):
-        self._data[key] = item
+        if isinstance(key, str):
+            if _is_list_of_dask_arrays(item):
+                self._data[key] = item
+            else:
+                raise ValueError(f"Item for key '{key}' is not a list of dask arrays. Cannot be set.")
+        else:
+            raise ValueError(f"Key '{key}' is not a string. Cannot be used as key.")
 
     @property
     def metadata(self):
@@ -697,6 +704,29 @@ class CellData(DeepCopyMixin):
         else:
             self._boundaries = None
             self._entries = ["matrix"]
+
+    def __getitem__(self, key):
+        """Retrieve a subset of the `CellData` object.
+
+        Args:
+            key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
+                or Series to retrieve.
+
+        Returns:
+            `CellData`: A new `CellData` object with the selected subset of cells.
+        """
+        new_celldata = self.copy()
+        new_celldata._matrix = new_celldata._matrix[key].copy()
+        new_celldata.sync()
+        return new_celldata
+
+    def __len__(self):
+        """Return the number of cells in the `CellData` object.
+
+        Returns:
+            int: The number of cells.
+        """
+        return len(self.matrix)
 
     def __repr__(self):
         repr = (
@@ -985,7 +1015,10 @@ class MultiCellData(DeepCopyMixin):
         return self._layers.get(key)
 
     def __setitem__(self, key: str, item):
-        self._layers[key] = item
+        if isinstance(item, CellData):
+            self._layers[key] = item
+        else:
+            raise ValueError(f"Item must be of type CellData. Instead: {type(item)}.")
 
     @property
     def layers(self):
@@ -1468,3 +1501,4 @@ class ImageData(DeepCopyMixin):
 
         if return_savepaths:
             return savepaths
+
