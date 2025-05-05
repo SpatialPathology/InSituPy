@@ -162,7 +162,7 @@ class InSituData:
                  metadata: dict = None,
                  slide_id: str = None,
                  sample_id: str = None,
-                 from_insitudata: bool = None,
+                #  from_insitudata: bool = None,
                  ):
         """
         """
@@ -174,7 +174,7 @@ class InSituData:
         self._metadata = metadata
         self._slide_id = slide_id
         self._sample_id = sample_id
-        self._from_insitudata = from_insitudata
+        # self._from_insitudata = from_insitudata
 
         # modalities
         self._images = None
@@ -297,7 +297,14 @@ class InSituData:
 
     @property
     def from_insitudata(self):
-        return self._from_insitudata
+        if self._path is not None:
+            if Path(self._path).exists():
+                return True
+            else:
+                print(f"Path {str(self._path)} does not exist.")
+                return False
+        else:
+            return False
 
     @property
     def images(self):
@@ -579,6 +586,7 @@ class InSituData:
 
         if not keep_path:
             self_copy._path = None
+            self_copy.metadata["path"]
 
         # add viewer again to original object if necessary
         if had_viewer:
@@ -892,7 +900,7 @@ class InSituData:
         if verbose:
             print("Loading cells...", flush=True)
 
-        if self._from_insitudata:
+        if self.from_insitudata:
             try:
                 cells_path = self._metadata["data"]["cells"]
             except KeyError:
@@ -912,7 +920,7 @@ class InSituData:
         if verbose:
             print("Loading images...", flush=True)
 
-        if self._from_insitudata:
+        if self.from_insitudata:
             # check if matrix data is stored in this InSituData
             try:
                 images_dict = self._metadata["data"]["images"]
@@ -949,7 +957,7 @@ class InSituData:
         if verbose:
             print("Loading transcripts...", flush=True)
 
-        if self._from_insitudata:
+        if self.from_insitudata:
             # check if transcript data is stored in this InSituData
             try:
                 transcripts_path = self._metadata["data"]["transcripts"]
@@ -1002,7 +1010,7 @@ class InSituData:
                    metadata=metadata,
                    slide_id=slide_id,
                    sample_id=sample_id,
-                   from_insitudata=True
+                   #from_insitudata=True
                    )
         return data
 
@@ -1130,11 +1138,11 @@ class InSituData:
         if path is not None:
             path = Path(path)
         else:
-            if self._from_insitudata:
-                path = Path(self._metadata["path"])
-            else:
+            # if self.from_insitudata:
+            #     path = Path(self._metadata["path"])
+            if not self.from_insitudata:
                 warn(
-                    f"Data as not loaded from an InSituPy project. "
+                    f"Data is not linked to an InSituPy project folder (link can be lost by copy for example). "
                     f"Use `saveas()` instead to save the data to a new project folder."
                     )
 

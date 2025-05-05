@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from anndata import AnnData
 from matplotlib.axes._axes import Axes
 from matplotlib.figure import Figure
 from tqdm import tqdm
@@ -518,6 +519,59 @@ class InSituExperiment:
         if not plot_volcano:
             return dge_res
 
+    def import_obs(
+        self,
+        adata: AnnData,
+        uid_column: str,
+        uid_column_adata: str,
+        obs_columns_to_transfer: Optional[List[str]] = None,
+        obsm_keys_to_transfer: Optional[List[str]] = None,
+        cells_layer: Optional[str] = None,
+        overwrite: bool = False
+    ):
+        """
+        Imports observation and observation matrix data from an AnnData object to the current InSituExperiment.
+        The data in `adata` and the `InSituData` objects within the `InSituExperiment` is matched based on unique identifiers
+        provided with `uid_column` and `uid_column_adata`. Data can be transferred from both `.obs` and `obsm` and is
+        added to the selected `cells_layer` of the `InSituData` objects.
+
+        Args:
+            adata (AnnData): The annotated data matrix from which to transfer data.
+            uid_column (str): The column name in the metadata of the `InSituExperiment` that contains unique identifiers.
+            uid_column_adata (str): The column name in `adata.obs` that contains unique identifiers.
+            obs_columns_to_transfer (Optional[List[str]]): List of column names in `adata.obs` to transfer. Defaults to None.
+            obsm_keys_to_transfer (Optional[List[str]]): List of keys in `adata.obsm` to transfer. Defaults to None.
+            cells_layer (Optional[str]): The layer in `xd.cells` to access. Defaults to None.
+            overwrite (bool): Whether to overwrite existing keys in `obsm`. Defaults to False.
+
+        Raises:
+            ValueError: If both `obs_columns_to_transfer` and `obsm_keys_to_transfer` are None.
+            ValueError: If a key in `obsm_keys_to_transfer` already exists in `celldata.matrix.obsm` and `overwrite` is False.
+
+        """
+        if obs_columns_to_transfer is None and obsm_keys_to_transfer is None:
+            raise ValueError("Both `obs_columns_to_transfer` and `obsm_keys_to_transfer` are None. At least one must be provided")
+
+        for meta, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            current_uid = meta[uid_column]
+            mask = adata.obs[uid_column_adata] == current_uid
+            subset = adata[mask]
+
+            if obs_columns_to_transfer:
+                for col in obs_columns_to_transfer:
+                    if col in celldata.matrix.obs.columns and not overwrite:
+                        raise ValueError(f"Key {col} already in `obs.`. To ignore this, set `overwrite=True`.")
+                    else:
+                        celldata.matrix.obs[col] = subset.obs[col]
+
+            if obsm_keys_to_transfer:
+                for key in obsm_keys_to_transfer:
+                    if key in celldata.matrix.obsm.keys() and not overwrite:
+                        raise ValueError(f"Key {key} already in `obsm.`. To ignore this, set `overwrite=True`.")
+                    celldata.matrix.obsm[key] = subset.obsm[key]
+
+
     def iterdata(self):
         """Iterate over the metadata rows and corresponding data.
 
@@ -627,19 +681,22 @@ class InSituExperiment:
     #     else:
     #         print(f"The `obs_names` in samples within the InSituExperiment are already unique. Skipped execution. To force the execution set `force=True`.")
 
-    def plot_umaps(self,
-                   cells_layer: Optional[str] = None,
-                   color: Optional[str] = None,
-                   title_columns: Optional[Union[List[str], str]] = None,
-                   title_size: int = 20,
-                   max_cols: int = 4,
-                   figsize: Tuple[int, int] = (8,6),
-                   savepath: Optional[Union[str, os.PathLike, Path]] = None,
-                   save_only: bool = False,
-                   show: bool = True,
-                   fig: Optional[Figure] = None,
-                   dpi_save: int = 300,
-                   **kwargs):
+    def plot_embedding(
+        self,
+        basis: str,
+        cells_layer: Optional[str] = None,
+        color: Optional[str] = None,
+        title_columns: Optional[Union[List[str], str]] = None,
+        title_size: int = 20,
+        max_cols: int = 4,
+        figsize: Tuple[int, int] = (8,6),
+        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        save_only: bool = False,
+        show: bool = True,
+        fig: Optional[Figure] = None,
+        dpi_save: int = 300,
+        **kwargs
+        ):
         """Create a plot with UMAPs of all datasets as subplots using scanpy's pl.umap function.
 
         Args:
@@ -672,7 +729,14 @@ class InSituExperiment:
             adata = celldata.matrix
 
             # plot UMAP and add to axis
-            sc.pl.umap(adata, ax=ax, color=color, show=False, **kwargs)
+            sc.pl.embedding(
+                adata=adata,
+                basis=basis,
+                color=color,
+                ax=ax,
+                show=False,
+                **kwargs
+            )
 
             if title_columns:
                 title = " - ".join(str(metadata_row[col]) for col in title_columns if col in metadata_row)
@@ -687,6 +751,53 @@ class InSituExperiment:
             save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=True)
         else:
             return fig, axes
+
+
+    def plot_umaps(
+        self,
+        cells_layer: Optional[str] = None,
+        color: Optional[str] = None,
+        title_columns: Optional[Union[List[str], str]] = None,
+        title_size: int = 20,
+        max_cols: int = 4,
+        figsize: Tuple[int, int] = (8, 6),
+        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        save_only: bool = False,
+        show: bool = True,
+        fig: Optional[Figure] = None,
+        dpi_save: int = 300,
+        **kwargs
+    ):
+        """Create a plot with UMAPs of all datasets as subplots using scanpy's pl.umap function.
+
+        Args:
+            cells_layer (str, optional): The layer in `xd.cells` to access. Defaults to None.
+            color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
+            title_columns (str or list of str, optional): List of column names from metadata to use for subplot titles. Defaults to None.
+            max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
+            figsize (tuple, optional): Figure size. Defaults to (8, 6).
+            savepath (optional): Path to save the plot.
+            save_only (bool, optional): Whether to only save the plot without showing. Defaults to False.
+            show (bool, optional): Whether to show the plot. Defaults to True.
+            fig (optional): Figure to plot on.
+            dpi_save (int, optional): DPI for saving the plot. Defaults to 300.
+            **kwargs: Additional keyword arguments to pass to sc.pl.umap.
+        """
+        return self.plot_embedding(
+            basis='X_umap',
+            cells_layer=cells_layer,
+            color=color,
+            title_columns=title_columns,
+            title_size=title_size,
+            max_cols=max_cols,
+            figsize=figsize,
+            savepath=savepath,
+            save_only=save_only,
+            show=show,
+            fig=fig,
+            dpi_save=dpi_save,
+            **kwargs
+        )
 
     def query(self, criteria):
         """Query the experiment based on metadata criteria.

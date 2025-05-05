@@ -393,8 +393,9 @@ def plot_cellular_composition(
         ax.set_xlabel(xlabel)
 
     if separate_legend:
-        # create legend in additional plot
+        # map colors to cell type names
         color_dict = {cat: palette(i % palette.N) for i, cat in enumerate(cell_type_names)}
+        # create legend in additional plot
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],

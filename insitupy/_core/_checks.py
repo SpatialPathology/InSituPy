@@ -1,6 +1,7 @@
 from typing import Literal, Optional
 
 import anndata
+import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
@@ -197,3 +198,16 @@ def _all_obs_names_unique(
         all_obs_names += celldata.matrix.obs_names.tolist()
 
     return _is_list_unique(all_obs_names)
+
+
+def _is_list_of_dask_arrays(variable):
+    # Check if the variable is a list
+    if not isinstance(variable, list):
+        return False
+
+    # Check if all elements in the list are dask arrays
+    for element in variable:
+        if not isinstance(element, da.Array):
+            return False
+
+    return True
