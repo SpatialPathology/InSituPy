@@ -1020,6 +1020,12 @@ class MultiCellData(DeepCopyMixin):
         else:
             raise ValueError(f"Item must be of type CellData. Instead: {type(item)}.")
 
+    def __delitem__(self, key: str):
+        if key in self._layers.keys():
+            del self._layers[key]
+        else:
+            raise KeyError(f"Key '{key}' not found in MultiCellData.")
+
     @property
     def layers(self):
         return self._layers

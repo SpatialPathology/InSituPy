@@ -102,8 +102,6 @@ def read_xenium(
                         metadata=metadata,
                         slide_id=slide_id,
                         sample_id=sample_id,
-                        from_insitudata=False,
-
                         )
 
     # LOAD CELLS
