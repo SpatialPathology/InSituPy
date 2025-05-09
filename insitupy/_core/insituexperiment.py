@@ -2,9 +2,10 @@ import os
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
+import anndata
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,11 +13,12 @@ import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
+from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 from tqdm import tqdm
 
-import insitupy
-from insitupy._constants import LOAD_FUNCS, MODALITIES, MODALITIES_ABBR
+from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
+                                 MODALITIES, MODALITIES_ABBR)
 from insitupy._core._checks import _all_obs_names_unique, is_integer_counts
 from insitupy._core._utils import _get_cell_layer
 from insitupy._core.insitudata import InSituData
@@ -25,6 +27,8 @@ from insitupy._exceptions import ModalityNotFoundError
 from insitupy._textformat import textformat as tf
 from insitupy.io.files import check_overwrite_and_remove_if_true
 from insitupy.io.plots import save_and_show_figure
+from insitupy.palettes import map_to_colors
+from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -581,11 +585,16 @@ class InSituExperiment:
         for idx, row in self._metadata.iterrows():
             yield row, self._data[idx]
 
-    def generate_collection(
+    def collect_anndatas(
         self,
         cells_layer: Optional[str],
         label_col: str = "uid",
-        make_obs_names_unique: bool = False
+        obs_keys=None,
+        var_keys=None,
+        obsm_keys=None,
+        uns_keys=None,
+        layer_keys=None,
+        make_obs_names_unique: bool = False,
         ):
         from anndata.experimental import AnnCollection
 
@@ -594,16 +603,70 @@ class InSituExperiment:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             adata = celldata.matrix
 
+            # filter adata
+            adata = _select_anndata_elements(
+                adata=adata,
+                obs_keys=obs_keys, var_keys=var_keys,
+                obsm_keys=obsm_keys, uns_keys=uns_keys,
+                layer_keys=layer_keys
+            )
+
             if make_obs_names_unique:
                 adata.obs_names = f"{str(i)}-" + adata.obs_names
 
             adatas[meta[label_col]] = adata
 
-        self._collection = AnnCollection(adatas,
-                                         join_vars='inner',
-                                         join_obs='inner',
-                                         label=label_col
-                                         )
+        return anndata.concat(
+            adatas,
+            axis='obs',
+            join='inner',
+            label=label_col
+            )
+
+    def create_color_dict(
+        self,
+        obs_col: str,
+        cells_layer: Optional[str] = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
+        ) -> Dict:
+        cols = []
+        for _, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            cols.append(np.unique(celldata.matrix.obs[obs_col]))
+        all_cats = np.sort(np.unique(np.concatenate(cols)))
+
+        # create color dict
+        color_dict = map_to_colors(all_cats, palette=palette)
+        return color_dict
+
+    def sync_colors(
+        self,
+        obs_cols: Union[str, List[str]],
+        cells_layer: Optional[str] = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
+    ):
+        # Make sure obs_cols is a list
+        obs_cols = convert_to_list(obs_cols)
+
+        for obs_col in obs_cols:
+            # create a color dictionary with all categories
+            color_dict = self.create_color_dict(
+                obs_col=obs_col,
+                cells_layer=cells_layer,
+                palette=palette
+            )
+
+            # iterate over all datasets and set the colors in .uns
+            uns_key = f"{obs_col}_colors"
+            print(f"Saving synchronized color list into `.uns['{uns_key}']...")
+            for _, xd in self.iterdata():
+                celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+
+                try:
+                    cats = celldata.matrix.obs[obs_col].cat.categories.values
+                except AttributeError:
+                    cats = np.unique(celldata.matrix.obs[obs_col])
+                celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
 
     def get_n_cells(
         self,
@@ -686,8 +749,8 @@ class InSituExperiment:
         basis: str,
         cells_layer: Optional[str] = None,
         color: Optional[str] = None,
-        title_columns: Optional[Union[List[str], str]] = None,
-        title_size: int = 20,
+        title_column: Optional[str] = None,
+        title_size: int = 24,
         max_cols: int = 4,
         figsize: Tuple[int, int] = (8,6),
         savepath: Optional[Union[str, os.PathLike, Path]] = None,
@@ -701,7 +764,7 @@ class InSituExperiment:
 
         Args:
             color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
-            title_columns (str or list of str, optional): List of column names from metadata to use for subplot titles. Defaults to None.
+            title_column (str, optional): Name of column in `self.metadata` to infer titles of subplots from. Defaults to None.
             max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
             **kwargs: Additional keyword arguments to pass to sc.pl.umap.
             figsize (tuple, optional): Figure size. Defaults to (8, 6).
@@ -718,8 +781,11 @@ class InSituExperiment:
             axes = axes.ravel()
 
         # make sure title_columns is a list
-        if title_columns is not None:
-            title_columns = convert_to_list(title_columns)
+        if title_column is not None:
+            title_columns = self.metadata[title_column].tolist()
+            #title_columns = convert_to_list(title_columns)
+        else:
+            title_columns = [f"Dataset {idx + 1}" for idx in range(len(self))]
 
         for idx, (metadata_row, dataset) in enumerate(self.iterdata()):
             ax = axes[idx] if num_datasets > 1 else axes
@@ -738,11 +804,16 @@ class InSituExperiment:
                 **kwargs
             )
 
-            if title_columns:
-                title = " - ".join(str(metadata_row[col]) for col in title_columns if col in metadata_row)
-                ax.set_title(title, fontdict={"fontsize": title_size})
-            else:
-                ax.set_title(f"Dataset {idx + 1}", fontdict={"fontsize": title_size})
+            ax.set_title(title_columns[idx],
+                         fontdict={"fontsize": title_size},
+                         pad=10
+                         )
+
+            # if title_column:
+            #     title = " - ".join(str(metadata_row[col]) for col in title_columns if col in metadata_row)
+            #     ax.set_title(title, fontdict={"fontsize": title_size})
+            # else:
+            #     ax.set_title(f"Dataset {idx + 1}", fontdict={"fontsize": title_size})
 
         remove_empty_subplots(
             axes, n_plots, n_rows, max_cols
@@ -757,7 +828,7 @@ class InSituExperiment:
         self,
         cells_layer: Optional[str] = None,
         color: Optional[str] = None,
-        title_columns: Optional[Union[List[str], str]] = None,
+        title_column: Optional[str] = None,
         title_size: int = 20,
         max_cols: int = 4,
         figsize: Tuple[int, int] = (8, 6),
@@ -773,7 +844,7 @@ class InSituExperiment:
         Args:
             cells_layer (str, optional): The layer in `xd.cells` to access. Defaults to None.
             color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
-            title_columns (str or list of str, optional): List of column names from metadata to use for subplot titles. Defaults to None.
+            title_column (str, optional): List of column names from metadata to use for subplot titles. Defaults to None.
             max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
             figsize (tuple, optional): Figure size. Defaults to (8, 6).
             savepath (optional): Path to save the plot.

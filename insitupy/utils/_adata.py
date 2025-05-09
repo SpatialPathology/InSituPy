@@ -98,7 +98,15 @@ def _extract_groups(
         return
 
 
-def _select_anndata_elements(adata, obs_keys=None, var_keys=None, obsm_keys=None, uns_keys=None, layer_keys=None, inplace=False):
+def _select_anndata_elements(
+    adata,
+    obs_keys=None,
+    var_keys=None,
+    obsm_keys=None,
+    uns_keys=None,
+    layer_keys=None,
+    inplace=False
+    ):
     """
     Select specific columns or keys from obs, var, obsm, uns, and layers in an AnnData object and remove all others.
 
