@@ -46,6 +46,7 @@ def _add_colorlegend_to_axis(
     max_per_row: int = 10,
     loc: str = 'center',
     bbox_to_anchor: tuple = (0.5, 0.5),
+    title: Optional[str] = None,
     #marker: Optional[str] = 'o',
     mode: Literal["circle", "rectangle"] = "circle",
     remove_axis: bool = True
@@ -68,6 +69,7 @@ def _add_colorlegend_to_axis(
         handles, labels,
         loc=loc, ncol=n_col,
         frameon=True,
+        title=title,
         bbox_to_anchor=bbox_to_anchor
         )
 

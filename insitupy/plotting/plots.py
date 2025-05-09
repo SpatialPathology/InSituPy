@@ -128,29 +128,44 @@ def _generate_experiment_subplots(
 
 
 def plot_colorlegend(
-    viewer: Viewer,
+    viewer: Optional[Viewer] = None,
+    mapping: Optional[None] = None,
     layer_name: Optional[str] = None,
     max_per_row: int = 10,
+    title: Optional[str] = None,
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
     dpi_save: int = 300,
     ):
-    # automatically get layer
-    if layer_name is None:
-        candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{_config.current_data_name}")]
-        try:
-            layer_name = candidate_layers[0].name
-        except IndexError:
-            raise ValueError("No layer with cellular transcriptomic data found. First add a layer using the 'Show Data' widget.")
+    if viewer is None and mapping is None:
+        raise ValueError("Both `viewer` and `mapping` are None. One of both must not be None.")
 
-    # extract layer
-    layer = viewer.layers[layer_name]
+    if viewer is not None and mapping is not None:
+        raise ValueError("Both `viewer` and `mapping` are not None. At least one of both must be None.")
 
-    # get values
-    values = layer.properties["value"]
+    if viewer is None:
+        if title is None:
+            title = "Color legend"
+    else:
+        # automatically get layer
+        if layer_name is None:
+            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{_config.current_data_name}")]
+            try:
+                layer_name = candidate_layers[0].name
+            except IndexError:
+                raise ValueError("No layer with cellular transcriptomic data found. First add a layer using the 'Show Data' widget.")
 
-    # create color mapping
-    rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
+        # extract layer
+        layer = viewer.layers[layer_name]
+
+        # get values
+        values = layer.properties["value"]
+
+        # create color mapping
+        rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
+
+        # set title
+        title = layer_name
 
     if isinstance(mapping, dict):
         # categorical colorbar
@@ -161,7 +176,13 @@ def plot_colorlegend(
         fig.subplots_adjust(bottom=0.5)
 
         # add color legend to axis
-        _add_colorlegend_to_axis(color_dict=mapping, ax=ax, max_per_row=max_per_row)
+        _add_colorlegend_to_axis(
+            color_dict=mapping,
+            ax=ax,
+            max_per_row=max_per_row,
+            title=title
+            )
+
 
     else:
         # continuous colorlegend
@@ -173,7 +194,7 @@ def plot_colorlegend(
 
         # Add the colorbar to the figure
         cbar = fig.colorbar(mapping, orientation='horizontal', cax=ax)
-        cbar.ax.set_title(layer_name)
+        cbar.ax.set_title(title)
 
     save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
     plt.show()
@@ -181,7 +202,9 @@ def plot_colorlegend(
 def calc_cellular_composition(
     data: Union[InSituData, InSituExperiment],
     cell_type_col: str,
+    cell_type_values: Optional[Union[str, List[str]]] = None,
     cells_layer: Optional[str] = None,
+    mask_col: Optional[str] = None,
     geom_key: Optional[str] = None,
     geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
@@ -193,6 +216,9 @@ def calc_cellular_composition(
 
     if geom_values is not None:
         geom_values = convert_to_list(geom_values)
+
+    if cell_type_values is not None:
+        cell_type_values = convert_to_list(cell_type_values)
 
     # check data
     is_experiment = _is_experiment(data)
@@ -215,12 +241,19 @@ def calc_cellular_composition(
             cells_layer=cells_layer,
             verbose=False
             )
-        adata = celldata.matrix
+        adata = celldata.matrix.copy()
+
+        if mask_col is not None:
+            adata = adata[adata.obs[mask_col]].copy()
+
         data_name = m[uid_column]
 
         if geom_key is not None:
             # check whether the key exists in the selected geometry
-            if geom_key in d.get_modality(modality).keys():
+            mod = d.get_modality(modality)
+            if mod is None:
+                raise ValueError(f"`geom_key` '{geom_key}' not available in modality '{modality}'")
+            if geom_key in mod.keys():
                 # check whether the cells were already assigned to the requested geometry
                 _check_assignment(
                     data=d,
@@ -239,8 +272,21 @@ def calc_cellular_composition(
                         if cat not in geom_values:
                             # skip this category
                             continue
+
+                    # calculate percentage
                     idx = assignment_series[assignment_series == cat].index
-                    compositions[cat] = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100 # calculate percentage
+                    value_counts = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100
+
+                    if cell_type_values is not None:
+                        # filter for cell type values
+                        in_cats = value_counts.index.isin(cell_type_values)
+                        count_results = value_counts[in_cats].copy()
+                        count_results['Others'] = value_counts[~in_cats].sum()
+                    else:
+                        count_results = value_counts
+
+                    compositions[cat] = count_results.sort_index()
+
                 compositions = pd.DataFrame(compositions)
                 collect = True
 
@@ -286,21 +332,27 @@ def calc_cellular_composition(
 
     compositions_df.columns.names = [geom_key, uid_column]
 
+    # sort by index
+    compositions_df = compositions_df.sort_index()
+
     return compositions_df
 
 
 def plot_cellular_composition(
     data: Union[InSituData, InSituExperiment],
     cell_type_col: str,
+    cell_type_values: Optional[Union[str, List[str]]] = None,
     cells_layer: Optional[str] = None,
+    mask_col: Optional[str] = None,
     geom_key: Optional[str] = None,
     geom_values: Optional[Union[str, List[str]]] = None,
-    modality: Literal["regions", "annotations"] = "regions",
+    modality: Optional[Literal["regions", "annotations"]] = None,
     plot_type: Literal["bar", "barh"] = "barh",
     uid_column: str = "sample_id",
     normalize: bool = True,
     force_assignment: bool = False,
     max_cols: int = 4,
+    aspect_factor: Number = 1,
     savepath: Union[str, os.PathLike, Path] = None,
     palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
     return_data: bool = False,
@@ -322,9 +374,14 @@ def plot_cellular_composition(
     else:
         raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
 
+    if geom_key is not None:
+        if modality is None:
+            raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or ' annotations'.")
+
     compositions_df = calc_cellular_composition(
-        data=data, cell_type_col=cell_type_col,
-        cells_layer=cells_layer,
+        data=data,
+        cell_type_col=cell_type_col, cell_type_values=cell_type_values,
+        cells_layer=cells_layer, mask_col=mask_col,
         geom_key=geom_key, geom_values=geom_values,
         modality=modality, uid_column=uid_column,
         normalize=normalize, force_assignment=force_assignment,
@@ -345,11 +402,11 @@ def plot_cellular_composition(
         raise ValueError(f"geom_names has length 0.")
 
     if plot_type == "bar":
-        subplot_width = 0.5+len(data_names)*1
-        subplot_height = 8
+        subplot_width = (0.5+len(data_names)*1) / aspect_factor
+        subplot_height = 7.5
     elif plot_type == "barh":
-        subplot_width = 8
-        subplot_height = len(data_names)*0.8
+        subplot_width = 7.5
+        subplot_height = (0.5+len(data_names)*1) * aspect_factor
     else:
         raise ValueError(f"plot_type must be either 'bar' or 'barh'. Instead: {plot_type}")
 
@@ -384,7 +441,7 @@ def plot_cellular_composition(
                             )
 
         if not separate_legend:
-            ax.legend(title='Cell Types', bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.legend(title=cell_type_col, bbox_to_anchor=(1.05, 1), loc='upper left')
 
         if inverty:
             plt.gca().invert_yaxis()

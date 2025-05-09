@@ -28,5 +28,4 @@ def save_and_show_figure(
     elif show:
         plt.show()
     else:
-
         return

@@ -1223,6 +1223,7 @@ class InSituData:
                     savepath = Path(f"figures/colorlegend-{layer.name}.pdf")
                 plot_colorlegend(
                     viewer=self.viewer,
+                    mapping=None,
                     layer_name=layer.name,
                     max_per_row=max_per_row,
                     savepath=savepath
