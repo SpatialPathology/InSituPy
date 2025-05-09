@@ -101,7 +101,7 @@ def _calculate_metrics(adata: AnnData, layer: str = None, force_layer: bool = Fa
 def plot_overview(
     data: InSituExperiment,
     cells_layer: Optional[str] = None,
-    colums_to_plot: List[str] = [],
+    columns_to_plot: List[str] = [],
     layer: str = None,
     force_layer: bool = False,
     index: bool = True,
@@ -133,8 +133,9 @@ def plot_overview(
     except ImportError:
         raise ImportError("This function requires the 'plottable' framework. Please install it with 'pip install plottable'.")
 
-    # Copy the metadata, select the columns to plot, and add index if nessiccary
-    df = data.metadata.copy()[colums_to_plot]
+    # Copy the metadata, select the columns to plot, and add index if necessary
+    df = data.metadata.copy()[columns_to_plot]
+
     colname_tmp = "ind_tmp"
     if not index and df.shape[1] > 0:
         # Set the first column as the index if index is False
@@ -153,9 +154,17 @@ def plot_overview(
         if column_name == colname_tmp:
             if index:
                 border = "right"
-            column_definition.append(ColumnDefinition(name=column_name, textprops={"ha": "center"}, width=width_dict[column_name], title="", border=border))
+            column_definition.append(
+                ColumnDefinition(name=column_name,
+                                 textprops={"ha": "center"},
+                                 width=width_dict[column_name],
+                                 title="Sample", border=border))
         else:
-            column_definition.append(ColumnDefinition(name=column_name, group="metadata", textprops={"ha": "center"}, width=width_dict[column_name]))
+            column_definition.append(
+                ColumnDefinition(name=column_name,
+                                 group="metadata",
+                                 textprops={"ha": "center"},
+                                 width=width_dict[column_name]))
 
     # Calculate predefined QC metrics
     list_gene_count = []
@@ -168,7 +177,10 @@ def plot_overview(
         # get CellData
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        m_gene_counts, m_transcript_counts = _calculate_metrics(celldata.matrix, layer=layer, force_layer=force_layer)
+        m_gene_counts, m_transcript_counts = _calculate_metrics(
+            celldata.matrix,
+            layer=layer,
+            force_layer=force_layer)
         list_gene_count.append(m_gene_counts)
         list_transcript_count.append(m_transcript_counts)
 
@@ -179,16 +191,39 @@ def plot_overview(
 
     # Add all columns with QC metrics
     column_definition_bars = [
-        ColumnDefinition("mean_transcript_counts", group="qc_metrics", plot_fn=_custom_bar, plot_kw={"max": max_transcripts}, title="Median Transcripts per Cell", textprops={"ha": "center"}, width=qc_width, border="left"),
-        ColumnDefinition("mean_gene_counts", group="qc_metrics", plot_fn=_custom_bar, plot_kw={"max": max_genes}, title="Median Genes per Cell", textprops={"ha": "center"}, width=qc_width)
+        ColumnDefinition(
+            "mean_transcript_counts",
+            group="qc_metrics",
+            plot_fn=_custom_bar,
+            plot_kw={"max": max_transcripts},
+            title="Median Transcripts per Cell",
+            textprops={"ha": "center"},
+            width=qc_width, border="left"),
+        ColumnDefinition(
+            "mean_gene_counts",
+            group="qc_metrics",
+            plot_fn=_custom_bar,
+            plot_kw={"max": max_genes},
+            title="Median Genes per Cell",
+            textprops={"ha": "center"},
+            width=qc_width
+            )
     ]
     # Create the plot
     fig, ax = plt.subplots(figsize=(total_width + qc_width * 2, len(df) * 0.7 + 1))
     plt.rcParams["font.family"] = ["DejaVu Sans"]
-    table = Table(df, column_definitions=(column_definition + column_definition_bars), row_dividers=True,
-                footer_divider=True, ax=ax, row_divider_kw={"linewidth": 1, "linestyle": (0, (1, 5))},
-                col_label_divider_kw={"linewidth": 1, "linestyle": "-"}, column_border_kw={"linewidth": 1, "linestyle": "-"},
-                index_col=col_id,)
+
+    table = Table(
+        df,
+        index_col=col_id,
+        column_definitions=(column_definition + column_definition_bars),
+        row_dividers=True,
+        footer_divider=True,
+        ax=ax,
+        row_divider_kw={"linewidth": 1, "linestyle": (0, (1, 5))},
+        col_label_divider_kw={"linewidth": 1, "linestyle": "-"},
+        column_border_kw={"linewidth": 1, "linestyle": "-"},
+        )
 
     # save and show figure
     save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
