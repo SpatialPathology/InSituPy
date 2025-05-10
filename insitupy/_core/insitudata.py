@@ -586,7 +586,7 @@ class InSituData:
 
         if not keep_path:
             self_copy._path = None
-            self_copy.metadata["path"]
+            self_copy.metadata["path"] = None
 
         # add viewer again to original object if necessary
         if had_viewer:
@@ -1138,15 +1138,20 @@ class InSituData:
         if path is not None:
             path = Path(path)
         else:
-            # if self.from_insitudata:
-            #     path = Path(self._metadata["path"])
-            if not self.from_insitudata:
+            if self.from_insitudata:
+                #path = Path(self._metadata["path"])
+                path = self.path
+            else:
                 warn(
                     f"Data is not linked to an InSituPy project folder (link can be lost by copy for example). "
                     f"Use `saveas()` instead to save the data to a new project folder."
                     )
+                return
 
         if path.exists():
+            if verbose:
+                print(f"Saving to existing path: {str(path)}", flush=True)
+
             # check if path is a valid directory
             if not path.is_dir():
                 raise NotADirectoryError(f"Path is not a directory: {str(path)}")
@@ -1186,6 +1191,9 @@ class InSituData:
 
 
         else:
+            if verbose:
+                print(f"Saving to new path: {str(path)}", flush=True)
+
             # save to the respective directory
             self.saveas(path=path)
 
