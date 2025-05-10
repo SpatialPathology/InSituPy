@@ -1,7 +1,7 @@
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -18,9 +18,11 @@ def volcano_plot(data,
                  fold_change_threshold: Number = 1,
                  title: str = None,
                  adjust_labels: bool = True,
+                 ax: Optional[plt.Axes] = None,
                  savepath: Union[str, os.PathLike, Path] = None,
                  save_only: bool = False,
                  dpi_save: int = 300,
+                 show: bool = True,
                  label_top_n: int = 20,
                  figsize: Tuple[int, int] = (8, 6),
                  config_table=None
@@ -52,7 +54,7 @@ def volcano_plot(data,
         except ImportError:
             raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
 
-    plt.figure(figsize=figsize)
+    # plt.figure(figsize=figsize)
 
     # Determine colors based on significance and fold change
     colors = []
@@ -67,22 +69,27 @@ def volcano_plot(data,
         else:
             colors.append('black')  # Not significant
 
+    if ax is None:
+        fig, ax = plt.subplots(1,1,figsize=figsize)
+
     # Scatter plot
-    plt.scatter(data[logfoldchanges_column], data[pval_column],
+    # plt.scatter(data[logfoldchanges_column], data[pval_column],
+    #             alpha=0.5, color=colors)
+    ax.scatter(data[logfoldchanges_column], data[pval_column],
                 alpha=0.5, color=colors)
 
     # Add labels and title
     if title is not None:
-        plt.title(title, fontsize=16)
-    plt.xlabel('$\mathregular{Log_2}$ fold change', fontsize=14)
-    plt.ylabel('$\mathregular{-Log_10}$ p-value', fontsize=14)
+        ax.set_title(title, fontsize=16)
+    ax.set_xlabel('$\mathregular{Log_2}$ fold change', fontsize=14)
+    ax.set_ylabel('$\mathregular{-Log_10}$ p-value', fontsize=14)
 
     # Add horizontal line for significance threshold
-    plt.axhline(y=-np.log10(significance_threshold), color='black', linestyle='--')
+    ax.axhline(y=-np.log10(significance_threshold), color='black', linestyle='--')
 
     # Add vertical lines for fold change thresholds
-    plt.axvline(x=fold_change_threshold, color='black', linestyle='--')
-    plt.axvline(x=-fold_change_threshold, color='black', linestyle='--')
+    ax.axvline(x=fold_change_threshold, color='black', linestyle='--')
+    ax.axvline(x=-fold_change_threshold, color='black', linestyle='--')
 
     # # Calculate mixed score and get top 20 up and down-regulated genes
     # volcano_data['mixed_score'] = -np.log10(volcano_data['pvals']) * volcano_data[logfoldchanges_column]
@@ -94,30 +101,32 @@ def volcano_plot(data,
     top_genes = pd.concat([top_up_genes, top_down_genes])
 
     # Adjust y-axis limits to provide space for text
-    plt.ylim(0, plt.ylim()[1] * 1.1)  # Increase the upper limit of the y-axis to make space for the annotations
+    ax.set_ylim(0, ax.get_ylim()[1] * 1.1)  # Increase the upper limit of the y-axis to make space for the annotations
 
     # Annotate top genes
     texts = []
     for i, row in top_genes.iterrows():
-        texts.append(plt.annotate(row['gene'],
-                                   (row[logfoldchanges_column], row[pval_column]),
-                                   fontsize=14,  # Increased font size
-                                   alpha=0.75))
+        texts.append(ax.annotate(
+            row['gene'],
+            (row[logfoldchanges_column], row[pval_column]),
+            fontsize=14,  # Increased font size
+            alpha=0.75))
 
     if adjust_labels:
         # Adjust text to avoid overlap
-        adjust_text(texts,
-                    arrowprops=dict(arrowstyle='->', color='gray', lw=0.5),
-                    max_move=None # this helped with some annotations remaining overlapping
-                    )
+        adjust_text(
+            texts, ax=ax,
+            arrowprops=dict(arrowstyle='->', color='gray', lw=0.5),
+            max_move=None # this helped with some annotations remaining overlapping
+            )
 
     # Add labels to the top of the plot, outside the plot area
-    plt.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
+    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
                 xytext=(-65, 0), textcoords='offset points',
                 ha='left', va='center', fontsize=14, color='black',
                 arrowprops=dict(arrowstyle='->', color='black'))
 
-    plt.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
+    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
                 xytext=(93, 0), textcoords='offset points',
                 ha='right', va='center', fontsize=14, color='black',
                 arrowprops=dict(arrowstyle='->', color='black'))
@@ -125,12 +134,14 @@ def volcano_plot(data,
     if config_table is not None:
         # Create table data
         # Add table at the bottom of the plot
-        table = plt.table(cellText=config_table.values,
-                        colLabels=config_table.columns,
-                        cellLoc='center',
-                        colWidths=[.2,.4,.4],
-                        loc='bottom',
-                        bbox=[-0.12, -0.2-(0.1*(len(config_table)+1)), 1.12, 0.1*(len(config_table)+1)])
+        table = ax.table(
+            cellText=config_table.values,
+            colLabels=config_table.columns,
+            cellLoc='center',
+            colWidths=[.2,.4,.4],
+            loc='bottom',
+            bbox=[-0.12, -0.2-(0.1*(len(config_table)+1)), 1.12, 0.1*(len(config_table)+1)]
+            )
 
         # make first row and first column bold
         for (row, col), cell in table.get_celld().items():
@@ -142,8 +153,19 @@ def volcano_plot(data,
         # table.set_fontsize(12)
 
         # Adjust layout to make room for the table
-        plt.subplots_adjust(left=0.2, bottom=0.1*(1+len(config_table)))
+        # plt.subplots_adjust(left=0.2, bottom=0.1*(1+len(config_table)))
+
+        # adjust position of axes (alternative to subplots_adjust above)
+        pos = ax.get_position()
+        new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
+        ax.set_position(new_pos)
 
     # save and show figure
-    save_and_show_figure(savepath=savepath, fig=plt.gcf(), save_only=save_only, dpi_save=dpi_save)
-    plt.show()
+    save_and_show_figure(
+        savepath=savepath,
+        fig=plt.gcf(),
+        save_only=save_only,
+        dpi_save=dpi_save,
+        show=show
+        )
+    #plt.show()

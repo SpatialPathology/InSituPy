@@ -56,6 +56,11 @@ class MultiSpatialPlot:
                  header: Optional[str] = None,
                  name_column: str = None,
 
+                 # font sizes
+                 title_size: int = 24,
+                 label_size: int = 16,
+                 tick_label_size: int = 14,
+
                  # image stuff
                  image_key: Optional[str] = None,
                  pixelwidth_per_subplot: int = 200,
@@ -286,22 +291,24 @@ class MultiSpatialPlot:
                     # set axis
                     ax.set_xlim(ConfigData.xlim[0], ConfigData.xlim[1])
                     ax.set_ylim(ConfigData.ylim[0], ConfigData.ylim[1])
-                    ax.set_xlabel('µm', fontsize=14)
-                    ax.set_ylabel('µm', fontsize=14)
+                    ax.set_xlabel('µm', fontsize=self.label_size)
+                    ax.set_ylabel('µm', fontsize=self.label_size)
                     ax.invert_yaxis()
                     ax.grid(False)
                     ax.set_aspect(1)
                     ax.set_facecolor(self.background_color)
-                    ax.tick_params(labelsize=12)
+                    ax.tick_params(labelsize=self.tick_label_size)
 
                     if self.multidata and not self.multikeys:
                         ax.set_title(name + "\n" + ConfigData.key,
-                                     fontsize=14, #fontweight='bold',
+                                     fontsize=self.title_size, #fontweight='bold',
+                                     pad=10,
                                      rotation=0)
                     else:
                         # set titles
                         ax.set_title(ConfigData.key,
-                                     fontsize=14, #fontweight='bold'
+                                     fontsize=self.title_size, #fontweight='bold'
+                                     pad=10,
                                      )
 
                         if idx_key == 0:
@@ -435,11 +442,11 @@ class MultiSpatialPlot:
             # add colorbar
             clb = self.fig.colorbar(s, cax=cax, orientation='vertical')
             # set colorbar
-            clb.ax.tick_params(labelsize=14)
+            clb.ax.tick_params(labelsize=self.tick_label_size)
 
             if self.clb_title is not None:
                 clb.ax.set_xlabel(self.clb_title,  # Change to xlabel for horizontal orientation
-                                fontdict={"fontsize": 14},
+                                fontdict={"fontsize": self.label_size},
                                 labelpad=20)
 
             if crange is not None:
@@ -477,6 +484,11 @@ def plot_spatial(
     clb_title: Optional[str] = None,
     header: Optional[str] = None,
     name_column: str = None,
+
+    # font sizes
+    title_size: int = 24,
+    label_size: int = 16,
+    tick_label_size: int = 14,
 
     # image stuff
     image_key: Optional[str] = None,
