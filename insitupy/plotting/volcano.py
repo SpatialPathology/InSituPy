@@ -15,7 +15,7 @@ def volcano_plot(data,
                  logfoldchanges_column: str = 'logfoldchanges',
                  pval_column: str = 'neg_log10_pvals',
                  significance_threshold: Number = 0.05,
-                 fold_change_threshold: Number = 1,
+                 lfc_threshold: Number = 2,
                  title: str = None,
                  adjust_labels: bool = True,
                  ax: Optional[plt.Axes] = None,
@@ -36,7 +36,7 @@ def volcano_plot(data,
         logfoldchanges_column (str): Column name for log fold changes (default is 'logfoldchanges').
         pval_column (str): Column name for negative log10 p-values (default is 'neg_log10_pvals').
         significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Log2 fold change threshold for up/down regulation (default is 1).
+        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 2).
         title (str): Title of the plot (default is "Volcano Plot").
         adjust_labels (bool, optional): If True, adjusts the labels to avoid overlap. Default is False.
         savepath (Union[str, os.PathLike, Path], optional): Path to save the plot (default is None).
@@ -55,11 +55,13 @@ def volcano_plot(data,
             raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
 
     # plt.figure(figsize=figsize)
+    neg_log_sig_thresh = -np.log10(significance_threshold)
+    fold_change_threshold = np.log2(lfc_threshold)
 
     # Determine colors based on significance and fold change
     colors = []
     for index, row in data.iterrows():
-        if row['pvals'] < significance_threshold:
+        if row[pval_column] > neg_log_sig_thresh:
             if row[logfoldchanges_column] > fold_change_threshold:
                 colors.append('maroon')  # Up-regulated
             elif row[logfoldchanges_column] < -fold_change_threshold:
@@ -94,14 +96,33 @@ def volcano_plot(data,
     # # Calculate mixed score and get top 20 up and down-regulated genes
     # volcano_data['mixed_score'] = -np.log10(volcano_data['pvals']) * volcano_data[logfoldchanges_column]
 
-    top_up_genes = data[data[logfoldchanges_column] > fold_change_threshold].nlargest(label_top_n, 'scores')
-    top_down_genes = data[data[logfoldchanges_column] < -fold_change_threshold].nsmallest(label_top_n, 'scores')
+    # determine top up- and down-regulated genes for adding the names
+    # create masks
+    sig_mask = (data[pval_column] > neg_log_sig_thresh)
+    up_mask = (data[logfoldchanges_column] > fold_change_threshold) & sig_mask
+    down_mask = (data[logfoldchanges_column] < -fold_change_threshold) & sig_mask
+
+    # select genes
+    # top_up_genes = data[up_mask].nlargest(label_top_n, 'scores')
+    # top_down_genes = data[down_mask].nsmallest(label_top_n, 'scores')
+    top_up_genes = data[up_mask].nlargest(label_top_n, logfoldchanges_column)
+    top_down_genes = data[down_mask].nsmallest(label_top_n, logfoldchanges_column)
+
+    # infer x limits
+    xlims = (
+        top_down_genes[logfoldchanges_column].min()*1.1,
+        top_up_genes[logfoldchanges_column].max()*1.1
+        )
 
     # Combine top genes for annotation
+    #return top_up_genes
     top_genes = pd.concat([top_up_genes, top_down_genes])
 
     # Adjust y-axis limits to provide space for text
     ax.set_ylim(0, ax.get_ylim()[1] * 1.1)  # Increase the upper limit of the y-axis to make space for the annotations
+
+    # set x-axis limits to remove non-significant outliers
+    ax.set_xlim(xlims[0], xlims[1])
 
     # Annotate top genes
     texts = []
@@ -159,6 +180,7 @@ def volcano_plot(data,
         pos = ax.get_position()
         new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
         ax.set_position(new_pos)
+
 
     # save and show figure
     save_and_show_figure(

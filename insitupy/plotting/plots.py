@@ -264,7 +264,8 @@ def calc_cellular_composition(
                     modality=modality)
 
                 assignment_series = adata.obsm[modality][geom_key]
-                cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+                #cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
+                cats = mod.metadata[geom_key]['classes']
 
                 # calculate compositions
                 compositions = {}
@@ -275,7 +276,8 @@ def calc_cellular_composition(
                             continue
 
                     # calculate percentage
-                    idx = assignment_series[assignment_series == cat].index
+                    #idx = assignment_series[assignment_series == cat].index
+                    idx = assignment_series[assignment_series.str.contains(cat)].index
                     value_counts = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100
 
                     if cell_type_values is not None:
@@ -406,7 +408,8 @@ def plot_cellular_composition(
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
         try:
-            color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            color_dict = map_to_colors(sorted(celldata.matrix.obs[cell_type_col].unique()), palette=palette)
+            #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
         except KeyError:
             color_dict = None
 
@@ -437,6 +440,7 @@ def plot_cellular_composition(
         subplot_height=subplot_height
     )
 
+    print(compositions_df)
     for i, geom_name in enumerate(geom_names):
         compositions = compositions_df.loc[:, geom_name]
         n_cats = compositions.shape[1]
@@ -454,7 +458,17 @@ def plot_cellular_composition(
         if color_dict is None:
             color_list = palette.colors
         else:
-            color_list = [color_dict[elem] for elem in compositions.index]
+            color_list = []
+            for elem in compositions.index:
+                try:
+                    color_list.append(color_dict[elem])
+                except KeyError as e:
+                    if elem == "Others":
+                        color_list.append("#d3d3d3") # append lightgrey hex code
+                    else:
+                        raise KeyError(e)
+
+            #color_list = [color_dict[elem] for elem in compositions.index]
         compositions.T.plot(kind=plot_type, stacked=True,
                             #figsize=(fig_width, fig_height),
                             width=0.7, ax=ax, legend=not separate_legend,

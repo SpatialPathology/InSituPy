@@ -26,8 +26,8 @@ from tqdm import tqdm
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_COLOR_DICT,
-                                 REGIONS_SYMBOL)
+                                 MODALITIES, MODALITIES_COLOR_DICT)
+from insitupy._core._checks import _check_geometry_symbol_and_layer
 from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
@@ -155,7 +155,8 @@ class InSituData:
     from ._deprecated import (add_alt, add_baysor, normalize_and_transform,
                               read_all, read_annotations, read_cells,
                               read_images, read_regions, read_transcripts,
-                              reduce_dimensions, save_current_colorlegend)
+                              reduce_dimensions, save_current_colorlegend,
+                              store_geometries)
 
     def __init__(self,
                  path: Union[str, os.PathLike, Path] = None,
@@ -490,7 +491,6 @@ class InSituData:
                 # create annotation from annotation masks
                 col_name = f"{geometry_type}-{key}"
                 data[col_name] = column_to_add
-
                 if col_name in celldata.matrix.obs:
                     if overwrite:
                         celldata.matrix.obs.drop(col_name, axis=1, inplace=True)
@@ -1384,12 +1384,9 @@ class InSituData:
     def show(self,
         keys: Optional[str] = None,
         cells_layer: Optional[str] = None,
-        # annotation_keys: Optional[str] = None,
         point_size: int = 8,
         scalebar: bool = True,
-        #pixel_size: float = None, # if none, extract from metadata
         unit: str = "µm",
-        # cmap_annotations: str ="Dark2",
         grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"],
         return_viewer: bool = False,
         widgets_max_width: int = 500
@@ -1519,8 +1516,6 @@ class InSituData:
                 show_points_widget.max_height = 170
                 show_points_widget.max_width = widgets_max_width
 
-
-
             if show_boundaries_widget is not None:
                 self._viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right")
                 #show_boundaries_widget.max_height = 80
@@ -1540,7 +1535,8 @@ class InSituData:
             add_geom_widget = add_new_geometries_widget()
             #annot_widget.max_height = 100
             add_geom_widget.max_width = widgets_max_width
-            self._viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", add_vertical_stretch=True)
+            self._viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
+                                                )
 
             # if show_region_widget is not None:
             #     self.viewer.window.add_dock_widget(show_region_widget, name="Show regions", area="right")
@@ -1609,35 +1605,55 @@ class InSituData:
         if return_viewer:
             return self._viewer
 
-    def store_geometries(self,
-                         name_pattern = "{type_symbol} {class_name} ({annot_key})",
-                         uid_col: str = "id"
-                         ):
-        """
-        Extracts geometric layers from shapes and points layers in the napari viewer
-        and stores them in the InSituData object as annotations or regions.
+    # def store_geometries(self):
+    #     """
+    #     Extracts geometric layers from shapes and points layers in the napari viewer
+    #     and stores them in the InSituData object as annotations or regions.
 
-        Args:
-            name_pattern (str): A format string used to parse the layer names.
-                It should contain placeholders for 'type_symbol', 'class_name',
-                and 'annot_key'.
-            uid_col (str): The name of the column used to store unique identifiers
-                for the geometries. Default is "id".
+    #     Raises:
+    #         AttributeError: If the viewer is not initialized, an error message
+    #             prompts the user to open a napari viewer using the `.show()` method.
 
-        Raises:
-            AttributeError: If the viewer is not initialized, an error message
-                prompts the user to open a napari viewer using the `.show()` method.
+    #     Notes:
+    #         - The function iterates through the layers in the viewer and checks if
+    #         they are instances of Shapes or Points.
+    #         - It extracts the geometric data, colors, and other relevant properties
+    #         to create a GeoDataFrame.
+    #         - The GeoDataFrame is then added to the annotations or regions of the
+    #         InSituData object based on the type of layer.
+    #         - If the layer is classified as a region but is a point layer, a warning
+    #         is issued, and the layer is skipped.
+    #     """
+    #     name_pattern = "{type_symbol} {class_name} ({annot_key})"
 
-        Notes:
-            - The function iterates through the layers in the viewer and checks if
-            they are instances of Shapes or Points.
-            - It extracts the geometric data, colors, and other relevant properties
-            to create a GeoDataFrame.
-            - The GeoDataFrame is then added to the annotations or regions of the
-            InSituData object based on the type of layer.
-            - If the layer is classified as a region but is a point layer, a warning
-            is issued, and the layer is skipped.
-        """
+    #     if self._viewer is not None:
+    #         viewer = self._viewer
+    #     else:
+    #         print("Use `.show()` first to open a napari viewer.")
+
+    #     # iterate through layers and save them as annotation or region if they meet requirements
+    #     layers = viewer.layers
+    #     #collection_dict = {}
+    #     for layer in layers:
+    #         if isinstance(layer, Shapes) or isinstance(layer, Points):
+    #             name_parsed = parse(name_pattern, layer.name)
+    #             if name_parsed is not None:
+    #                 type_symbol = name_parsed.named["type_symbol"]
+    #                 annot_key = name_parsed.named["annot_key"]
+    #                 class_name = name_parsed.named["class_name"]
+
+    #                 self._store_geometries(
+    #                     layer=layer,
+    #                     type_symbol=type_symbol,
+    #                     annot_key=annot_key,
+    #                     class_name=class_name
+    #                 )
+
+    #     #self._remove_empty_modalities()
+
+    def sync_geometries(self):
+        name_pattern = "{type_symbol} {class_name} ({annot_key})"
+
         if self._viewer is not None:
             viewer = self._viewer
         else:
@@ -1645,7 +1661,6 @@ class InSituData:
 
         # iterate through layers and save them as annotation or region if they meet requirements
         layers = viewer.layers
-        #collection_dict = {}
         for layer in layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
                 name_parsed = parse(name_pattern, layer.name)
@@ -1654,94 +1669,133 @@ class InSituData:
                     annot_key = name_parsed.named["annot_key"]
                     class_name = name_parsed.named["class_name"]
 
-                    # if the InSituData object does not have an annotations attribute, initialize it
-                    if self._annotations is None:
-                        self._annotations = AnnotationsData() # initialize empty object
-
-                    # extract shapes coordinates and colors
-                    layer_data = layer.data
-                    scale = layer.scale
-
-                    if isinstance(layer, Points):
-                        colors = layer.border_color.tolist()
-                    else:
-                        colors = layer.edge_color.tolist()
-
-                    checks_passed = True
-                    is_region_layer = False
-                    object_type = "annotation"
-                    if type_symbol == REGIONS_SYMBOL:
-                        is_region_layer = True
-                        object_type = "region"
-                        if isinstance(layer, Points):
-                            warn(f'Layer "{layer.name}" is a point layer and at the same time classified as "Region". This is not allowed. Skipped this layer.')
-                            checks_passed = False
-
-                    if object_type == "annotation":
-                        # if the InSituData object does not have an annotations attribute, initialize it
-                        if not hasattr(self, "annotations"):
-                            self.annotations = AnnotationsData() # initialize empty object
-                    else:
-                        # if the InSituData object does not have an regions attribute, initialize it
-                        if not hasattr(self, "regions"):
-                            self.regions = RegionsData() # initialize empty object
+                    checks_passed, object_type = _check_geometry_symbol_and_layer(
+                        layer=layer, type_symbol=type_symbol
+                    )
 
                     if checks_passed:
-                        if isinstance(layer, Shapes):
-                            # extract shape types
-                            shape_types = layer.shape_type
-                            # build annotation GeoDataFrame
-                            geom_df = {
-                                uid_col: layer.properties["uid"],
-                                "objectType": object_type,
-                                #"geometry": [Polygon(np.stack([ar[:, 1], ar[:, 0]], axis=1)) for ar in layer_data],  # switch x/y
-                                "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
-                                "name": class_name,
-                                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-                                #"scale": [scale] * len(layer_data),
-                                #"layer_type": ["Shapes"] * len(layer_data)
-                            }
+                        if object_type == "annotation":
+                            # if the InSituData object does not have an annotations attribute, initialize it
+                            if self.annotations is None:
+                                self.annotations = AnnotationsData() # initialize empty object
 
-                        elif isinstance(layer, Points):
-                            # build annotation GeoDataFrame
-                            geom_df = {
-                                uid_col: layer.properties["uid"],
-                                "objectType": object_type,
-                                "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
-                                "name": class_name,
-                                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-                                #"scale": [scale] * len(layer_data),
-                                #"layer_type": ["Points"] * len(layer_data)
-                            }
-
-                        # generate GeoDataFrame
-                        geom_df = GeoDataFrame(geom_df, geometry="geometry")
-
-                        if is_region_layer:
-                            if self._regions is None:
-                                self._regions = RegionsData()
-
-                            # add regions
-                            self._regions.add_data(data=geom_df,
-                                                  key=annot_key,
-                                                  verbose=True,
-                                                  scale_factor=scale[0]
-                                                  )
+                            shapesdata = self.annotations
                         else:
-                            if self._annotations is None:
-                                self._annotations = AnnotationsData()
+                            # if the InSituData object does not have an regions attribute, initialize it
+                            if self.regions is None:
+                                self.regions = RegionsData() # initialize empty object
 
-                            # add annotations
-                            self._annotations.add_data(data=geom_df,
-                                                      key=annot_key,
-                                                      verbose=True,
-                                                      scale_factor=scale[0]
-                                                      )
+                            shapesdata = self.regions
 
-            else:
-                pass
+                        # import all geometries from viewer into InSituData
+                        self._store_geometries(
+                            layer=layer,
+                            shapesdata=shapesdata,
+                            object_type=object_type,
+                            annot_key=annot_key,
+                            class_name=class_name
+                        )
 
-        #self._remove_empty_modalities()
+                        # remove entries in InSituData that are not present in viewer
+                        current_ids = layer.properties['uid'] # get ids from current layer
+                        geom_df = shapesdata[annot_key]
+                        ids_stored = geom_df[geom_df["name"] == class_name].index
+
+                        # filter geom_df and keep only those entries that are also present in viewer
+                        mask = ~ids_stored.isin(current_ids)
+                        ids_to_remove = ids_stored[mask]
+                        n_removed = np.sum(mask)
+                        geom_df.drop(
+                            ids_to_remove,
+                            inplace=True
+                            )
+
+                        if n_removed > 0:
+                            if n_removed > 1:
+                                object_str = object_type + "s"
+                            else:
+                                object_str = object_type
+
+                            print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
+
+    def _store_geometries(
+        self,
+        layer,
+        shapesdata,
+        object_type: str,
+        annot_key: str,
+        class_name: str,
+        uid_col: str = "id"
+        ):
+        # extract shapes coordinates and colors
+        layer_data = layer.data
+        scale = layer.scale
+
+        if isinstance(layer, Points):
+            colors = layer.border_color.tolist()
+        else:
+            colors = layer.edge_color.tolist()
+
+        if isinstance(layer, Shapes):
+            # extract shape types
+            shape_types = layer.shape_type
+            # build annotation GeoDataFrame
+            geom_df = {
+                uid_col: layer.properties["uid"],
+                "objectType": object_type,
+                "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
+                "name": class_name,
+                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
+            }
+
+        elif isinstance(layer, Points):
+            # build annotation GeoDataFrame
+            geom_df = {
+                uid_col: layer.properties["uid"],
+                "objectType": object_type,
+                "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
+                "name": class_name,
+                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
+            }
+
+        # generate GeoDataFrame
+        geom_df = GeoDataFrame(geom_df, geometry="geometry")
+
+        # add annotations
+        shapesdata.add_data(
+            data=geom_df,
+            key=annot_key,
+            verbose=True,
+            scale_factor=scale[0]
+            )
+
+        # if object_type == "region":
+        #     # add regions
+        #     self.regions.add_data(
+        #         data=geom_df,
+        #         key=annot_key,
+        #         verbose=True,
+        #         scale_factor=scale[0]
+        #         )
+        # else:
+        #     # add annotations
+        #     self.annotations.add_data(
+        #         data=geom_df,
+        #         key=annot_key,
+        #         verbose=True,
+        #         scale_factor=scale[0]
+        #         )
+
+
+
+    # def sync_geometries(
+    #     self
+    # ):
+    #     # store all geometries from viewer
+    #     self.store_geometries()
+
+    #     # remove non-matching entries
+
 
     def plot_expr_along_obs_val(
         self,
@@ -1836,4 +1890,3 @@ class InSituData:
 
         else:
             print(f"No modality '{modality}' found. Nothing removed.")
-

@@ -365,19 +365,21 @@ if WITH_NAPARI:
                         key={"choices": annot_keys, "label": "Key:"},
                         annot_class={"choices": first_classes, "label": "Class:"},
                         edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
-                        opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
-                        tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
+                        # opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
+                        # tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
                         show_names={'label': 'Show names'}
                     )
                     def show_geometries_widget(
                         geom_type,
                         key,
                         annot_class,
-                        edge_width: int = 10,
-                        opacity: float = 1,
-                        tolerance: int = 1,
+                        edge_width: int = 4,
+                        # opacity: float = 1,
+                        # tolerance: int = 1,
                         show_names: bool = False
                         ):
+                        opacity = 1
+                        tolerance = 1
 
                         if geom_type == "Annotations":
                             # get annotation dataframe
@@ -533,6 +535,9 @@ if WITH_NAPARI:
 
             else:
                 layer = None
+
+            if name in _config.viewer.layers:
+                return None
 
             # reset class name to nothing
             add_new_geometries_widget.class_name.value = ""
