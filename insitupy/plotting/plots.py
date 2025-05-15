@@ -18,6 +18,7 @@ from insitupy._core._utils import _get_cell_layer
 from insitupy._core.insitudata import InSituData
 from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
+from insitupy.palettes import map_to_colors
 from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
@@ -392,6 +393,24 @@ def plot_cellular_composition(
     data_names = compositions_df.columns.levels[1].values
     cell_type_names = compositions_df.index.values
 
+    # check data
+    is_experiment = _is_experiment(data)
+    if is_experiment:
+        # get colors for plotting
+        if cell_type_col in data.colors:
+            color_dict = data.colors[cell_type_col]
+        else:
+            color_dict = None
+    else:
+        # assume it is an InSituData object
+        celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+
+        try:
+            color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+        except KeyError:
+            color_dict = None
+
+    # setup plot
     if len(geom_names) == 1:
         n_plots = 1
         separate_legend = False
@@ -432,12 +451,15 @@ def plot_cellular_composition(
             xlabel = "%"
             inverty = True
 
-
+        if color_dict is None:
+            color_list = palette.colors
+        else:
+            color_list = [color_dict[elem] for elem in compositions.index]
         compositions.T.plot(kind=plot_type, stacked=True,
                             #figsize=(fig_width, fig_height),
                             width=0.7, ax=ax, legend=not separate_legend,
                             #color=color_list
-                            color=palette.colors
+                            color=color_list
                             )
 
         if not separate_legend:
@@ -451,7 +473,9 @@ def plot_cellular_composition(
 
     if separate_legend:
         # map colors to cell type names
-        color_dict = {cat: palette(i % palette.N) for i, cat in enumerate(cell_type_names)}
+        if color_dict is None:
+            color_dict = map_to_colors(cat_list=cell_type_names, palette=palette)
+        #color_dict = {cat: palette(i % palette.N) for i, cat in enumerate(cell_type_names)}
         # create legend in additional plot
         _add_colorlegend_to_axis(
             color_dict=color_dict,
