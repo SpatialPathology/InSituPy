@@ -16,12 +16,12 @@ from parse import *
 
 from insitupy import CACHE, __version__
 from insitupy._exceptions import UnknownOptionError
+from insitupy._textformat import textformat as tf
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    deconvolve_he, fit_image_to_size_limit,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
-from insitupy._textformat import textformat as tf
 from insitupy.utils.utils import convert_to_list
 
 from .._constants import SHRT_MAX
@@ -444,8 +444,7 @@ def register_images(
     min_good_matches_per_area: int = 5, # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
-    physicalsize: str = 'µm',
-    prefix: str = "",
+    physicalsize: str = 'µm'
     ):
     """
     Register images stored in an InSituData object.
@@ -462,7 +461,6 @@ def register_images(
         test_flipping (bool): Whether to test flipping of images during registration. Defaults to True.
         decon_scale_factor (float, optional): Scale factor for deconvolution. Defaults to 0.2.
         physicalsize (str, optional): Unit of physical size. Defaults to 'µm'.
-        prefix (str, optional): Prefix for the output files. Defaults to "".
 
     Raises:
         ValueError: If `image_type` is "IF" and `channel_name_for_registration` is None.
@@ -633,7 +631,7 @@ def register_images(
 
         if save_registered_images:
             # save files
-            identifier = f"{prefix}__{data.slide_id}__{data.sample_id}__{channel_names[0]}"
+            identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
             imreg_selected.save(
                 output_dir=output_dir,
                 identifier = identifier,
