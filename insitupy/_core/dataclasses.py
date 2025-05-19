@@ -227,7 +227,9 @@ class ShapesData(DeepCopyMixin):
                 annot_df = pd.concat([annot_df, new_df], ignore_index=False)
 
                 # remove all duplicated shapes - leaving only the newly added
-                annot_df = annot_df[~annot_df.index.duplicated()]
+                dup_mask = annot_df.index.duplicated()
+                annot_df = annot_df[~dup_mask]
+                print(f"Filtered out {np.sum(dup_mask)} duplicates.")
                 new_n = len(annot_df)
 
                 # collect additional variables for reporting
@@ -247,7 +249,7 @@ class ShapesData(DeepCopyMixin):
                     # check if any of the shapes are not shapely Polygons
                     is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
                     if np.any(is_not_polygon):
-                        annot_df = annot_df.loc[is_not_polygon]
+                        annot_df = annot_df.loc[~is_not_polygon]
                         warnings.warn(
                             f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
                             stacklevel=2
