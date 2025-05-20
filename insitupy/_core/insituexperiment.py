@@ -79,8 +79,6 @@ class InSituExperiment:
             Performs differential gene expression analysis.
         iterdata():
             Iterates over the metadata rows and corresponding data.
-        generate_collection(cells_layer=None, label_col="uid"):
-            Generates a collection of AnnData objects.
         get_n_cells(cells_layer=None):
             Returns the total number of cells across all datasets.
         load_all(skip=None):
@@ -125,7 +123,7 @@ class InSituExperiment:
         self._metadata = pd.DataFrame(columns=['uid', 'slide_id', 'sample_id'])
         self._data = []
         self._path = None
-        self._collection = None
+        self._colors = {}
 
     def __repr__(self):
         """Provide a string representation of the InSituExperiment object.
@@ -199,13 +197,11 @@ class InSituExperiment:
         return len(self._data)
 
     @property
-    def collection(self):
-        """Get the collection of anndatas.
-
-        Returns:
-            anndata.experimental.AnnCollection: Object that lazily concatenates AnnData objects.
+    def colors(self):
         """
-        return self._collection
+        Get color dictionaries created by `sync_colors`.
+        """
+        return self._colors
 
     @property
     def data(self):
@@ -668,6 +664,9 @@ class InSituExperiment:
                     cats = np.unique(celldata.matrix.obs[obs_col])
                 celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
 
+            # save color dict in InSituExperiment
+            self.colors[obs_col] = color_dict
+
     def get_n_cells(
         self,
         cells_layer: Optional[str] = None
@@ -785,7 +784,7 @@ class InSituExperiment:
             title_columns = self.metadata[title_column].tolist()
             #title_columns = convert_to_list(title_columns)
         else:
-            title_columns = [f"Dataset {idx + 1}" for idx in range(len(self))]
+            title_columns = [f"Sample {idx + 1}" for idx in range(len(self))]
 
         for idx, (metadata_row, dataset) in enumerate(self.iterdata()):
             ax = axes[idx] if num_datasets > 1 else axes
@@ -858,7 +857,7 @@ class InSituExperiment:
             basis='X_umap',
             cells_layer=cells_layer,
             color=color,
-            title_columns=title_columns,
+            title_column=title_column,
             title_size=title_size,
             max_cols=max_cols,
             figsize=figsize,

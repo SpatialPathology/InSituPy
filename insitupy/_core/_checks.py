@@ -211,3 +211,22 @@ def _is_list_of_dask_arrays(variable):
             return False
 
     return True
+
+from insitupy import WITH_NAPARI
+from insitupy._constants import ANNOTATIONS_SYMBOL, REGIONS_SYMBOL
+
+if WITH_NAPARI:
+    from napari.layers import Points
+
+def _check_geometry_symbol_and_layer(layer, type_symbol):
+    if type_symbol == ANNOTATIONS_SYMBOL:
+        checks_passed = True
+        object_type = "annotation"
+    elif type_symbol == REGIONS_SYMBOL:
+        #is_region_layer = True
+        object_type = "region"
+        if isinstance(layer, Points):
+            warn(f'Layer "{layer.name}" is a point layer and at the same time classified as "Region". This is not allowed. Skipped this layer.')
+            checks_passed = False
+
+    return checks_passed, object_type

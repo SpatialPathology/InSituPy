@@ -50,15 +50,11 @@ class ShapesData(DeepCopyMixin):
                  ) -> None:
         self._shape_name = shape_name if shape_name is not None else "shapes"
 
-        # create dictionary for metadata
-        self._metadata = {}
-        self._data =dict()
+        # add hidden variables
+        self._metadata = {} # dictionary for metadata
+        self._data = {}
         self._assert_uniqueness = assert_uniqueness
         self._polygons_only = polygons_only
-
-        # if forbidden_names is None:
-        #     self._forbidden_names = self._default_forbidden_names
-        # else:
         self._forbidden_names = forbidden_names
 
         if files is not None:
@@ -83,28 +79,29 @@ class ShapesData(DeepCopyMixin):
             repr_strings = []
             for l, m in self._metadata.items():
                 # add ' to classes
-                classes = [f"'{elem}'" for elem in m["classes"]]
+                # classes = [f"'{elem}'" for elem in m["classes"]]
+                # lc = len(classes)
+
+                # get metadata
+                n = len(self._data[l]) # get number of entries
+                classes = sorted(self._data[l]["name"].unique())
+                classes_str = [f"'{elem}'" for elem in classes]
                 lc = len(classes)
 
                 # create string
                 r = (
-                    f'{tf.Bold}{l}:{tf.ResetAll}\t{m[f"n_{self._shape_name}"]} '
+                    f'{tf.Bold}{l}:{tf.ResetAll}\t{n} '
                     f'{self._shape_name}, {lc} '
                     f'{"classes" if lc>1 else "class"} '
                 )
                 if lc < 10:
-                    r += f'({",".join(classes)}) {m["analyzed"]}'
+                    r += f'({", ".join(classes_str)}) {m["analyzed"]}'
                 repr_strings.append(r)
-            # repr_strings = [
-            #     #f'{tf.Bold}{l}:{tf.ResetAll}\t{m[f"n_{self.shape_name}"]} {self.shape_name}, {len(m["classes"])} classes {*m["classes"],} {m["analyzed"]}' for l, m in self.metadata.items()
-            #     f'{tf.Bold}{l}:{tf.ResetAll}\t{m[f"n_{self.shape_name}"]} {self.shape_name}, {len(m["classes"])} {"classes" if len(m["classes"])>1 else "class"} ({",".join(m["classes"])}) {m["analyzed"]}' for l, m in self.metadata.items()
-            #     ]
 
             s = "\n".join(repr_strings)
         else:
             s = ""
 
-        # repr = f"{self._repr_color}{tf.Bold}{self._shape_name}{tf.ResetAll}\n{s}"
         return s
 
     def __getitem__(self, key):
@@ -230,7 +227,9 @@ class ShapesData(DeepCopyMixin):
                 annot_df = pd.concat([annot_df, new_df], ignore_index=False)
 
                 # remove all duplicated shapes - leaving only the newly added
-                annot_df = annot_df[~annot_df.index.duplicated()]
+                dup_mask = annot_df.index.duplicated()
+                annot_df = annot_df[~dup_mask]
+                print(f"Filtered out {np.sum(dup_mask)} duplicates.")
                 new_n = len(annot_df)
 
                 # collect additional variables for reporting
@@ -250,7 +249,7 @@ class ShapesData(DeepCopyMixin):
                     # check if any of the shapes are not shapely Polygons
                     is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
                     if np.any(is_not_polygon):
-                        annot_df = annot_df.loc[is_not_polygon]
+                        annot_df = annot_df.loc[~is_not_polygon]
                         warnings.warn(
                             f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
                             stacklevel=2
@@ -333,16 +332,22 @@ class ShapesData(DeepCopyMixin):
     def keys(self):
         return self._data.keys()
 
-    def remove_data(self,
-                   key_to_remove: str,
-                   classes_to_remove: Union[Literal["all"], List[str], str] = "all"
-                   ):
+    def remove_key(
+        self,
+        key_to_remove: str,
+        classes_to_remove: Union[Literal["all"], List[str], str] = "all"
+        ):
         if classes_to_remove == "all":
-            del self._data[key_to_remove]
+            try:
+                del self._data[key_to_remove]
+                self.metadata.pop(key_to_remove, None)
+            except KeyError:
+                print(f"Key '{key_to_remove}' not found in ShapesData object. Nothing to remove.")
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
             geom_df = self[key_to_remove]
             self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
+            self.metadata[key_to_remove]['classes'] = [c for c in self.metadata[key_to_remove]['classes'] if c not in classes_to_remove]
 
         self._update_metadata()
 
@@ -1022,6 +1027,8 @@ class MultiCellData(DeepCopyMixin):
 
     def __delitem__(self, key: str):
         if key in self._layers.keys():
+            if key == self._main_key:
+                raise KeyError(f"Cannot delete the main key '{self._main_key}'. Please use `set_main()` to set another key as main first.")
             del self._layers[key]
         else:
             raise KeyError(f"Key '{key}' not found in MultiCellData.")
