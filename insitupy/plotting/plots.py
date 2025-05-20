@@ -440,7 +440,6 @@ def plot_cellular_composition(
         subplot_height=subplot_height
     )
 
-    print(compositions_df)
     for i, geom_name in enumerate(geom_names):
         compositions = compositions_df.loc[:, geom_name]
         n_cats = compositions.shape[1]

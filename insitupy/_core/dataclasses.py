@@ -338,11 +338,16 @@ class ShapesData(DeepCopyMixin):
         classes_to_remove: Union[Literal["all"], List[str], str] = "all"
         ):
         if classes_to_remove == "all":
-            del self._data[key_to_remove]
+            try:
+                del self._data[key_to_remove]
+                self.metadata.pop(key_to_remove, None)
+            except KeyError:
+                print(f"Key '{key_to_remove}' not found in ShapesData object. Nothing to remove.")
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
             geom_df = self[key_to_remove]
             self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
+            self.metadata[key_to_remove]['classes'] = [c for c in self.metadata[key_to_remove]['classes'] if c not in classes_to_remove]
 
         self._update_metadata()
 
@@ -1022,6 +1027,8 @@ class MultiCellData(DeepCopyMixin):
 
     def __delitem__(self, key: str):
         if key in self._layers.keys():
+            if key == self._main_key:
+                raise KeyError(f"Cannot delete the main key '{self._main_key}'. Please use `set_main()` to set another key as main first.")
             del self._layers[key]
         else:
             raise KeyError(f"Key '{key}' not found in MultiCellData.")
