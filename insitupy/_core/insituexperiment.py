@@ -857,7 +857,7 @@ class InSituExperiment:
             basis='X_umap',
             cells_layer=cells_layer,
             color=color,
-            title_columns=title_columns,
+            title_column=title_column,
             title_size=title_size,
             max_cols=max_cols,
             figsize=figsize,

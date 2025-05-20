@@ -379,7 +379,7 @@ def plot_cellular_composition(
 
     if geom_key is not None:
         if modality is None:
-            raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or ' annotations'.")
+            raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or 'annotations'.")
 
     compositions_df = calc_cellular_composition(
         data=data,
