@@ -15,7 +15,7 @@ def volcano_plot(data,
                  logfoldchanges_column: str = 'logfoldchanges',
                  pval_column: str = 'neg_log10_pvals',
                  significance_threshold: Number = 0.05,
-                 lfc_threshold: Number = 2,
+                 fold_change_threshold: Number = 2,
                  title: str = None,
                  adjust_labels: bool = True,
                  ax: Optional[plt.Axes] = None,
@@ -56,15 +56,15 @@ def volcano_plot(data,
 
     # plt.figure(figsize=figsize)
     neg_log_sig_thresh = -np.log10(significance_threshold)
-    fold_change_threshold = np.log2(lfc_threshold)
+    lfc_threshold = np.log2(fold_change_threshold)
 
     # Determine colors based on significance and fold change
     colors = []
     for index, row in data.iterrows():
         if row[pval_column] > neg_log_sig_thresh:
-            if row[logfoldchanges_column] > fold_change_threshold:
+            if row[logfoldchanges_column] > lfc_threshold:
                 colors.append('maroon')  # Up-regulated
-            elif row[logfoldchanges_column] < -fold_change_threshold:
+            elif row[logfoldchanges_column] < -lfc_threshold:
                 colors.append('royalblue')  # Down-regulated
             else:
                 colors.append('black')  # Not significant
@@ -90,8 +90,8 @@ def volcano_plot(data,
     ax.axhline(y=-np.log10(significance_threshold), color='black', linestyle='--')
 
     # Add vertical lines for fold change thresholds
-    ax.axvline(x=fold_change_threshold, color='black', linestyle='--')
-    ax.axvline(x=-fold_change_threshold, color='black', linestyle='--')
+    ax.axvline(x=lfc_threshold, color='black', linestyle='--')
+    ax.axvline(x=-lfc_threshold, color='black', linestyle='--')
 
     # # Calculate mixed score and get top 20 up and down-regulated genes
     # volcano_data['mixed_score'] = -np.log10(volcano_data['pvals']) * volcano_data[logfoldchanges_column]
@@ -99,8 +99,8 @@ def volcano_plot(data,
     # determine top up- and down-regulated genes for adding the names
     # create masks
     sig_mask = (data[pval_column] > neg_log_sig_thresh)
-    up_mask = (data[logfoldchanges_column] > fold_change_threshold) & sig_mask
-    down_mask = (data[logfoldchanges_column] < -fold_change_threshold) & sig_mask
+    up_mask = (data[logfoldchanges_column] > lfc_threshold) & sig_mask
+    down_mask = (data[logfoldchanges_column] < -lfc_threshold) & sig_mask
 
     # select data
     up_data = data[up_mask]
@@ -116,17 +116,31 @@ def volcano_plot(data,
         top_down_genes = down_data
         top_down_genes = top_down_genes[top_down_genes["gene"].isin(label_top_n)]
 
-    # infer x limits
-    xlims = (
-        down_data[logfoldchanges_column].min()*1.1,
-        up_data[logfoldchanges_column].max()*1.1
-        )
+    # infer x and y limits
+    #print(down_data)
+    if len(down_data) > 0:
+        xmin = min(down_data[logfoldchanges_column].min()*1.1, -(lfc_threshold*2))
+        ymin = 0 #down_data[pval_column].min()*1.1
+    else:
+        xmin = -(lfc_threshold*2)
+        ymin = 0
 
-    # infer x limits
-    ylims = (
-        down_data[pval_column].min()*1.1,
-        up_data[pval_column].max()*1.1
-        )
+    if len(up_data) > 0:
+        xmax = max(
+            up_data[logfoldchanges_column].max()*1.1,
+            lfc_threshold*2
+            )
+        ymax = max(
+            up_data[pval_column].max()*1.1,
+            down_data[pval_column].max()*1.1,
+            neg_log_sig_thresh*2
+            )
+    else:
+        xmax = lfc_threshold*2
+        ymax = neg_log_sig_thresh*2
+
+    xlims = (xmin, xmax)
+    ylims = (ymin, ymax)
 
     # Combine top genes for annotation
     #return top_up_genes
@@ -137,6 +151,7 @@ def volcano_plot(data,
     ax.set_ylim(0, ylims[1])
 
     # set x-axis limits to remove non-significant outliers
+    #print(xlims)
     ax.set_xlim(xlims[0], xlims[1])
 
     # Annotate top genes
@@ -156,18 +171,18 @@ def volcano_plot(data,
             max_move=None # this helped with some annotations remaining overlapping
             )
 
-    # Add labels to the top of the plot, outside the plot area
-    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
-                xytext=(-65, 0), textcoords='offset points',
-                ha='left', va='center', fontsize=14, color='black',
-                arrowprops=dict(arrowstyle='->', color='black'))
-
-    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
-                xytext=(93, 0), textcoords='offset points',
-                ha='right', va='center', fontsize=14, color='black',
-                arrowprops=dict(arrowstyle='->', color='black'))
-
     if config_table is not None:
+        # Add labels to the top of the plot, outside the plot area
+        ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
+                    xytext=(-65, 0), textcoords='offset points',
+                    ha='left', va='center', fontsize=14, color='black',
+                    arrowprops=dict(arrowstyle='->', color='black'))
+
+        ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
+                    xytext=(93, 0), textcoords='offset points',
+                    ha='right', va='center', fontsize=14, color='black',
+                    arrowprops=dict(arrowstyle='->', color='black'))
+
         # Create table data
         # Add table at the bottom of the plot
         table = ax.table(
