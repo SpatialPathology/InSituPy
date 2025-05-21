@@ -1,7 +1,7 @@
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +23,7 @@ def volcano_plot(data,
                  save_only: bool = False,
                  dpi_save: int = 300,
                  show: bool = True,
-                 label_top_n: int = 20,
+                 label_top_n: Union[int, List[str]] = 20,
                  figsize: Tuple[int, int] = (8, 6),
                  config_table=None
                  ):
@@ -102,16 +102,30 @@ def volcano_plot(data,
     up_mask = (data[logfoldchanges_column] > fold_change_threshold) & sig_mask
     down_mask = (data[logfoldchanges_column] < -fold_change_threshold) & sig_mask
 
+    # select data
+    up_data = data[up_mask]
+    down_data = data[down_mask]
+
     # select genes
-    # top_up_genes = data[up_mask].nlargest(label_top_n, 'scores')
-    # top_down_genes = data[down_mask].nsmallest(label_top_n, 'scores')
-    top_up_genes = data[up_mask].nlargest(label_top_n, logfoldchanges_column)
-    top_down_genes = data[down_mask].nsmallest(label_top_n, logfoldchanges_column)
+    if isinstance(label_top_n, int):
+        top_up_genes = up_data.nlargest(label_top_n, logfoldchanges_column)
+        top_down_genes = down_data.nsmallest(label_top_n, logfoldchanges_column)
+    elif isinstance(label_top_n, list):
+        top_up_genes = up_data
+        top_up_genes = top_up_genes[top_up_genes["gene"].isin(label_top_n)]
+        top_down_genes = down_data
+        top_down_genes = top_down_genes[top_down_genes["gene"].isin(label_top_n)]
 
     # infer x limits
     xlims = (
-        top_down_genes[logfoldchanges_column].min()*1.1,
-        top_up_genes[logfoldchanges_column].max()*1.1
+        down_data[logfoldchanges_column].min()*1.1,
+        up_data[logfoldchanges_column].max()*1.1
+        )
+
+    # infer x limits
+    ylims = (
+        down_data[pval_column].min()*1.1,
+        up_data[pval_column].max()*1.1
         )
 
     # Combine top genes for annotation
@@ -119,7 +133,8 @@ def volcano_plot(data,
     top_genes = pd.concat([top_up_genes, top_down_genes])
 
     # Adjust y-axis limits to provide space for text
-    ax.set_ylim(0, ax.get_ylim()[1] * 1.1)  # Increase the upper limit of the y-axis to make space for the annotations
+    #ax.set_ylim(0, ax.get_ylim()[1] * 1.1)  # Increase the upper limit of the y-axis to make space for the annotations
+    ax.set_ylim(0, ylims[1])
 
     # set x-axis limits to remove non-significant outliers
     ax.set_xlim(xlims[0], xlims[1])
