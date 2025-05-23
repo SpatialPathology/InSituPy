@@ -408,7 +408,9 @@ def plot_cellular_composition(
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
         try:
-            color_dict = map_to_colors(sorted(celldata.matrix.obs[cell_type_col].unique()), palette=palette)
+            color_dict = map_to_colors(
+                sorted(celldata.matrix.obs[cell_type_col].unique()),
+                palette=palette)
             #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
         except KeyError:
             color_dict = None

@@ -628,12 +628,17 @@ class InSituExperiment:
         cols = []
         for _, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            cols.append(np.unique(celldata.matrix.obs[obs_col]))
-        all_cats = np.sort(np.unique(np.concatenate(cols)))
+            if obs_col in celldata.matrix.obs.columns:
+                cols.append(np.unique(celldata.matrix.obs[obs_col]))
 
-        # create color dict
-        color_dict = map_to_colors(all_cats, palette=palette)
-        return color_dict
+        if len(cols) > 0:
+            all_cats = np.sort(np.unique(np.concatenate(cols)))
+
+            # create color dict
+            color_dict = map_to_colors(all_cats, palette=palette)
+            return color_dict
+        else:
+            return None
 
     def sync_colors(
         self,
@@ -652,20 +657,24 @@ class InSituExperiment:
                 palette=palette
             )
 
-            # iterate over all datasets and set the colors in .uns
-            uns_key = f"{obs_col}_colors"
-            print(f"Saving synchronized color list into `.uns['{uns_key}']...")
-            for _, xd in self.iterdata():
-                celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            if color_dict is not None:
+                # iterate over all datasets and set the colors in .uns
+                uns_key = f"{obs_col}_colors"
+                print(f"Saving synchronized color list into `.uns['{uns_key}']...")
+                for _, xd in self.iterdata():
+                    celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
-                try:
-                    cats = celldata.matrix.obs[obs_col].cat.categories.values
-                except AttributeError:
-                    cats = np.unique(celldata.matrix.obs[obs_col])
-                celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
+                    try:
+                        cats = celldata.matrix.obs[obs_col].cat.categories.values
+                    except AttributeError:
+                        # convert to categorical
+                        celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
+                        cats = celldata.matrix.obs[obs_col].cat.categories.values
+                        cats = np.unique(celldata.matrix.obs[obs_col])
+                    celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
 
-            # save color dict in InSituExperiment
-            self.colors[obs_col] = color_dict
+                # save color dict in InSituExperiment
+                self.colors[obs_col] = color_dict
 
     def get_n_cells(
         self,

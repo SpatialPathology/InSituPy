@@ -15,6 +15,33 @@ from insitupy._core._checks import check_raw
 from insitupy.palettes import CustomPalettes
 
 
+def _extract_color_values(adata, key, raw, layer):
+    ## Extract expression data
+    # check if plotting raw data
+    adata_X, adata_var, adata_var_names = check_raw(
+        adata,
+        use_raw=raw,
+        layer=layer
+        )
+
+    # locate gene in matrix and extract values
+    if key in adata_var_names:
+        idx = adata_var.index.get_loc(key)
+        color_values = adata_X[:, idx].copy()
+        categorical = False
+
+    elif key in adata.obs.columns:
+        color_values = adata.obs[key]
+        if is_numeric_dtype(adata.obs[key]):
+            categorical = False
+        else:
+            categorical = True
+    else:
+        color_values = None
+        categorical = None
+
+    return color_values, categorical
+
 def _create_handle_function(mode):
     if mode == "circle":
         def handle_function(color):
@@ -43,7 +70,7 @@ def _create_handle_function(mode):
 def _add_colorlegend_to_axis(
     color_dict: dict,
     ax: plt.Axes,
-    max_per_row: int = 10,
+    max_per_col: int = 10,
     loc: str = 'center',
     bbox_to_anchor: tuple = (0.5, 0.5),
     title: Optional[str] = None,
@@ -63,7 +90,7 @@ def _add_colorlegend_to_axis(
         handles.append(handle)
         labels.append(label)
 
-    n_col = max(1, math.ceil(len(labels) / max_per_row))
+    n_col = max(1, math.ceil(len(labels) / max_per_col))
 
     legend = ax.legend(
         handles, labels,
