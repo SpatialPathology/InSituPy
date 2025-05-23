@@ -97,6 +97,7 @@ class _ColorConfigMultiPlot:
         }
         if len(data_list) == 1:
             # one dataset
+            xd = data_list[0]
             celldata = _get_cell_layer(
                 cells=xd.cells,
                 cells_layer=self.cells_layer
@@ -168,7 +169,7 @@ class _ColorConfigMultiPlot:
             else:
                 raise ValueError(f"Values found for key {key} showed mixed type (categorical/numeric).")
 
-            return color_entry
+        return color_entry
 
 class _SinglePlotConfig:
     '''
