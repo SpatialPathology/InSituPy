@@ -16,8 +16,8 @@ from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting._colors import (_add_colorlegend_to_axis,
                                        create_cmap_mapping)
-from insitupy.plotting._objects import (_ConfigSpatialPlot,
-                                        _extract_color_values)
+from insitupy.plotting._objects import (_extract_color_values,
+                                        _MultiPlotConfig, _SinglePlotConfig)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -27,93 +27,13 @@ class MultiSpatialPlot:
     Class to render scatter plots of single-cell spatial transcriptomics data.
     '''
     def __init__(self,
-                 data: Union[InSituData, InSituExperiment],
-                 keys: Union[str, List[str]],
-                 cells_layer: Optional[str] = None,
-                 data_ids: Optional[List[int]] = None,
-                 raw: bool = False,
-                 layer: Optional[str] = None,
-                 fig: plt.figure = None,
-                 ax: plt.Axes = None,
-                 max_cols: int = 4,
-                 xlim: Optional[Tuple[float, float]] = None,
-                 ylim: Optional[Tuple[float, float]] = None,
-                 normalize_crange_not_for: List = [],
-                 crange: Optional[List[int]] = None,
-                 crange_type: Literal['minmax', 'percentile'] = 'minmax',
-                 palette: str = 'tab10',
-                 cmap_center: Optional[float] = None,
-                 dpi_display: int = 80,
-                 obsm_key: str = 'spatial',
-                 origin_zero: bool = False,
-                 spot_size: float = 10,
-                 spot_type: str = 'o',
-                 cmap: str = 'viridis',
-                 background_color: str = 'white',
-                 alpha: float = 1,
-                 colorbar: bool = True,
-                 clb_title: Optional[str] = None,
-                 header: Optional[str] = None,
-                 name_column: str = None,
-
-                 # font sizes
-                 title_size: int = 24,
-                 label_size: int = 16,
-                 tick_label_size: int = 14,
-
-                 # image stuff
-                 image_key: Optional[str] = None,
-                 pixelwidth_per_subplot: int = 200,
-                 histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
-
-                 # saving
-                 savepath: Optional[str] = None,
-                 save_only: bool = False,
-                 dpi_save: int = 300,
-                 show: bool = True,
-
-                 # other
-                 verbose: bool = False
+                 config: _MultiPlotConfig
                  ):
+        self.config = config
 
-
-
-        # Assign all kwargs to instance variables
-        for key, value in locals().items():
-            if key != "self":
-                setattr(self, key, value)
-
-
-    def check_arguments(self):
-        print("Check arguments.") if self.verbose else None
-        # convert arguments to lists
-        self.keys = convert_to_list(self.keys)
-
-        # check if cmap is supposed to be centered
-        if self.cmap_center is None:
-            self.normalize=None
-        else:
-            self.normalize = colors.CenteredNorm(vcenter=self.cmap_center)
-
-        # set multiplot variables
-        self.multikeys = False
-        self.multidata = False
-        if len(self.keys) > 1:
-            self.multikeys = True
-
-        try:
-            self.n_data = len(self.data)
-        except TypeError:
-            # if the data is an InSituData, it raises a TypeError
-            self.n_data = 1
-
-        if self.n_data > 1:
-            self.multidata = True
-        elif self.n_data == 1:
-            self.multidata = False
-        else:
-            raise ValueError(f"n_data < 1: {self.n_data}")
-
+        # Automatically assign all fields from the dataclass to the instance
+        for key, value in config.__dict__.items():
+            setattr(self, key, value)
 
     def setup_subplots(self):
         print("Setup subplots.") if self.verbose else None
@@ -235,7 +155,7 @@ class MultiSpatialPlot:
                 meta = None
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
             ad = celldata.matrix
-            annot_df = xd.annotations
+            #annot_df = xd.annotations
 
             if self.name_column is None or meta is None:
                 name = xd.sample_id
@@ -270,8 +190,21 @@ class MultiSpatialPlot:
                 else:
                     ax = self.ax
 
+                # prepare limits
+                if self.region_tuple is not None:
+                    if self.xlim is not None or self.ylim is not None:
+                        raise ValueError("If region_tuple is given, xlim and ylim need to be None.")
+                    else:
+                        region_df = xd.regions[self.region_tuple[0]]
+                        geom = region_df[region_df["name"] == self.region_tuple[1]]["geometry"].item()
+                        self._xlim = geom.bounds[0], geom.bounds[2]
+                        self._ylim = geom.bounds[1], geom.bounds[3]
+                else:
+                    self._xlim = self.xlim
+                    self._ylim = self.ylim
+
                 # get data
-                ConfigData = _ConfigSpatialPlot(
+                ConfigData = _SinglePlotConfig(
                     adata=ad,
                     key=key,
                     ImageDataObject=imagedata,
@@ -281,8 +214,8 @@ class MultiSpatialPlot:
                     layer=self.layer,
                     obsm_key=self.obsm_key,
                     origin_zero=self.origin_zero,
-                    xlim=self.xlim,
-                    ylim=self.ylim,
+                    xlim=self._xlim,
+                    ylim=self._ylim,
                     spot_size=self.spot_size,
                     histogram_setting=self.histogram_setting
                 )
@@ -362,7 +295,7 @@ class MultiSpatialPlot:
 
     def single_spatial(
         self,
-        ConfigData: Type[_ConfigSpatialPlot],
+        ConfigData: Type[_SinglePlotConfig],
         axis: plt.Axes,
         color_dict: Dict,
         crange: Optional[Tuple[float, float]],
@@ -456,18 +389,17 @@ class MultiSpatialPlot:
                     clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
 def plot_spatial(
-    data: Union[InSituData, InSituExperiment],
+    data: Union['InSituData', 'InSituExperiment'],
     keys: Union[str, List[str]],
     cells_layer: Optional[str] = None,
-    data_ids: Optional[List[int]] = None,
     raw: bool = False,
     layer: Optional[str] = None,
-    fig: plt.figure = None,
-    ax: plt.Axes = None,
+    fig: Optional[plt.Figure] = None,
+    ax: Optional[plt.Axes] = None,
     max_cols: int = 4,
     xlim: Optional[Tuple[float, float]] = None,
     ylim: Optional[Tuple[float, float]] = None,
-    normalize_crange_not_for: List = [],
+    region_tuple: Tuple[str, str] = None,
     crange: Optional[List[int]] = None,
     crange_type: Literal['minmax', 'percentile'] = 'minmax',
     palette: str = 'tab10',
@@ -483,37 +415,65 @@ def plot_spatial(
     colorbar: bool = True,
     clb_title: Optional[str] = None,
     header: Optional[str] = None,
-    name_column: str = None,
-
-    # font sizes
+    name_column: Optional[str] = None,
     title_size: int = 24,
     label_size: int = 16,
     tick_label_size: int = 14,
-
-    # image stuff
     image_key: Optional[str] = None,
     pixelwidth_per_subplot: int = 200,
     histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
-
-    # saving
     savepath: Optional[str] = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
-
-    # other
     verbose: bool = False,
-    ):
+):
+    config = _MultiPlotConfig(
+        data=data,
+        keys=keys,
+        cells_layer=cells_layer,
+        raw=raw,
+        layer=layer,
+        fig=fig,
+        ax=ax,
+        max_cols=max_cols,
+        xlim=xlim,
+        ylim=ylim,
+        region_tuple=region_tuple,
+        crange=crange,
+        crange_type=crange_type,
+        palette=palette,
+        cmap_center=cmap_center,
+        dpi_display=dpi_display,
+        obsm_key=obsm_key,
+        origin_zero=origin_zero,
+        spot_size=spot_size,
+        spot_type=spot_type,
+        cmap=cmap,
+        background_color=background_color,
+        alpha=alpha,
+        colorbar=colorbar,
+        clb_title=clb_title,
+        header=header,
+        name_column=name_column,
+        title_size=title_size,
+        label_size=label_size,
+        tick_label_size=tick_label_size,
+        image_key=image_key,
+        pixelwidth_per_subplot=pixelwidth_per_subplot,
+        histogram_setting=histogram_setting,
+        savepath=savepath,
+        save_only=save_only,
+        dpi_save=dpi_save,
+        show=show,
+        verbose=verbose,
+    )
 
-    msp = MultiSpatialPlot(**locals())
-
-    # check arguments
-    msp.check_arguments()
-
-    # prepare color legends
+    # Now use the config object as before
+    msp = MultiSpatialPlot(config)
+    #msp.check_arguments()
     msp.prepare_colorlegends()
 
-    # plotting
     if msp.ax is None:
         msp.setup_subplots()
     else:
@@ -528,7 +488,7 @@ def plot_spatial(
         save_only=msp.save_only,
         show=msp.show,
         dpi_save=msp.dpi_save
-        )
+    )
 
     gc.collect()
 

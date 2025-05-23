@@ -1,17 +1,94 @@
 import pickle
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
 
 import dask.array as da
+import matplotlib.pyplot as plt
 import numpy as np
 from anndata import AnnData
+from matplotlib import colors
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 from insitupy._core._checks import check_raw
 from insitupy._core.dataclasses import ImageData
+from insitupy._core.insitudata import InSituData
+from insitupy._core.insituexperiment import InSituExperiment
+from insitupy.utils.utils import convert_to_list
 
 
-class _ConfigSpatialPlot:
+@dataclass
+class _MultiPlotConfig:
+    data: Union[InSituData, InSituExperiment]
+    keys: Union[str, List[str]]
+    cells_layer: Optional[str] = None
+    raw: bool = False
+    layer: Optional[str] = None
+    fig: Optional[plt.Figure] = None
+    ax: Optional[plt.Axes] = None
+    max_cols: int = 4
+    xlim: Optional[Tuple[float, float]] = None
+    ylim: Optional[Tuple[float, float]] = None
+    region_tuple: Optional[Tuple[str, str]] = None,
+    crange: Optional[List[int]] = None
+    crange_type: Literal['minmax', 'percentile'] = 'minmax'
+    palette: str = 'tab10'
+    cmap_center: Optional[float] = None
+    dpi_display: int = 80
+    obsm_key: str = 'spatial'
+    origin_zero: bool = False
+    spot_size: float = 10
+    spot_type: str = 'o'
+    cmap: str = 'viridis'
+    background_color: str = 'white'
+    alpha: float = 1
+    colorbar: bool = True
+    clb_title: Optional[str] = None
+    header: Optional[str] = None
+    name_column: Optional[str] = None
+    title_size: int = 24
+    label_size: int = 16
+    tick_label_size: int = 14
+    image_key: Optional[str] = None
+    pixelwidth_per_subplot: int = 200
+    histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto"
+    savepath: Optional[str] = None
+    save_only: bool = False
+    dpi_save: int = 300
+    show: bool = True
+    verbose: bool = False
+
+    def __post_init__(self):
+        # convert arguments to lists
+        self.keys = convert_to_list(self.keys)
+
+        # check if cmap is supposed to be centered
+        if self.cmap_center is None:
+            self.normalize=None
+        else:
+            self.normalize = colors.CenteredNorm(vcenter=self.cmap_center)
+
+        # set multiplot variables
+        self.multikeys = False
+        self.multidata = False
+        if len(self.keys) > 1:
+            self.multikeys = True
+
+        try:
+            self.n_data = len(self.data)
+        except TypeError:
+            # if the data is an InSituData, it raises a TypeError
+            self.n_data = 1
+
+        if self.n_data > 1:
+            self.multidata = True
+        elif self.n_data == 1:
+            self.multidata = False
+        else:
+            raise ValueError(f"n_data < 1: {self.n_data}")
+
+
+class _SinglePlotConfig:
     '''
     Object extracting spatial coordinates and expression data from anndata object.
     '''
