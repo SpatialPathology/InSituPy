@@ -1584,17 +1584,6 @@ class InSituData:
         init_colorlegend_canvas()
         self._viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
 
-        # def update_colorlegend(event):
-        #     # if event.type == "inserted":
-        #     layer = event.source[event.index]
-        #     _add_colorlegend_to_canvas(layer=layer, static_canvas=config.static_canvas)
-        #     # if event.type == "removed":
-        #         # config.static_canvas.figure.clear()
-        #         # config.static_canvas.draw()
-
-        # self.viewer.layers.events.inserted.connect(update_colorlegend)
-        # #self.viewer.layers.events.removed.connect(add_colorlegend_widget)
-
         # NAPARI SETTINGS
         if scalebar:
             # add scale bar
@@ -1604,52 +1593,6 @@ class InSituData:
         napari.run()
         if return_viewer:
             return self._viewer
-
-    # def store_geometries(self):
-    #     """
-    #     Extracts geometric layers from shapes and points layers in the napari viewer
-    #     and stores them in the InSituData object as annotations or regions.
-
-    #     Raises:
-    #         AttributeError: If the viewer is not initialized, an error message
-    #             prompts the user to open a napari viewer using the `.show()` method.
-
-    #     Notes:
-    #         - The function iterates through the layers in the viewer and checks if
-    #         they are instances of Shapes or Points.
-    #         - It extracts the geometric data, colors, and other relevant properties
-    #         to create a GeoDataFrame.
-    #         - The GeoDataFrame is then added to the annotations or regions of the
-    #         InSituData object based on the type of layer.
-    #         - If the layer is classified as a region but is a point layer, a warning
-    #         is issued, and the layer is skipped.
-    #     """
-    #     name_pattern = "{type_symbol} {class_name} ({annot_key})"
-
-    #     if self._viewer is not None:
-    #         viewer = self._viewer
-    #     else:
-    #         print("Use `.show()` first to open a napari viewer.")
-
-    #     # iterate through layers and save them as annotation or region if they meet requirements
-    #     layers = viewer.layers
-    #     #collection_dict = {}
-    #     for layer in layers:
-    #         if isinstance(layer, Shapes) or isinstance(layer, Points):
-    #             name_parsed = parse(name_pattern, layer.name)
-    #             if name_parsed is not None:
-    #                 type_symbol = name_parsed.named["type_symbol"]
-    #                 annot_key = name_parsed.named["annot_key"]
-    #                 class_name = name_parsed.named["class_name"]
-
-    #                 self._store_geometries(
-    #                     layer=layer,
-    #                     type_symbol=type_symbol,
-    #                     annot_key=annot_key,
-    #                     class_name=class_name
-    #                 )
-
-    #     #self._remove_empty_modalities()
 
     def sync_geometries(self):
         name_pattern = "{type_symbol} {class_name} ({annot_key})"

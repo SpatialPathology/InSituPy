@@ -228,5 +228,7 @@ def _check_geometry_symbol_and_layer(layer, type_symbol):
         if isinstance(layer, Points):
             warn(f'Layer "{layer.name}" is a point layer and at the same time classified as "Region". This is not allowed. Skipped this layer.')
             checks_passed = False
+        else:
+            checks_passed = True
 
     return checks_passed, object_type
