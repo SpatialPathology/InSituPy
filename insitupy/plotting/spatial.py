@@ -15,7 +15,8 @@ from matplotlib import colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pandas.api.types import is_numeric_dtype
 
-from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
+from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
+                                 DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment, check_raw
 from insitupy._core._utils import _get_cell_layer
 from insitupy._core.dataclasses import ImageData, RegionsData
@@ -113,7 +114,7 @@ class _ColorConfigMultiPlot:
                 color_entry["is_categorical"] = True
                 # check if colors were saved in uns
                 uns_key = f"{key}_colors"
-                if uns_key in ad.uns.keys():
+                if uns_key in ad.uns.keys() and self.palette is None:
                     hex_list = ad.uns[uns_key]
                     color_entry["color_dict"] = {
                         c: hex_list[i] for i, c in enumerate(color_values.cat.categories)
@@ -311,15 +312,6 @@ class _SinglePlotConfig:
             adata=adata, key=self.key, raw=raw, layer=layer
         )
 
-        # if self.categorical:
-        #     self.color_dict = color_config[key]
-        #     self.crange = None
-        # else:
-        #     #color_dict = self.palette
-        #     self.color_dict = None
-        #     self.crange = [0, maxval_config[key]]
-
-
 class MultiSpatialPlot:
     '''
     Class to render scatter plots of single-cell spatial transcriptomics data.
@@ -395,25 +387,31 @@ class MultiSpatialPlot:
                 self.n_plots = self.n_rows * self.max_cols
 
                 # create subplots
-                self.fig, self.axs = plt.subplots(self.n_rows, self.max_cols,
-                                                  figsize=(6 * self.max_cols, 6 * self.n_rows),
-                                                  dpi=self.dpi_display)
-                self.fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
+                self.fig, self.axs = plt.subplots(
+                    self.n_rows, self.max_cols,
+                    figsize=(6 * self.max_cols, 6 * self.n_rows),
+                    dpi=self.dpi_display)
+                #self.fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
             else:
                 if self.color_config[self.keys[0]]["color_dict"] is None:
+                    # continuous data
                     n_subplots = self.n_data
+                    self.add_legend_to_last_subplot = False
                 else:
+                    # categorical data
                     n_subplots = self.n_data+1
-                self.add_legend_to_last_subplot = True # is the case for multidata=True and multikeys=False
+                    self.add_legend_to_last_subplot = True # is the case for multidata=True and multikeys=False for categorical data
+
                 # determine the layout of the subplots
                 self.n_plots, self.n_rows, self.max_cols = get_nrows_maxcols(
                     n_keys=n_subplots,
                     max_cols=self.max_cols
                     )
-                self.fig, self.axs = plt.subplots(self.n_rows, self.max_cols,
-                                        figsize=(7.6 * self.max_cols, 6 * self.n_rows),
-                                        dpi=self.dpi_display)
-                self.fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
+                self.fig, self.axs = plt.subplots(
+                    self.n_rows, self.max_cols,
+                    figsize=(6 * self.max_cols, 6 * self.n_rows),
+                    dpi=self.dpi_display)
+                #self.fig.tight_layout() # helps to equalize size of subplots. Without the subplots change parameters during plotting which results in differently sized spots.
 
                 if self.n_plots > 1:
                     self.axs = self.axs.ravel()
@@ -441,7 +439,7 @@ class MultiSpatialPlot:
 
             self.fig, self.axs = plt.subplots(
                 self.n_rows, self.max_cols,
-                figsize=(8 * self.max_cols, 8 * self.n_rows),
+                figsize=(6 * self.max_cols, 6 * self.n_rows),
                 dpi=self.dpi_display)
 
             if self.n_plots > 1:
@@ -459,47 +457,6 @@ class MultiSpatialPlot:
 
         if self.header is not None:
             plt.suptitle(self.header, fontsize=18, x=0.5, y=0.98)
-
-    # def prepare_colors(self):
-    #     print("Prepare colors.") if self.verbose else None
-    #     self.cmap_dict = {}
-    #     self.maxval_dict = {}
-    #     for key in self.keys:
-    #         value_list = []
-    #         categorical_list = []
-    #         for idx in range(self.n_data):
-    #             # extract the InSituData
-    #             try:
-    #                 xd = self.data.data[idx]
-    #             except AttributeError:
-    #                 xd = self.data
-    #             celldata = _get_cell_layer(
-    #                 cells=xd.cells,
-    #                 cells_layer=self.cells_layer
-    #                 )
-    #             ad = celldata.matrix
-
-    #             # extract the data
-    #             color_values, is_categorical = _extract_color_values(
-    #                 adata=ad, key=key, raw=self.raw, layer=self.layer
-    #             )
-
-    #             if is_categorical:
-    #                 value_list.append(np.unique(color_values))
-    #             else:
-    #                 value_list.append(np.max(color_values))
-
-    #             categorical_list.append(is_categorical)
-
-    #         if np.all(categorical_list):
-    #             # all values are categorical - concatenate all values
-    #             all_values = np.unique(np.concat(value_list))
-    #             self.cmap_dict[key] = create_cmap_mapping(all_values)
-    #         elif not np.any(categorical_list):
-    #             # no values are categorical - collect the maximum values
-    #             self.maxval_dict[key] = np.max(value_list)
-    #         else:
-    #             raise ValueError(f"Values found for key {key} showed mixed type (categorical/numeric).")
 
     def _set_axis(
         self,
@@ -527,10 +484,11 @@ class MultiSpatialPlot:
                 )
         else:
             # set titles
-            ax.set_title(ConfigData.key,
-                            fontsize=self.title_size, #fontweight='bold'
-                            pad=10,
-                            )
+            ax.set_title(
+                ConfigData.key,
+                fontsize=self.title_size, #fontweight='bold'
+                pad=10
+                )
 
             if ConfigData.idx_key == 0:
                 ax.annotate(
@@ -545,6 +503,28 @@ class MultiSpatialPlot:
                     weight='bold'
                     )
 
+    def _determine_axes(self, idx, idx_key):
+        if len(self.axs.shape) == 2:
+            ax = self.axs[idx, idx_key]
+            if idx == (self.n_rows - 1):
+                add_legend = True
+            else:
+                add_legend = False
+        elif len(self.axs.shape) == 1:
+            if self.multikeys:
+                ax = self.axs[idx_key]
+                add_legend = True
+            else:
+                ax = self.axs[idx]
+
+                if len(self.axs) == 1:
+                    add_legend = True
+                else:
+                    add_legend = False
+        else:
+            raise ValueError("`len(self.axs.shape)` has wrong shape {}. Requires 1 or 2.".format(len(self.axs.shape)))
+
+        return ax, add_legend
 
     def plot_to_subplots(self):
         print("Do plotting.") if self.verbose else None
@@ -574,23 +554,7 @@ class MultiSpatialPlot:
             for idx_key, key in enumerate(self.keys):
                 # get axis to plot
                 if self.ax is None:
-                    if len(self.axs.shape) == 2:
-                        ax = self.axs[idx, idx_key]
-                        if idx == (self.n_rows - 1):
-                            add_legend = True
-                        else:
-                            add_legend = False
-                    elif len(self.axs.shape) == 1:
-                        if self.multikeys:
-                            ax = self.axs[idx_key]
-                            add_legend = True
-                        else:
-                            ax = self.axs[idx]
-                            add_legend = False
-                            # if idx == (self.n_data - 1):
-                            #     separate_categorical_legend = True
-                    else:
-                        raise ValueError("`len(self.axs.shape)` has wrong shape {}. Requires 1 or 2.".format(len(self.axs.shape)))
+                    ax, add_legend = self._determine_axes(idx, idx_key)
                 else:
                     ax = self.ax
 
@@ -646,16 +610,14 @@ class MultiSpatialPlot:
 
             k = list(self.color_config.keys())[0]
             color_config_key = self.color_config[k]
-            is_categorical = color_config_key["is_categorical"]
-            if is_categorical:
-            # if len(self.cmap_dict) == 1:
-                #k = list(self.cmap_dict.keys())[0]
-                color_dict = self.color_config[k]["color_dict"]
+            # is_categorical = color_config_key["is_categorical"]
+            # if is_categorical:
+            color_dict = self.color_config[k]["color_dict"]
+            _add_colorlegend_to_axis(color_dict=color_dict, ax=ax)
 
-                _add_colorlegend_to_axis(color_dict=color_dict, ax=ax)
-
-            else:
-                ax.set_axis_off()
+            # else:
+            #     #if ConfigData.categorical:
+            #     ax.set_axis_off()
 
 
     def single_spatial(
@@ -781,7 +743,7 @@ def plot_spatial(
     origin_zero: bool = False,
     spot_size: float = 10,
     spot_type: str = 'o',
-    cmap: str = 'viridis',
+    cmap: str = DEFAULT_CONTINUOUS_CMAP,
     sync_colors: bool = True,
     background_color: str = 'white',
     alpha: float = 1,

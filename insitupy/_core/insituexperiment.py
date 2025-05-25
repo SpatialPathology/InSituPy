@@ -644,7 +644,8 @@ class InSituExperiment:
         self,
         obs_cols: Union[str, List[str]],
         cells_layer: Optional[str] = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        verbose: bool = True
     ):
         # Make sure obs_cols is a list
         obs_cols = convert_to_list(obs_cols)
@@ -660,7 +661,6 @@ class InSituExperiment:
             if color_dict is not None:
                 # iterate over all datasets and set the colors in .uns
                 uns_key = f"{obs_col}_colors"
-                print(f"Saving synchronized color list into `.uns['{uns_key}']...")
                 for _, xd in self.iterdata():
                     celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
@@ -675,6 +675,9 @@ class InSituExperiment:
 
                 # save color dict in InSituExperiment
                 self.colors[obs_col] = color_dict
+
+                if verbose:
+                    print(f"Saved synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
 
     def get_n_cells(
         self,
