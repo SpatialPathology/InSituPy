@@ -642,15 +642,15 @@ class InSituExperiment:
 
     def sync_colors(
         self,
-        obs_cols: Union[str, List[str]],
+        keys: Union[str, List[str]],
         cells_layer: Optional[str] = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         verbose: bool = True
     ):
         # Make sure obs_cols is a list
-        obs_cols = convert_to_list(obs_cols)
+        keys = convert_to_list(keys)
 
-        for obs_col in obs_cols:
+        for obs_col in keys:
             # create a color dictionary with all categories
             color_dict = self.create_color_dict(
                 obs_col=obs_col,

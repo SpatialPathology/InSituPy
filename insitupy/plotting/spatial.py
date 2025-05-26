@@ -345,18 +345,19 @@ class MultiSpatialPlot:
             if self.sync_colors:
                 # synchronize colors before plotting
                 self.data.sync_colors(
-                    obs_cols=self.keys,
+                    keys=self.keys,
                     cells_layer=self.cells_layer,
                     palette=self.palette
                 )
             else:
-                if self.is_experiment:
-                    # Todo: Need to make sure that the colors are already synchronized if data is categorical and an InSituExperiment
-                    warn(f"`sync_colors=False`, meaning that colors are not being synchronized. "
-                         f"In case of categorical data, this might lead to different color mappings "
-                         f"between the datasets. Set `sync_colors=True` or use InSituExperiments's `.sync_colors` function "
-                         f"to synchronize colors", UserWarning, 2)
-
+                for k in self.keys:
+                    if k not in self.data.colors:
+                        # Todo: Need to make sure that the colors are already synchronized if data is categorical and an InSituExperiment
+                        raise RuntimeError(f"Key '{k}' not in `exp.colors` and `sync_colors=False`, meaning that colors are not being synchronized. "
+                                f"In case of categorical data, this might lead to different color mappings "
+                                f"between the datasets. Set `sync_colors=True` or manually use InSituExperiments's `.sync_colors(keys='{k}')` function "
+                                f"to synchronize colors."
+                                )
         else:
             self.n_data = 1
             self.is_experiment = False
@@ -798,7 +799,7 @@ def plot_spatial(
     spot_size: float = 10,
     spot_type: str = 'o',
     cmap: str = DEFAULT_CONTINUOUS_CMAP,
-    sync_colors: bool = True,
+    sync_colors: bool = False,
     background_color: str = 'white',
     alpha: float = 1,
     colorbar: bool = True,
