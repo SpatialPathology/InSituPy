@@ -1,3 +1,4 @@
+import json
 import os
 import warnings
 from copy import deepcopy
@@ -619,7 +620,7 @@ class InSituExperiment:
             label=label_col
             )
 
-    def create_color_dict(
+    def _create_categorical_color_dict(
         self,
         obs_col: str,
         cells_layer: Optional[str] = None,
@@ -645,39 +646,43 @@ class InSituExperiment:
         keys: Union[str, List[str]],
         cells_layer: Optional[str] = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        overwrite: bool = False,
         verbose: bool = True
     ):
         # Make sure obs_cols is a list
         keys = convert_to_list(keys)
 
         for obs_col in keys:
-            # create a color dictionary with all categories
-            color_dict = self.create_color_dict(
-                obs_col=obs_col,
-                cells_layer=cells_layer,
-                palette=palette
-            )
+            if obs_col not in self.colors:
+                # create a color dictionary with all categories
+                color_dict = self._create_categorical_color_dict(
+                    obs_col=obs_col,
+                    cells_layer=cells_layer,
+                    palette=palette
+                )
 
-            if color_dict is not None:
-                # iterate over all datasets and set the colors in .uns
-                uns_key = f"{obs_col}_colors"
-                for _, xd in self.iterdata():
-                    celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+                if color_dict is not None:
+                    # iterate over all datasets and set the colors in .uns
+                    uns_key = f"{obs_col}_colors"
+                    for _, xd in self.iterdata():
+                        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
-                    try:
-                        cats = celldata.matrix.obs[obs_col].cat.categories.values
-                    except AttributeError:
-                        # convert to categorical
-                        celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
-                        cats = celldata.matrix.obs[obs_col].cat.categories.values
-                        cats = np.unique(celldata.matrix.obs[obs_col])
-                    celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
+                        try:
+                            cats = celldata.matrix.obs[obs_col].cat.categories.values
+                        except AttributeError:
+                            # convert to categorical
+                            celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
+                            cats = celldata.matrix.obs[obs_col].cat.categories.values
+                            cats = np.unique(celldata.matrix.obs[obs_col])
+                        celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
 
-                # save color dict in InSituExperiment
-                self.colors[obs_col] = color_dict
+                    # save color dict in InSituExperiment
+                    self.colors[obs_col] = color_dict
 
-                if verbose:
-                    print(f"Saved synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+                    if verbose:
+                        print(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+            # else:
+            #     print(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
 
     def get_n_cells(
         self,
@@ -977,6 +982,10 @@ class InSituExperiment:
         metadata_path = path / "metadata.csv"
         metadata = pd.read_csv(metadata_path, index_col=0)
 
+        # load colors
+        with open(path / "colors.json", 'r') as f:
+            colors = json.load(f)
+
         # Load each dataset
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
@@ -989,6 +998,7 @@ class InSituExperiment:
         experiment._metadata = metadata
         experiment._data = data
         experiment._path = path
+        experiment._colors = colors
 
         return experiment
 
@@ -1114,13 +1124,14 @@ class InSituExperiment:
     def save(self,
              verbose: bool = False,
              overwrite_metadata: bool = True,
+             overwrite_colors: bool = True,
              **kwargs
              ):
         if self.path is None:
             print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
             return
         else:
-            parent_path_identical = [d.path.parent == self.path for d in self.data]
+            parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
             if not np.all(parent_path_identical):
                 print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
             else:
@@ -1132,9 +1143,11 @@ class InSituExperiment:
 
         if overwrite_metadata:
             # Optionally, save the metadata as a CSV file
-            metadata_path = os.path.join(self.path, "metadata.csv")
-            self._metadata.to_csv(metadata_path, index=True)
+            self._metadata.to_csv(self.path / "metadata.csv", index=True)
 
+        if overwrite_colors:
+            with open(self.path / "colors.json", 'w') as f:
+                json.dump(self.colors, f)
 
     def saveas(self, path: Union[str, os.PathLike, Path],
                overwrite: bool = False,
@@ -1158,8 +1171,10 @@ class InSituExperiment:
             dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
         # Optionally, save the metadata as a CSV file
-        metadata_path = os.path.join(path, "metadata.csv")
-        self._metadata.to_csv(metadata_path, index=True)
+        self._metadata.to_csv(path / "metadata.csv", index=True)
+
+        with open(path / "colors.json", 'w') as f:
+            json.dump(self.colors, f)
 
         print("Saved.") if verbose else None
 

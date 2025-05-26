@@ -993,6 +993,7 @@ class InSituData:
             InSituData: A new InSituData object with the loaded data.
         """
         path = Path(path) # make sure the path is a pathlib path
+
         assert (path / ISPY_METADATA_FILE).exists(), "No insitupy metadata file found."
         # read InSituData metadata
         insitupy_metadata_file = path / ISPY_METADATA_FILE

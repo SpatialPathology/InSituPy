@@ -342,22 +342,21 @@ class MultiSpatialPlot:
             self.n_data = len(self.data)
             self.is_experiment = True
 
-            if self.sync_colors:
-                # synchronize colors before plotting
-                self.data.sync_colors(
-                    keys=self.keys,
-                    cells_layer=self.cells_layer,
-                    palette=self.palette
-                )
-            else:
-                for k in self.keys:
-                    if k not in self.data.colors:
-                        # Todo: Need to make sure that the colors are already synchronized if data is categorical and an InSituExperiment
-                        raise RuntimeError(f"Key '{k}' not in `exp.colors` and `sync_colors=False`, meaning that colors are not being synchronized. "
-                                f"In case of categorical data, this might lead to different color mappings "
-                                f"between the datasets. Set `sync_colors=True` or manually use InSituExperiments's `.sync_colors(keys='{k}')` function "
-                                f"to synchronize colors."
-                                )
+            # synchronize colors before plotting
+            self.data.sync_colors(
+                keys=self.keys,
+                cells_layer=self.cells_layer,
+                overwrite=self.overwrite_colors,
+                palette=self.palette
+            )
+                # for k in self.keys:
+                #     if k not in self.data.colors:
+                #         # Todo: Need to make sure that the colors are already synchronized if data is categorical and an InSituExperiment
+                #         raise RuntimeError(f"Key '{k}' not in `exp.colors` and `sync_colors=False`, meaning that colors are not being synchronized. "
+                #                 f"In case of categorical data, this might lead to different color mappings "
+                #                 f"between the datasets. Set `sync_colors=True` or manually use InSituExperiments's `.sync_colors(keys='{k}')` function "
+                #                 f"to synchronize colors."
+                #                 )
         else:
             self.n_data = 1
             self.is_experiment = False
@@ -568,33 +567,8 @@ class MultiSpatialPlot:
         print("Do plotting.") if self.verbose else None
         #i = 0
         for idx in range(self.n_data):
-            # # extract the InSituData object
-            # try:
-            #     xd = self.data.data[idx]
-            #     meta = self.data.metadata.iloc[idx]
-            # except AttributeError:
-            #     xd = self.data
-            #     meta = None
 
-            # # retrieve the right cell data
-            # celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
-
-            # # extract anndata
-            # ad = celldata.matrix
-
-            # # filter anndata
-            # ad = ad[ad.obs["cell_type"].str.contains("Cancer")]
-
-            # if self.name_column is None or meta is None:
-            #     sample_name = xd.sample_id
-            # else:
-            #     sample_name = meta[self.name_column]
-
-            # if self.image_key is not None:
-            #     imagedata = xd.images
-            # else:
-            #     imagedata = None
-
+            # retrieve data
             ad, sample_name, imagedata, regions = self._get_data(idx)
 
 
@@ -799,7 +773,7 @@ def plot_spatial(
     spot_size: float = 10,
     spot_type: str = 'o',
     cmap: str = DEFAULT_CONTINUOUS_CMAP,
-    sync_colors: bool = False,
+    overwrite_colors: bool = False,
     background_color: str = 'white',
     alpha: float = 1,
     colorbar: bool = True,
@@ -842,7 +816,7 @@ def plot_spatial(
         spot_size=spot_size,
         spot_type=spot_type,
         cmap=cmap,
-        sync_colors=sync_colors,
+        overwrite_colors=overwrite_colors,
         background_color=background_color,
         alpha=alpha,
         colorbar=colorbar,
