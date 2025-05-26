@@ -26,6 +26,7 @@ from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting._colors import (_add_colorlegend_to_axis,
                                        _extract_color_values,
                                        create_cmap_mapping)
+from insitupy.utils._adata import filter_anndata
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -526,30 +527,75 @@ class MultiSpatialPlot:
 
         return ax, add_legend
 
+    def _get_data(self, idx):
+        # extract the InSituData object
+        try:
+            xd = self.data.data[idx]
+            meta = self.data.metadata.iloc[idx]
+        except AttributeError:
+            xd = self.data
+            meta = None
+
+        # retrieve the right cell data
+        celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
+
+        # extract anndata
+        adata = celldata.matrix
+
+        # filter anndata
+        if self.filter_mode is not None and self.filter_tuple is not None:
+            adata = filter_anndata(
+                adata=adata, filter_mode=self.filter_mode, filter_tuple=self.filter_tuple
+                )
+
+        if self.name_column is None or meta is None:
+            sample_name = xd.sample_id
+        else:
+            sample_name = meta[self.name_column]
+
+        if self.image_key is not None:
+            imagedata = xd.images
+        else:
+            imagedata = None
+
+        # get regions
+        regions = xd.regions
+
+        return adata, sample_name, imagedata, regions
+
     def plot_to_subplots(self):
         print("Do plotting.") if self.verbose else None
         #i = 0
         for idx in range(self.n_data):
-            # extract the InSituData
-            try:
-                xd = self.data.data[idx]
-                meta = self.data.metadata.iloc[idx]
-            except AttributeError:
-                xd = self.data
-                meta = None
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
-            ad = celldata.matrix
-            #annot_df = xd.annotations
+            # # extract the InSituData object
+            # try:
+            #     xd = self.data.data[idx]
+            #     meta = self.data.metadata.iloc[idx]
+            # except AttributeError:
+            #     xd = self.data
+            #     meta = None
 
-            if self.name_column is None or meta is None:
-                sample_name = xd.sample_id
-            else:
-                sample_name = meta[self.name_column]
+            # # retrieve the right cell data
+            # celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
 
-            if self.image_key is not None:
-                imagedata = xd.images
-            else:
-                imagedata = None
+            # # extract anndata
+            # ad = celldata.matrix
+
+            # # filter anndata
+            # ad = ad[ad.obs["cell_type"].str.contains("Cancer")]
+
+            # if self.name_column is None or meta is None:
+            #     sample_name = xd.sample_id
+            # else:
+            #     sample_name = meta[self.name_column]
+
+            # if self.image_key is not None:
+            #     imagedata = xd.images
+            # else:
+            #     imagedata = None
+
+            ad, sample_name, imagedata, regions = self._get_data(idx)
+
 
             for idx_key, key in enumerate(self.keys):
                 # get axis to plot
@@ -567,7 +613,7 @@ class MultiSpatialPlot:
                     idx_key=idx_key,
                     color_config=self.color_config,
                     add_legend=add_legend,
-                    RegionDataObject=xd.regions,
+                    RegionDataObject=regions,
                     region_tuple=self.region_tuple,
                     ImageDataObject=imagedata,
                     image_key=self.image_key,
@@ -722,12 +768,20 @@ class MultiSpatialPlot:
                 if self.crange_type == 'percentile':
                     clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
+FilterMode = Literal[
+    "contains", "not contains", "starts with", "ends with",
+    "is equal", "is not", "in", "not in",
+    "greater than", "less than", "greater or equal", "less or equal"
+    ]
+
 def plot_spatial(
     data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
     cells_layer: Optional[str] = None,
     raw: bool = False,
     layer: Optional[str] = None,
+    filter_mode: Optional[FilterMode] = None,
+    filter_tuple: Optional[Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]] = None,
     fig: Optional[plt.Figure] = None,
     ax: Optional[plt.Axes] = None,
     max_cols: int = 4,
@@ -769,6 +823,8 @@ def plot_spatial(
         cells_layer=cells_layer,
         raw=raw,
         layer=layer,
+        filter_mode=filter_mode,
+        filter_tuple=filter_tuple,
         fig=fig,
         ax=ax,
         max_cols=max_cols,
