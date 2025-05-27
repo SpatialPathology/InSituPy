@@ -1,5 +1,8 @@
+from typing import List, Literal, Tuple, Union
+
 import anndata
 import numpy as np
+import pandas as pd
 
 from insitupy.utils.utils import convert_to_list
 
@@ -179,3 +182,76 @@ def _select_anndata_elements(
 
     if not inplace:
         return adata
+
+FilterMode = Literal[
+    "contains", "not contains", "starts with", "ends with",
+    "is equal", "is not", "in", "not in",
+    "greater than", "less than", "greater or equal", "less or equal"
+    ]
+
+def filter_anndata(
+    adata: anndata.AnnData,
+    filter_mode: FilterMode,
+    filter_tuple: Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]
+) -> anndata.AnnData:
+    """
+    Filters an AnnData object based on a specified filter mode and condition.
+
+    Args:
+        adata (AnnData): The AnnData object to be filtered.
+        filter_mode (FilterMode): The filtering mode to apply.
+        filter_tuple (tuple): A tuple of the form (column_name, value) specifying the column
+            in `adata.obs` and the value to filter by.
+
+    Returns:
+        AnnData: A new AnnData object containing only the filtered observations.
+
+    Raises:
+        ValueError: If the value type is incompatible with the filter mode.
+    """
+    column, value = filter_tuple
+
+    if column not in adata.obs:
+        raise ValueError(f"Column '{column}' does not exist in the AnnData object.")
+
+    string_based_modes = ["contains", "not contains", "starts with", "ends with", "is equal", "is not", "in", "not in"]
+    numeric_based_modes = ["greater than", "less than", "greater or equal", "less or equal"]
+
+    if filter_mode in string_based_modes and not (
+        isinstance(value, str) or
+        (filter_mode in ["in", "not in"] and isinstance(value, list) and all(isinstance(v, str) for v in value))
+    ):
+        raise ValueError(f"Filter mode '{filter_mode}' expects a string or list of strings as value.")
+
+    if filter_mode in numeric_based_modes and not isinstance(value, (int, float)):
+        raise ValueError(f"Filter mode '{filter_mode}' expects a numeric value (int or float).")
+
+    if filter_mode == "contains":
+        mask = adata.obs[column].str.contains(value)
+    elif filter_mode == "not contains":
+        mask = ~adata.obs[column].str.contains(value)
+    elif filter_mode == "starts with":
+        mask = adata.obs[column].str.startswith(value)
+    elif filter_mode == "ends with":
+        mask = adata.obs[column].str.endswith(value)
+    elif filter_mode == "is equal":
+        mask = adata.obs[column] == value
+    elif filter_mode == "is not":
+        mask = adata.obs[column] != value
+    elif filter_mode == "in":
+        mask = adata.obs[column].isin(value)
+    elif filter_mode == "not in":
+        mask = ~adata.obs[column].isin(value)
+    elif filter_mode == "greater than":
+        mask = adata.obs[column] > value
+    elif filter_mode == "less than":
+        mask = adata.obs[column] < value
+    elif filter_mode == "greater or equal":
+        mask = adata.obs[column] >= value
+    elif filter_mode == "less or equal":
+        mask = adata.obs[column] <= value
+    else:
+        raise ValueError(f"Unsupported filter mode: {filter_mode}")
+
+    return adata[mask].copy()
+

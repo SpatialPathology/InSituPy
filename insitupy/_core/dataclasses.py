@@ -228,8 +228,7 @@ class ShapesData(DeepCopyMixin):
 
                 # remove all duplicated shapes - leaving only the newly added
                 dup_mask = annot_df.index.duplicated()
-                annot_df = annot_df[~dup_mask]
-                print(f"Filtered out {np.sum(dup_mask)} duplicates.")
+                annot_df = annot_df[~dup_mask] # filter out duplicates
                 new_n = len(annot_df)
 
                 # collect additional variables for reporting

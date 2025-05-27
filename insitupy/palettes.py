@@ -36,9 +36,7 @@ class CustomPalettes:
 
         # concatenate color cycle
         color_cycle = cmap1[:7] + cmap1[8:] + cmap2[:7] + cmap2[8:] + (cmap1[7],) + (cmap2[7],)
-        self.tab20_mod = ListedColormap([rgb2hex(elem) for elem in color_cycle])
-
-
+        self.tab20_mod = ListedColormap([rgb2hex(elem) for elem in color_cycle], name="tab20_mod")
     def show_all(self):
         '''
         Plots all colormaps in the collection.
