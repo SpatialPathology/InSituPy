@@ -126,7 +126,7 @@ class InSituData:
             Saves the InSituData object to a specified path.
         save(path, zarr_zipped, verbose, keep_history):
             Saves the InSituData object to its current path or a specified path.
-        save_colorlegends(savepath, from_canvas, max_per_row):
+        save_colorlegends(savepath, from_canvas, max_per_col):
             Saves color legends from the viewer.
         quicksave(note):
             *Experimental feature!* Saves a quick snapshot of the annotations.
@@ -1202,7 +1202,7 @@ class InSituData:
         self,
         savepath: Optional[Union[str, os.PathLike, Path]] = None,
         from_canvas: bool = False,
-        max_per_row: int = 10
+        max_per_col: int = 10
         ):
         from insitupy.plotting.plots import plot_colorlegend
 
@@ -1234,7 +1234,7 @@ class InSituData:
                     viewer=self.viewer,
                     mapping=None,
                     layer_name=layer.name,
-                    max_per_row=max_per_row,
+                    max_per_col=max_per_col,
                     savepath=savepath
                     )
 

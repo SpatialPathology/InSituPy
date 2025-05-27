@@ -132,7 +132,7 @@ def plot_colorlegend(
     viewer: Optional[Viewer] = None,
     mapping: Optional[None] = None,
     layer_name: Optional[str] = None,
-    max_per_row: int = 10,
+    max_per_col: int = 10,
     title: Optional[str] = None,
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
@@ -180,7 +180,7 @@ def plot_colorlegend(
         _add_colorlegend_to_axis(
             color_dict=mapping,
             ax=ax,
-            max_per_row=max_per_row,
+            max_per_col=max_per_col,
             title=title
             )
 
@@ -495,7 +495,7 @@ def plot_cellular_composition(
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],
-            max_per_row=np.inf,
+            max_per_col=np.inf,
             loc='center',
             bbox_to_anchor=(0.5, 0.5),
             mode="rectangle",
