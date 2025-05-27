@@ -30,6 +30,11 @@ from insitupy.utils._adata import filter_anndata
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+FilterMode = Literal[
+    "contains", "not contains", "starts with", "ends with",
+    "is equal", "is not", "in", "not in",
+    "greater than", "less than", "greater or equal", "less or equal"
+    ]
 
 class _ColorConfigMultiPlot:
     def __init__(
@@ -317,10 +322,91 @@ class MultiSpatialPlot:
     '''
     Class to render scatter plots of single-cell spatial transcriptomics data.
     '''
-    def __init__(self, **kwargs):
-        # Automatically assign all keyword arguments to the instance
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+    def __init__(
+        self,
+        data: Union[InSituData, InSituExperiment],
+        keys: Union[str, List[str]],
+        cells_layer: Optional[str] = None,
+        raw: bool = False,
+        layer: Optional[str] = None,
+        filter_mode: Optional[FilterMode] = None,
+        filter_tuple: Optional[Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]] = None,
+        fig: Optional[plt.Figure] = None,
+        ax: Optional[plt.Axes] = None,
+        max_cols: int = 4,
+        xlim: Optional[Tuple[float, float]] = None,
+        ylim: Optional[Tuple[float, float]] = None,
+        region_tuple: Tuple[str, str] = None,
+        crange: Optional[List[int]] = None,
+        crange_type: Literal['minmax', 'percentile'] = 'minmax',
+        palette: str = DEFAULT_CATEGORICAL_CMAP,
+        cmap_center: Optional[float] = None,
+        dpi_display: int = 80,
+        obsm_key: str = 'spatial',
+        origin_zero: bool = False,
+        spot_size: float = 10,
+        spot_type: str = 'o',
+        cmap: str = DEFAULT_CONTINUOUS_CMAP,
+        overwrite_colors: bool = False,
+        background_color: str = 'white',
+        alpha: float = 1,
+        colorbar: bool = True,
+        clb_title: Optional[str] = None,
+        header: Optional[str] = None,
+        name_column: Optional[str] = None,
+        title_size: int = 24,
+        label_size: int = 16,
+        tick_label_size: int = 14,
+        image_key: Optional[str] = None,
+        pixelwidth_per_subplot: int = 200,
+        histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
+        savepath: Optional[str] = None,
+        save_only: bool = False,
+        dpi_save: int = 300,
+        show: bool = True,
+        verbose: bool = False,
+    ):
+        self.data = data
+        self.keys = keys
+        self.cells_layer = cells_layer
+        self.raw = raw
+        self.layer = layer
+        self.filter_mode = filter_mode
+        self.filter_tuple = filter_tuple
+        self.fig = fig
+        self.ax = ax
+        self.max_cols = max_cols
+        self.xlim = xlim
+        self.ylim = ylim
+        self.region_tuple = region_tuple
+        self.crange = crange
+        self.crange_type = crange_type
+        self.palette = palette
+        self.cmap_center = cmap_center
+        self.dpi_display = dpi_display
+        self.obsm_key = obsm_key
+        self.origin_zero = origin_zero
+        self.spot_size = spot_size
+        self.spot_type = spot_type
+        self.cmap = cmap
+        self.overwrite_colors = overwrite_colors
+        self.background_color = background_color
+        self.alpha = alpha
+        self.colorbar = colorbar
+        self.clb_title = clb_title
+        self.header = header
+        self.name_column = name_column
+        self.title_size = title_size
+        self.label_size = label_size
+        self.tick_label_size = tick_label_size
+        self.image_key = image_key
+        self.pixelwidth_per_subplot = pixelwidth_per_subplot
+        self.histogram_setting = histogram_setting
+        self.savepath = savepath
+        self.save_only = save_only
+        self.dpi_save = dpi_save
+        self.show = show
+        self.verbose = verbose
 
         # convert arguments to lists
         self.keys = convert_to_list(self.keys)
@@ -743,11 +829,7 @@ class MultiSpatialPlot:
                 if self.crange_type == 'percentile':
                     clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
-FilterMode = Literal[
-    "contains", "not contains", "starts with", "ends with",
-    "is equal", "is not", "in", "not in",
-    "greater than", "less than", "greater or equal", "less or equal"
-    ]
+
 
 def plot_spatial(
     data: Union[InSituData, InSituExperiment],
