@@ -982,9 +982,12 @@ class InSituExperiment:
         metadata_path = path / "metadata.csv"
         metadata = pd.read_csv(metadata_path, index_col=0)
 
-        # load colors
-        with open(path / "colors.json", 'r') as f:
-            colors = json.load(f)
+        try:
+            # load colors
+            with open(path / "colors.json", 'r') as f:
+                colors = json.load(f)
+        except FileNotFoundError:
+            colors = {}
 
         # Load each dataset
         data = []

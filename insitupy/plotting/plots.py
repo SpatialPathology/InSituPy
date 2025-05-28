@@ -253,7 +253,7 @@ def calc_cellular_composition(
             # check whether the key exists in the selected geometry
             mod = d.get_modality(modality)
             if mod is None:
-                raise ValueError(f"`geom_key` '{geom_key}' not available in modality '{modality}'")
+                raise ValueError(f"Modality '{modality}' not available.")
             if geom_key in mod.keys():
                 # check whether the cells were already assigned to the requested geometry
                 _check_assignment(
