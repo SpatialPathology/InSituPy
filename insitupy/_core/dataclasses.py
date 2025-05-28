@@ -246,7 +246,7 @@ class ShapesData(DeepCopyMixin):
 
                 if self._polygons_only:
                     # check if any of the shapes are not shapely Polygons
-                    is_not_polygon = [not isinstance(p, Polygon) for p in annot_df.geometry]
+                    is_not_polygon = np.array([not isinstance(p, Polygon) for p in annot_df.geometry])
                     if np.any(is_not_polygon):
                         annot_df = annot_df.loc[~is_not_polygon]
                         warnings.warn(

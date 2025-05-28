@@ -200,6 +200,20 @@ def plot_colorlegend(
     save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
     plt.show()
 
+def _get_adata(d, cells_layer, mask_col):
+    # get data
+    celldata = _get_cell_layer(
+        cells=d.cells,
+        cells_layer=cells_layer,
+        verbose=False
+        )
+    adata = celldata.matrix.copy()
+
+    if mask_col is not None:
+        adata = adata[adata.obs[mask_col]].copy()
+
+    return adata
+
 def calc_cellular_composition(
     data: Union[InSituData, InSituExperiment],
     cell_type_col: str,
@@ -237,15 +251,6 @@ def calc_cellular_composition(
     # retrieve cell type compositions
     compositions_dict = {}
     for m, d in exp.iterdata():
-        celldata = _get_cell_layer(
-            cells=d.cells,
-            cells_layer=cells_layer,
-            verbose=False
-            )
-        adata = celldata.matrix.copy()
-
-        if mask_col is not None:
-            adata = adata[adata.obs[mask_col]].copy()
 
         data_name = m[uid_column]
 
@@ -253,7 +258,7 @@ def calc_cellular_composition(
             # check whether the key exists in the selected geometry
             mod = d.get_modality(modality)
             if mod is None:
-                raise ValueError(f"`geom_key` '{geom_key}' not available in modality '{modality}'")
+                raise ValueError(f"Modality '{modality}' not available.")
             if geom_key in mod.keys():
                 # check whether the cells were already assigned to the requested geometry
                 _check_assignment(
@@ -262,6 +267,9 @@ def calc_cellular_composition(
                     key=geom_key,
                     force_assignment=force_assignment,
                     modality=modality)
+
+                # get data
+                adata = _get_adata(d=d, cells_layer=cells_layer, mask_col=mask_col)
 
                 assignment_series = adata.obsm[modality][geom_key]
                 #cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
@@ -302,6 +310,9 @@ def calc_cellular_composition(
             #     )
 
         else:
+            # get data
+            adata = _get_adata(d=d, cells_layer=cells_layer, mask_col=mask_col)
+
             compositions = pd.DataFrame(
                 {
                     "total": adata.obs[cell_type_col].value_counts(normalize=normalize) * 100
@@ -495,7 +506,7 @@ def plot_cellular_composition(
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],
-            max_per_col=np.inf,
+            max_per_col=5,
             loc='center',
             bbox_to_anchor=(0.5, 0.5),
             mode="rectangle",
