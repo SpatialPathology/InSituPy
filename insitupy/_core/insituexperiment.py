@@ -325,7 +325,7 @@ class InSituExperiment:
 
     def append_metadata(self,
                         new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],
-                        by: Optional[str] = None,
+                        by: Optional[str],
                         overwrite: bool = False
                         ):
         """
@@ -397,6 +397,10 @@ class InSituExperiment:
 
         # Update the object's metadata only if the check passes
         self._metadata = updated_metadata
+
+    def remove_metadata_columns(self, columns):
+        """Remove specified columns from the internal metadata."""
+        self._metadata.drop(columns=columns, inplace=True, errors='ignore')
 
     def copy(self):
         """Create a deep copy of the InSituExperiment object.
@@ -1128,29 +1132,36 @@ class InSituExperiment:
              verbose: bool = False,
              overwrite_metadata: bool = True,
              overwrite_colors: bool = True,
+             metadata_only: bool = False,
              **kwargs
              ):
-        if self.path is None:
-            print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
-            return
-        else:
-            parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
-            if not np.all(parent_path_identical):
-                print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
+        if metadata_only and not overwrite_metadata:
+            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
+
+        if not metadata_only:
+            if self.path is None:
+                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
+                return
             else:
-                for xd in tqdm(self._data):
-                    xd.save(
-                        verbose=verbose,
-                        **kwargs
-                        )
+                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
+                if not np.all(parent_path_identical):
+                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
+                else:
+                    for xd in tqdm(self._data):
+                        xd.save(
+                            verbose=verbose,
+                            **kwargs
+                            )
+
+            if overwrite_colors:
+                with open(self.path / "colors.json", 'w') as f:
+                    json.dump(self.colors, f)
 
         if overwrite_metadata:
             # Optionally, save the metadata as a CSV file
             self._metadata.to_csv(self.path / "metadata.csv", index=True)
 
-        if overwrite_colors:
-            with open(self.path / "colors.json", 'w') as f:
-                json.dump(self.colors, f)
+
 
     def saveas(self, path: Union[str, os.PathLike, Path],
                overwrite: bool = False,
