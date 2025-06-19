@@ -116,7 +116,6 @@ def _read_boundaries_from_xenium(
         raise ValueError(f"Unexpected shape for `cell_ids` array: {cell_ids.shape} instead of 1 or 2.")
 
     try:
-        print(cells_zarr_file)
         seg_mask_value = da.from_zarr(cells_zarr_file, component="seg_mask_value")
     except (ArrayNotFoundError, TypeError):
         seg_mask_value = np.array(range(1, len(cell_names)+1))
