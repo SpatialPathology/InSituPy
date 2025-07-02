@@ -43,7 +43,6 @@ from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
                                write_dict_to_json)
 from insitupy.io.io import read_multicelldata, read_shapesdata
-from insitupy.plotting import expr_along_obs_val
 from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import (_crop_transcripts,
                                   convert_napari_shape_to_polygon_or_line,
@@ -138,8 +137,6 @@ class InSituData:
             Visualizes the data using a napari viewer.
         store_geometries(name_pattern, uid_col):
             Extracts geometric layers from the viewer and stores them as annotations or regions.
-        plot_expr_along_obs_val(keys, obs_val, cells_layer, groupby, method, stderr, savepath, return_data, **kwargs):
-            Plots expression values along an observation value.
         reload(skip, verbose):
             Reloads the loaded modalities.
         get_loaded_modalities():
@@ -1741,36 +1738,36 @@ class InSituData:
     #     # remove non-matching entries
 
 
-    def plot_expr_along_obs_val(
-        self,
-        keys: str,
-        obs_val: str,
-        cells_layer: Optional[str] = None,
-        groupby: Optional[str] = None,
-        method: Literal["lowess", "loess"] = 'loess',
-        stderr: bool = False,
-        savepath=None,
-        return_data=False,
-        **kwargs
-        ):
-        # retrieve anndata object from InSituData
-        celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer, verbose=True)
-        adata = celldata.matrix
+    # def plot_expr_along_obs_val(
+    #     self,
+    #     keys: str,
+    #     obs_val: str,
+    #     cells_layer: Optional[str] = None,
+    #     groupby: Optional[str] = None,
+    #     method: Literal["lowess", "loess"] = 'loess',
+    #     stderr: bool = False,
+    #     savepath=None,
+    #     return_data=False,
+    #     **kwargs
+    #     ):
+    #     # retrieve anndata object from InSituData
+    #     celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer, verbose=True)
+    #     adata = celldata.matrix
 
-        results = expr_along_obs_val(
-            adata=adata,
-            keys=keys,
-            obs_val=obs_val,
-            groupby=groupby,
-            method=method,
-            stderr=stderr,
-            savepath=savepath,
-            return_data=return_data,
-            **kwargs
-            )
+    #     results = expr_along_obs_val(
+    #         adata=adata,
+    #         keys=keys,
+    #         obs_val=obs_val,
+    #         groupby=groupby,
+    #         method=method,
+    #         stderr=stderr,
+    #         savepath=savepath,
+    #         return_data=return_data,
+    #         **kwargs
+    #         )
 
-        if return_data:
-            return results
+    #     if return_data:
+    #         return results
 
     def reload(
         self,
