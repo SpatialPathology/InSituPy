@@ -58,11 +58,11 @@ def check_overwrite_and_remove_if_true(
             raise FileExistsError(f"The output file already exists at {path}. To overwrite it, please set the `overwrite` parameter to True."
 )
 
-def copy_files_from_folder(
+def copy_files_from_xenium_output(
     source_dir,
     target_dir,
     filename,
-    signature_filename: str = "experiment.xenium"
+    xenium_filename: str = "experiment.xenium"
     ):
     """
     Copies specified files from subdirectories within a source directory to a target directory,
@@ -93,17 +93,18 @@ def copy_files_from_folder(
     for folder in Path(source_dir).glob('*'):
         if folder.is_dir():
             # check if it is a Xenium output directory
-            xenium_file = folder / signature_filename
+            xenium_file = folder / xenium_filename
             if xenium_file.exists():
                 print(f"Found Xenium output directory: {folder}")
                 # Check if the specified file exists in the current folder
                 file_path = folder / filename
 
                 # get metadata
+                slide_id = read_json(xenium_file)["slide_id"]
                 region_name = read_json(xenium_file)["region_name"]
                 if file_path.exists():
                     # Copy the file to the target directory
-                    shutil.copy(file_path, target_path / f"{region_name}__{filename}")
+                    shutil.copy(file_path, target_path / f"{slide_id}__{region_name}__{filename}")
                     print(f"\tCopied {file_path} to {target_path}")
                 else:
                     print("\tFile not found in directory.")
