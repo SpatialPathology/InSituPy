@@ -6,7 +6,8 @@ from typing import Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from adjustText import adjust_text
+from matplotlib.font_manager import FontProperties
+from typing import Optional
 
 from insitupy.io.plots import save_and_show_figure
 
@@ -22,6 +23,8 @@ def volcano_plot(data,
                  dpi_save: int = 300,
                  label_top_n: int = 20,
                  figsize: Tuple[int, int] = (8, 6),
+                 config_table=None,
+                 scores: Optional[str] = 'scores'
                  ):
     """
     Create a volcano plot from the DataFrame and label the top 20 most significant up and down-regulated genes.
@@ -76,7 +79,12 @@ def volcano_plot(data,
 
     # # Calculate mixed score and get top 20 up and down-regulated genes
     # volcano_data['mixed_score'] = -np.log10(volcano_data['pvals']) * volcano_data[logfoldchanges_column]
-
+    
+    if scores is None:
+        data['scores'] = -np.log10(data['pvals']) * data[logfoldchanges_column]
+    else:
+        pass
+    
     top_up_genes = data[data[logfoldchanges_column] > fold_change_threshold].nlargest(label_top_n, 'scores')
     top_down_genes = data[data[logfoldchanges_column] < -fold_change_threshold].nsmallest(label_top_n, 'scores')
 
