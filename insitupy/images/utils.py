@@ -1,15 +1,47 @@
-import warnings
+import math
 from numbers import Number
 from typing import List, Literal, Tuple, Union
+from warnings import warn
 
 import cv2
 import dask.array as da
 import numpy as np
 from numpy.typing import NDArray
+from scipy.ndimage import zoom
 from skimage.color import hed2rgb, rgb2hed
 
 from .._exceptions import InvalidDataTypeError
-from .axes import ImageAxes
+from .axes import ImageAxes, get_height_and_width
+
+
+def _efficiently_resize_array(array, scale_factor):
+    downscale_factor =  1/scale_factor
+
+    # calculate factor for first part of the downscaling
+    first_downscale_factor = math.floor(downscale_factor)
+
+    # perform first downscaling
+    im_ds = array[::first_downscale_factor, ::first_downscale_factor]
+
+    # calculate scale factor for remaining downscaling
+    second_sf = 1 / (downscale_factor / first_downscale_factor)
+
+    # perform final downscaling
+    resized_array = zoom(im_ds, zoom=second_sf, order=0)
+    return resized_array
+
+def _get_scale_factor_from_max_res(pixel_size, max_resolution):
+    if max_resolution is not None:
+        if (max_resolution == pixel_size) or (max_resolution < pixel_size):
+            warn(f"`max_resolution` ({max_resolution}) equal as or smaller than `pixel_size` ({pixel_size}). Skipped resizing.")
+            scale_factor = None
+            pass
+        else:
+            scale_factor = 1 / (max_resolution / pixel_size)
+    else:
+        scale_factor = None
+
+    return scale_factor
 
 
 def resize_image(img: NDArray,
@@ -19,11 +51,15 @@ def resize_image(img: NDArray,
                  interpolation = cv2.INTER_LINEAR
                  ):
     '''
-    Resize image by scale_factor
+    Resize width and height of image by scale_factor. Resizing does not affect channels.
+    So far the function assumes images to be either grayscale (axes="YX"), RGB (axes="YXS") or multi-channel IF (axes="CYX").
+    Time-series images (e.g. "TCYX") are not supported yet.
     '''
     # read and interpret the image axes pattern
     image_axes = ImageAxes(pattern=axes)
     channel_axis = image_axes.C
+
+    assert image_axes.T is None, "Time-series images are not supported in `resize_image`."
 
     if (channel_axis is not None) & (channel_axis != len(img.shape)-1):
         # move channel axis to last position if it is not there already
@@ -53,6 +89,8 @@ def resize_image(img: NDArray,
 
     return img
 
+
+
 def fit_image_to_size_limit(image: NDArray,
                             axes: str,  # description of axes, e.g. YXS for RGB, CYX for IF, TYXS for time-series RGB
                             size_limit: int,
@@ -62,26 +100,28 @@ def fit_image_to_size_limit(image: NDArray,
     Function to resize image if necessary (warpAffine has a size limit for the image that is transformed).
     '''
     # retrieve image dimensions
-    orig_shape_image = image.shape
-    xy_shape_image = orig_shape_image[:2]
+    #orig_shape_image = image.shape
+    height_width_image = get_height_and_width(image=image, axes_config=ImageAxes(axes))
+    #xy_shape_image = orig_shape_image[:2]
 
-    sf_image = (size_limit-1) / np.max(xy_shape_image)
-    new_shape = [int(elem * sf_image) for elem in xy_shape_image]
+    sf_image = (size_limit-1) / np.max(height_width_image)
+    #new_shape = [int(elem * sf_image) for elem in height_width_image]
 
-    # if image has three dimensions (RGB) add third dimensions after resizing
-    if len(image.shape) == 3:
-            new_shape += [image.shape[-1]]
-    new_shape = tuple(new_shape)
+    # # if image has three dimensions (RGB) add third dimensions after resizing
+    # if len(image.shape) == 3:
+    #         new_shape += [image.shape[-1]]
+    # new_shape = tuple(new_shape)
 
     # resize image
-    resized_image = resize_image(image, dim=(new_shape[1], new_shape[0]), axes=axes)
+    #resized_image = resize_image(image, dim=(new_shape[1], new_shape[0]), axes=axes)
+    resized_image = resize_image(image, scale_factor=sf_image, axes=axes)
 
     if return_scale_factor:
         return resized_image, sf_image
     else:
         return resized_image
 
-def convert_to_8bit(img, save_mem=True, verbose=False):
+def convert_to_8bit_func(img, save_mem=True, verbose=False):
     '''
     Convert numpy array image to 8bit.
     '''
@@ -138,7 +178,7 @@ def scale_to_max_width(image: np.ndarray,
 
     # resizing - caution: order of dimensions is reversed in OpenCV compared to numpy
     image_scaled = resize_image(img=image, dim=(new_shape[1], new_shape[0]), axes=axes)
-    print(f"{print_spacer}Rescaled to following dimensions: {image_scaled.shape}") if verbose else None
+    print(f"{print_spacer}Rescaled from {image.shape} to following dimensions: {image_scaled.shape}") if verbose else None
 
     return image_scaled
 
@@ -179,9 +219,9 @@ def deconvolve_he(
         raise ValueError('Unknown `return_type`. Possible values: "grayscale" or "rgb".')
 
     if convert:
-        ihc_h = convert_to_8bit(ihc_h, save_mem=False)
-        ihc_e = convert_to_8bit(ihc_e, save_mem=False)
-        ihc_d = convert_to_8bit(ihc_d, save_mem=False)
+        ihc_h = convert_to_8bit_func(ihc_h, save_mem=False)
+        ihc_e = convert_to_8bit_func(ihc_e, save_mem=False)
+        ihc_d = convert_to_8bit_func(ihc_d, save_mem=False)
 
     return ihc_h, ihc_e, ihc_d
 
@@ -198,14 +238,14 @@ def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
         img = img[::scale_steps, ::scale_steps]
         #img = resize_image(img, scale_factor=1/scale_steps, axes=axes, interpolation=cv2.INTER_LINEAR)
 
-        # check dtype of image
-        if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
-            warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
+        # # check dtype of image
+        # if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
+        #     warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
 
-            if img.dtype == np.dtype('int8'):
-                img = img.astype('uint8')
-            else:
-                img = img.astype('uint16')
+        #     if img.dtype == np.dtype('int8'):
+        #         img = img.astype('uint8')
+        #     else:
+        #         img = img.astype('uint16')
 
         try:
             # rechunk to prevent dask errors
@@ -264,3 +304,30 @@ def crop_dask_array_or_pyramid(
         )
 
     return cropped_data
+
+def clip_image_histogram(
+    image: np.ndarray,
+    lower_perc: int = 2,
+    upper_perc: int = 98
+    ):
+    # Define the min and max intensity values
+    lp, up = np.percentile(image, (lower_perc, upper_perc))
+    image = np.clip((image - lp) * 255.0 / (up - lp), 0, 255).astype(np.uint8)
+    return image
+
+def otsu_thresholding(image: np.ndarray) -> np.ndarray:
+    # Apply GaussianBlur to reduce image noise if necessary
+    #blur = cv2.GaussianBlur(image, (5, 5), 0)
+    # Apply Otsu's thresholding
+    _, otsu_image = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return otsu_image
+
+def _get_contrast_limits(img):
+    # retrieve metadata
+    img_max = img[0].max() if isinstance(img, list) else img.max()
+    try:
+        img_max = img_max.compute()
+    except AttributeError:
+        img_max = img_max
+
+    return (0, img_max)

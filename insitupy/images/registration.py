@@ -1,21 +1,33 @@
+from __future__ import \
+    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
+
+import gc
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import cv2
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
+from dask_image.imread import imread
 from parse import *
 
-from insitupy import __version__
+from insitupy import CACHE, __version__
+from insitupy._exceptions import UnknownOptionError
+from insitupy._textformat import textformat as tf
+from insitupy.images.axes import ImageAxes, get_height_and_width
+from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
+                                   deconvolve_he, fit_image_to_size_limit,
+                                   otsu_thresholding, resize_image,
+                                   scale_to_max_width)
+from insitupy.utils.utils import convert_to_list
 
 from .._constants import SHRT_MAX
 from .._exceptions import NotEnoughFeatureMatchesError
 from ..utils.utils import remove_last_line_from_csv
 from .io import write_ome_tiff
-from .utils import convert_to_8bit, fit_image_to_size_limit, scale_to_max_width
 
 
 class ImageRegistration:
@@ -47,6 +59,8 @@ class ImageRegistration:
         self.template = template
         self.axes_image = axes_image
         self.axes_template = axes_template
+        self.axes_config_image = ImageAxes(self.axes_image)
+        self.axes_config_template = ImageAxes(self.axes_template)
         self.max_width = max_width
         self.convert_to_grayscale = convert_to_grayscale
         self.perspective_transform = perspective_transform
@@ -95,14 +109,15 @@ class ImageRegistration:
                                                       verbose=self.verbose,
                                                       print_spacer="\t\t\t"
                                                       )
+        ##TODO: Should we delete the self.image after this step to free memory?
         else:
             self.image_scaled = self.image
             self.template_scaled = self.template
 
         # convert and normalize images to 8bit for registration
         self.verboseprint("\t\tConvert scaled images to 8 bit")
-        self.image_scaled = convert_to_8bit(self.image_scaled)
-        self.template_scaled = convert_to_8bit(self.template_scaled)
+        self.image_scaled = convert_to_8bit_func(self.image_scaled)
+        self.template_scaled = convert_to_8bit_func(self.template_scaled)
 
         # calculate scale factors for x and y dimension for image and template
         # TODO: Do we really nead to do this separately for both axes?
@@ -112,7 +127,11 @@ class ImageRegistration:
         self.y_sf_template = self.template_scaled.shape[0] / self.template.shape[0]
 
         # resize image if necessary (warpAffine has a size limit for the image that is transformed)
-        if np.any([elem > SHRT_MAX for elem in self.image.shape[:2]]):
+        # get width and height of image
+
+        h_image, w_image = get_height_and_width(image=self.image, axes_config=self.axes_config_image)
+        # if np.any([elem > SHRT_MAX for elem in self.image.shape[:2]]):
+        if np.any([elem > SHRT_MAX for elem in (h_image, w_image)]):
             self.verboseprint(
                 "\t\tWarning: Dimensions of image ({}) exceed C++ limit SHRT_MAX ({}). " \
                 "Image dimensions are resized to meet requirements. " \
@@ -122,20 +141,31 @@ class ImageRegistration:
             self.image_resized, self.resize_factor_image = fit_image_to_size_limit(
                 self.image, size_limit=SHRT_MAX, return_scale_factor=True, axes=self.axes_image
                 )
+            print(f"Image dimensions after resizing: {self.image_resized.shape}. Resize factor: {self.resize_factor_image}")
         else:
             self.image_resized = None
             self.resize_factor_image = 1
 
-    def extract_features(self):
+    def extract_features(
+        self,
+        test_flipping: bool = True,
+        adjust_contrast_method: Optional[Literal["otsu", "clip"]] = "clip",
+        debugging: bool = False
+        ):
         '''
         Function to extract paired features from image and template.
         '''
 
         self.verboseprint("\t\t{}: Get features...".format(f"{datetime.now():%Y-%m-%d %H:%M:%S}"))
 
-        # Test different flip transformations starting with no flip, then vertical, then horizontal.
+        if test_flipping:
+            # Test different flip transformations starting with no flip, then vertical, then horizontal.
+            flip_axis_list = [None, 0] # before: [None, 0, 1]
+        else:
+            # do not test flipping of the axis
+            flip_axis_list = [None]
         matches_list = [] # list to collect number of matches
-        for flip_axis in [None, 0, 1]:
+        for flip_axis in flip_axis_list:
             flipped = False
             if flip_axis is not None:
                 # flip image
@@ -144,20 +174,53 @@ class ImageRegistration:
                 flipped = True # set flipped flag to True
 
             # Get features
+            # adjust contrast of both image and template
+            if adjust_contrast_method is not None:
+                self.verboseprint(f"\t\t\tAdjust contrast with {adjust_contrast_method} method...")
+                if adjust_contrast_method == "otsu":
+                    image_contrast_adj = otsu_thresholding(image=convert_to_8bit_func(self.image_scaled))
+                    template_contrast_adj = otsu_thresholding(image=convert_to_8bit_func(self.template_scaled))
+                elif adjust_contrast_method == "clip":
+                    image_contrast_adj = clip_image_histogram(image=self.image_scaled, lower_perc=20, upper_perc=99)
+                    template_contrast_adj = clip_image_histogram(image=self.template_scaled, lower_perc=20, upper_perc=99)
+                else:
+                    raise ValueError(f"Invalid method {adjust_contrast_method} for `adjust_contrast_method`.")
+            else:
+                image_contrast_adj = self.image_scaled
+                template_contrast_adj = self.template_scaled
+
+            if debugging:
+                outpath = CACHE
+                plt.imshow(self.image_scaled)
+                plt.savefig(outpath / f"image.png")
+                plt.close()
+
+                plt.imshow(image_contrast_adj)
+                plt.savefig(outpath / f"image_{adjust_contrast_method}.png")
+                plt.close()
+
+                plt.imshow(self.template_scaled)
+                plt.savefig(outpath / f"template.png")
+                plt.close()
+
+                plt.imshow(template_contrast_adj)
+                plt.savefig(outpath / f"template_{adjust_contrast_method}.png")
+                plt.close()
+
             if self.feature_detection_method == "sift":
                 self.verboseprint("\t\t\tMethod: SIFT...")
                 # sift
                 sift = cv2.SIFT_create()
 
-                (kpsA, descsA) = sift.detectAndCompute(self.image_scaled, None)
-                (kpsB, descsB) = sift.detectAndCompute(self.template_scaled, None)
+                (kpsA, descsA) = sift.detectAndCompute(image_contrast_adj, None)
+                (kpsB, descsB) = sift.detectAndCompute(template_contrast_adj, None)
 
             elif self.feature_detection_method == "surf":
                 self.verboseprint("\t\t\tMethod: SURF...")
                 surf = cv2.xfeatures2d.SURF_create(400)
 
-                (kpsA, descsA) = surf.detectAndCompute(self.image_scaled, None)
-                (kpsB, descsB) = surf.detectAndCompute(self.template_scaled, None)
+                (kpsA, descsA) = surf.detectAndCompute(image_contrast_adj, None)
+                (kpsB, descsB) = surf.detectAndCompute(template_contrast_adj, None)
 
             else:
                 self.verboseprint("\t\t\tUnknown method. Aborted.")
@@ -205,7 +268,7 @@ class ImageRegistration:
             # check if a sufficient number of good matches was found
             matches_list.append(len(good_matches))
             if len(good_matches) >= self.min_good_matches:
-                print(f"\t\t\tSufficient number of good matches found ({len(good_matches)}).")
+                print(f"\t\t\tSufficient number of good matches found ({len(good_matches)}/{self.min_good_matches}).")
                 self.flip_axis = flip_axis
                 break
             else:
@@ -283,11 +346,10 @@ class ImageRegistration:
             self.image_to_register = np.flip(self.image_to_register, axis=self.flip_axis)
 
         # use the transformation matrix to register the images
+        # TODO: not very safe to use here "[:2]"
         (h, w) = self.template.shape[:2]
         # warping
         self.verboseprint(f"\t\t{datetime.now():%Y-%m-%d %H:%M:%S}: Register image by {warp_name} transformation...")
-
-        #self.image_resized = convert_to_8bit(self.image_resized)
         self.registered = warp_func(self.image_to_register, self.T_to_register, (w, h))
 
     def register_images(self):
@@ -368,3 +430,280 @@ class ImageRegistration:
         plt.imshow(matchedVis)
         plt.savefig(matchedVis_file, dpi=400)
         plt.close()
+
+
+def register_images(
+    data: InSituData, # type: ignore
+    image_to_be_registered: Union[str, os.PathLike, Path],
+    image_type: Literal["histo", "IF"],
+    channel_names: Union[str, List[str]],
+    channel_name_for_registration: Optional[str] = None,  # name used for the nuclei image. Only required for IF images.
+    template_image_name: str = "nuclei",
+    save_registered_images: bool = True,
+    output_dir: Union[str, os.PathLike, Path] = None,
+    min_good_matches_per_area: int = 5, # unit: 1/mm²
+    test_flipping: bool = True,
+    decon_scale_factor: float = 0.2,
+    physicalsize: str = 'µm'
+    ):
+    """
+    Register images stored in an InSituData object.
+
+    Args:
+        data (InSituData): The InSituData object containing the images.
+        image_to_be_registered (Union[str, os.PathLike, Path]): Path to the image to be registered.
+        image_type (Literal["histo", "IF"]): Type of the image, either "histo" or "IF".
+        channel_names (Union[str, List[str]]): Names of the channels in the image.
+        channel_name_for_registration (Optional[str], optional): Name of the channel used for registration. Required for IF images. Defaults to None.
+        template_image_name (str, optional): Name of the template image. Defaults to "nuclei".
+        save_registered_images (bool, optional): Whether to save the registered images. Defaults to True.
+        min_good_matches (int, optional): Minimum number of good matches required for registration. Defaults to 20.
+        test_flipping (bool): Whether to test flipping of images during registration. Defaults to True.
+        decon_scale_factor (float, optional): Scale factor for deconvolution. Defaults to 0.2.
+        physicalsize (str, optional): Unit of physical size. Defaults to 'µm'.
+
+    Raises:
+        ValueError: If `image_type` is "IF" and `channel_name_for_registration` is None.
+        FileNotFoundError: If the image to be registered is not found.
+        ValueError: If more than one image name is retrieved for histo images.
+        ValueError: If no image name is found in the file.
+        UnknownOptionError: If an unknown image type is provided.
+        TypeError: If `channel_name_for_registration` is None for IF images.
+        ValueError: If no channel indicator `C` is found in the image axes.
+
+    Returns:
+        None
+    """
+
+    # if image type is IF, the channel name for registration needs to be given
+    if image_type == "IF" and channel_name_for_registration is None:
+        raise ValueError(f'If `image_type" is "IF", `channel_name_for_registration is not allowed to be `None`.')
+
+    if output_dir is None:
+        # define output directory
+        output_dir = data.path.parent / "registered_images"
+    else:
+        output_dir = Path(output_dir) / "registered_images"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    # if output_dir.is_dir() and not force:
+    #     raise FileExistsError(f"Output directory {output_dir} exists already. If you still want to run the registration, set `force=True`.")
+
+    # check if image path exists
+    image_to_be_registered = Path(image_to_be_registered)
+    if not image_to_be_registered.is_file():
+        raise FileNotFoundError(f"No such file found: {str(image_to_be_registered)}")
+
+    # make sure the given image names are in a list
+    channel_names = convert_to_list(channel_names)
+
+    # determine the structure of the image axes and check other things
+    axes_template = "YX"
+    if image_type == "histo":
+        axes_image = "YXS"
+
+        # make sure that there is only one image name given
+        if len(channel_names) > 1:
+            raise ValueError(f"More than one image name retrieved ({channel_names})")
+
+        if len(channel_names) == 0:
+            raise ValueError(f"No image name found in file {image_to_be_registered}")
+
+    elif image_type == "IF":
+        axes_image = "CYX"
+    else:
+        raise UnknownOptionError(image_type, available=["histo", "IF"])
+
+    print(f'\tProcessing following {image_type} images: {tf.Bold}{", ".join(channel_names)}{tf.ResetAll}', flush=True)
+
+    # read images
+    print("\t\tLoading images to be registered...", flush=True)
+    image = imread(image_to_be_registered) # e.g. HE image
+
+    # sometimes images are read with an empty time dimension in the first axis.
+    # If this is the case, it is removed here.
+    if len(image.shape) == 4:
+        image = image[0]
+
+    # # read images in InSituData object
+    template = data.images[template_image_name][0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
+
+    # extract OME metadata
+    #ome_metadata_template = data.images.metadata[template_image_name]["OME"]
+
+    # get pixel size from image metadata
+    pixel_size = data.images.metadata[template_image_name]["pixel_size"]
+
+    # extract pixel size for x and y from OME metadata
+    #pixelsizes = {key: ome_metadata_template['Image']['Pixels'][key] for key in ['PhysicalSizeX', 'PhysicalSizeY']}
+
+    # generate OME metadata for saving
+    ome_metadata = {
+        'SignificantBits': 8,
+        'PhysicalSizeXUnit': physicalsize,
+        'PhysicalSizeYUnit': physicalsize,
+        'PhysicalSizeX': pixel_size,
+        'PhysicalSizeY': pixel_size
+        }
+
+    # determine minimum number of good matches that are necessary for the registration to be performed
+    h, w = template.shape[:2]
+    image_area = h * w * pixel_size**2 / 1000**2 # in mm²
+    min_good_matches = int(min_good_matches_per_area * image_area)
+
+    # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
+    #axes_selected = "YX"
+    if image_type == "histo":
+        print("\t\tRun color deconvolution", flush=True)
+        # deconvolve HE - performed on resized image to save memory
+        # TODO: Scale to max width instead of using a fixed scale factor before deconvolution (`scale_to_max_width`)
+        nuclei_img, eo, dab = deconvolve_he(img=resize_image(image, scale_factor=decon_scale_factor, axes="YXS"),
+                                    return_type="grayscale", convert=True)
+
+        # bring back to original size
+        nuclei_img = resize_image(nuclei_img, scale_factor=1/decon_scale_factor, axes="YX")
+
+        # set nuclei_channel and nuclei_axis to None
+        channel_name_for_registration = channel_axis = None
+    else:
+        # image_type is "IF" then
+        # get index of nuclei channel
+        channel_id_for_registration = channel_names.index(channel_name_for_registration)
+        channel_axis = axes_image.find("C")
+
+        if channel_axis == -1:
+            raise ValueError(f"No channel indicator `C` found in image axes ({axes_image})")
+
+        print(f"\t\tSelect image with nuclei from IF image (channel index: {channel_id_for_registration})", flush=True)
+        # # select nuclei channel from IF image
+        # if channel_name_for_registration is None:
+        #     raise TypeError("Argument `nuclei_channel` should be an integer and not NoneType.")
+
+        # select dapi channel for registration and convert to numpy array
+        nuclei_img = np.take(image, channel_id_for_registration, channel_axis).compute()
+
+    # Setup image registration objects - is important to load and scale the images.
+    # The reason for this are limits in C++, not allowing to perform certain OpenCV functions on big images.
+
+    # First: Setup the ImageRegistration object for the whole image (before deconvolution in histo images and multi-channel in IF)
+    imreg_complete = ImageRegistration(
+        image=image,
+        template=template,
+        axes_image=axes_image,
+        axes_template=axes_template,
+        verbose=True
+        )
+    # load and scale the whole image
+    print('Load and scale image data containing all channels.')
+    imreg_complete.load_and_scale_images()
+
+    # setup ImageRegistration object with the nucleus image (either from deconvolution or just selected from IF image)
+    axes_selected = "YX"
+    imreg_selected = ImageRegistration(
+        image=nuclei_img,
+        template=imreg_complete.template,
+        axes_image=axes_selected,
+        axes_template=axes_template,
+        max_width=4000,
+        convert_to_grayscale=False,
+        perspective_transform=False,
+        min_good_matches=min_good_matches
+    )
+
+    # run all steps to extract features and get transformation matrix
+    print('Load and scale image data containing only the channels required for registration.')
+    imreg_selected.load_and_scale_images()
+
+    print("\t\tExtract common features from image and template", flush=True)
+    # perform registration to extract the common features ptsA and ptsB
+    imreg_selected.extract_features(test_flipping=test_flipping)
+    imreg_selected.calculate_transformation_matrix()
+
+    if image_type == "histo":
+        # in case of histo RGB images, the channels are in the third axis and OpenCV can transform them
+        if imreg_complete.image_resized is None:
+            imreg_selected.image = imreg_complete.image  # use original image
+        else:
+            imreg_selected.image_resized = imreg_complete.image_resized  # use resized original image
+
+        # perform registration
+        imreg_selected.perform_registration()
+
+        if save_registered_images:
+            # save files
+            identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
+            imreg_selected.save(
+                output_dir=output_dir,
+                identifier = identifier,
+                axes=axes_image,
+                photometric='rgb',
+                ome_metadata=ome_metadata
+                )
+
+            # # save metadata
+            # data.metadata["method_params"]['images'][f'registered_{channel_names[0]}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
+            # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
+            # #self._save_metadata_after_registration()
+
+        data.images.add_image(
+            image=imreg_selected.registered,
+            name=channel_names[0],
+            axes=axes_image,
+            pixel_size=pixel_size,
+            ome_meta=ome_metadata,
+            overwrite=True
+            )
+
+        del imreg_complete, imreg_selected, image, template, nuclei_img, eo, dab
+    else:
+        # image_type is IF
+        # In case of IF images the channels are normally in the first axis and each channel is registered separately
+        # Further, each channel is then saved separately as grayscale image.
+
+        # iterate over channels
+        for i, n in enumerate(channel_names):
+            # skip the DAPI image
+            if n == channel_name_for_registration:
+                break
+
+            if imreg_complete.image_resized is None:
+                # select one channel from non-resized original image
+                imreg_selected.image = np.take(imreg_complete.image, i, channel_axis)
+            else:
+                # select one channel from resized original image
+                imreg_selected.image_resized = np.take(imreg_complete.image_resized, i, channel_axis)
+
+            # perform registration
+            imreg_selected.perform_registration()
+
+            if save_registered_images:
+                # save files
+                identifier = f"{data.slide_id}__{data.sample_id}__{n}"
+
+                imreg_selected.save(
+                    output_dir=output_dir,
+                    identifier=identifier,
+                    axes='YX',
+                    photometric='minisblack',
+                    ome_metadata=ome_metadata
+                    )
+
+                # # save metadata
+                # data.metadata["method_params"]['images'][f'registered_{n}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
+                # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
+                # #self._save_metadata_after_registration()
+            # if add_registered_image:
+            data.images.add_image(
+                image=imreg_selected.registered,
+                name=n,
+                axes=axes_image,
+                pixel_size=pixel_size,
+                ome_meta=ome_metadata,
+                overwrite=True
+                )
+
+        # free RAM
+        del imreg_complete, imreg_selected, image, template, nuclei_img
+    gc.collect()
+
+

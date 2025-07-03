@@ -3,26 +3,32 @@ from math import ceil
 from numbers import Number
 from pathlib import Path
 from typing import List, Literal, Optional, Union
+from warnings import warn
 
 import dask.array as da
+import numpy as np
 import pandas as pd
 import scanpy as sc
 import toml
 import zarr
-from rasterio.features import rasterize
 from zarr.errors import ArrayNotFoundError
 
 from insitupy._core.dataclasses import (AnnotationsData, BoundariesData,
-                                        CellData, RegionsData, ShapesData)
-from insitupy.io.baysor import read_baysor_polygons
+                                        CellData, MultiCellData, RegionsData,
+                                        ShapesData)
+from insitupy.io._segmentation import _read_baysor_polygons
 from insitupy.io.files import read_json
-from insitupy.utils.utils import convert_to_list
+from insitupy.utils.utils import convert_int_to_xenium_hex, convert_to_list
 
 
 def read_baysor_cells(
     baysor_output: Union[str, os.PathLike, Path],
     pixel_size: Number = 1 # the pixel size is usually 1 since baysor runs on the µm coordinates
     ) -> CellData:
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
 
     # convert to pathlib path
     baysor_output = Path(baysor_output)
@@ -55,7 +61,7 @@ def read_baysor_cells(
     print("Reading segmentation masks", flush=True)
     print("\tRead polygons", flush=True)
     jsonfile = baysor_output / "segmentation_polygons.json"
-    df = read_baysor_polygons(jsonfile)
+    df = _read_baysor_polygons(jsonfile)
 
     # remove polygons of cells that have been removed in the matrix
     df = df[df.cell.astype(int).isin(matrix.obs["CellID"])]
@@ -121,25 +127,38 @@ def read_celldata(
     # check whether it is zipped or not
     suffix = bound_path.name.split(".", maxsplit=1)[-1]
 
-    # read cell ids and seg_mask_values
-    cell_ids = da.from_zarr(bound_path, component="cell_id")
+    try:
+        # read cell ids and seg_mask_values
+        cell_names = da.from_zarr(bound_path, component="cell_names")
+    except ArrayNotFoundError:
+        # if cell names is not found, the data might come from an older InSituPy version which contained a cell_id instead
+        try:
+            # read cell ids and seg_mask_values
+            cell_ids = da.from_zarr(bound_path, component="cell_id").compute()
+            cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
+        except ArrayNotFoundError:
+            # if no cell_id is present, this means that the data is from a new InSituPy version which is good.
+            pass
 
     try:
         # in older datasets sometimes seg_mask_value is missing
         seg_mask_value = da.from_zarr(bound_path, component="seg_mask_value")
     except ArrayNotFoundError:
+        warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.matrix`.")
         seg_mask_value = None
 
-    # create boundaries data object
-    boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
+    # initialize boundaries data object
+    boundaries = BoundariesData(cell_names=cell_names, seg_mask_value=seg_mask_value)
 
     # retrieve the boundaries data
     bound_data = {}
     meta = {}
     zipped = True if suffix == "zarr.zip" else False
     with zarr.ZipStore(bound_path, mode='r') if zipped else zarr.DirectoryStore(bound_path) as dirstore:
-        for k in dirstore.listdir("masks"):
-            if not k.startswith("."):
+        # for k in dirstore.listdir("masks"):
+        #     if not k.startswith("."):
+        for k in ["cells", "nuclei"]:
+            if (bound_path / "masks" / k).exists():
                 # iterate through subresolutions
                 subresolutions = dirstore.listdir(f"masks/{k}")
 
@@ -167,10 +186,19 @@ def read_celldata(
                 store = zarr.open(dirstore)
                 meta[k] = store[f"masks/{k}"].attrs.asdict()
 
+    cell_boundaries = bound_data["cells"]
+    if "nuclei" in bound_data:
+        nuclei_boundaries = bound_data["nuclei"]
+    else:
+        nuclei_boundaries = None
+
     # add boundaries
-    boundaries.add_boundaries(data=bound_data,
-                              pixel_size=meta[list(meta.keys())[0]]["pixel_size"]
-                              )
+    boundaries.add_boundaries(
+        #data=bound_data,
+        cell_boundaries=cell_boundaries,
+        nuclei_boundaries=nuclei_boundaries,
+        pixel_size=meta[list(meta.keys())[0]]["pixel_size"]
+        )
 
     # try to extract configuration
     try:
@@ -240,4 +268,30 @@ def read_shapesdata(
     data.metadata = metadata
     return data
 
-
+def read_multicelldata(
+        path: Union[str, os.PathLike, Path],
+        path_upper: Optional[Union[str, os.PathLike, Path]] = None,
+        alt_path_dict: Optional[dict] = None,
+    ) -> MultiCellData:
+    if os.path.exists(path / ".multicelldata"):
+        old = False
+    elif os.path.exists(path / ".celldata"):
+        old = True
+    else:
+        raise FileNotFoundError(f"Metadata file for cells dimension in {path} was not found.")
+    path = Path(path)
+    mcd = MultiCellData()
+    if not old:
+        celldata_metadata = read_json(path / ".multicelldata")
+        for key in celldata_metadata["all_keys"]:
+            cd = read_celldata(path / key)
+            mcd.add_celldata(cd=cd, key=key, is_main=(key == celldata_metadata["key_main"]))
+    else:
+        cd = read_celldata(path)
+        mcd.add_celldata(cd=cd, key="main", is_main=True)
+        if path_upper is not None and alt_path_dict is not None:
+            path_upper = Path(path_upper)
+            for k, p in alt_path_dict.items():
+                cd = read_celldata(path=path_upper / p)
+                mcd.add_celldata(cd=cd, key=k)
+    return mcd

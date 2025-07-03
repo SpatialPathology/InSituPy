@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 
+from insitupy._textformat import textformat as tf
 from insitupy.palettes import CustomPalettes
 
 # make sure that images do not exceed limits in c++ (required for cv2::remap function in cv2::warpAffine)
@@ -15,7 +16,8 @@ SHRT_MIN = -(2**15-1) # -32767
 CACHE = Path.home() / ".cache/InSituPy/"
 
 # modalities
-MODALITIES = ["annotations", "cells", "images", "regions", "transcripts"]
+MODALITIES = ["cells", "images", "transcripts", "annotations", "regions"]
+MODALITIES_ABBR = "CITAR"
 LOAD_FUNCS = [
     'load_annotations',
     'load_cells',
@@ -23,6 +25,13 @@ LOAD_FUNCS = [
     'load_regions',
     'load_transcripts'
     ]
+MODALITIES_COLOR_DICT = {
+    "images": tf.Blue,
+    "cells": tf.Green,
+    "transcripts": tf.Purple,
+    "annotations": tf.Cyan,
+    "regions": tf.Yellow
+}
 
 # naming
 ISPY_METADATA_FILE = ".ispy"

@@ -1,8 +1,11 @@
-from typing import Literal
+from typing import Literal, Optional
 
 import anndata
+import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
+
+from insitupy._core._utils import _get_cell_layer
 
 
 # checker functions for data sanity
@@ -46,7 +49,7 @@ def check_integer_counts(X):
     # check if the matrix contains raw counts
     if not np.all(np.modf(X)[0] == 0):
         raise ValueError("Anndata object does not contain raw counts. Preprocessing aborted.")
-    
+
 
 def is_integer_counts(X):
     '''
@@ -140,12 +143,17 @@ def check_rgb_column(df, column_name):
     # Check if all values in the specified column are valid RGB tuples
     return df[column_name].apply(is_valid_rgb_tuple).all()
 
-
 def _check_assignment(
-    data, key, force_assignment, modality: Literal["annotations", "regions"]
+    data,
+    cells_layer: str,
+    key: str,
+    modality: Literal["annotations", "regions"],
+    force_assignment: bool = False,
+    verbose: bool = False
 ):
+    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
     try:
-        column = data.cells.matrix.obsm[modality].columns
+        column = celldata.matrix.obsm[modality].columns
     except KeyError:
         do_assignment = True
     else:
@@ -157,41 +165,70 @@ def _check_assignment(
     if do_assignment or force_assignment:
         if modality == "annotations":
             # assign annotations
-            data.assign_annotations(keys=key)
+            data.assign_annotations(keys=key, cells_layers=cells_layer)
         elif modality == "regions":
             # assign regions
-            data.assign_regions(keys=key)
+            data.assign_regions(keys=key, cells_layers=cells_layer)
     else:
-        print(f"{modality.capitalize()} with key '{key} have already been assigned to `data`.")
+        if verbose:
+            print(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")
 
+def _is_experiment(obj):
+    from insitupy._core.insitudata import InSituData
+    from insitupy._core.insituexperiment import InSituExperiment
 
-def _substitution_func(
-    row,
-    annotation_key,
-    annotation_name,
-    check_reference,
-    reference_name=None,
-    ignore_duplicate_assignments=False
+    if isinstance(obj, InSituData):
+        return False
+    elif isinstance(obj, InSituExperiment):
+        return True
+    else:
+        raise ValueError(f"Object is neither InSituData or InSituExperiment. Instead: {type(obj)}")
+
+def _is_list_unique(lst):
+    return len(lst) == len(set(lst))
+
+def _all_obs_names_unique(
+    exp,
+    cells_layer: Optional[str],
     ):
-    elem = row[annotation_key]
-    # check_reference = False
-    # if reference_name is not None:
-    #     check_reference = True
-    try:
-        split_name = elem.split(" & ")
-        if annotation_name in split_name:
-            if check_reference:
-                if reference_name in split_name:
-                    if not ignore_duplicate_assignments:
-                        raise ValueError(f"Cell '{row.name}' was found to belong to both the annotation and the reference. To ignore this and use only the annotation assignment, use `ignore_duplicate_assignments=True`. Assignment that was found is: {elem}")
-                    else:
-                        return annotation_name
-                else:
-                    return annotation_name
-            else:
-                return annotation_name
+
+    all_obs_names = []
+    for meta, data in exp.iterdata():
+        celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+        all_obs_names += celldata.matrix.obs_names.tolist()
+
+    return _is_list_unique(all_obs_names)
+
+
+def _is_list_of_dask_arrays(variable):
+    # Check if the variable is a list
+    if not isinstance(variable, list):
+        return False
+
+    # Check if all elements in the list are dask arrays
+    for element in variable:
+        if not isinstance(element, da.Array):
+            return False
+
+    return True
+
+from insitupy import WITH_NAPARI
+from insitupy._constants import ANNOTATIONS_SYMBOL, REGIONS_SYMBOL
+
+if WITH_NAPARI:
+    from napari.layers import Points
+
+def _check_geometry_symbol_and_layer(layer, type_symbol):
+    if type_symbol == ANNOTATIONS_SYMBOL:
+        checks_passed = True
+        object_type = "annotation"
+    elif type_symbol == REGIONS_SYMBOL:
+        #is_region_layer = True
+        object_type = "region"
+        if isinstance(layer, Points):
+            warn(f'Layer "{layer.name}" is a point layer and at the same time classified as "Region". This is not allowed. Skipped this layer.')
+            checks_passed = False
         else:
-            # TODO: Here also the reference name must be kept - does it really? Only if both annotation and reference are in the same dataset
-            return elem
-    except AttributeError:
-        return elem
+            checks_passed = True
+
+    return checks_passed, object_type

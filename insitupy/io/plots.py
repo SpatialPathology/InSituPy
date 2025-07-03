@@ -4,13 +4,17 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 
-def save_and_show_figure(savepath, fig, save_only=False, show=True, dpi_save=300, background_color=None, tight=True):
+def save_and_show_figure(
+    savepath, fig,
+    save_only=False, show=True, dpi_save=300,
+    background_color=None, tight=True
+    ):
 
     if tight:
         fig.tight_layout()
 
     if savepath is not None:
-        print("Saving figure to file " + savepath)
+        print("Saving figure to file " + str(savepath))
 
         # create path if it does not exist
         Path(os.path.dirname(savepath)).mkdir(parents=True, exist_ok=True)
@@ -22,6 +26,6 @@ def save_and_show_figure(savepath, fig, save_only=False, show=True, dpi_save=300
     if save_only:
         plt.close(fig)
     elif show:
-        return plt.show()
+        plt.show()
     else:
         return

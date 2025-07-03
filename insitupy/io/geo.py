@@ -35,14 +35,18 @@ def parse_geopandas(
         else:
             raise ValueError(f"Unknown file extension: {data.suffix}. File is expected to be `.geojson` or `.parquet`.")
 
-    # set the crs to EPSG:4326 (does not matter for us but to circumvent errors it is better to set it)
-    df = df.set_crs(4326)
+    if len(df) > 0:
+        # set the crs to EPSG:4326 (does not matter for us but to circumvent errors it is better to set it)
+        df = df.set_crs(4326)
 
-    if df.index.name != uid_col:
-        # set uid column as index
-        df = df.set_index(uid_col)
+        if df.index.name != uid_col:
+            # set uid column as index
+            df = df.set_index(uid_col)
 
-    return df
+        return df
+    else:
+        # empty data object
+        return None
 
 def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     """
@@ -55,10 +59,12 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     pandas.DataFrame: A DataFrame with flattened columns including "name" and "color" extracted from the "classification" column.
     """
     # Read the GeoJSON file into a GeoDataFrame
-    dataframe = geopandas.read_file(file)
+    dataframe = geopandas.read_file(file, engine="fiona")
 
     # annotation geojsons contain a classification column where each entry is a dict with name and color of the annotation
     if "classification" in dataframe.columns:
+        # print(dataframe)
+        # print(dataframe["classification"])
         # Flatten the "classification" column into separate "name" and "color" columns
         if "name" in dataframe.columns:
             warnings.warn(

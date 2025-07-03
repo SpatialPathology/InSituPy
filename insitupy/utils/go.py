@@ -1,5 +1,6 @@
 import json
 import os
+from numbers import Number
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -7,7 +8,6 @@ import numpy as np
 import pandas as pd
 import requests
 from anndata import AnnData
-from gprofiler import GProfiler
 from matplotlib import colormaps
 from scipy.cluster.hierarchy import (dendrogram, fcluster, linkage,
                                      set_link_color_palette)
@@ -47,10 +47,15 @@ class GOEnrichment():
     def results(self):
         return self._results
 
-    def gprofiler(self, target_genes: Union[dict, list] = None, top_n: Optional[int] = None,
-                  organism: str = None, key_added: str = 'result',
-                  uns_key_added: str = 'gprofiler', return_df: bool = True,
-                  sortby: str = 'pvals_adj', **kwargs: Any):
+    def gprofiler(self,
+                  target_genes: Union[dict, list] = None,
+                  top_n: Optional[int] = None,
+                  organism: Optional[str] = None,
+                  background: Optional[Union[List[str], str]] = None,
+                  key_added: str = 'result',
+                  uns_key_added: str = 'gprofiler',
+                  return_df: bool = True,
+                  **kwargs: Any):
         """
         Performs GO term enrichment analysis using the gprofiler web resource.
 
@@ -70,6 +75,11 @@ class GOEnrichment():
         Raises:
             ValueError: If `target_genes` is not a dictionary or list, or if `organism` is not specified.
         """
+        try:
+            from gprofiler import GProfiler
+        except ImportError:
+            raise ImportError("This function requires the 'gprofiler' package. Please install it with 'pip install gprofiler-official'.")
+
         if isinstance(target_genes, dict):
             groups = target_genes.keys()
         elif isinstance(target_genes, list):
@@ -87,7 +97,13 @@ class GOEnrichment():
                 genes = genes[:top_n]
 
             gp = GProfiler(return_dataframe=True)
-            e = gp.profile(organism=organism, query=genes, no_evidences=False)
+            e = gp.profile(
+                organism=organism,
+                query=genes,
+                no_evidences=False,
+                background=background,
+                user_threshold=0.05
+                )
 
             # calc -log(p_value)
             e['Enrichment score'] = [-np.log10(elem) for elem in e.p_value]
@@ -182,12 +198,19 @@ class GOEnrichment():
         if return_df:
             return enrichment
 
-    def enrichr(self, target_genes: Union[dict, list] = None, top_n: Optional[int] = None,
-                organism: str = None, key_added: str = 'result',
-                enrichr_libraries: str = 'GO_Biological_Process_2018',
-                outdir: str = None, no_plot: bool = True,
-                uns_key_added: str = 'enrichr', return_df: bool = True,
-                sortby: str = 'pvals_adj', **kwargs: Any):
+    def enrichr(self,
+                target_genes: Union[dict, list] = None,
+                top_n: Optional[int] = None,
+                organism: str = None,
+                background: Optional[Union[List[str], str]] = None,
+                key_added: str = 'result',
+                enrichr_libraries: str = 'GO_Biological_Process_2025',
+                outdir: str = None,
+                no_plot: bool = True,
+                uns_key_added: str = 'enrichr',
+                return_df: bool = True,
+                sortby: str = 'pvals_adj',
+                **kwargs: Any):
         """
         Performs GO term enrichment analysis using the enrichr web resource.
 
@@ -210,7 +233,10 @@ class GOEnrichment():
         Raises:
             ValueError: If `target_genes` is not a dictionary or list, or if `organism` is not specified.
         """
-        import gseapy
+        try:
+            import gseapy
+        except ImportError:
+            raise ImportError("This function requires the 'gseapy' package. Please install it with 'pip install gseapy'.")
 
         if isinstance(target_genes, dict):
             groups = target_genes.keys()
@@ -228,9 +254,14 @@ class GOEnrichment():
             if top_n is not None:
                 genes = genes[:top_n]
 
-            e = gseapy.enrichr(gene_list=genes, gene_sets=enrichr_libraries,
-                            organism=organism, outdir=outdir, no_plot=no_plot,
-                            **kwargs).results
+            e = gseapy.enrichr(
+                gene_list=genes,
+                gene_sets=enrichr_libraries,
+                organism=organism,
+                outdir=outdir,
+                no_plot=no_plot,
+                background=background,
+                **kwargs).results
 
             # calc -log(p_value)
             e['Enrichment score'] = [-np.log10(elem) for elem in e['Adjusted P-value']]
@@ -239,7 +270,10 @@ class GOEnrichment():
             e.sort_values('Enrichment score', inplace=True, ascending=False)
 
             # calculate gene ratio
-            e['Gene ratio'] = [int(elem.split("/")[0]) / int(elem.split("/")[1]) for elem in e['Overlap']]
+            try:
+                e['Gene ratio'] = [int(elem.split("/")[0]) / int(elem.split("/")[1]) for elem in e['Overlap']]
+            except KeyError:
+                pass
 
             # collect data
             enrichment_dict[group] = e
@@ -417,3 +451,18 @@ class StringDB:
 
             sdb = StringDB(return_results=False)
             sdb.call_stringdb_network(genes=target_genes, species=organism, prefix=prefix, output_format=output_format, save=True, **kwargs)
+
+
+
+def get_up_down_genes(dge_results,
+                      pval_threshold: Number = 0.05,
+                      logfold_threshold: Number = 1
+                      ):
+    pval_mask = dge_results['pvals'] < pval_threshold
+    lfc_mask_up = dge_results['logfoldchanges'] > logfold_threshold
+    lfc_mask_down = dge_results['logfoldchanges'] < -logfold_threshold
+
+    genes_up = dge_results[lfc_mask_up & pval_mask]['gene'].tolist()
+    genes_down = dge_results[lfc_mask_down & pval_mask]['gene'].tolist()
+
+    return genes_up, genes_down

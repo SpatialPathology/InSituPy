@@ -1,7 +1,6 @@
 import warnings
 from typing import List, Literal, Union
 
-import mellon
 import numpy as np
 import pandas as pd
 from scipy.linalg import LinAlgError
@@ -35,6 +34,10 @@ def _calc_kernel_density(
     data = np.array(data)
 
     if mode == "mellon":
+        try:
+            import mellon
+        except:
+            raise ImportError("To calculate densities with the mellon package, please install it with `pip install mellon`.")
         if verbose:
             print("Using Mellon density estimator.")
         # Fit and predict log density
@@ -57,33 +60,29 @@ def _calc_kernel_density(
 
     return density
 
-def calc_grouped_log_density(
+def calc_density(
     adata,
     groupby: str,
-    #log_density_key: str = "density",
-    #clipped_log_density_key: str = "density_clipped",
     mode: Literal["gauss", "mellon"] = "gauss",
     clip: bool = True,
     inplace: bool = False
 ):
     """
-    Calculate the log density and clipped log density for groups in the AnnData object.
+    Calculate the spatial density for groups in the AnnData object. Groups could be e.g. cell types in the sample.
+    Spatial coordinates are expected to be saved in `adata.obsm["spatial"]`.
 
     Args:
         adata (AnnData): The annotated data matrix.
         groupby (str): The column in `adata.obs` to group by.
-        log_density_key (str, optional): The key under which to store the log density in `adata.obsm`.
-            Defaults to "log_density".
-        clipped_log_density_key (str, optional): The key under which to store the clipped log density in `adata.obsm`.
-            Defaults to "log_density_clipped".
         mode (Literal["gauss", "mellon"], optional): The mode of density estimation.
             "gauss" for Gaussian KDE using scipy, "mellon" for Mellon density estimator.
             Defaults to "gauss".
+        clip (bool, optional): If True, clip the density values to the 5th and 95th percentile.
         inplace (bool, optional): If True, modify `adata` in place. If False, return a copy of `adata` with the modifications.
             Defaults to False.
 
     Returns:
-        AnnData: The modified AnnData object with added log density and clipped log density.
+        AnnData: The modified AnnData object with added density values.
     """
     if inplace:
         _adata = adata
@@ -91,7 +90,7 @@ def calc_grouped_log_density(
         _adata = adata.copy()
 
     # Initialize lists to store results
-    log_density_df = pd.DataFrame(index=_adata.obs_names)
+    density_df = pd.DataFrame(index=_adata.obs_names)
 
     # Iterate over unique values in the groupby column
     for group in tqdm(_adata.obs[groupby].unique()):
@@ -110,93 +109,65 @@ def calc_grouped_log_density(
             )
 
         # Store results in dataframes
-        log_density_df[group] = density_series
+        density_df[group] = density_series
 
     if clip:
         # clip the data
-        quantiles_df = log_density_df.quantile([0.05, 1])
-        log_density_df_clipped = log_density_df.clip(
+        quantiles_df = density_df.quantile([0.05, 1])
+        density_df_clipped = density_df.clip(
             lower=quantiles_df.iloc[0],
             upper=quantiles_df.iloc[1],
             axis=1
             )
 
-        _adata.obsm[f"density-{mode}"] = log_density_df_clipped
+        _adata.obsm[f"density-{mode}"] = density_df_clipped
 
     else:
-        _adata.obsm[f"density-{mode}"] = log_density_df
-
-    # # Sort the dataframes and add them to adata
-    # _adata.obsm[f"{log_density_key}-{mode}"] = log_density_df
-    # _adata.obsm[f"{clipped_log_density_key}-{mode}"] = log_density_df_clipped
+        _adata.obsm[f"density-{mode}"] = density_df
 
     if not inplace:
         return _adata
 
+def cohens_d(a, b, paired=False, correct_small_sample_size=True):
+    '''
+    Function to calculate the Cohen's D measure of effect sizes.
 
-# def calc_grouped_log_density(
-#     adata,
-#     groupby: str,
-#     log_density_key: str = "log_density",
-#     clipped_log_density_key: str = "log_density_clipped",
-#     mode: Literal["gauss", "mellon"] = "gauss",
-#     inplace: bool = False
-# ):
-#     """
-#     Calculate the log density and clipped log density for groups in the AnnData object.
+    Function with correction was adapted from:
+    https://www.statisticshowto.com/probability-and-statistics/statistics-definitions/cohens-d/
 
-#     Args:
-#         adata (AnnData): The annotated data matrix.
-#         groupby (str): The column in `adata.obs` to group by.
-#         log_density_key (str, optional): The key under which to store the log density in `adata.obsm`.
-#             Defaults to "log_density".
-#         clipped_log_density_key (str, optional): The key under which to store the clipped log density in `adata.obsm`.
-#             Defaults to "log_density_clipped".
-#         mode (Literal["gauss", "mellon"], optional): The mode of density estimation.
-#             "gauss" for Gaussian KDE using scipy, "mellon" for Mellon density estimator.
-#             Defaults to "gauss".
-#         inplace (bool, optional): If True, modify `adata` in place. If False, return a copy of `adata` with the modifications.
-#             Defaults to False.
+    To allow measurement for different sample sizes following sources were used:
+    https://stackoverflow.com/questions/21532471/how-to-calculate-cohens-d-in-python
+    https://en.wikipedia.org/wiki/Effect_size#Cohen's_d
 
-#     Returns:
-#         AnnData: The modified AnnData object with added log density and clipped log density.
-#     """
-#     if inplace:
-#         _adata = adata
-#     else:
-#         _adata = adata.copy()
+    For paired samples following websites were used:
+    https://www.datanovia.com/en/lessons/t-test-effect-size-using-cohens-d-measure/
+    The results were tested here: https://statistikguru.de/rechner/cohens-d-gepaarter-t-test.html
+    '''
+    if not paired:
+        # calculate parameters
+        mean1 = np.mean(a)
+        mean2 = np.mean(b)
+        std1 = np.std(a, ddof=1)
+        std2 = np.std(b, ddof=1)
+        n1 = len(a)
+        n2 = len(b)
+        dof = n1 + n2 - 2 # degrees of freedom
+        SDpool = np.sqrt(((n1-1) * std1**2 + (n2 - 1) * std2**2) / dof) # pooled standard deviations
 
-#     # Initialize lists to store results
-#     log_density_list = []
-#     clipped_log_density_list = []
+        if SDpool == 0:
+            d = np.nan
+        else:
+            d = (mean1 - mean2) / SDpool
 
-#     # Iterate over unique values in the groupby column
-#     for group in tqdm(_adata.obs[groupby].unique()):
-#         # Select the respective values in adata.obsm["spatial"]
-#         group_mask = _adata.obs[groupby] == group
-#         spatial_data = _adata.obsm["spatial"][group_mask]
+        n = np.min([n1, n2])
+        if correct_small_sample_size and n < 50:
+            # correct for small sample size
+            corr_factor = ((n - 3) / (n-2.25)) * np.sqrt((n - 2) / n)
+            d *= corr_factor
 
-#         # Fit and predict density
-#         density = _calc_kernel_density(spatial_data, mode=mode)
+    else:
+        assert len(a) == len(b), "For paired testing the size of both samples needs to be equal."
+        diff = np.array(a) - np.array(b)
+        d = np.mean(diff) / np.std(diff)
 
-#         # Store results in lists
-#         log_density_list.append(
-#             pd.DataFrame(
-#                 {groupby: density},
-#                 index=adata.obs_names[group_mask]
-#             ))
-#         clipped_log_density_list.append(
-#             pd.DataFrame(
-#                 {groupby: np.clip(density, *np.quantile(density, [0.05, 1]))},
-#                 index=adata.obs_names[group_mask]
-#             ))
-
-#     log_density_df = pd.concat(log_density_list)
-#     clipped_log_density_df = pd.concat(clipped_log_density_list)
-
-#     # Sort the dataframes and add them to adata
-#     _adata.obsm[f"{log_density_key}-{mode}"] = log_density_df.loc[_adata.obs_names]
-#     _adata.obsm[f"{clipped_log_density_key}-{mode}"] = clipped_log_density_df.loc[_adata.obs_names]
-
-#     if not inplace:
-#         return _adata
+    return d

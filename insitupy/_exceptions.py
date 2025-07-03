@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Optional, Type
 
 from .utils.utils import convert_to_list
@@ -118,7 +119,7 @@ class ModalityNotFoundError(Exception):
     """
 
     def __init__(self,
-                 modality: str,
+                 modality: str
                  ):
         self.message = f"No `{modality}` modality found."
         super().__init__(self.message)
@@ -151,4 +152,12 @@ class InvalidDataTypeError(Exception):
         if message is None:
             message = f"Invalid data type. Allowed data types: {', '.join(allowed_types)}. Received: {received_type}"
         self.message = message
+        super().__init__(self.message)
+
+class InvalidXeniumDirectory(Exception):
+    def __init__(self, directory):
+        if (Path(directory) / ".ispy").exists():
+            self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file, but it contains an InSituPy project file. Try `InSituData.read()` instead."
+        else:
+            self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file."
         super().__init__(self.message)

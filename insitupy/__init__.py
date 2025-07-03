@@ -1,6 +1,6 @@
 __author__ = "Johannes Wirth"
 __email__ = "j.wirth@tum.de"
-__version__ = "0.4.0"
+__version__ = "0.8.10"
 
 # check if napari is available
 try:
@@ -14,19 +14,37 @@ from insitupy._constants import CACHE
 from . import images as im
 from . import io
 from . import plotting as pl
+from . import preprocessing as pp
+from . import tools as tl
 from . import utils
-from ._core.dataclasses import AnnotationsData, BoundariesData, ImageData
-from ._core.insitudata import (InSituData, calc_distance_of_cells_from,
-                               differential_gene_expression, register_images)
+from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
+                                ImageData, MultiCellData, RegionsData)
+from ._core.insitudata import InSituData
 from ._core.insituexperiment import InSituExperiment
-from ._core.xenium import read_xenium
+from ._core.readers import read_xenium
+from .images.registration import register_images
 from .palettes import CustomPalettes
+from .tools.dge import differential_gene_expression
+from .tools.distance import calc_distance_of_cells_from
 
 __all__ = [
     "InSituData",
+    "InSituExperiment",
+    "CustomPalettes",
     "AnnotationsData",
     "BoundariesData",
+    "CellData",
     "ImageData",
+    "MultiCellData",
+    "RegionsData",
+    "read_xenium",
+    "differential_gene_expression",
+    "calc_distance_of_cells_from",
+    "register_images",
     "im",
+    "io",
+    "pl",
+    "pp",
+    "tl",
     "utils"
 ]

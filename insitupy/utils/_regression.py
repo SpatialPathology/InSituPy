@@ -7,7 +7,6 @@ import pandas as pd
 import scipy
 from scipy import stats
 from scipy.spatial import distance as dist
-from skmisc.loess import loess
 from statsmodels.nonparametric.smoothers_lowess import lowess as sm_lowess
 
 
@@ -109,6 +108,10 @@ class lowess:
 
 
 def bootstrap_loess(x, y, newdata, sample_frac=0.5):
+    try:
+        from skmisc.loess import loess
+    except ImportError:
+        raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
 
     # subsample data
     samples = np.random.choice(len(x), int(len(x)*sample_frac), replace=True)
@@ -139,12 +142,16 @@ class bootstrap_loess:
     Class to calculate standard error and confidence intervals of LOESS regression using bootstrapping.
     '''
     def __init__(self,
-                 loess_object: loess,
+                 loess_object
                  ):
         self.x = loess_object.inputs.x
         self.y = loess_object.inputs.y
 
     def _single_bootstrap_loess(self, newdata, sample_frac=0.5, assert_minmax: bool = True):
+        try:
+            from skmisc.loess import loess
+        except ImportError:
+            raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
 
         # get indices of max and min in x
         max_id = np.argmax(self.x)
@@ -226,6 +233,11 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
     Returns:
         pd.DataFrame: A DataFrame containing the predicted y values and associated standard errors and confidence intervals.
     """
+    try:
+        from skmisc.loess import loess
+    except ImportError:
+        raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
+
     # assure the input are numpy arrays
     xs = np.array(xs)
     ys = np.array(ys)

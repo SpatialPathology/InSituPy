@@ -25,15 +25,18 @@ if WITH_NAPARI:
     import napari
     from napari.types import LayerDataTuple
 
-    def _add_annotations_as_layer(
+    def _add_geometries_as_layer(
         dataframe: pd.DataFrame,
         viewer: napari.Viewer,
         layer_name: str,
         #scale_factor: Union[Tuple, List, np.ndarray],
+        edge_width: Number = 10, # µm
+        opacity: float = 1,
         rgb_color: Optional[Tuple] = None,
         show_names: bool = False,
         allow_duplicate_layers: bool = False,
-        mode: Literal["Annotations", "Regions"] = "Annotations"
+        mode: Literal["Annotations", "Regions"] = "Annotations",
+        tolerance: Number = 5
         ):
 
         # list to store information on shapes
@@ -87,6 +90,8 @@ if WITH_NAPARI:
 
             if annotation_type == "polygon_like":
                 for p in data:
+                    # simplify polygon for visualization
+                    p = p.simplify(tolerance)
                     # extract exterior coordinates from shapely object
                     # Note: the last coordinate is removed since it is identical with the first
                     # in shapely objects, leading sometimes to visualization bugs in napari
@@ -182,9 +187,10 @@ if WITH_NAPARI:
                     name=layer_name_with_symbol,
                     properties=properties_dict,
                     shape_type=shape_type_list,
-                    edge_width=10, # µm
+                    edge_width=edge_width, # µm
                     edge_color=color_list["Shapes"],
                     face_color='transparent',
+                    opacity=opacity,
                     #scale=scale_factor,
                     text=text_dict
                     )
@@ -223,13 +229,14 @@ if WITH_NAPARI:
                             point_size: int = 6, # is in scale unit (so mostly µm)
                             opacity: float = 1,
                             visible: bool = True,
-                            edge_width: float = 0,
-                            edge_color: str = 'red',
+                            border_width: float = 0,
+                            border_color: str = 'red',
                             upper_climit_pct: int = 99,
+                            categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
                             continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
-                            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
                             ) -> LayerDataTuple:
-
+        if categorical_cmap is None:
+            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
         # get colors
         colors, mapping, cmap = _data_to_rgba(data=color_values,
                                continuous_cmap=continuous_cmap,
@@ -250,8 +257,8 @@ if WITH_NAPARI:
                 'face_color': colors,
                 'opacity': opacity,
                 'visible': visible,
-                'edge_width': edge_width,
-                'edge_color': edge_color,
+                'border_width': border_width,
+                'border_color': border_color,
                 'metadata': {"upper_climit_pct": upper_climit_pct}
                 },
             'points'
@@ -263,10 +270,17 @@ if WITH_NAPARI:
         new_color_values: List[Number],
         new_name: Optional[str] = None,
         upper_climit_pct: int = 99,
+        categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
         # cmap: str = "viridis"
         ) -> None:
         # get the RGBA colors for the new values
-        new_colors, mapping, cmap = _data_to_rgba(data=new_color_values, upper_climit_pct=upper_climit_pct)
+        if categorical_cmap is None:
+            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
+        new_colors, mapping, cmap = _data_to_rgba(data=new_color_values,
+                                                continuous_cmap=continuous_cmap,
+                                                categorical_cmap=categorical_cmap,
+                                                upper_climit_pct=upper_climit_pct)
 
         # change the colors of the layer
         layer.face_color = new_colors

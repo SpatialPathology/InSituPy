@@ -7,7 +7,7 @@ from typing import Optional, Union
 from parse import *
 
 from insitupy import __version__
-from insitupy._core.dataclasses import ImageData
+from insitupy._core.dataclasses import ImageData, MultiCellData
 from insitupy.utils.utils import _generate_time_based_uid
 
 
@@ -16,7 +16,8 @@ def _save_images(imagedata: ImageData,
                  metadata: Optional[dict] = None,
                  images_as_zarr: bool = True,
                  zipped: bool = False,
-                 max_resolution: Optional[Number] = None # in µm per pixel
+                 max_resolution: Optional[Number] = None, # in µm per pixel,
+                 verbose: bool = False
                  ):
     img_path = (path / "images")
 
@@ -25,7 +26,8 @@ def _save_images(imagedata: ImageData,
         as_zarr=images_as_zarr,
         zipped=zipped,
         return_savepaths=True,
-        max_resolution=max_resolution
+        max_resolution=max_resolution,
+        verbose=verbose
         )
 
     if metadata is not None:
@@ -35,10 +37,11 @@ def _save_images(imagedata: ImageData,
             # collect metadata
             metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
 
-def _save_cells(cells,
+def _save_cells(cells: MultiCellData,
                 path,
                 metadata,
                 boundaries_zipped=False,
+                max_resolution_boundaries: Optional[Number] = None, # in µm per pixel
                 overwrite=False
                 ):
     # create path for cells
@@ -49,6 +52,7 @@ def _save_cells(cells,
     cells.save(
         path=cells_path,
         boundaries_zipped=boundaries_zipped,
+        max_resolution_boundaries=max_resolution_boundaries,
         overwrite=overwrite
         )
 
@@ -64,38 +68,6 @@ def _save_cells(cells,
         # move new paths to data
         metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
 
-def _save_alt(attr,
-              path,
-              metadata,
-              boundaries_zipped=False
-              ):
-    # create path for cells
-    alt_path = path / "alt"
-
-    for k, celldata in attr.items():
-        uid = _generate_time_based_uid()
-        cells_path = alt_path / k / uid
-        # save cells to path and write info to metadata
-        celldata.save(cells_path, boundaries_zipped=boundaries_zipped)
-
-        if metadata is not None:
-            # setup the alt section in metadata
-            if "alt" not in metadata["data"]:
-                metadata["data"]["alt"] = {}
-            if "alt" not in metadata["history"]:
-                metadata["history"]["alt"] = {}
-            if k not in metadata["history"]["alt"]:
-                metadata["history"]["alt"][k] = []
-
-            try:
-                # move old celldata paths to history
-                old_path = metadata["data"]["alt"][k]
-            except KeyError:
-                pass
-            else:
-                metadata["history"]["alt"][k].append(old_path)
-
-            metadata["data"]["alt"][k] = Path(relpath(cells_path, path)).as_posix()
 
 def _save_transcripts(transcripts, path, metadata):
     # create file path

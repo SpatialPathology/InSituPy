@@ -1,10 +1,14 @@
 import math
 import os
 from datetime import datetime
+from typing import Optional, Tuple, Union
 from uuid import uuid4
+from warnings import warn
 
-import matplotlib.pyplot as plt
+import dask.dataframe as dd
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
 from parse import datetime
@@ -14,89 +18,10 @@ from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
                                  XENIUM_INT_TO_HEX_CONV_DICT)
 
 
-class textformat:
-    '''
-    Helper class to format printed text.
-    e.g. print(color.RED + color.BOLD + 'Hello, World!' + color.END)
-    '''
-    # colors and formats
-    # PURPLE = '\033[95m'
-    # CYAN = '\033[96m'
-    # DARKCYAN = '\033[36m'
-    # BLUE = '\033[94m'
-    # GREEN = '\033[92m'
-    # YELLOW = '\033[93m'
-    # RED = '\033[91m'
-    # BOLD = '\033[1m'
-    # UNDERLINE = '\033[4m'
-    # END = '\033[0m'
-
-    ResetAll = "\033[0m"
-
-    Bold       = "\033[1m"
-    Dim        = "\033[2m"
-    Underlined = "\033[4m"
-    Blink      = "\033[5m"
-    Reverse    = "\033[7m"
-    Hidden     = "\033[8m"
-
-    ResetBold       = "\033[21m"
-    ResetDim        = "\033[22m"
-    ResetUnderlined = "\033[24m"
-    ResetBlink      = "\033[25m"
-    ResetReverse    = "\033[27m"
-    ResetHidden     = "\033[28m"
-
-    Default      = "\033[39m"
-    Black        = "\033[30m"
-    Red          = "\033[31m"
-    Green        = "\033[32m"
-    Yellow       = "\033[33m"
-    Blue         = "\033[34m"
-    Magenta      = "\033[35m"
-    Cyan         = "\033[36m"
-    LightGray    = "\033[37m"
-    DarkGray     = "\033[90m"
-    LightRed     = "\033[91m"
-    LightGreen   = "\033[92m"
-    LightYellow  = "\033[93m"
-    LightBlue    = "\033[94m"
-    Purple       = "\033[95m"
-    LightCyan    = "\033[96m"
-    White        = "\033[97m"
-
-    BackgroundDefault      = "\033[49m"
-    BackgroundBlack        = "\033[40m"
-    BackgroundRed          = "\033[41m"
-    BackgroundGreen        = "\033[42m"
-    BackgroundYellow       = "\033[43m"
-    BackgroundBlue         = "\033[44m"
-    BackgroundMagenta      = "\033[45m"
-    BackgroundCyan         = "\033[46m"
-    BackgroundLightGray    = "\033[47m"
-    BackgroundDarkGray     = "\033[100m"
-    BackgroundLightRed     = "\033[101m"
-    BackgroundLightGreen   = "\033[102m"
-    BackgroundLightYellow  = "\033[103m"
-    BackgroundLightBlue    = "\033[104m"
-    BackgroundLightMagenta = "\033[105m"
-    BackgroundLightCyan    = "\033[106m"
-    BackgroundWhite        = "\033[107m"
-
-    # signs
-    TSIGN = "\u251c"
-    LSIGN = "\u2514"
-    HLINE = "\u2500"
-    RARROWHEAD = "\u27A4"
-    TICK = "\u2714"
-    CIRCLE_EMPTY = "\u25EF"
-    CIRCLE_FILLED = "\u2B24"
-    CIRCLE_HALF = "\u25D0"
-    CIRCLE_THREEQUARTER = "\u25D5"
-    CIRCLE_ONEQUARTER = "\u25D4"
-
-    # spacer
-    SPACER = "    "
+def create_ansi_color_code_from_rgb(rgb_color):
+    # Create the ANSI escape code
+    ansi_escape_code = f'\033[38;2;{rgb_color[0]};{rgb_color[1]};{rgb_color[2]}m'
+    return ansi_escape_code
 
 def remove_last_line_from_csv(filename):
     with open(filename) as myFile:
@@ -163,6 +88,7 @@ def get_nrows_maxcols(n_keys, max_cols):
     return n_keys, n_rows, max_cols
 
 def remove_empty_subplots(axes, nplots, nrows, ncols):
+    assert len(axes.shape) == 1, "Axis object must have only one dimension."
     if nplots > 1:
         # check if there are empty plots remaining
         i = nplots
@@ -345,3 +271,82 @@ def exclude_index(array, exclude_index):
         np.ndarray: A new array with the element at exclude_index excluded.
     """
     return np.concatenate((array[:exclude_index], array[exclude_index+1:]))
+
+def _crop_transcripts(
+    transcript_df: Union[pd.DataFrame, dd.DataFrame],
+    shape: Optional[Polygon] = None,
+    xlim: Optional[Tuple[int, int]] = None,
+    ylim: Optional[Tuple[int, int]] = None,
+    verbose: bool = True
+    ):
+
+    if shape is not None:
+        if xlim is not None and ylim is not None:
+            if verbose:
+                warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
+
+        try:
+            points = gpd.points_from_xy(x=transcript_df.loc[:, ("coordinates", "x")].values,
+                                        y=transcript_df.loc[:, ("coordinates", "y")].values)
+            warn("Filtering transcripts based on a shape may take longer if transcripts are stored as pandas dataframe instead of dask dataframe.")
+            grouped_df = True
+        except KeyError:
+            try:
+                import dask_geopandas as dask_gpd
+            except ImportError:
+                warn("Filtering transcripts based on a shape may take longer if `dask_geopandas` is not installed.")
+
+                # load the dataframe into memory to generate points
+                print("Load transcript dataframe into memory...")
+                transcript_df = transcript_df.compute()
+                # generate points without dask_geopandas
+                points = gpd.points_from_xy(x=transcript_df.loc[:, "x_location"].values,
+                                            y=transcript_df.loc[:, "y_location"].values)
+            else:
+                # generate points with dask_geopandas
+                points = dask_gpd.points_from_xy(df=transcript_df, x="x_location", y="y_location")
+            grouped_df = False
+
+        # create mask
+        #mask = shape.contains(points)
+        mask = points.within(shape)
+
+        # get minimum x and y values
+        minx, miny, _, _ = shape.bounds
+
+    else:
+        if xlim is None or ylim is None:
+            raise ValueError("Either both xlim and ylim must be provided, or shape must be provided.")
+
+        try:
+            # infer mask for selection
+            xmask = (transcript_df["coordinates", "x"] >= xlim[0]) & (transcript_df["coordinates", "x"] <= xlim[1])
+            ymask = (transcript_df["coordinates", "y"] >= ylim[0]) & (transcript_df["coordinates", "y"] <= ylim[1])
+            grouped_df = True
+        except KeyError:
+            xmask = (transcript_df["x_location"] >= xlim[0]) & (transcript_df["x_location"] <= xlim[1])
+            ymask = (transcript_df["y_location"] >= ylim[0]) & (transcript_df["y_location"] <= ylim[1])
+            grouped_df = False
+
+        # create filtering mask
+        mask = xmask & ymask
+
+        # get minimum x and y for shifting the coordinates after cropping
+        minx = xlim[0]
+        miny = ylim[0]
+
+    # select
+    transcript_df = transcript_df.loc[mask, :].copy()
+
+    if grouped_df:
+        # move origin again to 0 by subtracting the lower limits from the coordinates
+        transcript_df["coordinates", "x"] -= minx
+        transcript_df["coordinates", "y"] -= miny
+    else:
+        # move origin again to 0 by subtracting the lower limits from the coordinates
+        transcript_df["x_location"] -= minx
+        transcript_df["y_location"] -= miny
+
+    return transcript_df
+
+

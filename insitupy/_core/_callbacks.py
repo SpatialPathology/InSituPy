@@ -1,4 +1,5 @@
 import math
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -6,13 +7,19 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from pandas.api.types import is_numeric_dtype
 
-import insitupy._core.config as config
+import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
-from insitupy._constants import POINTS_SYMBOL
+from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+                                 REGIONS_SYMBOL)
+from insitupy.plotting._colors import continuous_data_to_rgba
 
 if WITH_NAPARI:
     import napari
 
+# show cells widget
+def _update_key_on_type_change(widget):
+    current_key_type = widget.key_type.value
+    widget.key.choices = _config.key_dict[current_key_type]
 
 # geometry widget
 def _update_keys_based_on_geom_type(widget, xdata):
@@ -48,18 +55,40 @@ def _set_show_names_based_on_geom_type(widget):
 
 
 # Function to update the legend
-def _update_categorical_legend(static_canvas, mapping, label, max_rows: int = 6):
+def _update_categorical_legend(
+    static_canvas,
+    mapping: dict,
+    label: str,
+    max_rows: int = 6,
+    marker: str = "o",
+    marker_mode: Literal["face", "edge"] = "face"
+    ):
 
     # Calculate the number of columns needed
     num_items = len(mapping)
     ncols = math.ceil(num_items / max_rows)
 
+    # prepare figue
     static_canvas.figure.clear()  # Clear the current figure
     axes = static_canvas.figure.subplots()  # Create new axes
-    legend_handles = [Line2D([0], [0],
-                             marker='o', color='w', label=n,
-                             markerfacecolor=c, markeredgecolor='k',
-                             markersize=7) for n,c in mapping.items()]
+
+    if marker_mode == "face":
+        # create legend handles with face colored
+        legend_handles = [Line2D([0], [0],
+                                marker=marker, color='w', label=n,
+                                markerfacecolor=c, markeredgecolor='k',
+                                markersize=7) for n,c in mapping.items()]
+    elif marker_mode == "edge":
+        # create legend handles with edges colored
+        legend_handles = [Line2D([0], [0],
+                                marker=marker, color='w', label=n,
+                                markerfacecolor='w', markeredgecolor=c,
+                                markeredgewidth=2,
+                                markersize=7) for n,c in mapping.items()]
+    else:
+        raise ValueError(f"marker_mode must be either 'face' or 'edge'. Instead: {marker_mode}")
+
+    # add legend to axis
     axes.legend(handles=legend_handles, loc="center", title=label, ncols=ncols,
                 fontsize=8, title_fontsize=10,
                 labelspacing=0.7, borderpad=0.5)
@@ -79,78 +108,105 @@ def _update_continuous_legend(static_canvas, mapping, label):
     static_canvas.draw()  # Redraw the canvas
 
 def _update_colorlegend():
-
-    # # automatically get layer
-    # candidate_layers = [l for l in config.viewer.layers if l.name.startswith(f"{config.current_data_name}")]
-    # try:
-    #     # always choose the candidate layer that is on top
-    #     layer_name = candidate_layers[-1].name
-    # except IndexError:
-    #     raise ValueError("No layer with cellular transcriptomic data found. First add a layer using the 'Show Data' widget.")
-
-    # # extract layer
-    # layer = config.viewer.layers[layer_name]
-
-    layer = config.viewer.layers.selection.active
+    layer = _config.viewer.layers.selection.active
 
     if isinstance(layer, napari.layers.points.points.Points):
-        # get values
-        values = layer.properties["value"]
-        color_values = layer.face_color
+        try:
+            # get values
+            values = layer.properties["value"]
+            color_values = layer.face_color
+        except KeyError:
+            first_char = layer.name[:1]
+            if first_char == POINTS_SYMBOL:
+                # collect the layer names and edge colors of the respective layer
+                layer_names = []
+                face_colors = []
+                for elem in _config.viewer.layers:
+                    if elem.name.startswith(first_char):
+                        layer_names.append(elem.name.strip(first_char + " "))
+                        face_colors.append(elem.current_face_color)
 
+                # create mapping from collected values
+                mapping = dict(zip(layer_names, face_colors))
 
-        from insitupy.plotting._colors import continuous_data_to_rgba
-        if is_numeric_dtype(values):
-            rgba_list, mapping = continuous_data_to_rgba(data=values,
-                                    cmap=layer.face_colormap.name,
-                                    #upper_climit_pct=upper_climit_pct,
-                                    return_mapping=True
-                                    )
-
-            _update_continuous_legend(static_canvas=config.static_canvas,
-                                    mapping=mapping,
-                                    label=layer.name)
-
+                _update_categorical_legend(
+                    static_canvas=_config.static_canvas,
+                    mapping=mapping,
+                    label="Points",
+                    marker="o",
+                    marker_mode="face"
+                    )
         else:
-            # substitute pd.NA with np.nan
-            values = pd.Series(values).fillna(np.nan).values
-            # assume the data is categorical
-            #mapping = {category: tuple(rgba) for category, rgba in zip(values, color_values)}
-            unique_values = list(set(values))
-            mapping = {str(v): tuple(color_values[list(values).index(v)]) for v in unique_values}
-            # sort mapping dict
-            mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
 
-            _update_categorical_legend(static_canvas=config.static_canvas,
-                                    mapping=mapping, label=layer.name)
+            if is_numeric_dtype(values):
+                rgba_list, mapping = continuous_data_to_rgba(data=values,
+                                        cmap=layer.face_colormap.name,
+                                        #upper_climit_pct=upper_climit_pct,
+                                        return_mapping=True
+                                        )
 
-        # # create color mapping
-        # rgba_list, mapping = _data_to_rgba(values, return_mapping=True)
+                _update_continuous_legend(
+                    static_canvas=_config.static_canvas,
+                    mapping=mapping,
+                    label=layer.name)
 
-        # if isinstance(mapping, dict):
-        #     _update_categorical_legend(static_canvas=config.static_canvas,
-        #                                mapping=mapping, label=layer.name)
-        # else:
-        #     _update_continuous_legend(static_canvas=config.static_canvas,
-        #                               mapping=mapping,
-        #                               label=layer.name)
+            else:
+                # substitute pd.NA with np.nan
+                values = pd.Series(values).fillna(np.nan).values
+                # assume the data is categorical
+                #mapping = {category: tuple(rgba) for category, rgba in zip(values, color_values)}
+                unique_values = list(set(values))
+                mapping = {str(v): tuple(color_values[list(values).index(v)]) for v in unique_values}
+                # sort mapping dict
+                mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
+
+                _update_categorical_legend(
+                    static_canvas=_config.static_canvas,
+                    mapping=mapping,
+                    label=layer.name
+                    )
+
+    elif isinstance(layer, napari.layers.shapes.shapes.Shapes):
+        # check if the layer is a annotations or regions layer
+        first_char = layer.name[:1]
+        if first_char in [ANNOTATIONS_SYMBOL, REGIONS_SYMBOL]:
+            # collect the layer names and edge colors of the respective layer
+            layer_names = []
+            face_colors = []
+            for elem in _config.viewer.layers:
+                if elem.name.startswith(first_char):
+                    layer_names.append(elem.name.strip(first_char + " "))
+                    face_colors.append(elem.current_edge_color)
+
+            # create mapping from collected values
+            mapping = dict(zip(layer_names, face_colors))
+
+            _update_categorical_legend(
+                static_canvas=_config.static_canvas,
+                mapping=mapping,
+                label="Annotations" if first_char == ANNOTATIONS_SYMBOL else "Regions",
+                marker="s",
+                marker_mode="edge"
+                )
+    else:
+        pass
 
 
-def _refresh_widgets_after_data_change(xdata, points_widget, boundaries_widget, filter_widget):
-    config.init_viewer_config(xdata)
+def _refresh_widgets_after_data_change(xdata, show_cells_widget, boundaries_widget, filter_widget):
+    _config.init_viewer_config(xdata)
 
     # set choices
-    boundaries_widget.key.choices = config.masks
+    boundaries_widget.key.choices = _config.masks
 
     # reset the currently selected key to None
-    points_widget.value.value = None
+    show_cells_widget.key.value = None
 
     # add last addition to recent
-    points_widget.recent.choices = sorted(config.recent_selections)
-    points_widget.recent.value = None
+    show_cells_widget.recent.choices = sorted(_config.recent_selections)
+    show_cells_widget.recent.value = None
 
     # update obs in filter widget
-    filter_widget.obs_key.choices = config.value_dict["obs"]
+    filter_widget.obs_key.choices = _config.key_dict["obs"]
 
     # set only the last cell layer visible
     cell_layers = []

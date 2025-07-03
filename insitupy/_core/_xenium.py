@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Literal, Union
 
 import dask.array as da
+import numpy as np
 import pandas as pd
 import scanpy as sc
 import zarr
@@ -15,11 +16,14 @@ from zarr.errors import ArrayNotFoundError
 
 from insitupy._core.dataclasses import BoundariesData
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy.utils.utils import decode_robust_series
+from insitupy.images.utils import _efficiently_resize_array
+from insitupy.utils.utils import (convert_int_to_xenium_hex,
+                                  decode_robust_series)
 
 
 def _read_matrix_from_xenium(path) -> AnnData:
     # extract parameters from metadata
+    path = Path(path)
     cf_h5_path = path / "cell_feature_matrix.h5"
 
     with warnings.catch_warnings():
@@ -55,60 +59,78 @@ def _read_matrix_from_xenium(path) -> AnnData:
 def _read_boundaries_from_xenium(
     path: Union[str, os.PathLike, Path],
     pixel_size: Number,
-    mode: Literal["dataframe", "mask"] = "mask"
+    downscale: bool = False
+    # mode: Literal["dataframe", "mask"] = "mask"
     ) -> BoundariesData:
     # # read boundaries data
     path = Path(path)
 
-    if mode == "dataframe":
-        files=["cell_boundaries.parquet", "nucleus_boundaries.parquet"]
-        labels=["cellular", "nuclear"]
+    # if mode == "dataframe":
+    #     files=["cell_boundaries.parquet", "nucleus_boundaries.parquet"]
+    #     labels=["cellular", "nuclear"]
 
-        # generate path for files
-        files = [path / f for f in files]
+    #     # generate path for files
+    #     files = [path / f for f in files]
 
-        # generate dataframes
-        data_dict = {}
-        for n, f in zip(labels, files):
-            # check the file suffix
-            if not f.suffix == ".parquet":
-                InvalidFileTypeError(allowed_types=[".parquet"], received_type=f.suffix)
+    #     # generate dataframes
+    #     data_dict = {}
+    #     for n, f in zip(labels, files):
+    #         # check the file suffix
+    #         if not f.suffix == ".parquet":
+    #             InvalidFileTypeError(allowed_types=[".parquet"], received_type=f.suffix)
 
-            # load dataframe
-            df = pd.read_parquet(f)
+    #         # load dataframe
+    #         df = pd.read_parquet(f)
 
-            # decode columns
-            df = df.apply(lambda x: decode_robust_series(x), axis=0)
+    #         # decode columns
+    #         df = df.apply(lambda x: decode_robust_series(x), axis=0)
 
-            # collect dataframe
-            data_dict[n] = df
+    #         # collect dataframe
+    #         data_dict[n] = df
 
-        # create boundariesdata object
-        boundaries = BoundariesData()
+    #     # create boundariesdata object
+    #     boundaries = BoundariesData()
 
+    # else:
+    cells_zarr_file = path / "cells.zarr.zip"
+
+    # open zarr directory using dask
+    cell_boundaries = da.from_zarr(cells_zarr_file, component="masks/1")
+    nuclei_boundaries = da.from_zarr(cells_zarr_file, component="masks/0")
+
+    if pixel_size != 1 and downscale:
+        cell_boundaries = _efficiently_resize_array(array=cell_boundaries, scale_factor=1/pixel_size)
+        nuclei_boundaries = _efficiently_resize_array(array=nuclei_boundaries, scale_factor=1/pixel_size)
+        pixel_size_for_meta = 1
     else:
-        cells_zarr_file = path / "cells.zarr.zip"
+        pixel_size_for_meta = pixel_size
 
-        # open zarr directory using dask
-        data_dict = {
-            "nuclear": da.from_zarr(cells_zarr_file, component="masks/0"),
-            "cellular": da.from_zarr(cells_zarr_file, component="masks/1")
-        }
+    # read cell ids and seg mask value
+    # for info see: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-zarr#cells
+    cell_ids = da.from_zarr(cells_zarr_file, component="cell_id").compute()
+    if len(cell_ids.shape) == 2:
+        cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
+    elif len(cell_ids.shape) == 1:
+        cell_names = cell_ids.astype(str)
+    else:
+        raise ValueError(f"Unexpected shape for `cell_ids` array: {cell_ids.shape} instead of 1 or 2.")
 
-        # read cell ids and seg mask value
-        # for info see: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-zarr#cells
-        cell_ids = da.from_zarr(cells_zarr_file, component="cell_id")
+    try:
+        seg_mask_value = da.from_zarr(cells_zarr_file, component="seg_mask_value")
+    except (ArrayNotFoundError, TypeError):
+        seg_mask_value = np.array(range(1, len(cell_names)+1))
 
-        try:
-            seg_mask_value = da.from_zarr(cells_zarr_file, component="seg_mask_value")
-        except ArrayNotFoundError:
-            seg_mask_value = None
+    # create boundariesdata object
+    boundaries = BoundariesData(
+        cell_names=cell_names,
+        seg_mask_value=seg_mask_value
+        )
 
-        # create boundariesdata object
-        boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
-
-    boundaries.add_boundaries(data=data_dict,
-                              pixel_size=pixel_size)
+    boundaries.add_boundaries(
+        cell_boundaries=cell_boundaries,
+        nuclei_boundaries=nuclei_boundaries,
+        pixel_size=pixel_size_for_meta
+        )
 
     return boundaries
 
@@ -117,7 +139,8 @@ def _read_binned_expression(
     path: Union[str, os.PathLike, Path],
     gene_names_to_select = List
 ):
-    # add binned expression data to .varm of self.cells.matrix
+    path = Path(path)
+    # add binned expression data to .varm
     trans_file = path / "transcripts.zarr.zip"
 
     # read zarr store
@@ -149,14 +172,16 @@ def _read_binned_expression(
     return arr
 
 
-def _restructure_transcripts_dataframe(dataframe):
+def _restructure_transcripts_dataframe(dataframe: pd.DataFrame, decode:bool = False):
 
-    # decode columns
-    dataframe = dataframe.apply(lambda x: decode_robust_series(x), axis=0)
+    if decode:
+        # decode columns
+        dataframe = dataframe.apply(lambda x: decode_robust_series(x), axis=0)
+
     # set index and rename columns
     dataframe = dataframe.set_index("transcript_id")
     dataframe = dataframe.rename({
-        "cell_id": "xenium_cell_id",
+        "cell_id": "cell_id",
         "x_location": "x",
         "y_location": "y",
         "z_location": "z",
@@ -164,7 +189,7 @@ def _restructure_transcripts_dataframe(dataframe):
     }, axis=1)
 
     # reorder dataframe
-    column_names_ordered = ["x", "y", "z", "gene", "qv", "overlaps_nucleus", "fov_name", "nucleus_distance", "xenium_cell_id"]
+    column_names_ordered = ["x", "y", "z", "gene", "qv", "overlaps_nucleus", "fov_name", "nucleus_distance", "cell_id"]
     in_df = [elem in dataframe.columns for elem in column_names_ordered]
     column_names_ordered = [elem for i, elem in zip(in_df, column_names_ordered) if i]
     dataframe = dataframe.loc[:, column_names_ordered]

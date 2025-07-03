@@ -86,8 +86,11 @@ def write_zarr(image, file,
                img_metadata: dict,
                save_pyramid: bool = True,
                axes: str = "YXS", # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-               overwrite: bool = False
+               overwrite: bool = False,
+               verbose: bool = False
                ):
+    if verbose:
+        print(f"Saving image to {str(file)}")
 
     # get suffix
     file = Path(file)
@@ -144,7 +147,8 @@ def write_ome_tiff(
     photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', # before I had rgb here. Xenium doc says minisblack
     tile: tuple = (1024, 1024), # 1024 pixel is optimal for Xenium Explorer
     compression: Literal['jpeg', 'LZW', 'jpeg2000', "ZLIB", None] = 'ZLIB', # jpeg2000 or ZLIB are recommended in the Xenium documentation - ZLIB is faster
-    overwrite: bool = False
+    overwrite: bool = False,
+    verbose: bool = False
     ):
 
     '''
@@ -153,6 +157,8 @@ def write_ome_tiff(
 
     For parameters optimal for Xenium see: https://www.10xgenomics.com/support/software/xenium-explorer/tutorials/xe-image-file-conversion
     '''
+    if verbose:
+        print(f"Saving image to {str(file)}")
     # check if the image is an image pyramid
     if isinstance(image, list):
         # if it is a pyramid, select only the highest resolution image

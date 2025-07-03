@@ -15,7 +15,7 @@ def split_batches(adata, batch, hvg=None, return_categories=False):
         return split, batch_categories
     return split
 
-def scanorama(adata,
+def run_scanorama(adata,
               batch_key: str,
               hvg: bool = False,
               hvg_key: str = 'highly_variable',
