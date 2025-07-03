@@ -11,15 +11,17 @@ from shapely.geometry.multipolygon import MultiPolygon
 import insitupy._core._callbacks
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
+from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+                                 REGION_CMAP, REGIONS_SYMBOL)
+from insitupy._core._callbacks import (_refresh_widgets_after_data_change,
+                                       _set_show_names_based_on_geom_type,
+                                       _update_classes_on_key_change,
+                                       _update_colorlegend,
+                                       _update_key_on_type_change,
+                                       _update_keys_based_on_geom_type)
+from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer, _update_points_layer
-
-from .._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL, REGION_CMAP,
-                          REGIONS_SYMBOL)
-from ..images.utils import create_img_pyramid
-from ._callbacks import (_refresh_widgets_after_data_change,
-                         _set_show_names_based_on_geom_type,
-                         _update_classes_on_key_change, _update_colorlegend,
-                         _update_keys_based_on_geom_type)
+from insitupy.images.utils import create_img_pyramid
 
 if WITH_NAPARI:
     import napari
@@ -65,11 +67,12 @@ if WITH_NAPARI:
             @select_data.data_name.changed.connect
             def update_widgets_on_data_change(event=None):
                 _config.current_data_name = select_data.data_name.value
-                insitupy._core._callbacks._refresh_widgets_after_data_change(xdata,
-                                                    show_cells_widget,
-                                                    show_boundaries_widget,
-                                                    filter_cells_widget
-                                                    )
+                insitupy._core._callbacks._refresh_widgets_after_data_change(
+                    xdata,
+                    show_cells_widget,
+                    show_boundaries_widget,
+                    filter_cells_widget
+                    )
 
             if len(_config.masks) > 0:
                 @magicgui(
@@ -104,21 +107,17 @@ if WITH_NAPARI:
             else:
                 show_boundaries_widget = None
 
-            def _update_values_on_key_change(widget):
-                current_key = widget.key.value
-                widget.value.choices = _config.value_dict[current_key]
-
             @magicgui(
                 call_button='Show',
-                key={'choices': ["genes", "obs", "obsm"], 'label': 'Key:'},
-                value={'choices': _config.genes, 'label': "Value:"},
+                key_type={'choices': ["genes", "obs", "obsm"], 'label': 'Type:'},
+                key={'choices': _config.genes, 'label': "Key:"},
                 size={'label': 'Size [µm]'},
                 recent={'choices': [""], 'label': "Recent:"},
                 add_new_layer={'label': 'Add new layer'}
                 )
             def show_cells_widget(
-                key="genes",
-                value=None,
+                key_type="genes",
+                key=None,
                 size=8,
                 recent=None,
                 add_new_layer=False,
@@ -129,34 +128,19 @@ if WITH_NAPARI:
                 cell_names = _config.adata.obs_names.values
 
                 #layers_to_add = []
-                if value is not None or recent is not None:
-                    if value is None:
-                        key = recent.split(":", maxsplit=1)[0]
-                        value = recent.split(":", maxsplit=1)[1]
-                    #if gene not in viewer.layers:
+                if key is not None or recent is not None:
+                    if key is None:
+                        key_type = recent.split(":", maxsplit=1)[0]
+                        key = recent.split(":", maxsplit=1)[1]
+
                     # get expression values
-                    if key == "genes":
-                        gene_loc = _config.adata.var_names.get_loc(value)
-                        color_value = _config.X[:, gene_loc]
-                    elif key == "obs":
-                        color_value = _config.adata.obs[value]
-                    elif key == "obsm":
-                        #TODO: Implement it for obsm
-                        obsm_key = value.split("#", maxsplit=1)[0]
-                        obsm_col = value.split("#", maxsplit=1)[1]
-                        data = _config.adata.obsm[obsm_key]
+                    color_value = _get_expression_values(
+                        adata=_config.adata,
+                        X=_config.X,
+                        key_type=key_type, key=key
+                    )
 
-                        if isinstance(data, pd.DataFrame):
-                            color_value = data[obsm_col].values
-                        elif isinstance(data, np.ndarray):
-                            color_value = data[:, int(obsm_col)-1]
-                        else:
-                            warn("Data in `obsm` needs to be either pandas DataFrame or numpy array to be parsed.")
-                        pass
-                    else:
-                        print("Unknown key selected.", flush=True)
-
-                    new_layer_name = f"{_config.current_data_name}-{value}"
+                    new_layer_name = f"{_config.current_data_name}-{key}"
 
                     # get layer names from the current data
                     layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(_config.current_data_name)]
@@ -165,14 +149,14 @@ if WITH_NAPARI:
                     layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
 
                     # save last addition to add it to recent in the callback
-                    _config.recent_selections.append(f"{key}:{value}")
+                    _config.recent_selections.append(f"{key_type}:{key}")
 
-                    if f"{value}_colors" in _config.adata.uns.keys():
+                    if f"{key}_colors" in _config.adata.uns.keys():
                         # Convert hex colors to RGB format
                         def hex_to_rgb(hex_color):
                             hex_color = hex_color.lstrip('#')
                             return tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-                        rgb_colors = [hex_to_rgb(color) for color in _config.adata.uns[f"{value}_colors"]]
+                        rgb_colors = [hex_to_rgb(color) for color in _config.adata.uns[f"{key}_colors"]]
 
                         # Transform to ListedColormap
                         colormap = ListedColormap(rgb_colors)
@@ -221,7 +205,7 @@ if WITH_NAPARI:
 
             @magicgui(
                 call_button='Filter',
-                obs_key={'choices': _config.value_dict["obs"], 'label': "Obs:"},
+                obs_key={'choices': _config.key_dict["obs"], 'label': "Obs:"},
                 operation_type={'choices': ["contains", "is equal to", "is not", "is in"], 'label': 'Operation:'},
                 obs_value={'label': 'Value:'},
                 reset={'label': 'Reset'}
@@ -266,10 +250,10 @@ if WITH_NAPARI:
                         fc[:, -1] = 1.
                         current_layer.face_color = fc
 
-            @show_cells_widget.key.changed.connect
+            @show_cells_widget.key_type.changed.connect
             @show_cells_widget.call_button.changed.connect
-            def update_values_on_key_change(event=None):
-                _update_values_on_key_change(show_cells_widget)
+            def update_values_on_type_change(event=None):
+                _update_key_on_type_change(show_cells_widget)
 
             @magicgui(
                 call_button='Show',
@@ -308,11 +292,12 @@ if WITH_NAPARI:
 
             def callback_refresh(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer
-                _refresh_widgets_after_data_change(xdata,
-                                                        points_widget=show_cells_widget,
-                                                        boundaries_widget=show_boundaries_widget,
-                                                        filter_widget=filter_cells_widget
-                                                        )
+                _refresh_widgets_after_data_change(
+                    xdata,
+                    show_cells_widget=show_cells_widget,
+                    boundaries_widget=show_boundaries_widget,
+                    filter_widget=filter_cells_widget
+                    )
 
             def callback_update_legend(event=None):
                 _update_colorlegend()
@@ -440,7 +425,7 @@ if WITH_NAPARI:
                         _update_keys_based_on_geom_type(show_geometries_widget, xdata=xdata)
                         _update_classes_on_key_change(show_geometries_widget, xdata=xdata)
                         _set_show_names_based_on_geom_type(show_geometries_widget)
-                        _update_values_on_key_change(show_cells_widget)
+                        _update_key_on_type_change(show_cells_widget)
 
         return show_cells_widget, move_to_cell_widget, show_geometries_widget, show_boundaries_widget, select_data, filter_cells_widget #add_genes, add_observations
 

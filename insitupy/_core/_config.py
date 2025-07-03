@@ -41,7 +41,7 @@ if WITH_NAPARI:
         #     boundaries = xdata.cells[current_data_name].boundaries
 
         # get keys from var_names, obs and obsm
-        global genes, observations, value_dict
+        global genes, observations, key_dict
         genes = sorted(adata.var_names.tolist())
         observations = sorted(adata.obs.columns.tolist())
 
@@ -58,7 +58,7 @@ if WITH_NAPARI:
             else:
                 pass
 
-        value_dict = {
+        key_dict = {
             "genes": genes,
             "obs": observations,
             "obsm": obsm_cats

@@ -28,6 +28,7 @@ from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
 from insitupy._core._checks import _check_geometry_symbol_and_layer
+from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
@@ -1381,6 +1382,7 @@ class InSituData:
 
     def show(self,
         keys: Optional[str] = None,
+        key_type: Literal["genes", "obs", "obsm"] = "genes",
         cells_layer: Optional[str] = None,
         point_size: int = 8,
         scalebar: bool = True,
@@ -1451,6 +1453,12 @@ class InSituData:
                 raise InSituDataMissingObject("cells")
             else:
                 celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
+
+                if cells_layer is None:
+                    cells_layer_name = self.cells.main_key
+                else:
+                    cells_layer_name = cells_layer
+
                 # convert keys to list
                 keys = convert_to_list(keys)
 
@@ -1465,14 +1473,12 @@ class InSituData:
                     X = celldata.matrix.X
 
                 for i, k in enumerate(keys):
-                    #pvis = False if i < len(keys) - 1 else True # only last image is set visible
                     # get expression values
-                    if k in celldata.matrix.obs.columns:
-                        color_value = celldata.matrix.obs[k].values
-
-                    else:
-                        geneid = celldata.matrix.var_names.get_loc(k)
-                        color_value = X[:, geneid]
+                    color_value = _get_expression_values(
+                        adata=celldata.matrix,
+                        X=X,
+                        key_type=key_type, key=k
+                    )
 
                     # extract names of cells
                     cell_names = celldata.matrix.obs_names.values
@@ -1481,7 +1487,7 @@ class InSituData:
                     layer = _create_points_layer(
                         points=points,
                         color_values=color_value,
-                        name=k,
+                        name=f"{cells_layer_name}-{k}",
                         point_names=cell_names,
                         point_size=point_size,
                         visible=True

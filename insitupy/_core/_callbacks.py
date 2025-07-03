@@ -16,6 +16,10 @@ from insitupy.plotting._colors import continuous_data_to_rgba
 if WITH_NAPARI:
     import napari
 
+# show cells widget
+def _update_key_on_type_change(widget):
+    current_key_type = widget.key_type.value
+    widget.key.choices = _config.key_dict[current_key_type]
 
 # geometry widget
 def _update_keys_based_on_geom_type(widget, xdata):
@@ -188,21 +192,21 @@ def _update_colorlegend():
         pass
 
 
-def _refresh_widgets_after_data_change(xdata, points_widget, boundaries_widget, filter_widget):
+def _refresh_widgets_after_data_change(xdata, show_cells_widget, boundaries_widget, filter_widget):
     _config.init_viewer_config(xdata)
 
     # set choices
     boundaries_widget.key.choices = _config.masks
 
     # reset the currently selected key to None
-    points_widget.value.value = None
+    show_cells_widget.key.value = None
 
     # add last addition to recent
-    points_widget.recent.choices = sorted(_config.recent_selections)
-    points_widget.recent.value = None
+    show_cells_widget.recent.choices = sorted(_config.recent_selections)
+    show_cells_widget.recent.value = None
 
     # update obs in filter widget
-    filter_widget.obs_key.choices = _config.value_dict["obs"]
+    filter_widget.obs_key.choices = _config.key_dict["obs"]
 
     # set only the last cell layer visible
     cell_layers = []
