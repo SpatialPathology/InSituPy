@@ -54,6 +54,8 @@ if WITH_NAPARI:
     import napari
     from napari.layers import Layer, Points, Shapes
 
+    from insitupy._core._configs import config_manager
+
     #from napari.layers.shapes.shapes import Shapes
     from ._layers import _add_geometries_as_layer
     from ._widgets import _initialize_widgets, add_new_geometries_widget
@@ -1379,125 +1381,118 @@ class InSituData:
             for k in ad.metadata.keys():
                 annotations.add_data(ad[k], k, verbose=True)
 
+    def _add_images_to_viewer(
+        self,
+        grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"]
+        ):
+        images_attr = self._images
+        n_images = len(images_attr.metadata)
+        n_grayscales = 0 # number of grayscale images
+        for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
+        #for i, img_name in enumerate(image_keys):
+            img = images_attr[img_name]
+            is_visible = False if i < n_images - 1 else True # only last image is set visible
+            pixel_size = img_metadata['pixel_size']
 
-    def show(self,
-        keys: Optional[str] = None,
+            # check if the current image is RGB
+            is_rgb = self._images.metadata[img_name]["rgb"]
+
+            if is_rgb:
+                cmap = None  # default value of cmap
+                blending = "translucent_no_depth"  # set blending mode
+            else:
+                if img_name == "nuclei":
+                    cmap = "blue"
+                else:
+                    cmap = grayscale_colormap[n_grayscales]
+                    n_grayscales += 1
+                blending = "additive"  # set blending mode
+
+
+            if not isinstance(img, list):
+                # create image pyramid for lazy loading
+                img_pyramid = create_img_pyramid(img=img, nsubres=6)
+            else:
+                img_pyramid = img
+
+            # infer contrast limits
+            contrast_limits = _get_contrast_limits(img_pyramid)
+
+            if contrast_limits[1] == 0:
+                warn("The maximum value of the image is 0. Is the image really completely empty?")
+                contrast_limits = (0, 255)
+
+            # add img pyramid to napari viewer
+            self._viewer.add_image(
+                    img_pyramid,
+                    name=img_name,
+                    colormap=cmap,
+                    blending=blending,
+                    rgb=is_rgb,
+                    contrast_limits=contrast_limits,
+                    scale=(pixel_size, pixel_size),
+                    visible=is_visible
+                )
+
+    def _add_cells_to_viewer(
+        self,
+        keys: str,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
         cells_layer: Optional[str] = None,
-        point_size: int = 8,
-        scalebar: bool = True,
-        unit: str = "µm",
-        grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"],
-        return_viewer: bool = False,
+        point_size: int = 8
+        ):
+        if self._cells is None:
+            raise InSituDataMissingObject("cells")
+        else:
+            celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
+
+            if cells_layer is None:
+                cells_layer_name = self.cells.main_key
+            else:
+                cells_layer_name = cells_layer
+
+            # convert keys to list
+            keys = convert_to_list(keys)
+
+            # get point coordinates
+            points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
+            #points *= pixel_size # convert to length unit (e.g. µm)
+
+            # get expression matrix
+            if issparse(celldata.matrix.X):
+                X = celldata.matrix.X.toarray()
+            else:
+                X = celldata.matrix.X
+
+            for i, k in enumerate(keys):
+                # get expression values
+                color_value = _get_expression_values(
+                    adata=celldata.matrix,
+                    X=X,
+                    key_type=key_type, key=k
+                )
+
+                # extract names of cells
+                cell_names = celldata.matrix.obs_names.values
+
+                # create points layer
+                layer = _create_points_layer(
+                    points=points,
+                    color_values=color_value,
+                    name=f"{cells_layer_name}-{k}",
+                    point_names=cell_names,
+                    point_size=point_size,
+                    visible=True
+                )
+
+                # add layer programmatically - does not work for all types of layers
+                # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
+                self._viewer.add_layer(Layer.create(*layer))
+
+    def _add_widgets_to_viewer(
+        self,
         widgets_max_width: int = 500
         ):
-
-        # create viewer
-        self._viewer = napari.Viewer(title=f"{self._slide_id}: {self._sample_id}")
-
-        if self._images is None:
-            warn("No attribute `.images` found.")
-        else:
-            images_attr = self._images
-            n_images = len(images_attr.metadata)
-            n_grayscales = 0 # number of grayscale images
-            for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
-            #for i, img_name in enumerate(image_keys):
-                img = images_attr[img_name]
-                is_visible = False if i < n_images - 1 else True # only last image is set visible
-                pixel_size = img_metadata['pixel_size']
-
-                # check if the current image is RGB
-                is_rgb = self._images.metadata[img_name]["rgb"]
-
-                if is_rgb:
-                    cmap = None  # default value of cmap
-                    blending = "translucent_no_depth"  # set blending mode
-                else:
-                    if img_name == "nuclei":
-                        cmap = "blue"
-                    else:
-                        cmap = grayscale_colormap[n_grayscales]
-                        n_grayscales += 1
-                    blending = "additive"  # set blending mode
-
-
-                if not isinstance(img, list):
-                    # create image pyramid for lazy loading
-                    img_pyramid = create_img_pyramid(img=img, nsubres=6)
-                else:
-                    img_pyramid = img
-
-                # infer contrast limits
-                contrast_limits = _get_contrast_limits(img_pyramid)
-
-                if contrast_limits[1] == 0:
-                    warn("The maximum value of the image is 0. Is the image really completely empty?")
-                    contrast_limits = (0, 255)
-
-                # add img pyramid to napari viewer
-                self._viewer.add_image(
-                        img_pyramid,
-                        name=img_name,
-                        colormap=cmap,
-                        blending=blending,
-                        rgb=is_rgb,
-                        contrast_limits=contrast_limits,
-                        scale=(pixel_size, pixel_size),
-                        visible=is_visible
-                    )
-
-        # optionally: add cells as points
-        if keys is not None:
-            if self._cells is None:
-                raise InSituDataMissingObject("cells")
-            else:
-                celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
-
-                if cells_layer is None:
-                    cells_layer_name = self.cells.main_key
-                else:
-                    cells_layer_name = cells_layer
-
-                # convert keys to list
-                keys = convert_to_list(keys)
-
-                # get point coordinates
-                points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
-                #points *= pixel_size # convert to length unit (e.g. µm)
-
-                # get expression matrix
-                if issparse(celldata.matrix.X):
-                    X = celldata.matrix.X.toarray()
-                else:
-                    X = celldata.matrix.X
-
-                for i, k in enumerate(keys):
-                    # get expression values
-                    color_value = _get_expression_values(
-                        adata=celldata.matrix,
-                        X=X,
-                        key_type=key_type, key=k
-                    )
-
-                    # extract names of cells
-                    cell_names = celldata.matrix.obs_names.values
-
-                    # create points layer
-                    layer = _create_points_layer(
-                        points=points,
-                        color_values=color_value,
-                        name=f"{cells_layer_name}-{k}",
-                        point_names=cell_names,
-                        point_size=point_size,
-                        visible=True
-                    )
-
-                    # add layer programmatically - does not work for all types of layers
-                    # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
-                    self._viewer.add_layer(Layer.create(*layer))
-
-        # WIDGETS
         if self._cells is None:
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
@@ -1505,7 +1500,7 @@ class InSituData:
             add_geom_widget.max_width = widgets_max_width
             self._viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
         else:
-            celldata = self._cells
+            #celldata = self._cells
             # initialize the widgets
             show_points_widget, locate_cells_widget, show_geometries_widget, show_boundaries_widget, select_data, filter_cells_widget = _initialize_widgets(xdata=self)
 
@@ -1551,7 +1546,7 @@ class InSituData:
                 self._viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
                 show_geometries_widget.max_width = widgets_max_width
 
-        # EVENTS
+    def _add_events_to_viewer(self):
         # Assign function to an layer addition event
         def _update_uid(event):
             if event is not None:
@@ -1582,11 +1577,54 @@ class InSituData:
         # Connect the function to any new layers added to the viewer
         self._viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
 
+    def _add_color_legend_to_viewer(self):
         # add color legend widget
         import insitupy._core._config as _config
         from insitupy._core._config import init_colorlegend_canvas
         init_colorlegend_canvas()
         self._viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
+
+    def show(self,
+        keys: Optional[str] = None,
+        key_type: Literal["genes", "obs", "obsm"] = "genes",
+        cells_layer: Optional[str] = None,
+        point_size: int = 8,
+        scalebar: bool = True,
+        unit: str = "µm",
+        return_viewer: bool = False,
+        widgets_max_width: int = 500
+        ):
+        # initialize a config class manager with new ID
+        uid_viewer = config_manager.init_config(data=self)
+
+        # create viewer
+        self._viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
+
+        # IMAGES
+        if self._images is None:
+            warn("No attribute `.images` found.")
+        else:
+            self._add_images_to_viewer()
+
+        # CELLS
+        if keys is not None:
+            self._add_cells_to_viewer(
+                keys=keys,
+                key_type=key_type,
+                cells_layer=cells_layer,
+                point_size=point_size
+                )
+
+        # WIDGETS
+        self._add_widgets_to_viewer(
+            widgets_max_width=widgets_max_width
+        )
+
+        # EVENTS
+        self._add_events_to_viewer()
+
+        # COLOR LEGEND
+        self._add_color_legend_to_viewer()
 
         # NAPARI SETTINGS
         if scalebar:
