@@ -13,17 +13,28 @@ from scipy.sparse import issparse
 
 from insitupy import WITH_NAPARI
 
+
+def _get_viewer_uid(viewer):
+    return viewer.title.rsplit("#", 1)[1]
+
 if WITH_NAPARI:
     class ViewerConfig:
         def __init__(
             self,
             data: InSituData
             ):
-            self.xdata = data # required to import changes from Viewer into InSituData
-            self.data_name = data.cells.main_key # by default, main_key is the first data layer
+            self.data = data # required to import changes from Viewer into InSituData
+
+            if data.cells is not None:
+                self.data_name = data.cells.main_key # by default, main_key is the first data layer
+                self.has_cells = True
+            else:
+                self.data_name = None
+                self.has_cells = False
+
             #self.adata = xdata.cells[self.data_name].matrix
             #self.boundaries = xdata.cells[self.data_name].boundaries
-            self.viewer = data.viewer
+            #self.viewer = data.viewer
             #self.genes = sorted(self.adata.var_names.tolist())
             #self.observations = sorted(self.adata.obs.columns.tolist())
             self.key_dict = self._build_key_dict()
@@ -34,14 +45,15 @@ if WITH_NAPARI:
             self.recent_selections = []
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
 
+
         @property
         def adata(self):
             """Return the AnnData object."""
-            return self.xdata.cells[self.data_name].matrix
+            return self.data.cells[self.data_name].matrix
 
         @property
         def boundaries(self):
-            return self.xdata.cells[self.data_name].boundaries
+            return self.data.cells[self.data_name].boundaries
 
         @property
         def genes(self):
@@ -105,10 +117,11 @@ if WITH_NAPARI:
         def __init__(self):
             self._configs: Dict[str, ViewerConfig] = {}
 
-        def init_config(self, data) -> str:
+        def add_config(self, data) -> str:
             """Create and store a new ViewerConfig instance with a unique ID."""
             uid = str(uuid4()).split("-")[0]
             self._configs[uid] = ViewerConfig(data)
+            print(self._configs)
             return uid
 
         def __getitem__(self, config_id: str) -> ViewerConfig:
@@ -119,6 +132,13 @@ if WITH_NAPARI:
             """Return all stored ViewerConfig instances with their IDs."""
             return self._configs
 
-    # initialize config manager
-    global config_manager
-    config_manager = ViewerConfigManager()
+        def __repr__(self) -> str:
+            config_count = len(self._configs)
+            config_ids = ', '.join(list(self._configs.keys())[:5])  # Show up to 5 IDs
+            if config_count > 5:
+                config_ids += ', ...'
+            return f"<ViewerConfigManager with {config_count} configs: [{config_ids}]>"
+
+    # initialize config manager only if it doesn't already exist
+    if 'config_manager' not in globals():
+        config_manager = ViewerConfigManager()
