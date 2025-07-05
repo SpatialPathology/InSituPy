@@ -41,7 +41,7 @@ if WITH_NAPARI:
             #self.points = np.flip(self.adata.obsm["spatial"].copy(), axis=1)
             #self.X = self.adata.X.toarray() if issparse(self.adata.X) else self.adata.X
             self.masks = self._extract_masks()
-            self.pixel_size = self._get_pixel_size(data)
+            self.pixel_size = self._get_pixel_size()
             self.recent_selections = []
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
 
@@ -99,18 +99,27 @@ if WITH_NAPARI:
 
         def _extract_masks(self):
             masks = []
-            for n, b in self.boundaries.metadata.items():
-                if b is not None and (
-                    isinstance(b, dask.array.core.Array) or
-                    all(isinstance(elem, dask.array.core.Array) for elem in b)
-                ):
-                    masks.append(n)
+            # for n, b in self.boundaries.metadata.items():
+            #     if b is not None and (
+            #         isinstance(b, dask.array.core.Array) or
+            #         all(isinstance(elem, dask.array.core.Array) for elem in b)
+            #     ):
+            #         masks.append(n)
+
+            boundaries = self.data.cells[self.data_name].boundaries
+
+            for n in boundaries.metadata.keys():
+                b = boundaries[n]
+                if b is not None:
+                    if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
+                        masks.append(n)
+
             return masks
 
-        def _get_pixel_size(self, data):
-            if data.images is not None:
-                first_key = list(data.images.metadata.keys())[0]
-                return data.images.metadata[first_key]["pixel_size"]
+        def _get_pixel_size(self):
+            if self.data.images is not None:
+                first_key = list(self.data.images.metadata.keys())[0]
+                return self.data.images.metadata[first_key]["pixel_size"]
             return None
 
     class ViewerConfigManager:

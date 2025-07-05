@@ -59,7 +59,7 @@ if WITH_NAPARI:
 
     #from napari.layers.shapes.shapes import Shapes
     from ._layers import _add_geometries_as_layer
-    from ._widgets import _initialize_widgets, add_new_geometries_widget
+    from ._widgets import _initialize_widgets  # add_new_geometries_widget
 
 
 class InSituData:
@@ -1516,7 +1516,8 @@ class InSituData:
                 show_geometries_widget,
                 show_boundaries_widget,
                 select_data,
-                filter_cells_widget
+                filter_cells_widget,
+                add_geom_widget
             ) = _initialize_widgets(
                 viewer=viewer,
                 viewer_config=viewer_config
@@ -1524,22 +1525,22 @@ class InSituData:
 
             # add widgets to napari window
             if select_data is not None:
-                viewer.window.add_dock_widget(select_data, name="Select data", area="right")
+                viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
                 select_data.max_height = 50
                 select_data.max_width = widgets_max_width
 
             if show_points_widget is not None:
-                viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right")
+                viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right", tabify=False)
                 show_points_widget.max_height = 170
                 show_points_widget.max_width = widgets_max_width
 
             if show_boundaries_widget is not None:
-                viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right")
+                viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
                 #show_boundaries_widget.max_height = 80
                 show_boundaries_widget.max_width = widgets_max_width
 
             if locate_cells_widget is not None:
-                viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=True)
+                viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
                 #locate_cells_widget.max_height = 130
                 locate_cells_widget.max_width = widgets_max_width
 
@@ -1549,7 +1550,7 @@ class InSituData:
                 show_points_widget.max_width = widgets_max_width
 
             # add annotation widget to napari
-            add_geom_widget = add_new_geometries_widget()
+            #add_geom_widget = add_new_geometries_widget()
             #annot_widget.max_height = 100
             add_geom_widget.max_width = widgets_max_width
             viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
