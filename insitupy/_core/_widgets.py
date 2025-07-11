@@ -71,7 +71,10 @@ if WITH_NAPARI:
             # connect key change with update function
             @select_data.data_name.changed.connect
             def update_widgets_on_data_change(event=None):
+                # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data.data_name.value
+                viewer_config.refresh_variables()
+
                 _refresh_widgets_after_data_change(
                     data,
                     viewer=viewer,
@@ -81,7 +84,6 @@ if WITH_NAPARI:
                     filter_widget=filter_cells_widget
                     )
 
-            print(viewer_config.masks)
             if len(viewer_config.masks) > 0:
                 @magicgui(
                     call_button='Show',
@@ -113,7 +115,6 @@ if WITH_NAPARI:
                     else:
                         print(f"Layer '{layer_name}' already in layer list.", flush=True)
             else:
-                print("here I am")
                 show_boundaries_widget = None
 
             @magicgui(

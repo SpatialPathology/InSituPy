@@ -32,19 +32,18 @@ if WITH_NAPARI:
                 self.data_name = None
                 self.has_cells = False
 
+            self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
+
             #self.adata = xdata.cells[self.data_name].matrix
             #self.boundaries = xdata.cells[self.data_name].boundaries
             #self.viewer = data.viewer
             #self.genes = sorted(self.adata.var_names.tolist())
             #self.observations = sorted(self.adata.obs.columns.tolist())
-            self.key_dict = self._build_key_dict()
+
             #self.points = np.flip(self.adata.obsm["spatial"].copy(), axis=1)
             #self.X = self.adata.X.toarray() if issparse(self.adata.X) else self.adata.X
-            self.masks = self._extract_masks()
-            self.pixel_size = self._get_pixel_size()
-            self.recent_selections = []
-            self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
 
+            self.refresh_variables()
 
         @property
         def adata(self):
@@ -90,6 +89,15 @@ if WITH_NAPARI:
                 return self.adata.X.toarray()
             return self.adata.X
 
+        def refresh_variables(self):
+            self.key_dict = self._build_key_dict()
+            self.masks = self._extract_masks()
+            self.pixel_size = self._get_pixel_size()
+            self.recent_selections = []
+
+        def update_data_name(self, new_data_name):
+            self.data_name = new_data_name
+
         def _build_key_dict(self):
             return {
                 "genes": self.genes,
@@ -99,13 +107,6 @@ if WITH_NAPARI:
 
         def _extract_masks(self):
             masks = []
-            # for n, b in self.boundaries.metadata.items():
-            #     if b is not None and (
-            #         isinstance(b, dask.array.core.Array) or
-            #         all(isinstance(elem, dask.array.core.Array) for elem in b)
-            #     ):
-            #         masks.append(n)
-
             boundaries = self.data.cells[self.data_name].boundaries
 
             for n in boundaries.metadata.keys():
@@ -130,7 +131,6 @@ if WITH_NAPARI:
             """Create and store a new ViewerConfig instance with a unique ID."""
             uid = str(uuid4()).split("-")[0]
             self._configs[uid] = ViewerConfig(data)
-            print(self._configs)
             return uid
 
         def __getitem__(self, config_id: str) -> ViewerConfig:

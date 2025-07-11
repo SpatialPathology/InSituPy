@@ -194,7 +194,7 @@ def _update_colorlegend(viewer, viewer_config):
 
 def _refresh_widgets_after_data_change(xdata, viewer, viewer_config, show_cells_widget, boundaries_widget, filter_widget):
     #_config.init_viewer_config(xdata)
-    viewer_config.__init__(xdata) # re-initialize ViewerConfig
+    #viewer_config.__init__(xdata) # re-initialize ViewerConfig
 
     if boundaries_widget is not None:
         # set choices
@@ -203,6 +203,9 @@ def _refresh_widgets_after_data_change(xdata, viewer, viewer_config, show_cells_
     if show_cells_widget is not None:
         # reset the currently selected key to None
         show_cells_widget.key.value = None
+
+        # update choices for key
+        show_cells_widget.key.choices = viewer_config.key_dict[show_cells_widget.key_type.value]
 
         # add last addition to recent
         show_cells_widget.recent.choices = sorted(viewer_config.recent_selections)
