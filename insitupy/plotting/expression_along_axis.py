@@ -425,7 +425,7 @@ def cell_expression_along_axis(
     axis,
     genes: List[str],
     cell_type_column,
-    cell_type,
+    cell_type: Union[str, List[str]],
     xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
     min_expression: Union[int, float] = 0,
     xlabel: Optional[str] = None,
@@ -493,7 +493,7 @@ def cell_expression_along_axis(
         min_expression=min_expression,
         xlim=xlim,
     )
-
+    
     # create xlabel string
     if xlabel is None:
         xlabel_str = " ".join(convert_to_list(axis))
@@ -659,12 +659,17 @@ def _select_data(
         obsm_col = obs_val[1]
         #obs_val = f"distance_from_{obsm_col}"
         adata_obs["axis"] = adata.obsm[obsm_key][obsm_col]
+    else:
+        adata_obs["axis"] = adata.obs[obs_val]
 
     # Get data for plotting
     data = adata_obs[["axis", cell_type_column]].dropna()
 
     # Filter data for the specified cell type
-    selected_data = data[data[cell_type_column] == cell_type].copy()
+    if isinstance(cell_type, str):
+        selected_data = data[data[cell_type_column] == cell_type].copy()
+    else:
+        selected_data = data[data[cell_type_column].isin(cell_type)].copy()
 
     # Apply limits
     selected_data = selected_data[
