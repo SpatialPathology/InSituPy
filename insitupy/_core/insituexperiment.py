@@ -354,6 +354,9 @@ class InSituExperiment:
         # Create a copy of the existing metadata
         old_metadata = self._metadata.copy()
 
+        if not by in new_metadata.columns or not by in old_metadata.columns:
+            raise ValueError(f"Column '{by}' must be present in both existing and new metadata. If you want to append metadata by order, set `by=None`.")
+
         if overwrite:
             # preserve only the columns of the old metadata that are not in the new metadata
             cols_to_use = list(old_metadata.columns.difference(new_metadata.columns))
@@ -586,30 +589,105 @@ class InSituExperiment:
         for idx, row in self._metadata.iterrows():
             yield row, self._data[idx]
 
+
     def collect_anndatas(
         self,
         cells_layer: Optional[str],
         label_col: str = "uid",
-        obs_keys=None,
-        var_keys=None,
-        obsm_keys=None,
-        uns_keys=None,
-        layer_keys=None,
+        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = False,
-        ):
-        from anndata.experimental import AnnCollection
+    ) -> anndata.AnnData:
+        """Collect AnnData objects from the dataset and concatenate them.
 
-        adatas = {}
+        This function iterates through the dataset, extracts cell data from the specified
+        layer, filters the AnnData objects according to the provided key selections,
+        and concatenates them into a single AnnData object.
+
+        Args:
+            cells_layer: The layer name to extract cell data from. If None, uses default layer.
+            label_col: Column name in metadata to use as labels for concatenation.
+                Defaults to "uid".
+            obs_keys: Keys to select from the observations (obs) dataframe. Can be a list
+                of specific keys or "all" to select all available keys. If None, no
+                filtering is applied.
+            var_keys: Keys to select from the variables (var) dataframe. Can be a list
+                of specific keys or "all" to select all available keys. If None, no
+                filtering is applied.
+            obsm_keys: Keys to select from the obsm (observation matrices) dictionary.
+                Can be a list of specific keys or "all" to select all available keys.
+                If None, no filtering is applied.
+            uns_keys: Keys to select from the uns (unstructured) dictionary. Can be a
+                list of specific keys or "all" to select all available keys. If None,
+                no filtering is applied.
+            layer_keys: Keys to select from the layers dictionary. Can be a list of
+                specific keys or "all" to select all available keys. If None, no
+                filtering is applied.
+            make_obs_names_unique: If True, prepends an index to observation names to
+                make them unique across datasets. Defaults to False.
+
+        Returns:
+            A concatenated AnnData object containing data from all processed datasets.
+            The concatenation is performed along the observation axis with inner join.
+
+        Raises:
+            ValueError: If label_col is not found in metadata.
+            KeyError: If specified keys are not found in the respective AnnData components.
+
+        Examples:
+            >>> # Select specific keys
+            >>> adata = obj.collect_anndatas(
+            ...     cells_layer="raw",
+            ...     obs_keys=["cell_type", "batch"],
+            ...     var_keys=["gene_name", "highly_variable"]
+            ... )
+
+            >>> # Select all available keys
+            >>> adata = obj.collect_anndatas(
+            ...     cells_layer="processed",
+            ...     obs_keys="all",
+            ...     var_keys="all",
+            ...     make_obs_names_unique=True
+            ... )
+        """
+
+        def _process_keys(keys: Optional[Union[List[str], str]], available_keys: List[str]) -> Optional[List[str]]:
+            """Process key selection, handling 'all' case and validation."""
+            if keys is None:
+                return None
+            elif keys == "all":
+                return available_keys
+            elif isinstance(keys, str):
+                return [keys]
+            elif isinstance(keys, list):
+                return keys
+            else:
+                raise ValueError(f"Invalid type for keys: {type(keys)}. Expected str, list, or 'all'.")
+
+        adatas: Dict[Any, anndata.AnnData] = {}
+
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             adata = celldata.matrix
 
-            # filter adata
+            # Process keys - handle "all" case by getting available keys from first adata
+            processed_obs_keys = _process_keys(obs_keys, list(adata.obs.columns)) if obs_keys is not None else None
+            processed_var_keys = _process_keys(var_keys, list(adata.var.columns)) if var_keys is not None else None
+            processed_obsm_keys = _process_keys(obsm_keys, list(adata.obsm.keys())) if obsm_keys is not None else None
+            processed_uns_keys = _process_keys(uns_keys, list(adata.uns.keys())) if uns_keys is not None else None
+            processed_layer_keys = _process_keys(layer_keys, list(adata.layers.keys())) if layer_keys is not None else None
+
+            # Filter adata
             adata = _select_anndata_elements(
                 adata=adata,
-                obs_keys=obs_keys, var_keys=var_keys,
-                obsm_keys=obsm_keys, uns_keys=uns_keys,
-                layer_keys=layer_keys
+                obs_keys=processed_obs_keys,
+                var_keys=processed_var_keys,
+                obsm_keys=processed_obsm_keys,
+                uns_keys=processed_uns_keys,
+                layer_keys=processed_layer_keys
             )
 
             if make_obs_names_unique:
@@ -622,7 +700,44 @@ class InSituExperiment:
             axis='obs',
             join='inner',
             label=label_col
-            )
+        )
+
+    # def collect_anndatas(
+    #     self,
+    #     cells_layer: Optional[str],
+    #     label_col: str = "uid",
+    #     obs_keys=None,
+    #     var_keys=None,
+    #     obsm_keys=None,
+    #     uns_keys=None,
+    #     layer_keys=None,
+    #     make_obs_names_unique: bool = False,
+    #     ):
+
+    #     adatas = {}
+    #     for i, (meta, xd) in enumerate(self.iterdata()):
+    #         celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+    #         adata = celldata.matrix
+
+    #         # filter adata
+    #         adata = _select_anndata_elements(
+    #             adata=adata,
+    #             obs_keys=obs_keys, var_keys=var_keys,
+    #             obsm_keys=obsm_keys, uns_keys=uns_keys,
+    #             layer_keys=layer_keys
+    #         )
+
+    #         if make_obs_names_unique:
+    #             adata.obs_names = f"{str(i)}-" + adata.obs_names
+
+    #         adatas[meta[label_col]] = adata
+
+    #     return anndata.concat(
+    #         adatas,
+    #         axis='obs',
+    #         join='inner',
+    #         label=label_col
+    #         )
 
     def _create_categorical_color_dict(
         self,
@@ -1163,9 +1278,11 @@ class InSituExperiment:
 
 
 
-    def saveas(self, path: Union[str, os.PathLike, Path],
-               overwrite: bool = False,
-               verbose: bool = False, **kwargs):
+    def saveas(
+        self,
+        path: Union[str, os.PathLike, Path],
+        overwrite: bool = False,
+        verbose: bool = False, **kwargs):
         """Save all datasets to a specified folder.
 
         Args:
@@ -1192,7 +1309,11 @@ class InSituExperiment:
 
         print("Saved.") if verbose else None
 
-    def show(self, index: int, return_viewer: bool = True):
+    def show(
+        self,
+        index: int,
+        #return_viewer: bool = True
+        ):
         """
         Displays the dataset at the specified index.
 
@@ -1205,8 +1326,8 @@ class InSituExperiment:
         """
         dataset = self.data[index]
         dataset.show()
-        if return_viewer:
-            return dataset.viewer
+        # if return_viewer:
+        #     return dataset.viewer
 
     def show_modality(self, modality, uid_column: str = "sample_id"):
         repr_string = ""
