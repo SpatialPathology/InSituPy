@@ -383,7 +383,12 @@ def plot_cellular_composition(
     """
     if isinstance(palette, list):
         palette = ListedColormap(palette)
+        palette_is_dict = False
     elif isinstance(palette, ListedColormap):
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, dict):
+        palette_is_dict = True
         pass
     else:
         raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
@@ -418,13 +423,16 @@ def plot_cellular_composition(
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        try:
-            color_dict = map_to_colors(
-                sorted(celldata.matrix.obs[cell_type_col].unique()),
-                palette=palette)
-            #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
-        except KeyError:
-            color_dict = None
+        if palette_is_dict:
+            color_dict = palette
+        else:
+            try:
+                color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].unique()),
+                    palette=palette)
+                #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            except KeyError:
+                color_dict = None
 
     # setup plot
     if len(geom_names) == 1:
