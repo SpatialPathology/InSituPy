@@ -3,7 +3,7 @@ import os
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
 import anndata
@@ -354,8 +354,9 @@ class InSituExperiment:
         # Create a copy of the existing metadata
         old_metadata = self._metadata.copy()
 
-        if not by in new_metadata.columns or not by in old_metadata.columns:
-            raise ValueError(f"Column '{by}' must be present in both existing and new metadata. If you want to append metadata by order, set `by=None`.")
+        if by is not None:
+            if not by in new_metadata.columns or not by in old_metadata.columns:
+                raise ValueError(f"Column '{by}' must be present in both existing and new metadata. If you want to append metadata by order, set `by=None`.")
 
         if overwrite:
             # preserve only the columns of the old metadata that are not in the new metadata
@@ -566,6 +567,10 @@ class InSituExperiment:
             mask = adata.obs[uid_column_adata] == current_uid
             subset = adata[mask]
 
+            if len(subset) == 0:
+                warnings.warn(f"No matching data found in `adata` for ID '{current_uid}'. Skipping this dataset.")
+                continue
+
             if obs_columns_to_transfer:
                 for col in obs_columns_to_transfer:
                     if col in celldata.matrix.obs.columns and not overwrite:
@@ -749,6 +754,8 @@ class InSituExperiment:
         for _, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             if obs_col in celldata.matrix.obs.columns:
+                if celldata.matrix.obs[obs_col].isna().all():
+                    raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
                 cols.append(np.unique(celldata.matrix.obs[obs_col]))
 
         if len(cols) > 0:
