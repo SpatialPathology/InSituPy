@@ -49,38 +49,39 @@ def cell_expression_along_axis(
 ):
 
     """
-    Plot gene expression along a specified axis for a given cell type.
+    Plot gene expression along a specified axis for selected cell types.
 
-    This function visualizes gene expression for a selected cell type along a continuous axis
-    (e.g., pseudotime, spatial coordinate, etc.). It creates a grid of subplots with scatter
-    plots, optional regression fits, and marginal KDE plots for both the axis and gene expression.
+    This function visualizes gene expression for one or more genes along a continuous axis
+    (e.g., pseudotime, spatial coordinate) for a specified cell type or group of cell types.
+    It generates a grid of subplots with scatter plots, optional LOESS regression fits, and
+    marginal KDE plots for both the axis and gene expression distributions.
 
     Args:
-        adata: AnnData object containing the single-cell data.
-        axis: Observation key in `adata.obs` to plot along the x-axis (e.g., pseudotime) or a tuple of a key in `adata.obsm` and a column name key in the respective table: (obsm key, column key).
+        adata: AnnData object containing single-cell data.
+        axis: Key in `adata.obs` or a tuple (obsm key, column key) to use for the x-axis.
         genes (List[str]): List of gene names to plot.
-        cell_type_column: Column name in `adata.obs` that contains cell type annotations.
-        cell_type Union[str, List[str]]: Specific cell type or a list of cell types to filter the data for plotting.
-        xlim (Tuple[Union[int, float], Union[int, float]], optional): Limits for the x-axis. Defaults to (0, np.inf).
-        min_expression (Union[int, float], optional): Minimum expression threshold to include a cell. Defaults to 0.
-        xlabel (Optional[str], optional): Custom label for the x-axis. If None, uses the `axis` name. Defaults to None.
-        fit_reg (bool, optional): Whether to fit a LOESS regression line to the scatter plot. Defaults to False.
-        kde (bool, optional): Whether to overlay a 2D KDE plot on the scatter plot. Defaults to False.
-        max_cols (int, optional): Maximum number of columns in the subplot grid. The actual number of columns will be the
-            minimum of this value and the number of genes. Defaults to 4.
-        savepath (Union[str, os.PathLike, Path], optional): Path to save the figure. If None, the figure is not saved. Defaults to None.
-        save_only (bool, optional): If True, the figure is saved but not shown. Defaults to False.
-        dpi_save (int, optional): DPI for saving the figure. Defaults to 300.
+        cell_type_column: Column in `adata.obs` with cell type annotations.
+        cell_type (Union[str, List[str]]): Cell type(s) to include in the plot.
+        xlim (Tuple[Union[int, float], Union[int, float]], optional): X-axis limits. Defaults to (0, np.inf).
+        min_expression (Union[int, float], optional): Minimum expression threshold. Defaults to 0.
+        xlabel (Optional[str], optional): Custom x-axis label. Defaults to axis name.
+        fit_reg (bool, optional): Whether to overlay a LOESS regression line. Defaults to False.
+        kde (bool, optional): Whether to overlay a 2D KDE plot. Defaults to False.
+        max_cols (int, optional): Maximum number of columns in the subplot grid. Defaults to 4.
+        savepath (Union[str, os.PathLike, Path], optional): Path to save the figure. Defaults to None.
+        save_only (bool, optional): If True, saves the figure without displaying it. Defaults to False.
+        dpi_save (int, optional): DPI for saved figure. Defaults to 300.
         fig_height (Number, optional): Height of each subplot row. Defaults to 4.
-        fig_marginal_ratio (Number, optional): Height ratio of the marginal KDE plot to the main plot. Defaults to 0.15.
+        fig_marginal_ratio (Number, optional): Ratio of marginal KDE height to main plot. Defaults to 0.15.
         scatter_size (Number, optional): Size of scatter plot points. Defaults to 1.
-        wspace (Number, optional): Width space between subplots. Defaults to 0.15.
-        hspace (Number, optional): Height space between subplot rows. Defaults to 0.25.
+        wspace (Number, optional): Horizontal spacing between subplots. Defaults to 0.15.
+        hspace (Number, optional): Vertical spacing between subplot rows. Defaults to 0.25.
         font_scale_factor (Number, optional): Scaling factor for font sizes. Defaults to 1.
 
     Returns:
-        None: Displays and/or saves the generated plot.
+        None: Displays and/or saves the generated figure.
     """
+
 
     # reset matplotlib settings
     _init_mpl_fontsize(scale_factor=font_scale_factor)
@@ -91,14 +92,14 @@ def cell_expression_along_axis(
     # select the data for plotting
     data_for_one_celltype = _select_data(
         adata=adata,
-        obs_val=axis,
+        axis=axis,
         cell_type_column=cell_type_column,
         cell_type=cell_type,
         genes=genes,
         min_expression=min_expression,
         xlim=xlim,
     )
-    
+
     # create xlabel string
     if xlabel is None:
         xlabel_str = " ".join(convert_to_list(axis))
@@ -243,10 +244,10 @@ def cell_expression_along_axis(
 
 def _select_data(
     adata,
-    obs_val,
+    axis,
     genes: List[str],
-    cell_type_column,
-    cell_type,
+    cell_type_column: str,
+    cell_type: Union[str, List[str]],
     xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
     min_expression: Number = None,
     sort: bool = True,
@@ -258,14 +259,17 @@ def _select_data(
 
     # Check type of obs_val
     adata_obs = adata.obs.copy()
-    if isinstance(obs_val, tuple):
-        print("Retrieve `obs_val` from .obsm.") if verbose else None
-        obsm_key = obs_val[0]
-        obsm_col = obs_val[1]
+    if isinstance(axis, tuple):
+        print("Retrieve axis from .obsm.") if verbose else None
+        obsm_key = axis[0]
+        obsm_col = axis[1]
         #obs_val = f"distance_from_{obsm_col}"
         adata_obs["axis"] = adata.obsm[obsm_key][obsm_col]
+    elif isinstance(axis, str):
+        print("Retrieve axis from .obs.") if verbose else None
+        adata_obs["axis"] = adata.obs[axis]
     else:
-        adata_obs["axis"] = adata.obs[obs_val]
+        raise ValueError(f"Invalid type for `axis`: {type(axis)}. Expected str or tuple.")
 
     # Get data for plotting
     data = adata_obs[["axis", cell_type_column]].dropna()
@@ -443,38 +447,50 @@ def cell_abundance_along_axis(
     dpi_save: int = 300,
     multiple: Literal["layer", "dodge", "stack", "fill"] = "stack",
     histplot_element: Literal["bars", "step", "poly"] = "bars",
-    kde: bool = False
+    kde: bool = False,
+    verbose: bool = True
     ):
 
     """
-    Plot cell abundance along a specified observation value.
+    Plot cell abundance along a specified axis.
+
+    This function visualizes the distribution of cells along a continuous variable
+    (e.g., pseudotime, spatial coordinate) using histograms or KDE plots. It supports
+    grouping by a categorical variable and allows customization of the histogram style.
 
     Args:
-        adata (AnnData): Annotated data matrix.
-        axis (Union[str, Tuple[str, str]]): Observation category to be plotted on the x-axis.
-            Can be a string representing a column in `adata.obs` or a tuple (obsm_key, obsm_col)
-            where `obsm_key` is a key in `adata.obsm` and `obsm_col` is a column in the corresponding DataFrame.
-        groupby (Optional[str], optional): Column in `adata.obs` to group by. Defaults to None.
-        xmin (Number, optional): Minimum value of `obs_val` to include in the plot. Defaults to 0.
-        savepath (Optional[os.PathLike], optional): Path to save the figure. Defaults to None.
-        figsize (Tuple, optional): Size of the figure. Defaults to (8, 6).
-        save_only (bool, optional): If True, only save the figure without displaying it. Defaults to False.
-        dpi_save (int, optional): Dots per inch for saving the figure. Defaults to 300.
-        histplot_multiple (str, optional): How to plot multiple histograms. Options are "layer", "dodge", "stack", "fill". Defaults to "stack".
-        histplot_element (str, optional): Plotting element. Options are "bars", "step", "poly". Defaults to "bars".
+        adata (AnnData): AnnData object containing single-cell data.
+        axis (Union[str, Tuple[str, str]]): Key for the x-axis. Can be a column in `adata.obs`
+            or a tuple (obsm_key, obsm_col) for accessing values from `adata.obsm`.
+        groupby (Optional[str], optional): Column in `adata.obs` to group cells by. Defaults to None.
+        xlim (Tuple, optional): Range of x-axis values to include. Defaults to (0, np.inf).
+        savepath (Optional[os.PathLike], optional): Path to save the figure. If None, the figure is not saved.
+        figsize (Tuple, optional): Size of the figure in inches. Defaults to (8, 6).
+        save_only (bool, optional): If True, saves the figure without displaying it. Defaults to False.
+        dpi_save (int, optional): Resolution (DPI) for saving the figure. Defaults to 300.
+        multiple (Literal["layer", "dodge", "stack", "fill"], optional): How to display multiple groups. Defaults to "stack".
+        histplot_element (Literal["bars", "step", "poly"], optional): Style of histogram elements. Defaults to "bars".
+        kde (bool, optional): If True, plots KDE instead of histogram. Defaults to False.
+        verbose (bool, optional): If True, prints progress messages. Defaults to True.
 
     Returns:
-        None
+        None: Displays and/or saves the generated plot.
     """
+
 
     # check type of obs_val
     adata_obs = adata.obs.copy()
     if isinstance(axis, tuple):
-        print("Retrieve `obs_val` from .obsm.")
+        print("Retrieve axis from `.obsm`.") if verbose else None
         obsm_key = axis[0]
         obsm_col = axis[1]
         axis = f"distance_from_{obsm_col}"
         adata_obs[axis] = adata.obsm[obsm_key][obsm_col]
+    elif isinstance(axis, str):
+        print("Retrieve axis from `.obs`.") if verbose else None
+        adata_obs[axis] = adata.obs[axis]
+    else:
+        raise ValueError(f"Invalid type for `axis`: {type(axis)}. Expected str or tuple.")
 
     # get data for plotting
     data = adata_obs[[axis, groupby]].dropna()
@@ -510,93 +526,3 @@ def cell_abundance_along_axis(
                          tight=True
                          )
 
-# def cell_expression_along_axis(
-#     adata,
-#     obs_val,
-#     genes,
-#     cell_type_column,
-#     cell_type,
-#     xlim: Tuple[Number, Number] = (0, np.inf),
-#     min_expression: Number = 0,
-#     xlabel: Optional[str] = None,
-#     fit_reg: bool = False,
-#     lowess: bool = False,
-#     robust: bool = False
-#     ):
-#     genes = convert_to_list(genes)
-
-#     # if len(genes) == 1:
-#     #     _single_cell_expression_along_axis(
-#     #         adata=adata, obs_val=obs_val, gene=genes[0],
-#     #         cell_type_column=cell_type_column, cell_type=cell_type,
-#     #         xlim=xlim, min_expression=min_expression, xlabel=xlabel,
-#     #         fit_reg=fit_reg, lowess=lowess, robust=robust
-#     #     )
-#     # elif len(genes) > 1:
-#     _multi_cell_expression_along_axis(
-#         adata=adata, obs_val=obs_val, genes=genes,
-#         cell_type_column=cell_type_column, cell_type=cell_type,
-#         xlim=xlim, min_expression=min_expression, xlabel=xlabel,
-#         fit_reg=fit_reg, lowess=lowess, robust=robust
-#     )
-#     # else:
-#     #     raise ValueError("`genes` must have length > 0.")
-
-# def _single_cell_expression_along_axis(
-#     adata,
-#     obs_val,
-#     gene,
-#     cell_type_column,
-#     cell_type,
-#     xlim: Tuple[Number, Number] = (0, np.inf),
-#     min_expression: Number = 0,
-#     xlabel: Optional[str] = None,
-#     fit_reg: bool = False,
-#     lowess: bool = False,
-#     robust: bool = False
-#     ):
-
-#     data_of_one_celltype = _select_data(
-#         adata=adata,
-#         obs_val=obs_val,
-#         cell_type_column=cell_type_column,
-#         cell_type=cell_type,
-#         genes=gene,
-#         xlim=xlim,
-#     )
-
-#     # Filter for minimum gene expression
-#     data_of_one_celltype = data_of_one_celltype[data_of_one_celltype[gene] >= min_expression]
-
-#     # Plot
-#     g = sns.jointplot(data=data_of_one_celltype,
-#                     x="axis", y=gene,
-#                     height=4,
-#                     color="firebrick", kind="kde", levels=8,
-#                     marginal_kws={"fill": True},
-#                     )
-#     #g.plot_joint(sns.scatterplot, color="k", s=12)
-#     g.plot_joint(sns.regplot, color="k",
-#                  #lowess=True,
-#                  fit_reg=fit_reg,
-#                  lowess=lowess,
-#                  robust=robust,
-#                  scatter_kws={"s": 1},
-#                  line_kws={"color": "orange"}
-#                  )
-#     g.ax_joint.set_ylabel(f"{gene} in '{cell_type}'")
-
-#     # Set common x-label
-#     if xlabel is None:
-#         g.ax_joint.set_xlabel("_".join(convert_to_list(obs_val)))
-#     else:
-#         g.ax_joint.set_xlabel(xlabel)
-
-#     # g = sns.jointplot(data=data_of_one_celltype,
-#     #             x=axis_label, y=gene,
-#     #             color="k", kind="reg", #levels=8,
-#     #             marginal_kws={"fill": True},
-#     #             )
-#     # g.plot_marginals(sns.kdeplot, color="firebrick", #s=12
-#     #                  )
-#     plt.show()
