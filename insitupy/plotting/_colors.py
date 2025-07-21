@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib import cm
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, rgb2hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
@@ -288,6 +288,16 @@ def _data_to_rgba(
         cmap = continuous_cmap
 
     return rgba_list, mapping, cmap
+
+
+def _rgb2hex_robust(rgb, scale_to_one: bool, max_value: int = 255):
+    """
+    Convert RGB values to hex format, ensuring that the values are within the range [0, 1].
+    """
+    if scale_to_one:
+        rgb = [elem / max_value for elem in rgb]
+    # Ensure that the values are within the range [0, 1]
+    return rgb2hex(rgb)
 
 # def get_crange(adata, key, use_raw,
 #     layer=None,

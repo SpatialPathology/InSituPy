@@ -19,12 +19,12 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment, check_raw
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.dataclasses import ImageData, RegionsData
+from insitupy._core.dataclasses import AnnotationsData, ImageData, RegionsData
 from insitupy._core.insitudata import InSituData
 from insitupy._core.insituexperiment import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting._colors import (_add_colorlegend_to_axis,
-                                       _extract_color_values,
+                                       _extract_color_values, _rgb2hex_robust,
                                        create_cmap_mapping)
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
@@ -193,7 +193,10 @@ class _SinglePlotConfig:
         add_legend: bool,
         RegionDataObject: Optional[RegionsData],
         region_tuple: Optional[Tuple[str, str]],
-        ImageDataObject: Optional[ImageData],
+        AnnotationsDataObject: Optional[AnnotationsData],
+        annotations_key: Optional[Union[str, Tuple[str, Optional[Union[Literal["all"], str, List[str]]]]]],
+        annotations_mode: Literal["outlined", "filled"] = "outlined",
+        ImageDataObject: Optional[ImageData] = None,
         image_key: Optional[str] = None,
         pixelwidth_per_subplot: int = 200,
         raw: bool = False,
@@ -203,7 +206,6 @@ class _SinglePlotConfig:
         xlim_general: Optional[Tuple[int, int]] = None,
         ylim_general: Optional[Tuple[int, int]] = None,
         histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
-
         ):
 
         # add arguments to object
@@ -212,6 +214,7 @@ class _SinglePlotConfig:
         self.name = name
         self.idx_key = idx_key
         self.add_legend = add_legend
+        self.annotations_mode = annotations_mode
 
         # retrieve color dictionary
         self.color_dict = color_config[key]["color_dict"]
@@ -309,9 +312,30 @@ class _SinglePlotConfig:
                 self.vmax = histogram_setting[1]
             else:
                 raise ValueError(f"Unknown type for histogram_setting: {type(histogram_setting)}")
-
         else:
             self.image = None
+
+        if annotations_key is not None:
+            if isinstance(annotations_key, tuple):
+                ankey = annotations_key[0]
+                anvalues = annotations_key[1]
+
+                # get annotations dataframe
+                self.annotations_df = AnnotationsDataObject[ankey]
+
+                if anvalues not in ("all", None):
+                    # filter them by what is provided in the values of the tuple
+                    anvalues = convert_to_list(anvalues)
+                    mask = self.annotations_df["name"].isin(anvalues)
+                    self.annotations_df = self.annotations_df[mask]
+            elif isinstance(annotations_key, str):
+                # get annotations dataframe
+                self.annotations_df = AnnotationsDataObject[annotations_key]
+            else:
+                raise ValueError(f"Unknown type for annotations_key: {type(annotations_key)}. Must be either a tuple or a string.")
+
+        else:
+            self.annotations_df = None
 
         # get color values for expression data or categories
         self.color_values, self.categorical = _extract_color_values(
@@ -337,6 +361,8 @@ class MultiSpatialPlot:
         xlim: Optional[Tuple[float, float]] = None,
         ylim: Optional[Tuple[float, float]] = None,
         region_tuple: Tuple[str, str] = None,
+        annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
+        annotations_mode: Literal["outlined", "filled"] = "outlined",
         crange: Optional[List[int]] = None,
         crange_type: Literal['minmax', 'percentile'] = 'minmax',
         palette: str = DEFAULT_CATEGORICAL_CMAP,
@@ -379,6 +405,8 @@ class MultiSpatialPlot:
         self.xlim = xlim
         self.ylim = ylim
         self.region_tuple = region_tuple
+        self.annotations_key = annotations_key
+        self.annotations_mode = annotations_mode
         self.crange = crange
         self.crange_type = crange_type
         self.palette = palette
@@ -647,7 +675,10 @@ class MultiSpatialPlot:
         # get regions
         regions = xd.regions
 
-        return adata, sample_name, imagedata, regions
+        # get annotations
+        annotations = xd.annotations
+
+        return adata, sample_name, imagedata, regions, annotations
 
     def plot_to_subplots(self):
         print("Do plotting.") if self.verbose else None
@@ -655,7 +686,7 @@ class MultiSpatialPlot:
         for idx in range(self.n_data):
 
             # retrieve data
-            ad, sample_name, imagedata, regions = self._get_data(idx)
+            ad, sample_name, imagedata, regions, annotations = self._get_data(idx)
 
 
             for idx_key, key in enumerate(self.keys):
@@ -676,6 +707,9 @@ class MultiSpatialPlot:
                     add_legend=add_legend,
                     RegionDataObject=regions,
                     region_tuple=self.region_tuple,
+                    AnnotationsDataObject=annotations,
+                    annotations_key=self.annotations_key,
+                    annotations_mode=self.annotations_mode,
                     ImageDataObject=imagedata,
                     image_key=self.image_key,
                     pixelwidth_per_subplot=self.pixelwidth_per_subplot,
@@ -730,10 +764,6 @@ class MultiSpatialPlot:
     def single_spatial(
         self,
         ConfigData: _SinglePlotConfig,
-        #axis: plt.Axes,
-        # color_dict: Dict,
-        # crange: Optional[Tuple[float, float]],
-        # add_legend: bool,
         ):
 
         # calculate marker size
@@ -829,6 +859,43 @@ class MultiSpatialPlot:
                 if self.crange_type == 'percentile':
                     clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
+        if ConfigData.annotations_df is not None:
+            # convert rgb colors to hex colors
+            hex_colors = [
+                _rgb2hex_robust(elem, scale_to_one=True, max_value=255)
+                for elem
+                in ConfigData.annotations_df.color
+                ]
+
+            if ConfigData.annotations_mode == "outlined":
+                # plot the annotations as outlines
+                ConfigData.annotations_df.plot(
+                    edgecolor=hex_colors,
+                    linewidth=4,
+                    facecolor="none",
+                    ax=ConfigData.ax,
+                    aspect=1
+                    )
+            elif ConfigData.annotations_mode == "filled":
+                # plot the annotations filled with transparent colors
+                ConfigData.annotations_df.plot(
+                    color=hex_colors,
+                    edgecolor="none",
+                    alpha=0.3,
+                    ax=ConfigData.ax,
+                    aspect=1
+                    )
+
+                # plot outlines in black
+                ConfigData.annotations_df.plot(
+                    facecolor="none",
+                    edgecolor="black",
+                    linewidth=2,
+                    ax=ConfigData.ax,
+                    aspect=1
+                    )
+            else:
+                raise ValueError(f"Unknown type for annotations_mode: {type(ConfigData.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
 
 
 def plot_spatial(
@@ -845,6 +912,8 @@ def plot_spatial(
     xlim: Optional[Tuple[float, float]] = None,
     ylim: Optional[Tuple[float, float]] = None,
     region_tuple: Tuple[str, str] = None,
+    annotations_key: Optional[Union[str, Tuple[str, Optional[Union[Literal["all"], str, List[str]]]]]] = None,
+    annotations_mode: Literal["outlined", "filled"] = "outlined",
     crange: Optional[List[int]] = None,
     crange_type: Literal['minmax', 'percentile'] = 'minmax',
     palette: str = DEFAULT_CATEGORICAL_CMAP,
@@ -888,6 +957,8 @@ def plot_spatial(
         xlim=xlim,
         ylim=ylim,
         region_tuple=region_tuple,
+        annotations_key=annotations_key,
+        annotations_mode=annotations_mode,
         crange=crange,
         crange_type=crange_type,
         palette=palette,
