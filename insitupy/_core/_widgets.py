@@ -1,14 +1,8 @@
-from numbers import Number
 from typing import List, Optional
-from warnings import warn
 
-import matplotlib
 import numpy as np
-import pandas as pd
-from matplotlib.colors import ListedColormap, rgb2hex
-from shapely.geometry.multipolygon import MultiPolygon
+from matplotlib.colors import ListedColormap
 
-import insitupy._core._callbacks
 #import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
@@ -397,150 +391,45 @@ if WITH_NAPARI:
 
                         # iterate through classes
                         for cl in classes:
-
                             layer_name = f"{cl} ({key})"
+                            #if layer_name not in viewer.layers: # this cannot be checked here because the symbol is missing which is added in the adding process below
+                            # get dataframe for this class
+                            class_df = annot_df[annot_df["name"] == cl].copy()
 
-                            if layer_name not in viewer.layers:
-                                # get dataframe for this class
-                                class_df = annot_df[annot_df["name"] == cl].copy()
+                            # simplify polygons for visualization
+                            # class_df["geometry"] = class_df["geometry"].simplify(tolerance)
 
-                                # simplify polygons for visualization
-                                # class_df["geometry"] = class_df["geometry"].simplify(tolerance)
+                            if not "color" in class_df.columns:
+                                # create a RGB color with range 0-255 for this key
+                                rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
+                            else:
+                                rgb_color = None
 
-                                if not "color" in class_df.columns:
-                                    # create a RGB color with range 0-255 for this key
-                                    rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
-                                else:
-                                    rgb_color = None
-
-                                # add layer to viewer
-                                _add_geometries_as_layer(
-                                    dataframe=class_df,
-                                    viewer=viewer,
-                                    layer_name=layer_name,
-                                    #scale_factor=scale_factor,
-                                    edge_width=edge_width,
-                                    opacity=opacity,
-                                    rgb_color=rgb_color,
-                                    show_names=show_names,
-                                    mode=geom_type,
-                                    tolerance=tolerance
-                                )
+                            # add layer to viewer
+                            _add_geometries_as_layer(
+                                dataframe=class_df,
+                                viewer=viewer,
+                                layer_name=layer_name,
+                                #scale_factor=scale_factor,
+                                edge_width=edge_width,
+                                opacity=opacity,
+                                rgb_color=rgb_color,
+                                show_names=show_names,
+                                mode=geom_type,
+                                tolerance=tolerance
+                            )
 
                     # connect key change with update function
                     @show_geometries_widget.geom_type.changed.connect
                     @show_geometries_widget.key.changed.connect
                     @show_geometries_widget.call_button.clicked.connect
                     @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
-                    @viewer.layers.events.inserted.connect # or remoed. Therefore, this update is necessary
+                    @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
                     def update_annotation_widget_after_changes(event=None):
                         _update_keys_based_on_geom_type(show_geometries_widget, xdata=data)
                         _update_classes_on_key_change(show_geometries_widget, xdata=data)
                         _set_show_names_based_on_geom_type(show_geometries_widget)
                         _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
-
-        #@magic_factory(
-        @magicgui(
-            call_button='Add geometry layer',
-            key={"choices": ["Geometric annotations", "Point annotations", "Regions"], "label": "Type:"},
-            annot_key={'label': 'Key:'},
-            class_name={'label': 'Class:'}
-            )
-        def add_new_geometries_widget(
-            key: str = "Geometric annotations",
-            annot_key: str = "TestKey",
-            class_name: str = "TestClass",
-        ) -> napari.types.LayerDataTuple:
-            # name pattern of layer name
-            name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
-
-            if (class_name != "") & (annot_key != ""):
-                if key == "Geometric annotations":
-                    # generate name
-                    name = name_pattern.format(
-                        type_symbol=ANNOTATIONS_SYMBOL,
-                        class_name=class_name,
-                        annot_key=annot_key
-                        )
-
-                    # generate shapes layer for geometric annotation
-                    layer = (
-                        [],
-                        {
-                            'name': name,
-                            'shape_type': 'polygon',
-                            'edge_width': 10,
-                            'edge_color': 'red',
-                            'face_color': 'transparent',
-                            #'scale': (config.pixel_size, config.pixel_size),
-                            'properties': {
-                                'uid': np.array([], dtype='object')
-                            }
-                            },
-                        'shapes'
-                        )
-                elif key == "Point annotations":
-                    # generate name
-                    name = name_pattern.format(
-                        type_symbol=POINTS_SYMBOL,
-                        class_name=class_name,
-                        annot_key=annot_key
-                        )
-
-                    # generate points layer for point annotation
-                    layer = (
-                        [],
-                        {
-                            'name': name,
-                            'size': 40,
-                            'edge_color': 'black',
-                            'face_color': 'blue',
-                            #'scale': (config.pixel_size, config.pixel_size),
-                            'properties': {
-                                'uid': np.array([], dtype='object')
-                            }
-                            },
-                        'points'
-                        )
-
-                elif key == "Regions":
-                    # generate name
-                    name = name_pattern.format(
-                        type_symbol=REGIONS_SYMBOL,
-                        class_name=class_name,
-                        annot_key=annot_key
-                        )
-
-                    # generate shapes layer for region
-                    layer = (
-                        [],
-                        {
-                            'name': name,
-                            'shape_type': 'polygon',
-                            'edge_width': 10,
-                            'edge_color': '#ffaa00ff',
-                            'face_color': 'transparent',
-                            #'scale': (config.pixel_size, config.pixel_size),
-                            'properties': {
-                                'uid': np.array([], dtype='object')
-                            }
-                            },
-                        'shapes'
-                        )
-
-                else:
-                    layer = None
-
-                if name in viewer_config.viewer.layers:
-                    return None
-
-                # reset class name to nothing
-                add_new_geometries_widget.class_name.value = ""
-
-                return layer
-
-            else:
-                return None
 
         return (
             show_cells_widget,
@@ -549,5 +438,116 @@ if WITH_NAPARI:
             show_boundaries_widget,
             select_data,
             filter_cells_widget,
-            add_new_geometries_widget
+            #add_new_geometries_widget
             )
+
+    # Difference between magicgui and magic_factory decorators:
+    # - the magicgui decorator directly returns the widget
+    # - the magic_factory decorator returns a factory function that can be called to generate the widget
+    @magic_factory(
+        call_button='Add geometry layer',
+        key={"choices": ["Geometric annotations", "Point annotations", "Regions"], "label": "Type:"},
+        annot_key={'label': 'Key:'},
+        class_name={'label': 'Class:'}
+        )
+    def add_new_geometries_widget(
+        key: str = "Geometric annotations",
+        annot_key: str = "TestKey",
+        class_name: str = "TestClass",
+    ) -> napari.types.LayerDataTuple:
+        # name pattern of layer name
+        name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
+
+        # get current viewer
+        viewer = napari.current_viewer()
+
+        if (class_name != "") & (annot_key != ""):
+            if key == "Geometric annotations":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=ANNOTATIONS_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
+
+                # generate shapes layer for geometric annotation
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'shape_type': 'polygon',
+                        'edge_width': 10,
+                        'edge_color': 'red',
+                        'face_color': 'transparent',
+                        #'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object'),
+                            'type': np.array([], dtype='object')
+                            }
+                        },
+                    'shapes'
+                    )
+            elif key == "Point annotations":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=POINTS_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
+
+                # generate points layer for point annotation
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'size': 40,
+                        'edge_color': 'black',
+                        'face_color': 'blue',
+                        #'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object'),
+                            'type': np.array([], dtype='object')
+                        }
+                        },
+                    'points'
+                    )
+
+            elif key == "Regions":
+                # generate name
+                name = name_pattern.format(
+                    type_symbol=REGIONS_SYMBOL,
+                    class_name=class_name,
+                    annot_key=annot_key
+                    )
+
+                # generate shapes layer for region
+                layer = (
+                    [],
+                    {
+                        'name': name,
+                        'shape_type': 'polygon',
+                        'edge_width': 10,
+                        'edge_color': '#ffaa00ff',
+                        'face_color': 'transparent',
+                        #'scale': (config.pixel_size, config.pixel_size),
+                        'properties': {
+                            'uid': np.array([], dtype='object'),
+                            'type': np.array([], dtype='object')
+                        }
+                        },
+                    'shapes'
+                    )
+
+            else:
+                layer = None
+
+            if name in viewer.layers:
+                return None
+
+            # reset class name to nothing
+            add_new_geometries_widget.class_name.value = ""
+
+            return layer
+
+        else:
+            return None

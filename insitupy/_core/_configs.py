@@ -19,6 +19,52 @@ def _get_viewer_uid(viewer):
 
 if WITH_NAPARI:
     class ViewerConfig:
+
+        """
+        ViewerConfig manages the configuration and data access for the InSituPy napari viewer.
+
+        This class acts as a bridge between the viewer interface and the underlying InSituData,
+        providing convenient access to AnnData matrices, spatial coordinates, gene and observation
+        metadata, and image boundaries. It also manages viewer-specific state such as the currently
+        selected data layer and cached variables for rendering.
+
+        Attributes:
+            data (InSituData): The input data object containing single-cell spatial transcriptomics data.
+            data_name (str or None): The key identifying the currently selected data layer.
+            has_cells (bool): Indicates whether cell data is available.
+            static_canvas (FigureCanvas): A static canvas used for rendering legends or overlays.
+            key_dict (dict): A dictionary mapping data categories to their respective keys.
+            masks (list): A list of mask names extracted from the boundary metadata.
+            pixel_size (float or None): The pixel size of the image, if available.
+            recent_selections (list): A list of recently selected items in the viewer.
+
+        Properties:
+            adata (AnnData): The AnnData object for the selected data layer.
+            boundaries: The boundary data for the selected data layer.
+            genes (list): Sorted list of gene names.
+            observations (list): Sorted list of observation names.
+            obsm (list): List of available obsm keys with subcategories.
+            points (ndarray): Spatial coordinates of the cells.
+            X (ndarray): Dense data matrix of gene expression values.
+
+        Methods:
+            refresh_variables(): Updates internal variables such as key_dict, masks, and pixel size.
+            update_data_name(new_data_name): Updates the selected data layer.
+        """
+
+        __slots__ = [
+            'data',
+            'data_name',
+            'has_cells',
+            'static_canvas',
+            'key_dict',
+            'masks',
+            'pixel_size',
+            'recent_selections',
+            '_removal_tracker',
+            '_auto_set_uid'
+        ] # using slots reduces he memory consumption and accelerates attribute access
+
         def __init__(
             self,
             data: InSituData
@@ -32,16 +78,14 @@ if WITH_NAPARI:
                 self.data_name = None
                 self.has_cells = False
 
+            # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
 
-            #self.adata = xdata.cells[self.data_name].matrix
-            #self.boundaries = xdata.cells[self.data_name].boundaries
-            #self.viewer = data.viewer
-            #self.genes = sorted(self.adata.var_names.tolist())
-            #self.observations = sorted(self.adata.obs.columns.tolist())
+            # list to track the removal of elements
+            self._removal_tracker = []
 
-            #self.points = np.flip(self.adata.obsm["spatial"].copy(), axis=1)
-            #self.X = self.adata.X.toarray() if issparse(self.adata.X) else self.adata.X
+            # boolean switch to automatically set the uid of an added shape
+            self._auto_set_uid = True
 
             self.refresh_variables()
 
@@ -124,6 +168,28 @@ if WITH_NAPARI:
             return None
 
     class ViewerConfigManager:
+        """
+        Manages multiple ViewerConfig instances, each associated with a unique identifier.
+
+        This class provides methods to create, store, retrieve, and list ViewerConfig
+        objects, enabling organized access to multiple viewer configurations.
+
+        Attributes:
+            _configs (Dict[str, ViewerConfig]): A dictionary mapping unique IDs to ViewerConfig instances.
+
+        Methods:
+            add_config(data) -> str:
+                Creates a new ViewerConfig from the given data and stores it with a unique ID.
+            __getitem__(config_id: str) -> ViewerConfig:
+                Retrieves a ViewerConfig by its unique ID using dictionary-like access.
+            list_configs() -> Dict[str, ViewerConfig]:
+                Returns all stored ViewerConfig instances with their associated IDs.
+            __repr__() -> str:
+                Returns a string representation summarizing the stored configurations.
+        """
+
+        __slots__ = ['_configs']
+
         def __init__(self):
             self._configs: Dict[str, ViewerConfig] = {}
 

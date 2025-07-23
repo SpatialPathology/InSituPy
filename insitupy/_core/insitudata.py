@@ -16,26 +16,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from geopandas import GeoDataFrame
 from parse import *
 from pyarrow import ArrowInvalid
+from qtpy.QtWidgets import QPushButton
 from scipy.sparse import issparse
-from shapely import Point
 from tqdm import tqdm
 
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._core._checks import _check_geometry_symbol_and_layer
 from insitupy._core._configs import _get_viewer_uid
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
+from insitupy._core.dataclasses import (AnnotationsData, ImageData,
                                         MultiCellData, RegionsData)
+from insitupy._core.viewer import sync_geometries
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError)
@@ -46,9 +45,7 @@ from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
                                write_dict_to_json)
 from insitupy.io.io import read_multicelldata, read_shapesdata
 from insitupy.utils.geo import fast_query_points_within_polygon
-from insitupy.utils.utils import (_crop_transcripts,
-                                  convert_napari_shape_to_polygon_or_line,
-                                  convert_to_list)
+from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
 # optional packages that are not always installed
 if WITH_NAPARI:
@@ -58,8 +55,7 @@ if WITH_NAPARI:
     from insitupy._core._configs import config_manager
 
     #from napari.layers.shapes.shapes import Shapes
-    from ._layers import _add_geometries_as_layer
-    from ._widgets import _initialize_widgets  # add_new_geometries_widget
+    from ._widgets import _initialize_widgets, add_new_geometries_widget
 
 
 class InSituData:
@@ -1517,7 +1513,6 @@ class InSituData:
                 show_boundaries_widget,
                 select_data,
                 filter_cells_widget,
-                add_geom_widget
             ) = _initialize_widgets(
                 viewer=viewer,
                 viewer_config=viewer_config
@@ -1550,7 +1545,7 @@ class InSituData:
                 show_points_widget.max_width = widgets_max_width
 
             # add annotation widget to napari
-            #add_geom_widget = add_new_geometries_widget()
+            add_geom_widget = add_new_geometries_widget()
             #annot_widget.max_height = 100
             add_geom_widget.max_width = widgets_max_width
             viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
@@ -1564,20 +1559,44 @@ class InSituData:
         self,
         viewer: napari.Viewer
         ):
+        # get viewer configuration from configuration manager
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
+
         # Assign function to an layer addition event
         def _update_uid(event):
+            global uids_before_removal
             if event is not None:
                 layer = event.source
-                if event.action == "added":
-                    if 'uid' in layer.properties:
-                        layer.properties['uid'][-1] = str(uuid4())
-                    else:
-                        layer.properties['uid'] = np.array([str(uuid4())], dtype='object')
+                print(event.action)
+                if event.action == "added" and viewer_config._auto_set_uid:
+                    if isinstance(layer, Shapes):
+                        type_last = layer.shape_type[-1]
+                        if type_last == "polygon":
+                            geom_type = "polygon_exterior"
+                        elif type_last == "line":
+                            geom_type = "line"
+                    elif isinstance(layer, Points):
+                        geom_type = "point"
+                    #if 'uid' in layer.properties:
+                    uid = str(uuid4())
+                    try:
+                        print(uid)
+                        layer.properties['uid'][-1] = uid
+                        layer.properties['type'][-1] = geom_type
+                    except KeyError:
+                        print(uid)
+                        layer.properties['uid'] = np.array([uid], dtype='object')
+                        layer.properties['uid'] = np.array([geom_type], dtype='object')
 
-                # elif event.action == "removed":
-                #     pass
-                # else:
-                #     raise ValueError(f"Unexpected value '{event.action}' for `event.action`. Expected 'add' or 'remove'.")
+                elif event.action == "removing":
+                    print(set(layer.properties['uid']))
+                    uids_before_removal = set(layer.properties['uid'])
+                elif event.action == "removed":
+                    print(uids_before_removal ^ set(layer.properties['uid']))
+                    viewer_config._removal_tracker += list(uids_before_removal ^ set(layer.properties['uid']))
+                    print(viewer_config._removal_tracker)
+                else:
+                    pass
 
         # Assign the function to data of all existing layers
         for layer in viewer.layers:
@@ -1604,6 +1623,20 @@ class InSituData:
         init_colorlegend_canvas()
         viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
 
+    def _add_buttons_to_viewer(
+        self,
+        viewer: napari.Viewer
+    ):
+        def sync_geometries_button():
+            sync_geometries()
+
+        # create the sync button
+        sync_button = QPushButton("Sync Geometries")
+        sync_button.clicked.connect(sync_geometries_button)
+
+        # add the sync button to viewer
+        viewer.window.add_dock_widget(sync_button, area='right', name="")
+
     def show(self,
         keys: Optional[str] = None,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
@@ -1616,12 +1649,10 @@ class InSituData:
         ):
         # initialize a config class manager with new ID
         uid_viewer = config_manager.add_config(data=self)
+        current_viewer_config = config_manager[uid_viewer] # get current viewer config
 
         # create viewer
         current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
-
-        # get current viewer config
-        current_viewer_config = config_manager[uid_viewer]
 
         # IMAGES
         if self._images is None:
@@ -1645,6 +1676,11 @@ class InSituData:
             widgets_max_width=widgets_max_width
         )
 
+        # BUTTONS
+        self._add_buttons_to_viewer(
+            viewer=current_viewer
+        )
+
         # EVENTS
         self._add_events_to_viewer(viewer=current_viewer)
 
@@ -1662,125 +1698,6 @@ class InSituData:
         if return_viewer:
             return current_viewer
 
-    def sync_geometries(self):
-        name_pattern = "{type_symbol} {class_name} ({annot_key})"
-
-        # get the viewer that was open last
-        viewer = napari.current_viewer()
-
-        if viewer is None:
-            print("No napari viewer open to synchronize from. First, use `.show()` to open a napari viewer.")
-            return
-
-        # iterate through layers and save them as annotation or region if they meet requirements
-        layers = viewer.layers
-        for layer in layers:
-            if isinstance(layer, Shapes) or isinstance(layer, Points):
-                name_parsed = parse(name_pattern, layer.name)
-                if name_parsed is not None:
-                    type_symbol = name_parsed.named["type_symbol"]
-                    annot_key = name_parsed.named["annot_key"]
-                    class_name = name_parsed.named["class_name"]
-
-                    checks_passed, object_type = _check_geometry_symbol_and_layer(
-                        layer=layer, type_symbol=type_symbol
-                    )
-
-                    if checks_passed:
-                        if object_type == "annotation":
-                            # if the InSituData object does not have an annotations attribute, initialize it
-                            if self.annotations is None:
-                                self.annotations = AnnotationsData() # initialize empty object
-
-                            shapesdata = self.annotations
-                        else:
-                            # if the InSituData object does not have an regions attribute, initialize it
-                            if self.regions is None:
-                                self.regions = RegionsData() # initialize empty object
-
-                            shapesdata = self.regions
-
-                        # import all geometries from viewer into InSituData
-                        self._store_geometries(
-                            layer=layer,
-                            shapesdata=shapesdata,
-                            object_type=object_type,
-                            annot_key=annot_key,
-                            class_name=class_name
-                        )
-
-                        # remove entries in InSituData that are not present in viewer
-                        current_ids = layer.properties['uid'] # get ids from current layer
-                        geom_df = shapesdata[annot_key]
-                        ids_stored = geom_df[geom_df["name"] == class_name].index
-
-                        # filter geom_df and keep only those entries that are also present in viewer
-                        mask = ~ids_stored.isin(current_ids)
-                        ids_to_remove = ids_stored[mask]
-                        n_removed = np.sum(mask)
-                        geom_df.drop(
-                            ids_to_remove,
-                            inplace=True
-                            )
-
-                        if n_removed > 0:
-                            if n_removed > 1:
-                                object_str = object_type + "s"
-                            else:
-                                object_str = object_type
-
-                            print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
-
-    def _store_geometries(
-        self,
-        layer,
-        shapesdata,
-        object_type: str,
-        annot_key: str,
-        class_name: str,
-        uid_col: str = "id"
-        ):
-        # extract shapes coordinates and colors
-        layer_data = layer.data
-        scale = layer.scale
-
-        if isinstance(layer, Points):
-            colors = layer.border_color.tolist()
-        else:
-            colors = layer.edge_color.tolist()
-
-        if isinstance(layer, Shapes):
-            # extract shape types
-            shape_types = layer.shape_type
-            # build annotation GeoDataFrame
-            geom_df = {
-                uid_col: layer.properties["uid"],
-                "objectType": object_type,
-                "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
-                "name": class_name,
-                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-            }
-
-        elif isinstance(layer, Points):
-            # build annotation GeoDataFrame
-            geom_df = {
-                uid_col: layer.properties["uid"],
-                "objectType": object_type,
-                "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
-                "name": class_name,
-                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-            }
-
-        # generate GeoDataFrame
-        geom_df = GeoDataFrame(geom_df, geometry="geometry")
-
-        # add annotations
-        shapesdata.add_data(
-            data=geom_df,
-            key=annot_key,
-            verbose=True,
-            scale_factor=scale[0]
-            )
 
     def reload(
         self,
