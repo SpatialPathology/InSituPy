@@ -1567,7 +1567,7 @@ class InSituData:
             global uids_before_removal
             if event is not None:
                 layer = event.source
-                print(event.action)
+                print(event.action) if viewer_config.verbose else None
                 if event.action == "added" and viewer_config._auto_set_uid:
                     if isinstance(layer, Shapes):
                         type_last = layer.shape_type[-1]
@@ -1579,12 +1579,11 @@ class InSituData:
                         geom_type = "point"
                     #if 'uid' in layer.properties:
                     uid = str(uuid4())
+                    print(f"Adding {geom_type} with UID {uid}") if viewer_config.verbose else None
                     try:
-                        print(uid)
                         layer.properties['uid'][-1] = uid
                         layer.properties['type'][-1] = geom_type
                     except KeyError:
-                        print(uid)
                         layer.properties['uid'] = np.array([uid], dtype='object')
                         layer.properties['uid'] = np.array([geom_type], dtype='object')
 
@@ -1592,9 +1591,9 @@ class InSituData:
                     print(set(layer.properties['uid']))
                     uids_before_removal = set(layer.properties['uid'])
                 elif event.action == "removed":
-                    print(uids_before_removal ^ set(layer.properties['uid']))
-                    viewer_config._removal_tracker += list(uids_before_removal ^ set(layer.properties['uid']))
-                    print(viewer_config._removal_tracker)
+                    removed_uids = uids_before_removal ^ set(layer.properties['uid'])
+                    print(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
+                    viewer_config._removal_tracker += list(removed_uids)
                 else:
                     pass
 
@@ -1645,11 +1644,14 @@ class InSituData:
         scalebar: bool = True,
         unit: str = "µm",
         return_viewer: bool = False,
-        widgets_max_width: int = 500
+        widgets_max_width: int = 500,
+        verbose: bool = False
         ):
         # initialize a config class manager with new ID
         uid_viewer = config_manager.add_config(data=self)
         current_viewer_config = config_manager[uid_viewer] # get current viewer config
+        if verbose:
+            current_viewer_config.verbose = True
 
         # create viewer
         current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")

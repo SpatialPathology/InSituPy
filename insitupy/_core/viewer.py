@@ -1,6 +1,7 @@
 import napari
 import numpy as np
 from geopandas import GeoDataFrame
+from napari.utils.notifications import show_info, show_warning
 from parse import parse
 from shapely import Point
 
@@ -86,30 +87,35 @@ if WITH_NAPARI:
     ):
         # remove entries in InSituData that are not present in viewer
         current_ids = layer.properties['uid'] # get ids from current layer
-        geom_df = shapesdata[annot_key]
-        ids_stored = geom_df[geom_df["name"] == class_name].index
 
-        # filter geom_df and keep only those entries that are also present in viewer
-        removal_mask = ~ids_stored.isin(current_ids)
-        ids_to_remove = ids_stored[removal_mask]
+        try:
+            geom_df = shapesdata[annot_key]
+        except KeyError:
+            pass
+        else:
+            ids_stored = geom_df[geom_df["name"] == class_name].index
 
-        # remove only elements that were actively removed from the viewer
-        ids_to_remove = [elem for elem in ids_to_remove if elem in config._removal_tracker]
-        n_removed = len(ids_to_remove)
+            # filter geom_df and keep only those entries that are also present in viewer
+            removal_mask = ~ids_stored.isin(current_ids)
+            ids_to_remove = ids_stored[removal_mask]
 
-        # drop entries from geometries dataframe
-        geom_df.drop(
-            ids_to_remove,
-            inplace=True
-            )
+            # remove only elements that were actively removed from the viewer
+            ids_to_remove = [elem for elem in ids_to_remove if elem in config._removal_tracker]
+            n_removed = len(ids_to_remove)
 
-        if n_removed > 0:
-            if n_removed > 1:
-                object_str = object_type + "s"
-            else:
-                object_str = object_type
+            # drop entries from geometries dataframe
+            geom_df.drop(
+                ids_to_remove,
+                inplace=True
+                )
 
-            print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
+            if n_removed > 0:
+                if n_removed > 1:
+                    object_str = object_type + "s"
+                else:
+                    object_str = object_type
+
+                print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
 
     def _store_geometries(
         layer,
@@ -153,10 +159,13 @@ if WITH_NAPARI:
         # generate GeoDataFrame
         geom_df = GeoDataFrame(geom_df, geometry="geometry")
 
-        # add annotations
-        shapesdata.add_data(
-            data=geom_df,
-            key=annot_key,
-            verbose=True,
-            scale_factor=scale[0]
-            )
+        if len(geom_df) > 0:
+            # add annotations
+            shapesdata.add_data(
+                data=geom_df,
+                key=annot_key,
+                verbose=True,
+                scale_factor=scale[0]
+                )
+        else:
+            show_info(f"No geometries found in layer {layer.name}.")

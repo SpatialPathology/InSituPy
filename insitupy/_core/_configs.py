@@ -61,6 +61,7 @@ if WITH_NAPARI:
             'masks',
             'pixel_size',
             'recent_selections',
+            'verbose',
             '_removal_tracker',
             '_auto_set_uid'
         ] # using slots reduces he memory consumption and accelerates attribute access
@@ -84,8 +85,9 @@ if WITH_NAPARI:
             # list to track the removal of elements
             self._removal_tracker = []
 
-            # boolean switch to automatically set the uid of an added shape
-            self._auto_set_uid = True
+            # set boolean variables
+            self.verbose = False
+            self._auto_set_uid = True # boolean switch to automatically set the uid of an added shape
 
             self.refresh_variables()
 

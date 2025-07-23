@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import numpy as np
 from matplotlib.colors import ListedColormap
+from napari.utils.notifications import show_info, show_warning
 
 #import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
@@ -13,7 +14,8 @@ from insitupy._core._callbacks import (_refresh_widgets_after_data_change,
                                        _update_colorlegend,
                                        _update_key_on_type_change,
                                        _update_keys_based_on_geom_type)
-from insitupy._core._configs import ViewerConfig
+from insitupy._core._configs import (ViewerConfig, _get_viewer_uid,
+                                     config_manager)
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer, _update_points_layer
 from insitupy.images.utils import create_img_pyramid
@@ -458,11 +460,16 @@ if WITH_NAPARI:
         # name pattern of layer name
         name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
 
-        # get current viewer
+        # get current viewer and config
         viewer = napari.current_viewer()
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
 
         if (class_name != "") & (annot_key != ""):
             if key == "Geometric annotations":
+                # print(annot_key)
+                # print(class_name)
+                # print(viewer_config)
+                _test_existance(viewer_config, annot_key, class_name, modality="annotations")
                 # generate name
                 name = name_pattern.format(
                     type_symbol=ANNOTATIONS_SYMBOL,
@@ -476,7 +483,7 @@ if WITH_NAPARI:
                     {
                         'name': name,
                         'shape_type': 'polygon',
-                        'edge_width': 10,
+                        'edge_width': 4,
                         'edge_color': 'red',
                         'face_color': 'transparent',
                         #'scale': (config.pixel_size, config.pixel_size),
@@ -488,6 +495,7 @@ if WITH_NAPARI:
                     'shapes'
                     )
             elif key == "Point annotations":
+                _test_existance(viewer_config, annot_key, class_name, modality="annotations")
                 # generate name
                 name = name_pattern.format(
                     type_symbol=POINTS_SYMBOL,
@@ -500,7 +508,7 @@ if WITH_NAPARI:
                     [],
                     {
                         'name': name,
-                        'size': 40,
+                        'size': 10,
                         'edge_color': 'black',
                         'face_color': 'blue',
                         #'scale': (config.pixel_size, config.pixel_size),
@@ -513,6 +521,7 @@ if WITH_NAPARI:
                     )
 
             elif key == "Regions":
+                _test_existance(viewer_config, annot_key, class_name, modality="regions")
                 # generate name
                 name = name_pattern.format(
                     type_symbol=REGIONS_SYMBOL,
@@ -550,4 +559,19 @@ if WITH_NAPARI:
             return layer
 
         else:
+            show_warning("Please provide a class name and an annotation key.")
             return None
+
+
+    def _test_existance(viewer_config, annot_key, class_name, modality):
+        try:
+            geom_df = getattr(viewer_config.data, modality)
+            exists = (geom_df[annot_key]["name"] == class_name).any()
+        except KeyError:
+            exists = False
+
+        if exists:
+            show_warning((
+                    f"Data contains already {modality} with key '{annot_key}' and class '{class_name}'."
+                    f"To show them use the 'Show geometries' widget."
+                    ))

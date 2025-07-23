@@ -118,14 +118,14 @@ if WITH_NAPARI:
                 if shapes_layer_exists:
                     layer = viewer.layers[shapes_layer_name_with_symbol]
                     if uid in layer.properties["uid"]:
-                        print(f"Already in layer: {uid}")
+                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
                         continue
 
             if annotation_type == "point_like":
                 if points_layer_exists:
                     layer = viewer.layers[points_layer_name_with_symbol]
                     if uid in layer.properties["uid"]:
-                        print(f"Already in layer: {uid}")
+                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
                         continue
 
             if annotation_type == "polygon_like":
@@ -220,9 +220,7 @@ if WITH_NAPARI:
                     face_color='transparent',
                 )
 
-                # # add properties
-                # layer.properties["uid"] = np.append(layer.properties["uid"], properties_dict["uid"])
-                # layer.properties["type"] = np.append(layer.properties["type"], properties_dict["type"])
+                # add properties
                 layer.properties["uid"][-len(shape_list):] = properties_dict["uid"]
                 layer.properties["type"][-len(shape_list):] = properties_dict["type"]
 
