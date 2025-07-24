@@ -16,25 +16,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from geopandas import GeoDataFrame
 from parse import *
 from pyarrow import ArrowInvalid
+from qtpy.QtWidgets import QPushButton
 from scipy.sparse import issparse
-from shapely import Point
 from tqdm import tqdm
 
 import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._core._checks import _check_geometry_symbol_and_layer
+from insitupy._core._configs import _get_viewer_uid
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
+from insitupy._core.dataclasses import (AnnotationsData, ImageData,
                                         MultiCellData, RegionsData)
+from insitupy._core.viewer import sync_geometries
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError)
@@ -45,17 +45,17 @@ from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
                                write_dict_to_json)
 from insitupy.io.io import read_multicelldata, read_shapesdata
 from insitupy.utils.geo import fast_query_points_within_polygon
-from insitupy.utils.utils import (_crop_transcripts,
-                                  convert_napari_shape_to_polygon_or_line,
-                                  convert_to_list)
+from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
 # optional packages that are not always installed
 if WITH_NAPARI:
     import napari
     from napari.layers import Layer, Points, Shapes
+    from napari.utils.notifications import show_info, show_warning
+
+    from insitupy._core._configs import config_manager
 
     #from napari.layers.shapes.shapes import Shapes
-    from ._layers import _add_geometries_as_layer
     from ._widgets import _initialize_widgets, add_new_geometries_widget
 
 
@@ -154,7 +154,7 @@ class InSituData:
                               read_all, read_annotations, read_cells,
                               read_images, read_regions, read_transcripts,
                               reduce_dimensions, save_current_colorlegend,
-                              store_geometries)
+                              store_geometries, sync_geometries)
 
     def __init__(self,
                  path: Union[str, os.PathLike, Path] = None,
@@ -183,7 +183,7 @@ class InSituData:
         self._regions = None
 
         # other
-        self._viewer = None
+        #self._viewer = None
         self._quicksave_dir = None
 
     def __repr__(self):
@@ -356,19 +356,19 @@ class InSituData:
     def transcripts(self):
         self._transcripts = None
 
-    @property
-    def viewer(self):
-        """Return viewer of the InSituData object.
-        """
-        return self._viewer
+    # @property
+    # def viewer(self):
+    #     """Return viewer of the InSituData object.
+    #     """
+    #     return self._viewer
 
-    @viewer.setter
-    def viewer(self, value):
-        self._viewer = value
+    # @viewer.setter
+    # def viewer(self, value):
+    #     self._viewer = value
 
-    @viewer.deleter
-    def viewer(self):
-        self._viewer = None
+    # @viewer.deleter
+    # def viewer(self):
+    #     self._viewer = None
 
     @property
     def annotations(self):
@@ -570,15 +570,14 @@ class InSituData:
         Function to generate a deep copy of the InSituData object.
         '''
         from copy import deepcopy
-        had_viewer = False
-        if self._viewer is not None:
-            # make copy of viewer to add it later again
-            had_viewer = True
-            viewer_copy = self._viewer.copy()
 
-            # remove viewer because there is otherwise a error during deepcopy
-            self.viewer = None
-
+        # had_viewer = False
+        # if self._viewer is not None:
+        #     # make copy of viewer to add it later again
+        #     had_viewer = True
+        #     viewer_copy = self._viewer.copy()
+        #     # remove viewer because there is otherwise a error during deepcopy
+        #     self.viewer = None
         # make copy
         self_copy = deepcopy(self)
 
@@ -586,9 +585,9 @@ class InSituData:
             self_copy._path = None
             self_copy.metadata["path"] = None
 
-        # add viewer again to original object if necessary
-        if had_viewer:
-            self._viewer = viewer_copy
+        # # add viewer again to original object if necessary
+        # if had_viewer:
+        #     self._viewer = viewer_copy
 
         return self_copy
 
@@ -704,8 +703,9 @@ class InSituData:
                 _self.metadata["history"][k] = []
 
         if inplace:
-            if self._viewer is not None:
-                del _self.viewer # delete viewer
+            pass
+            # if self._viewer is not None:
+            #     del _self.viewer # delete viewer
         else:
             return _self
 
@@ -1379,159 +1379,169 @@ class InSituData:
             for k in ad.metadata.keys():
                 annotations.add_data(ad[k], k, verbose=True)
 
+    def _add_images_to_viewer(
+        self,
+        viewer: napari.Viewer,
+        grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"]
+        ):
+        images_attr = self._images
+        n_images = len(images_attr.metadata)
+        n_grayscales = 0 # number of grayscale images
+        for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
+        #for i, img_name in enumerate(image_keys):
+            img = images_attr[img_name]
+            is_visible = False if i < n_images - 1 else True # only last image is set visible
+            pixel_size = img_metadata['pixel_size']
 
-    def show(self,
-        keys: Optional[str] = None,
+            # check if the current image is RGB
+            is_rgb = self._images.metadata[img_name]["rgb"]
+
+            if is_rgb:
+                cmap = None  # default value of cmap
+                blending = "translucent_no_depth"  # set blending mode
+            else:
+                if img_name == "nuclei":
+                    cmap = "blue"
+                else:
+                    cmap = grayscale_colormap[n_grayscales]
+                    n_grayscales += 1
+                blending = "additive"  # set blending mode
+
+
+            if not isinstance(img, list):
+                # create image pyramid for lazy loading
+                img_pyramid = create_img_pyramid(img=img, nsubres=6)
+            else:
+                img_pyramid = img
+
+            # infer contrast limits
+            contrast_limits = _get_contrast_limits(img_pyramid)
+
+            if contrast_limits[1] == 0:
+                warn("The maximum value of the image is 0. Is the image really completely empty?")
+                contrast_limits = (0, 255)
+
+            # add img pyramid to napari viewer
+            viewer.add_image(
+                    img_pyramid,
+                    name=img_name,
+                    colormap=cmap,
+                    blending=blending,
+                    rgb=is_rgb,
+                    contrast_limits=contrast_limits,
+                    scale=(pixel_size, pixel_size),
+                    visible=is_visible
+                )
+
+    def _add_cells_to_viewer(
+        self,
+        viewer: napari.viewer,
+        keys: str,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
         cells_layer: Optional[str] = None,
-        point_size: int = 8,
-        scalebar: bool = True,
-        unit: str = "µm",
-        grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"],
-        return_viewer: bool = False,
+        point_size: int = 8
+        ):
+        if self._cells is None:
+            raise InSituDataMissingObject("cells")
+        else:
+            celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
+
+            if cells_layer is None:
+                cells_layer_name = self.cells.main_key
+            else:
+                cells_layer_name = cells_layer
+
+            # convert keys to list
+            keys = convert_to_list(keys)
+
+            # get point coordinates
+            points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
+            #points *= pixel_size # convert to length unit (e.g. µm)
+
+            # get expression matrix
+            if issparse(celldata.matrix.X):
+                X = celldata.matrix.X.toarray()
+            else:
+                X = celldata.matrix.X
+
+            for i, k in enumerate(keys):
+                # get expression values
+                color_value = _get_expression_values(
+                    adata=celldata.matrix,
+                    X=X,
+                    key_type=key_type, key=k
+                )
+
+                # extract names of cells
+                cell_names = celldata.matrix.obs_names.values
+
+                # create points layer
+                layer = _create_points_layer(
+                    points=points,
+                    color_values=color_value,
+                    name=f"{cells_layer_name}-{k}",
+                    point_names=cell_names,
+                    point_size=point_size,
+                    visible=True
+                )
+
+                # add layer programmatically - does not work for all types of layers
+                # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
+                #self._viewer.add_layer(Layer.create(*layer))
+                viewer.add_layer(Layer.create(*layer))
+
+    def _add_widgets_to_viewer(
+        self,
+        viewer: napari.Viewer,
         widgets_max_width: int = 500
         ):
+        # get viewer configuration from configuration manager
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        # create viewer
-        self._viewer = napari.Viewer(title=f"{self._slide_id}: {self._sample_id}")
-
-        if self._images is None:
-            warn("No attribute `.images` found.")
-        else:
-            images_attr = self._images
-            n_images = len(images_attr.metadata)
-            n_grayscales = 0 # number of grayscale images
-            for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
-            #for i, img_name in enumerate(image_keys):
-                img = images_attr[img_name]
-                is_visible = False if i < n_images - 1 else True # only last image is set visible
-                pixel_size = img_metadata['pixel_size']
-
-                # check if the current image is RGB
-                is_rgb = self._images.metadata[img_name]["rgb"]
-
-                if is_rgb:
-                    cmap = None  # default value of cmap
-                    blending = "translucent_no_depth"  # set blending mode
-                else:
-                    if img_name == "nuclei":
-                        cmap = "blue"
-                    else:
-                        cmap = grayscale_colormap[n_grayscales]
-                        n_grayscales += 1
-                    blending = "additive"  # set blending mode
-
-
-                if not isinstance(img, list):
-                    # create image pyramid for lazy loading
-                    img_pyramid = create_img_pyramid(img=img, nsubres=6)
-                else:
-                    img_pyramid = img
-
-                # infer contrast limits
-                contrast_limits = _get_contrast_limits(img_pyramid)
-
-                if contrast_limits[1] == 0:
-                    warn("The maximum value of the image is 0. Is the image really completely empty?")
-                    contrast_limits = (0, 255)
-
-                # add img pyramid to napari viewer
-                self._viewer.add_image(
-                        img_pyramid,
-                        name=img_name,
-                        colormap=cmap,
-                        blending=blending,
-                        rgb=is_rgb,
-                        contrast_limits=contrast_limits,
-                        scale=(pixel_size, pixel_size),
-                        visible=is_visible
-                    )
-
-        # optionally: add cells as points
-        if keys is not None:
-            if self._cells is None:
-                raise InSituDataMissingObject("cells")
-            else:
-                celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
-
-                if cells_layer is None:
-                    cells_layer_name = self.cells.main_key
-                else:
-                    cells_layer_name = cells_layer
-
-                # convert keys to list
-                keys = convert_to_list(keys)
-
-                # get point coordinates
-                points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
-                #points *= pixel_size # convert to length unit (e.g. µm)
-
-                # get expression matrix
-                if issparse(celldata.matrix.X):
-                    X = celldata.matrix.X.toarray()
-                else:
-                    X = celldata.matrix.X
-
-                for i, k in enumerate(keys):
-                    # get expression values
-                    color_value = _get_expression_values(
-                        adata=celldata.matrix,
-                        X=X,
-                        key_type=key_type, key=k
-                    )
-
-                    # extract names of cells
-                    cell_names = celldata.matrix.obs_names.values
-
-                    # create points layer
-                    layer = _create_points_layer(
-                        points=points,
-                        color_values=color_value,
-                        name=f"{cells_layer_name}-{k}",
-                        point_names=cell_names,
-                        point_size=point_size,
-                        visible=True
-                    )
-
-                    # add layer programmatically - does not work for all types of layers
-                    # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
-                    self._viewer.add_layer(Layer.create(*layer))
-
-        # WIDGETS
         if self._cells is None:
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
             add_geom_widget.max_height = 120
             add_geom_widget.max_width = widgets_max_width
-            self._viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
+            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
         else:
-            celldata = self._cells
+            #celldata = self._cells
             # initialize the widgets
-            show_points_widget, locate_cells_widget, show_geometries_widget, show_boundaries_widget, select_data, filter_cells_widget = _initialize_widgets(xdata=self)
+            (
+                show_points_widget,
+                locate_cells_widget,
+                show_geometries_widget,
+                show_boundaries_widget,
+                select_data,
+                filter_cells_widget,
+            ) = _initialize_widgets(
+                viewer=viewer,
+                viewer_config=viewer_config
+                )
 
             # add widgets to napari window
             if select_data is not None:
-                self._viewer.window.add_dock_widget(select_data, name="Select data", area="right")
+                viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
                 select_data.max_height = 50
                 select_data.max_width = widgets_max_width
 
             if show_points_widget is not None:
-                self.viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right")
+                viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right", tabify=False)
                 show_points_widget.max_height = 170
                 show_points_widget.max_width = widgets_max_width
 
             if show_boundaries_widget is not None:
-                self._viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right")
+                viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
                 #show_boundaries_widget.max_height = 80
                 show_boundaries_widget.max_width = widgets_max_width
 
             if locate_cells_widget is not None:
-                self._viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=True)
+                viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
                 #locate_cells_widget.max_height = 130
                 locate_cells_widget.max_width = widgets_max_width
 
             if filter_cells_widget is not None:
-                self.viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
+                viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
                 filter_cells_widget.max_height = 150
                 show_points_widget.max_width = widgets_max_width
 
@@ -1539,36 +1549,58 @@ class InSituData:
             add_geom_widget = add_new_geometries_widget()
             #annot_widget.max_height = 100
             add_geom_widget.max_width = widgets_max_width
-            self._viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
+            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
                                                 )
 
-            # if show_region_widget is not None:
-            #     self.viewer.window.add_dock_widget(show_region_widget, name="Show regions", area="right")
-            #     show_region_widget.max_height = 100
-            #     show_region_widget.max_width = widgets_max_width
-
             if show_geometries_widget is not None:
-                self._viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
+                viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
                 show_geometries_widget.max_width = widgets_max_width
 
-        # EVENTS
+    def _add_events_to_viewer(
+        self,
+        viewer: napari.Viewer
+        ):
+        # get viewer configuration from configuration manager
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
+
         # Assign function to an layer addition event
         def _update_uid(event):
+            global uids_before_removal
             if event is not None:
                 layer = event.source
-                if event.action == "added":
-                    if 'uid' in layer.properties:
-                        layer.properties['uid'][-1] = str(uuid4())
-                    else:
-                        layer.properties['uid'] = np.array([str(uuid4())], dtype='object')
+                print(event.action) if viewer_config.verbose else None
+                if event.action == "added" and viewer_config._auto_set_uid:
+                    if isinstance(layer, Shapes):
+                        type_last = layer.shape_type[-1]
+                        if type_last in ["polygon", "rectangle", "ellipse"]:
+                            geom_type = "polygon_exterior"
+                        elif type_last in ["path", "line"]:
+                            geom_type = "line"
+                        else:
+                            show_warning(f"Unsupported shape type '{type_last}' for UID assignment. Only 'polygon' and 'path' are supported.")
+                    elif isinstance(layer, Points):
+                        geom_type = "point"
+                    #if 'uid' in layer.properties:
+                    uid = str(uuid4())
+                    print(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
+                    try:
+                        layer.properties['uid'][-1] = uid
+                        layer.properties['type'][-1] = geom_type
+                    except KeyError:
+                        layer.properties['uid'] = np.array([uid], dtype='object')
+                        layer.properties['uid'] = np.array([geom_type], dtype='object')
 
-                # elif event.action == "removed":
-                #     pass
-                # else:
-                #     raise ValueError(f"Unexpected value '{event.action}' for `event.action`. Expected 'add' or 'remove'.")
+                elif event.action == "removing":
+                    uids_before_removal = set(layer.properties['uid'])
+                elif event.action == "removed":
+                    removed_uids = uids_before_removal ^ set(layer.properties['uid'])
+                    print(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
+                    viewer_config._removal_tracker += list(removed_uids)
+                else:
+                    pass
 
         # Assign the function to data of all existing layers
-        for layer in self._viewer.layers:
+        for layer in viewer.layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
                 layer.events.data.connect(_update_uid)
 
@@ -1580,200 +1612,96 @@ class InSituData:
                     layer.events.data.connect(_update_uid)
 
         # Connect the function to any new layers added to the viewer
-        self._viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
+        viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
 
+    def _add_color_legend_to_viewer(
+        self,
+        viewer: napari.Viewer
+        ):
         # add color legend widget
         import insitupy._core._config as _config
         from insitupy._core._config import init_colorlegend_canvas
         init_colorlegend_canvas()
-        self._viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
+        viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
+
+    def _add_buttons_to_viewer(
+        self,
+        viewer: napari.Viewer
+    ):
+        def sync_geometries_button():
+            sync_geometries()
+
+        # create the sync button
+        sync_button = QPushButton("Sync Geometries")
+        sync_button.clicked.connect(sync_geometries_button)
+
+        # add the sync button to viewer
+        viewer.window.add_dock_widget(sync_button, area='right', name="")
+
+    def show(self,
+        keys: Optional[str] = None,
+        key_type: Literal["genes", "obs", "obsm"] = "genes",
+        cells_layer: Optional[str] = None,
+        point_size: int = 8,
+        scalebar: bool = True,
+        unit: str = "µm",
+        return_viewer: bool = False,
+        widgets_max_width: int = 500,
+        verbose: bool = False
+        ):
+        # initialize a config class manager with new ID
+        uid_viewer = config_manager.add_config(data=self)
+        current_viewer_config = config_manager[uid_viewer] # get current viewer config
+        if verbose:
+            current_viewer_config.verbose = True
+
+        # create viewer
+        current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
+
+        # IMAGES
+        if self._images is None:
+            warn("No attribute `.images` found.")
+        else:
+            self._add_images_to_viewer(viewer=current_viewer)
+
+        # CELLS
+        if keys is not None:
+            self._add_cells_to_viewer(
+                viewer=current_viewer,
+                keys=keys,
+                key_type=key_type,
+                cells_layer=cells_layer,
+                point_size=point_size
+                )
+
+        # WIDGETS
+        self._add_widgets_to_viewer(
+            viewer=current_viewer,
+            widgets_max_width=widgets_max_width
+        )
+
+        # BUTTONS
+        self._add_buttons_to_viewer(
+            viewer=current_viewer
+        )
+
+        # EVENTS
+        self._add_events_to_viewer(viewer=current_viewer)
+
+        # COLOR LEGEND
+        self._add_color_legend_to_viewer(viewer=current_viewer)
 
         # NAPARI SETTINGS
         if scalebar:
             # add scale bar
-            self._viewer.scale_bar.visible = True
-            self._viewer.scale_bar.unit = unit
+            current_viewer.scale_bar.visible = True
+            current_viewer.scale_bar.unit = unit
 
         napari.run()
+
         if return_viewer:
-            return self._viewer
+            return current_viewer
 
-    def sync_geometries(self):
-        name_pattern = "{type_symbol} {class_name} ({annot_key})"
-
-        if self._viewer is not None:
-            viewer = self._viewer
-        else:
-            print("Use `.show()` first to open a napari viewer.")
-
-        # iterate through layers and save them as annotation or region if they meet requirements
-        layers = viewer.layers
-        for layer in layers:
-            if isinstance(layer, Shapes) or isinstance(layer, Points):
-                name_parsed = parse(name_pattern, layer.name)
-                if name_parsed is not None:
-                    type_symbol = name_parsed.named["type_symbol"]
-                    annot_key = name_parsed.named["annot_key"]
-                    class_name = name_parsed.named["class_name"]
-
-                    checks_passed, object_type = _check_geometry_symbol_and_layer(
-                        layer=layer, type_symbol=type_symbol
-                    )
-
-                    if checks_passed:
-                        if object_type == "annotation":
-                            # if the InSituData object does not have an annotations attribute, initialize it
-                            if self.annotations is None:
-                                self.annotations = AnnotationsData() # initialize empty object
-
-                            shapesdata = self.annotations
-                        else:
-                            # if the InSituData object does not have an regions attribute, initialize it
-                            if self.regions is None:
-                                self.regions = RegionsData() # initialize empty object
-
-                            shapesdata = self.regions
-
-                        # import all geometries from viewer into InSituData
-                        self._store_geometries(
-                            layer=layer,
-                            shapesdata=shapesdata,
-                            object_type=object_type,
-                            annot_key=annot_key,
-                            class_name=class_name
-                        )
-
-                        # remove entries in InSituData that are not present in viewer
-                        current_ids = layer.properties['uid'] # get ids from current layer
-                        geom_df = shapesdata[annot_key]
-                        ids_stored = geom_df[geom_df["name"] == class_name].index
-
-                        # filter geom_df and keep only those entries that are also present in viewer
-                        mask = ~ids_stored.isin(current_ids)
-                        ids_to_remove = ids_stored[mask]
-                        n_removed = np.sum(mask)
-                        geom_df.drop(
-                            ids_to_remove,
-                            inplace=True
-                            )
-
-                        if n_removed > 0:
-                            if n_removed > 1:
-                                object_str = object_type + "s"
-                            else:
-                                object_str = object_type
-
-                            print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
-
-    def _store_geometries(
-        self,
-        layer,
-        shapesdata,
-        object_type: str,
-        annot_key: str,
-        class_name: str,
-        uid_col: str = "id"
-        ):
-        # extract shapes coordinates and colors
-        layer_data = layer.data
-        scale = layer.scale
-
-        if isinstance(layer, Points):
-            colors = layer.border_color.tolist()
-        else:
-            colors = layer.edge_color.tolist()
-
-        if isinstance(layer, Shapes):
-            # extract shape types
-            shape_types = layer.shape_type
-            # build annotation GeoDataFrame
-            geom_df = {
-                uid_col: layer.properties["uid"],
-                "objectType": object_type,
-                "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
-                "name": class_name,
-                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-            }
-
-        elif isinstance(layer, Points):
-            # build annotation GeoDataFrame
-            geom_df = {
-                uid_col: layer.properties["uid"],
-                "objectType": object_type,
-                "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
-                "name": class_name,
-                "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
-            }
-
-        # generate GeoDataFrame
-        geom_df = GeoDataFrame(geom_df, geometry="geometry")
-
-        # add annotations
-        shapesdata.add_data(
-            data=geom_df,
-            key=annot_key,
-            verbose=True,
-            scale_factor=scale[0]
-            )
-
-        # if object_type == "region":
-        #     # add regions
-        #     self.regions.add_data(
-        #         data=geom_df,
-        #         key=annot_key,
-        #         verbose=True,
-        #         scale_factor=scale[0]
-        #         )
-        # else:
-        #     # add annotations
-        #     self.annotations.add_data(
-        #         data=geom_df,
-        #         key=annot_key,
-        #         verbose=True,
-        #         scale_factor=scale[0]
-        #         )
-
-
-
-    # def sync_geometries(
-    #     self
-    # ):
-    #     # store all geometries from viewer
-    #     self.store_geometries()
-
-    #     # remove non-matching entries
-
-
-    # def plot_expr_along_obs_val(
-    #     self,
-    #     keys: str,
-    #     obs_val: str,
-    #     cells_layer: Optional[str] = None,
-    #     groupby: Optional[str] = None,
-    #     method: Literal["lowess", "loess"] = 'loess',
-    #     stderr: bool = False,
-    #     savepath=None,
-    #     return_data=False,
-    #     **kwargs
-    #     ):
-    #     # retrieve anndata object from InSituData
-    #     celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer, verbose=True)
-    #     adata = celldata.matrix
-
-    #     results = expr_along_obs_val(
-    #         adata=adata,
-    #         keys=keys,
-    #         obs_val=obs_val,
-    #         groupby=groupby,
-    #         method=method,
-    #         stderr=stderr,
-    #         savepath=savepath,
-    #         return_data=return_data,
-    #         **kwargs
-    #         )
-
-    #     if return_data:
-    #         return results
 
     def reload(
         self,

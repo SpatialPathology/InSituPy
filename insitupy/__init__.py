@@ -22,6 +22,7 @@ from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
 from ._core.insitudata import InSituData
 from ._core.insituexperiment import InSituExperiment
 from ._core.readers import read_xenium
+from ._core.viewer import sync_geometries
 from .images.registration import register_images
 from .palettes import CustomPalettes
 from .tools.dge import differential_gene_expression

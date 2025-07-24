@@ -8,6 +8,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 from matplotlib.colors import rgb2hex
+from napari.utils.notifications import show_info, show_warning
 from pandas.api.types import is_numeric_dtype
 from shapely import (LinearRing, LineString, MultiPoint, MultiPolygon, Point,
                      Polygon)
@@ -16,10 +17,10 @@ from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
                                  REGION_CMAP, REGIONS_SYMBOL)
+from insitupy._core._checks import check_rgb_column
+from insitupy._core._configs import _get_viewer_uid, config_manager
 from insitupy.palettes import CustomPalettes
 from insitupy.plotting._colors import _data_to_rgba, _determine_climits
-
-from ._checks import check_rgb_column
 
 if WITH_NAPARI:
     import napari
@@ -53,6 +54,29 @@ if WITH_NAPARI:
         type_list = {"Points": [], "Shapes": []} # list to store whether the polygon is exterior or interior
         names_list = {"Points": [], "Shapes": []}
 
+        # get the config
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
+
+        # prepare layer names
+        if mode == "Regions":
+            shapes_layer_name_with_symbol = REGIONS_SYMBOL + " " + layer_name
+        elif mode == "Annotations":
+            shapes_layer_name_with_symbol = ANNOTATIONS_SYMBOL + " " + layer_name
+        else:
+            raise ValueError(f"Unknown value for `mode`: {mode}")
+
+        points_layer_name_with_symbol = POINTS_SYMBOL + " " + layer_name
+
+        if shapes_layer_name_with_symbol in viewer.layers:
+            shapes_layer_exists = True
+        else:
+            shapes_layer_exists = False
+
+        if points_layer_name_with_symbol in viewer.layers:
+            points_layer_exists = True
+        else:
+            points_layer_exists = False
+
         # check if colors are given
         if "color" in dataframe.columns:
             # make sure the RGB column consists only of valid RGB tuples or lists
@@ -71,6 +95,7 @@ if WITH_NAPARI:
             geometry = row["geometry"]
             #uid = row["id"]
             hexcolor = rgb2hex([elem / 255 for elem in row["color"]])
+            rgbacolor = [elem / 255 for elem in row["color"]] + [1] # scale to range 0-1 and add opacity value
 
             # check if polygon is a MultiPolygon or just a simple Polygon object
             if isinstance(geometry, MultiPolygon):
@@ -87,6 +112,21 @@ if WITH_NAPARI:
                 annotation_type = "point_like"
             else:
                 raise ValueError(f"Received unknown geometry type: {type(geometry)}")
+
+            # check if this uid is already in the current layer. If so, skip it
+            if annotation_type in ["polygon_like", "line_like"]:
+                if shapes_layer_exists:
+                    layer = viewer.layers[shapes_layer_name_with_symbol]
+                    if uid in layer.properties["uid"]:
+                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
+                        continue
+
+            if annotation_type == "point_like":
+                if points_layer_exists:
+                    layer = viewer.layers[points_layer_name_with_symbol]
+                    if uid in layer.properties["uid"]:
+                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
+                        continue
 
             if annotation_type == "polygon_like":
                 for p in data:
@@ -143,7 +183,7 @@ if WITH_NAPARI:
                 for coord in point_coords:
                     point_x_list.append(coord[1].tolist()[0])
                     point_y_list.append(coord[0].tolist()[0])
-                    color_list["Points"].append(hexcolor)  # collect corresponding color
+                    color_list["Points"].append(rgbacolor)  # collect corresponding color
                     uid_list["Points"].append(uid)  # collect corresponding unique id
                     type_list["Points"].append("point") # information on type of coordinates - important for interior/exterior of polygons
                     names_list["Points"].append(row["name"])
@@ -166,25 +206,34 @@ if WITH_NAPARI:
             else:
                 text_dict = None
 
-            if mode == "Regions":
-                layer_name_with_symbol = REGIONS_SYMBOL + " " + layer_name
-            elif mode == "Annotations":
-                layer_name_with_symbol = ANNOTATIONS_SYMBOL + " " + layer_name
-            else:
-                raise ValueError(f"Unknown value for `mode`: {mode}")
-
             # add shapes to viewer
-            if not layer_name_with_symbol in viewer.layers:
-                add = True
-            elif allow_duplicate_layers:
-                add = True
-            else:
-                add = False
+            if shapes_layer_name_with_symbol in viewer.layers:
+                show_warning(f"A layer with the name '{shapes_layer_name_with_symbol}' already exists. Shapes added to this layer.")
+                layer = viewer.layers[shapes_layer_name_with_symbol]
 
-            if add:
+                viewer_config._auto_set_uid = False
+                layer.add(
+                    data=shape_list,
+                    shape_type=shape_type_list,
+                    edge_width=edge_width, # µm
+                    edge_color=color_list["Shapes"],
+                    face_color='transparent',
+                )
+
+                # add properties
+                layer.properties["uid"][-len(shape_list):] = properties_dict["uid"]
+                layer.properties["type"][-len(shape_list):] = properties_dict["type"]
+
+                if show_names:
+                    layer.properties["name"][-len(shape_list):] = properties_dict["name"]
+                    # layer.properties["name"] = np.append(layer.properties["name"], properties_dict["name"])
+
+                viewer_config._auto_set_uid = True
+
+            else:
                 viewer.add_shapes(
                     data=shape_list,
-                    name=layer_name_with_symbol,
+                    name=shapes_layer_name_with_symbol,
                     properties=properties_dict,
                     shape_type=shape_type_list,
                     edge_width=edge_width, # µm
@@ -194,29 +243,44 @@ if WITH_NAPARI:
                     #scale=scale_factor,
                     text=text_dict
                     )
+                show_info(f"New layer '{shapes_layer_name_with_symbol}' created.")
 
         point_data = np.stack([point_x_list, point_y_list]).T
         if len(point_data) > 0:
-            layer_name_with_symbol = POINTS_SYMBOL + " " + layer_name
             # add points to viewer
-            # add shapes to viewer
-            if not layer_name_with_symbol in viewer.layers:
-                add = True
-            elif allow_duplicate_layers:
-                add = True
-            else:
-                add = False
+            # if not points_layer_name_with_symbol in viewer.layers:
+            #     add = True
+            # elif allow_duplicate_layers:
+            #     add = True
+            # else:
+            #     add = False
 
-            if add:
-                viewer.add_points(
-                    data=point_data,
-                    name=layer_name_with_symbol,
-                    properties={
+            # if add:
+
+            properties_dict = {
                         'uid': uid_list["Points"], # list with uids
                         'type': type_list["Points"] # list giving information on whether the polygon is interior or exterior
-                    },
-                    size=40,
-                    edge_color="black",
+                    }
+
+            if points_layer_name_with_symbol in viewer.layers:
+                show_warning(f"A layer with the name '{points_layer_name_with_symbol}' already exists. Points added to this layer.")
+                layer = viewer.layers[points_layer_name_with_symbol]
+
+                layer.add(
+                    coords=point_data,
+                    # face_color=color_list["Points"]
+                )
+
+                # change colors of the newly added data
+                layer.face_color[-len(point_data):] = color_list["Points"]
+                layer.refresh() # refresh layer to show new colors
+            else:
+                viewer.add_points(
+                    data=point_data,
+                    name=points_layer_name_with_symbol,
+                    properties=properties_dict,
+                    size=10,
+                    border_color="black",
                     face_color=color_list["Points"],
                     #scale=scale_factor
                 )

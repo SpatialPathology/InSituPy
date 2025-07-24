@@ -5,7 +5,13 @@ import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
+from insitupy import WITH_NAPARI
+from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+                                 REGIONS_SYMBOL)
 from insitupy._core._utils import _get_cell_layer
+
+if WITH_NAPARI:
+    from napari.layers import Points
 
 
 # checker functions for data sanity
@@ -212,14 +218,12 @@ def _is_list_of_dask_arrays(variable):
 
     return True
 
-from insitupy import WITH_NAPARI
-from insitupy._constants import ANNOTATIONS_SYMBOL, REGIONS_SYMBOL
-
-if WITH_NAPARI:
-    from napari.layers import Points
 
 def _check_geometry_symbol_and_layer(layer, type_symbol):
     if type_symbol == ANNOTATIONS_SYMBOL:
+        checks_passed = True
+        object_type = "annotation"
+    elif type_symbol == POINTS_SYMBOL:
         checks_passed = True
         object_type = "annotation"
     elif type_symbol == REGIONS_SYMBOL:
@@ -230,5 +234,9 @@ def _check_geometry_symbol_and_layer(layer, type_symbol):
             checks_passed = False
         else:
             checks_passed = True
+    else:
+        warn(f'Layer "{layer.name}" is not a valid geometry type. Skipped this layer.')
+        checks_passed = False
+        object_type = None
 
     return checks_passed, object_type

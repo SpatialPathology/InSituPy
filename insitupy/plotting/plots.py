@@ -223,7 +223,7 @@ def calc_cellular_composition(
     geom_key: Optional[str] = None,
     geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
-    uid_column: str = "sample_id",
+    groupby: str = "uid",
     normalize: bool = True,
     force_assignment: bool = False,
     fill_missing_categories: bool = True
@@ -241,18 +241,18 @@ def calc_cellular_composition(
         exp = data
     else:
         exp = InSituExperiment()
-        exp.add(data, metadata={uid_column: data.sample_id})
+        exp.add(data, metadata={groupby: data.sample_id})
 
-    all_data_names = exp.metadata[uid_column].values
+    all_data_names = exp.metadata[groupby].values
 
     if not len(all_data_names) == len(np.unique(all_data_names)):
-        raise ValueError(f"Values in {uid_column} were found to be not unique. Please choose a column with unique values in `.metadata`.")
+        raise ValueError(f"Values in {groupby} were found to be not unique. Please choose a column with unique values in `.metadata`.")
 
     # retrieve cell type compositions
     compositions_dict = {}
     for m, d in exp.iterdata():
 
-        data_name = m[uid_column]
+        data_name = m[groupby]
 
         if geom_key is not None:
             # check whether the key exists in the selected geometry
@@ -344,7 +344,7 @@ def calc_cellular_composition(
     # swap multi index levels to have annotations/regions on top of samples
     compositions_df = compositions_df.swaplevel(0, 1, axis=1)
 
-    compositions_df.columns.names = [geom_key, uid_column]
+    compositions_df.columns.names = [geom_key, groupby]
 
     # sort by index
     compositions_df = compositions_df.sort_index()
@@ -362,11 +362,12 @@ def plot_cellular_composition(
     geom_values: Optional[Union[str, List[str]]] = None,
     modality: Optional[Literal["regions", "annotations"]] = None,
     plot_type: Literal["bar", "barh"] = "barh",
-    uid_column: str = "sample_id",
+    groupby: str = "uid",
     normalize: bool = True,
     force_assignment: bool = False,
     max_cols: int = 4,
     aspect_factor: Number = 1,
+    legend_max_per_col: int = 10,
     savepath: Union[str, os.PathLike, Path] = None,
     palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
     return_data: bool = False,
@@ -383,7 +384,12 @@ def plot_cellular_composition(
     """
     if isinstance(palette, list):
         palette = ListedColormap(palette)
+        palette_is_dict = False
     elif isinstance(palette, ListedColormap):
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, dict):
+        palette_is_dict = True
         pass
     else:
         raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
@@ -397,7 +403,7 @@ def plot_cellular_composition(
         cell_type_col=cell_type_col, cell_type_values=cell_type_values,
         cells_layer=cells_layer, mask_col=mask_col,
         geom_key=geom_key, geom_values=geom_values,
-        modality=modality, uid_column=uid_column,
+        modality=modality, groupby=groupby,
         normalize=normalize, force_assignment=force_assignment,
     )
 
@@ -418,13 +424,16 @@ def plot_cellular_composition(
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        try:
-            color_dict = map_to_colors(
-                sorted(celldata.matrix.obs[cell_type_col].unique()),
-                palette=palette)
-            #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
-        except KeyError:
-            color_dict = None
+        if palette_is_dict:
+            color_dict = palette
+        else:
+            try:
+                color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].unique()),
+                    palette=palette)
+                #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            except KeyError:
+                color_dict = None
 
     # setup plot
     if len(geom_names) == 1:
@@ -506,7 +515,7 @@ def plot_cellular_composition(
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],
-            max_per_col=5,
+            max_per_col=legend_max_per_col,
             loc='center',
             bbox_to_anchor=(0.5, 0.5),
             mode="rectangle",

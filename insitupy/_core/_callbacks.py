@@ -7,7 +7,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from pandas.api.types import is_numeric_dtype
 
-import insitupy._core._config as _config
+#import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGIONS_SYMBOL)
@@ -17,9 +17,9 @@ if WITH_NAPARI:
     import napari
 
 # show cells widget
-def _update_key_on_type_change(widget):
+def _update_key_on_type_change(widget, viewer_config):
     current_key_type = widget.key_type.value
-    widget.key.choices = _config.key_dict[current_key_type]
+    widget.key.choices = viewer_config.key_dict[current_key_type]
 
 # geometry widget
 def _update_keys_based_on_geom_type(widget, xdata):
@@ -107,8 +107,8 @@ def _update_continuous_legend(static_canvas, mapping, label):
     axes.set_axis_off()
     static_canvas.draw()  # Redraw the canvas
 
-def _update_colorlegend():
-    layer = _config.viewer.layers.selection.active
+def _update_colorlegend(viewer, viewer_config):
+    layer = viewer.layers.selection.active
 
     if isinstance(layer, napari.layers.points.points.Points):
         try:
@@ -121,7 +121,7 @@ def _update_colorlegend():
                 # collect the layer names and edge colors of the respective layer
                 layer_names = []
                 face_colors = []
-                for elem in _config.viewer.layers:
+                for elem in viewer.layers:
                     if elem.name.startswith(first_char):
                         layer_names.append(elem.name.strip(first_char + " "))
                         face_colors.append(elem.current_face_color)
@@ -130,7 +130,7 @@ def _update_colorlegend():
                 mapping = dict(zip(layer_names, face_colors))
 
                 _update_categorical_legend(
-                    static_canvas=_config.static_canvas,
+                    static_canvas=viewer_config.static_canvas,
                     mapping=mapping,
                     label="Points",
                     marker="o",
@@ -146,7 +146,7 @@ def _update_colorlegend():
                                         )
 
                 _update_continuous_legend(
-                    static_canvas=_config.static_canvas,
+                    static_canvas=viewer_config.static_canvas,
                     mapping=mapping,
                     label=layer.name)
 
@@ -161,7 +161,7 @@ def _update_colorlegend():
                 mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
 
                 _update_categorical_legend(
-                    static_canvas=_config.static_canvas,
+                    static_canvas=viewer_config.static_canvas,
                     mapping=mapping,
                     label=layer.name
                     )
@@ -173,7 +173,7 @@ def _update_colorlegend():
             # collect the layer names and edge colors of the respective layer
             layer_names = []
             face_colors = []
-            for elem in _config.viewer.layers:
+            for elem in viewer.layers:
                 if elem.name.startswith(first_char):
                     layer_names.append(elem.name.strip(first_char + " "))
                     face_colors.append(elem.current_edge_color)
@@ -182,7 +182,7 @@ def _update_colorlegend():
             mapping = dict(zip(layer_names, face_colors))
 
             _update_categorical_legend(
-                static_canvas=_config.static_canvas,
+                static_canvas=viewer_config.static_canvas,
                 mapping=mapping,
                 label="Annotations" if first_char == ANNOTATIONS_SYMBOL else "Regions",
                 marker="s",
@@ -192,31 +192,38 @@ def _update_colorlegend():
         pass
 
 
-def _refresh_widgets_after_data_change(xdata, show_cells_widget, boundaries_widget, filter_widget):
-    _config.init_viewer_config(xdata)
+def _refresh_widgets_after_data_change(xdata, viewer, viewer_config, show_cells_widget, boundaries_widget, filter_widget):
+    #_config.init_viewer_config(xdata)
+    #viewer_config.__init__(xdata) # re-initialize ViewerConfig
 
-    # set choices
-    boundaries_widget.key.choices = _config.masks
+    if boundaries_widget is not None:
+        # set choices
+        boundaries_widget.key.choices = viewer_config.masks
 
-    # reset the currently selected key to None
-    show_cells_widget.key.value = None
+    if show_cells_widget is not None:
+        # reset the currently selected key to None
+        show_cells_widget.key.value = None
 
-    # add last addition to recent
-    show_cells_widget.recent.choices = sorted(_config.recent_selections)
-    show_cells_widget.recent.value = None
+        # update choices for key
+        show_cells_widget.key.choices = viewer_config.key_dict[show_cells_widget.key_type.value]
 
-    # update obs in filter widget
-    filter_widget.obs_key.choices = _config.key_dict["obs"]
+        # add last addition to recent
+        show_cells_widget.recent.choices = sorted(viewer_config.recent_selections)
+        show_cells_widget.recent.value = None
 
-    # set only the last cell layer visible
-    cell_layers = []
-    for elem in xdata.viewer.layers:
-        if isinstance(elem, napari.layers.points.points.Points):
-            if not elem.name.startswith(POINTS_SYMBOL):
-                # only if the layer is not a point annotation layer, it is added
-                cell_layers.append(elem)
-    #point_layers = [elem for elem in xdata.viewer.layers if isinstance(elem, napari.layers.points.points.Points)]
-    n_cell_layers = len(cell_layers)
+    if filter_widget is not None:
+        # update obs in filter widget
+        filter_widget.obs_key.choices = viewer_config.key_dict["obs"]
+
+    # # set only the last cell layer visible
+    # cell_layers = []
+    # for elem in viewer.layers:
+    #     if isinstance(elem, napari.layers.points.points.Points):
+    #         if not elem.name.startswith(POINTS_SYMBOL):
+    #             # only if the layer is not a point annotation layer, it is added
+    #             cell_layers.append(elem)
+    # #point_layers = [elem for elem in xdata.viewer.layers if isinstance(elem, napari.layers.points.points.Points)]
+    # n_cell_layers = len(cell_layers)
 
     # # make only last cell layer visible
     # for i, l in enumerate(cell_layers):
