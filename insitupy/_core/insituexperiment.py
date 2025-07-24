@@ -412,9 +412,6 @@ class InSituExperiment:
         Returns:
             InSituExperiment: A new InSituExperiment object that is a deep copy of the current object.
         """
-        for xd in self._data:
-            if xd.viewer is not None:
-                xd.viewer = None
         return deepcopy(self)
 
     def dge(self,
@@ -1319,7 +1316,7 @@ class InSituExperiment:
     def show(
         self,
         index: int,
-        #return_viewer: bool = True
+        verbose: bool = False
         ):
         """
         Displays the dataset at the specified index.
@@ -1332,9 +1329,7 @@ class InSituExperiment:
             Viewer: The viewer object of the dataset if return_viewer is True.
         """
         dataset = self.data[index]
-        dataset.show()
-        # if return_viewer:
-        #     return dataset.viewer
+        dataset.show(verbose=verbose)
 
     def show_modality(self, modality, uid_column: str = "sample_id"):
         repr_string = ""

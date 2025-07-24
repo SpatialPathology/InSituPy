@@ -1582,7 +1582,7 @@ class InSituData:
                         geom_type = "point"
                     #if 'uid' in layer.properties:
                     uid = str(uuid4())
-                    print(f"Adding {geom_type} with UID {uid}") if viewer_config.verbose else None
+                    print(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
                     try:
                         layer.properties['uid'][-1] = uid
                         layer.properties['type'][-1] = geom_type
