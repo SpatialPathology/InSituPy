@@ -154,7 +154,7 @@ class InSituData:
                               read_all, read_annotations, read_cells,
                               read_images, read_regions, read_transcripts,
                               reduce_dimensions, save_current_colorlegend,
-                              store_geometries)
+                              store_geometries, sync_geometries)
 
     def __init__(self,
                  path: Union[str, os.PathLike, Path] = None,

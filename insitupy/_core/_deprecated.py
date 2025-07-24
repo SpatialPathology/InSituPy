@@ -42,4 +42,7 @@ def add_baysor(self, *args, **kwargs):
     warn("`add_baysor()` is deprecated. Use `.cells.add_{}()` instead.", DeprecationWarning, stacklevel=2)
 
 def store_geometries(self, *args, **kwargs):
-    warn("`store_geometries()` is deprecated. Use `.cells.sync_geometries()` instead.", DeprecationWarning, stacklevel=2)
+    warn("`store_geometries()` is deprecated. Use the `sync_geometries()` or the 'Sync Geometries' button in napari instead.", DeprecationWarning, stacklevel=2)
+
+def sync_geometries(self, *args, **kwargs):
+    warn("`store_geometries()` as function of `InSituData` is deprecated. Use `sync_geometries()` as external function or the 'Sync Geometries' button in napari instead.", DeprecationWarning, stacklevel=2)
