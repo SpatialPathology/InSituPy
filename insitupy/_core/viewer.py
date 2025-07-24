@@ -13,6 +13,7 @@ from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 if WITH_NAPARI:
     import napari
     from napari.layers import Layer, Points, Shapes
+    from napari.utils.notifications import show_info, show_warning
 
     from insitupy._core._configs import config_manager
 
@@ -115,7 +116,7 @@ if WITH_NAPARI:
                 else:
                     object_str = object_type
 
-                print(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
+                show_info(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
 
     def _store_geometries(
         layer,
@@ -164,8 +165,9 @@ if WITH_NAPARI:
             shapesdata.add_data(
                 data=geom_df,
                 key=annot_key,
+                scale_factor=scale[0],
                 verbose=True,
-                scale_factor=scale[0]
+                in_napari=True
                 )
         else:
             show_info(f"No geometries found in layer {layer.name}.")

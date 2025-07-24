@@ -279,7 +279,7 @@ if WITH_NAPARI:
                     data=point_data,
                     name=points_layer_name_with_symbol,
                     properties=properties_dict,
-                    size=40,
+                    size=10,
                     border_color="black",
                     face_color=color_list["Points"],
                     #scale=scale_factor

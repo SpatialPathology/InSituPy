@@ -15,7 +15,7 @@ from anndata import AnnData
 from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
-from insitupy import __version__
+from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
 from insitupy._core._checks import _is_list_of_dask_arrays
 from insitupy._core._mixins import DeepCopyMixin
@@ -32,6 +32,8 @@ from insitupy.io.files import (check_overwrite_and_remove_if_true,
 from insitupy.io.geo import parse_geopandas, write_qupath_geojson
 from insitupy.utils.utils import convert_to_list, decode_robust_series
 
+if WITH_NAPARI:
+    from napari.utils.notifications import show_info, show_warning
 
 class ShapesData(DeepCopyMixin):
     '''
@@ -177,6 +179,7 @@ class ShapesData(DeepCopyMixin):
                  key: str,
                  scale_factor: Number,
                  verbose: bool = False,
+                 in_napari: bool = False
                    ):
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
@@ -270,7 +273,10 @@ class ShapesData(DeepCopyMixin):
 
                     if verbose:
                         # report
-                        print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                        if in_napari:
+                            show_info(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                        else:
+                            print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
 
     def crop(self,
              shape,

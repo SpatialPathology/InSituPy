@@ -51,6 +51,7 @@ from insitupy.utils.utils import _crop_transcripts, convert_to_list
 if WITH_NAPARI:
     import napari
     from napari.layers import Layer, Points, Shapes
+    from napari.utils.notifications import show_info, show_warning
 
     from insitupy._core._configs import config_manager
 
@@ -1571,10 +1572,12 @@ class InSituData:
                 if event.action == "added" and viewer_config._auto_set_uid:
                     if isinstance(layer, Shapes):
                         type_last = layer.shape_type[-1]
-                        if type_last == "polygon":
+                        if type_last in ["polygon", "rectangle", "ellipse"]:
                             geom_type = "polygon_exterior"
-                        elif type_last == "line":
+                        elif type_last in ["path", "line"]:
                             geom_type = "line"
+                        else:
+                            show_warning(f"Unsupported shape type '{type_last}' for UID assignment. Only 'polygon' and 'path' are supported.")
                     elif isinstance(layer, Points):
                         geom_type = "point"
                     #if 'uid' in layer.properties:
@@ -1588,7 +1591,6 @@ class InSituData:
                         layer.properties['uid'] = np.array([geom_type], dtype='object')
 
                 elif event.action == "removing":
-                    print(set(layer.properties['uid']))
                     uids_before_removal = set(layer.properties['uid'])
                 elif event.action == "removed":
                     removed_uids = uids_before_removal ^ set(layer.properties['uid'])

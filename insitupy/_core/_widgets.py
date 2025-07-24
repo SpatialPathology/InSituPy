@@ -572,6 +572,6 @@ if WITH_NAPARI:
 
         if exists:
             show_warning((
-                    f"Data contains already {modality} with key '{annot_key}' and class '{class_name}'."
+                    f"Data contains already {modality} with key '{annot_key}' and class '{class_name}'. "
                     f"To show them use the 'Show geometries' widget."
                     ))
