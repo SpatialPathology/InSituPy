@@ -1,3 +1,4 @@
+import json
 import os
 from os.path import abspath
 from pathlib import Path
@@ -5,9 +6,14 @@ from typing import Literal, Optional, Union
 from uuid import uuid4
 from warnings import warn
 
+import anndata
 import dask.dataframe as dd
+import geopandas as gpd
+import numpy as np
 import pandas as pd
+import tifffile
 from parse import *
+from PIL import Image
 
 from insitupy import __version__
 from insitupy._constants import ISPY_METADATA_FILE
@@ -15,13 +21,12 @@ from insitupy._core._xenium import (_read_binned_expression,
                                     _read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
                                     _restructure_transcripts_dataframe)
+from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
+                                        MultiCellData, RegionsData)
 from insitupy._core.insitudata import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.io.files import read_json
 from insitupy.utils.utils import convert_to_list
-
-from .._core.dataclasses import (AnnotationsData, CellData, ImageData,
-                                 MultiCellData, RegionsData)
 
 
 def read_xenium(
@@ -177,5 +182,94 @@ def read_xenium(
         data.transcripts = dd.read_parquet(data.path / transcript_filename)
     else:
         raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
+
+    return data
+
+
+def read_any(
+    cellular_data: Optional[Union[str, Path]] = None,
+    cellular_metadata: Optional[Union[str, Path]] = None,
+    cellular_coordinates: Optional[Union[str, Path]] = None, # format: x|y
+    boundaries_path: Optional[Union[str, Path]] = None,
+    image_path: Optional[Union[str, Path]] = None,
+    sample_id: Optional[str] = "unknown_sample",
+    slide_id: Optional[str] = "unknown_slide",
+    verbose: bool = True
+) -> InSituData:
+    """
+    Generalized reader for cellular spatial omics data.
+
+    Args:
+        cellular_omics_path (str or Path, optional): Path to single-cell transcriptomic/proteomic abundance data (.csv or .h5ad).
+        boundaries_path (str or Path, optional): Path to cell boundary data (.geojson or image mask).
+        image_path (str or Path, optional): Path to OME-TIFF or .qptiff image file.
+        sample_id (str, optional): Sample ID to store in metadata.
+        slide_id (str, optional): Slide ID to store in metadata.
+        verbose (bool, optional): If True, print progress.
+
+    Returns:
+        InSituData: Object containing the loaded data.
+    """
+    cellular_data = Path(cellular_data) if cellular_data else None
+    boundaries_path = Path(boundaries_path) if boundaries_path else None
+    image_path = Path(image_path) if image_path else None
+
+    # Metadata
+    metadata = {
+        "method": "GenericReader",
+        "uids": [str(uuid4())],
+        "path": str(cellular_data or boundaries_path or image_path or "."),
+        "history": {
+            "cells": [],
+            "annotations": [],
+            "regions": []
+        }
+    }
+
+    data = InSituData(
+        path=Path(metadata["path"]),
+        metadata=metadata,
+        slide_id=slide_id,
+        sample_id=sample_id
+    )
+
+    # Prepare variables
+    matrix = None
+    boundaries = None
+
+    # Load expression matrix
+    if cellular_data:
+        if verbose:
+            print(f"Loading expression data from {cellular_data}", flush=True)
+        if cellular_data.suffix == ".csv":
+            matrix = pd.read_csv(cellular_data, index_col=0)
+        elif cellular_data.suffix == ".h5ad":
+            adata = anndata.read_h5ad(cellular_data)
+            matrix = adata.to_df()
+        else:
+            raise ValueError(f"Unsupported transcript format: {cellular_data.suffix}")
+
+    # Load cell boundaries
+    if boundaries_path:
+        if verbose:
+            print(f"Loading boundaries from {boundaries_path}", flush=True)
+        if boundaries_path.suffix == ".geojson":
+            boundaries = gpd.read_file(boundaries_path)
+        elif boundaries_path.suffix.lower() in [".tif", ".tiff", ".png", ".jpg"]:
+            boundaries = np.array(Image.open(boundaries_path))
+        else:
+            raise ValueError(f"Unsupported boundary format: {boundaries_path.suffix}")
+
+    # Combine into CellData and add to InSituData.cells
+    if matrix is not None or boundaries is not None:
+        cd = CellData(matrix=matrix, boundaries=boundaries)
+        data.cells = MultiCellData()
+        data.cells.add_celldata(cd=cd, key="main", is_main=True)
+
+    # Load image
+    if image_path:
+        if verbose:
+            print(f"Loading image from {image_path}", flush=True)
+        data.images = ImageData(image_paths=[image_path], image_names=["image"])
 
     return data

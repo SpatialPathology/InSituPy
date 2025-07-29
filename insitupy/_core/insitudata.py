@@ -22,7 +22,6 @@ from qtpy.QtWidgets import QPushButton
 from scipy.sparse import issparse
 from tqdm import tqdm
 
-import insitupy._core._config as _config
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
@@ -32,9 +31,9 @@ from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
 from insitupy._core._utils import _get_cell_layer
+from insitupy._core._widgets import SaveWidget, SyncButton
 from insitupy._core.dataclasses import (AnnotationsData, ImageData,
                                         MultiCellData, RegionsData)
-from insitupy._core.viewer import sync_geometries
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError)
@@ -153,8 +152,9 @@ class InSituData:
     from ._deprecated import (add_alt, add_baysor, normalize_and_transform,
                               read_all, read_annotations, read_cells,
                               read_images, read_regions, read_transcripts,
-                              reduce_dimensions, save_current_colorlegend,
-                              store_geometries, sync_geometries)
+                              reduce_dimensions, save_colorlegends,
+                              save_current_colorlegend, store_geometries,
+                              sync_geometries)
 
     def __init__(self,
                  path: Union[str, os.PathLike, Path] = None,
@@ -1196,45 +1196,7 @@ class InSituData:
             # save to the respective directory
             self.saveas(path=path)
 
-    def save_colorlegends(
-        self,
-        savepath: Optional[Union[str, os.PathLike, Path]] = None,
-        from_canvas: bool = False,
-        max_per_col: int = 10
-        ):
-        from insitupy.plotting.plots import plot_colorlegend
 
-        if from_canvas:
-            # Check if static_canvas exists
-            if not hasattr(_config, 'static_canvas'):
-                print("Warning: 'static_canvas' attribute not found in config. "
-                    "Please display data in the napari viewer using '.show()' first.")
-                return
-
-            try:
-                # Save the figure to a PDF file
-                _config.static_canvas.figure.savefig(savepath)
-                print(f"Figure saved as {savepath}")
-            except RuntimeError as e:
-                if 'FigureCanvasQTAgg has been deleted' in str(e):
-                    print("Warning: The color legend has been deleted and cannot be saved.")
-                else:
-                    raise  # Re-raise the exception if it's a different error
-        else:
-            if not hasattr(self, "viewer"):
-                raise ValueError("No viewer attribute found. Open a napari viewer with `.show()`.")
-
-            selected_layers = self.viewer.layers.selection
-            for layer in selected_layers:
-                if savepath is None:
-                    savepath = Path(f"figures/colorlegend-{layer.name}.pdf")
-                plot_colorlegend(
-                    viewer=self.viewer,
-                    mapping=None,
-                    layer_name=layer.name,
-                    max_per_col=max_per_col,
-                    savepath=savepath
-                    )
 
     def _update_to_existing_project(self,
                                     path: Optional[Union[str, os.PathLike, Path]],
@@ -1618,25 +1580,23 @@ class InSituData:
         self,
         viewer: napari.Viewer
         ):
-        # add color legend widget
-        import insitupy._core._config as _config
-        from insitupy._core._config import init_colorlegend_canvas
-        init_colorlegend_canvas()
-        viewer.window.add_dock_widget(_config.static_canvas, area='left', name='Color legend')
+        # # add color legend widget
+        config = config_manager[_get_viewer_uid(viewer)]
+        viewer.window.add_dock_widget(config.static_canvas, area='left', name='Color legend')
+
+        # add save widget for color legends
+        save_widget = SaveWidget()
+        viewer.window.add_dock_widget(save_widget, area='left', name="Save color legend")
 
     def _add_buttons_to_viewer(
         self,
         viewer: napari.Viewer
     ):
-        def sync_geometries_button():
-            sync_geometries()
-
-        # create the sync button
-        sync_button = QPushButton("Sync Geometries")
-        sync_button.clicked.connect(sync_geometries_button)
+        # create sync button
+        sync_button = SyncButton()
 
         # add the sync button to viewer
-        viewer.window.add_dock_widget(sync_button, area='right', name="")
+        viewer.window.add_dock_widget(sync_button, area='right', name="Sync")
 
     def show(self,
         keys: Optional[str] = None,

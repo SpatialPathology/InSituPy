@@ -3,6 +3,10 @@ from typing import List, Optional
 import numpy as np
 from matplotlib.colors import ListedColormap
 from napari.utils.notifications import show_info, show_warning
+from qtpy.QtCore import QSize, Qt
+from qtpy.QtGui import QFontMetrics, QIcon
+from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
+                            QVBoxLayout, QWidget)
 
 #import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
@@ -18,6 +22,7 @@ from insitupy._core._configs import (ViewerConfig, _get_viewer_uid,
                                      config_manager)
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer, _update_points_layer
+from insitupy._core.viewer import save_colorlegends, sync_geometries
 from insitupy.images.utils import create_img_pyramid
 
 if WITH_NAPARI:
@@ -566,7 +571,11 @@ if WITH_NAPARI:
     def _test_existance(viewer_config, annot_key, class_name, modality):
         try:
             geom_df = getattr(viewer_config.data, modality)
-            exists = (geom_df[annot_key]["name"] == class_name).any()
+
+            if geom_df is not None:
+                exists = (geom_df[annot_key]["name"] == class_name).any()
+            else:
+                exists = False
         except KeyError:
             exists = False
 
@@ -575,3 +584,106 @@ if WITH_NAPARI:
                     f"Data contains already {modality} with key '{annot_key}' and class '{class_name}'. "
                     f"To show them use the 'Show geometries' widget."
                     ))
+
+    class SyncButton(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.layout = QVBoxLayout()
+            self.setLayout(self.layout)
+
+            # create the sync button
+            self.sync_button = QPushButton("Sync Geometries")
+            self.sync_button.clicked.connect(self._sync_geometries)
+            self.layout.addWidget(self.sync_button)
+
+        def _sync_geometries(self):
+            sync_geometries()
+
+
+
+    class SaveWidget(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.layout = QVBoxLayout()
+            self.setLayout(self.layout)
+
+            self.path_layout = QHBoxLayout()
+
+            self.label = QLabel("No folder selected")
+            self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self.label.setMinimumWidth(150)
+            self.label.setMaximumWidth(200)
+            self.label.setToolTip("No folder selected")
+            self.path_layout.addWidget(self.label)
+
+            self.select_button = QPushButton()
+            self.select_button.setText("Select")
+            self.select_button.setIconSize(QSize(16, 16))
+            self.select_button.setToolTip("Select Output Folder")
+            self.select_button.clicked.connect(self.select_folder)
+            self.path_layout.addWidget(self.select_button)
+
+            self.layout.addLayout(self.path_layout)
+
+            self.save_button = QPushButton("Save")
+            self.save_button.clicked.connect(self.save_data)
+            self.layout.addWidget(self.save_button)
+
+            self.output_folder = None
+
+        def select_folder(self):
+            folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+            if folder:
+                self.output_folder = folder
+                self.update_label(folder)
+
+        def update_label(self, text):
+            metrics = QFontMetrics(self.label.font())
+            elided_text = metrics.elidedText(text, Qt.ElideMiddle, self.label.width())
+            self.label.setText(elided_text)
+            self.label.setToolTip(text)
+
+        def save_data(self):
+            if self.output_folder:
+                save_colorlegends(output_folder=self.output_folder)
+            else:
+                self.label.setText("Please select a folder first.")
+
+
+    # class SaveWidget(QWidget):
+    #     def __init__(self):
+    #         super().__init__()
+    #         self.layout = QVBoxLayout()
+    #         self.setLayout(self.layout)
+
+    #         self.label = QLabel("No folder selected")
+    #         self.layout.addWidget(self.label)
+
+    #         self.select_button = QPushButton("Select Output Folder")
+    #         self.select_button.clicked.connect(self.select_folder)
+    #         self.layout.addWidget(self.select_button)
+
+    #         self.save_button = QPushButton("Save")
+    #         self.save_button.clicked.connect(self.save_data)
+    #         self.layout.addWidget(self.save_button)
+
+    #         self.output_folder = None
+
+    #     def select_folder(self):
+    #         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+    #         if folder:
+    #             self.output_folder = folder
+    #             # Truncate the path if it's too long
+    #             max_length = 40  # Adjust as needed
+    #             if len(folder) > max_length:
+    #                 truncated = "..." + folder[-(max_length - 3):]
+    #             else:
+    #                 truncated = folder
+    #             self.label.setText(f"{truncated}")
+
+    #     def save_data(self):
+    #         if self.output_folder:
+    #             # Replace this with your actual saving function
+    #             save_colorlegends(output_folder=self.output_folder)
+    #         else:
+    #             self.label.setText("Please select a folder first.")

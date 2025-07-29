@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
+from napari.utils.notifications import show_info, show_warning
 from napari.viewer import Viewer
 
 import insitupy._core._config as _config
@@ -137,7 +138,10 @@ def plot_colorlegend(
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
     dpi_save: int = 300,
+    verbose: bool = True,
+    return_status: bool = False
     ):
+    do_plotting = True
     if viewer is None and mapping is None:
         raise ValueError("Both `viewer` and `mapping` are None. One of both must not be None.")
 
@@ -160,45 +164,59 @@ def plot_colorlegend(
         layer = viewer.layers[layer_name]
 
         # get values
-        values = layer.properties["value"]
+        try:
+            values = layer.properties["value"]
+        except AttributeError:
+            show_warning("The selected layer does not contain any plottable data.")
+            do_plotting = False
+        else:
+            # create color mapping
+            rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
 
-        # create color mapping
-        rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
+            # set title
+            title = layer_name
 
-        # set title
-        title = layer_name
+    if do_plotting:
+        if isinstance(mapping, dict):
+            # categorical colorbar
+            # create a figure for the colorbar
+            fig, ax = plt.subplots(
+                #figsize=(5, 3)
+                )
+            fig.subplots_adjust(bottom=0.5)
 
-    if isinstance(mapping, dict):
-        # categorical colorbar
-        # create a figure for the colorbar
-        fig, ax = plt.subplots(
-            #figsize=(5, 3)
+            # add color legend to axis
+            _add_colorlegend_to_axis(
+                color_dict=mapping,
+                ax=ax,
+                max_per_col=max_per_col,
+                title=title
+                )
+
+        else:
+            # continuous colorlegend
+            # create a figure for the colorbar
+            fig, ax = plt.subplots(
+                figsize=(6, 1)
+                )
+            fig.subplots_adjust(bottom=0.5)
+
+            # Add the colorbar to the figure
+            cbar = fig.colorbar(mapping, orientation='horizontal', cax=ax)
+            cbar.ax.set_title(title)
+
+        save_and_show_figure(
+            savepath=savepath,
+            fig=fig,
+            save_only=save_only,
+            dpi_save=dpi_save,
+            tight=False,
+            verbose=verbose
             )
-        fig.subplots_adjust(bottom=0.5)
+        plt.show()
 
-        # add color legend to axis
-        _add_colorlegend_to_axis(
-            color_dict=mapping,
-            ax=ax,
-            max_per_col=max_per_col,
-            title=title
-            )
-
-
-    else:
-        # continuous colorlegend
-        # create a figure for the colorbar
-        fig, ax = plt.subplots(
-            figsize=(6, 1)
-            )
-        fig.subplots_adjust(bottom=0.5)
-
-        # Add the colorbar to the figure
-        cbar = fig.colorbar(mapping, orientation='horizontal', cax=ax)
-        cbar.ax.set_title(title)
-
-    save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
-    plt.show()
+    if return_status:
+        return do_plotting
 
 def _get_adata(d, cells_layer, mask_col):
     # get data

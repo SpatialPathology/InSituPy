@@ -1,3 +1,7 @@
+import os
+from pathlib import Path
+from typing import Optional, Union
+
 import napari
 import numpy as np
 from geopandas import GeoDataFrame
@@ -7,6 +11,7 @@ from shapely import Point
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._core._checks import _check_geometry_symbol_and_layer
+from insitupy._core._configs import _get_viewer_uid
 from insitupy._core.dataclasses import AnnotationsData, RegionsData
 from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
@@ -77,6 +82,59 @@ if WITH_NAPARI:
                             annot_key=annot_key,
                             class_name=class_name
                         )
+
+    def save_colorlegends(
+        output_folder: Union[str, os.PathLike, Path] = "figures",
+        #savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        #from_canvas: bool = False,
+        max_per_col: int = 10,
+        save_only: bool = True
+        ):
+        from insitupy.plotting.plots import plot_colorlegend
+
+        viewer = napari.current_viewer()
+        config = config_manager[_get_viewer_uid(viewer)]
+
+        # create output folder path
+        output_folder = Path(output_folder)
+        output_folder.mkdir(exist_ok=True)
+
+        selected_layers = viewer.layers.selection
+        for layer in selected_layers:
+            savepath = output_folder / f"colorlegend-{layer.name}.pdf"
+
+            plotted = plot_colorlegend(
+                viewer=viewer,
+                mapping=None,
+                layer_name=layer.name,
+                max_per_col=max_per_col,
+                savepath=savepath,
+                save_only=save_only,
+                verbose=False,
+                return_status=True
+                )
+
+            if plotted:
+                show_info(f"Saved color legend to '{savepath}'")
+
+        # if from_canvas:
+        #     # Check if static_canvas exists
+        #     if not hasattr(config, 'static_canvas'):
+        #         print("Warning: 'static_canvas' attribute not found in config. "
+        #             "Please display data in the napari viewer using '.show()' first.")
+        #         return
+
+        #     try:
+        #         # Save the figure to a PDF file
+        #         config.static_canvas.figure.savefig(savepath)
+        #         print(f"Figure saved as {savepath}")
+        #     except RuntimeError as e:
+        #         if 'FigureCanvasQTAgg has been deleted' in str(e):
+        #             print("Warning: The color legend has been deleted and cannot be saved.")
+        #         else:
+        #             raise  # Re-raise the exception if it's a different error
+        # else:
+
 
     def _remove_geometries(
         layer,

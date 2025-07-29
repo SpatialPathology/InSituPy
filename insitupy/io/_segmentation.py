@@ -219,7 +219,7 @@ def _read_proseg(
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
     # rasterize polygons
-    img = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
-    img = da.from_array(img)
+    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
+    boundaries_mask = da.from_array(boundaries_mask)
 
-    return adata, img, cell_names, seg_mask_value
+    return adata, boundaries_mask, cell_names, seg_mask_value

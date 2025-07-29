@@ -93,6 +93,7 @@ def _update_categorical_legend(
                 fontsize=8, title_fontsize=10,
                 labelspacing=0.7, borderpad=0.5)
     axes.set_axis_off()
+
     static_canvas.draw()  # Redraw the canvas
 
 def _update_continuous_legend(static_canvas, mapping, label):
@@ -137,7 +138,6 @@ def _update_colorlegend(viewer, viewer_config):
                     marker_mode="face"
                     )
         else:
-
             if is_numeric_dtype(values):
                 rgba_list, mapping = continuous_data_to_rgba(data=values,
                                         cmap=layer.face_colormap.name,

@@ -1094,7 +1094,7 @@ class MultiCellData(DeepCopyMixin):
         # generate data paths
         path = Path(path)
 
-        adata, img, cell_names, seg_mask_value = _read_proseg(
+        adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
             path, counts_file=counts_file, cell_metadata_file=cell_metadata_file, polygons_file=polygons_file, pixel_size=pixel_size
             )
 
@@ -1107,7 +1107,7 @@ class MultiCellData(DeepCopyMixin):
         # add cellular boundaries
         boundaries.add_boundaries(
             #data={f"cells": img},
-            cell_boundaries=img,
+            cell_boundaries=boundaries_mask,
             pixel_size=pixel_size
             )
 
