@@ -12,7 +12,6 @@ from matplotlib.colors import ListedColormap
 from napari.utils.notifications import show_info, show_warning
 from napari.viewer import Viewer
 
-import insitupy._core._config as _config
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core._utils import _get_cell_layer

@@ -8,7 +8,6 @@ from qtpy.QtGui import QFontMetrics, QIcon
 from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
                             QVBoxLayout, QWidget)
 
-#import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGION_CMAP, REGIONS_SYMBOL)

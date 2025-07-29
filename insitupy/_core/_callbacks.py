@@ -7,7 +7,6 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.lines import Line2D
 from pandas.api.types import is_numeric_dtype
 
-#import insitupy._core._config as _config
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGIONS_SYMBOL)
