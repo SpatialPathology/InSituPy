@@ -435,7 +435,9 @@ class ImageRegistration:
 def register_images(
     data: InSituData, # type: ignore
     image_to_be_registered: Union[str, os.PathLike, Path],
-    image_type: Literal["histo", "IF"],
+    #image_type: Literal["histo", "IF"],
+    axes_image: Literal["CYX", "YXS"],  # axes of the image to be registered, e.g. YXS for RGB images, CYX for IF images
+    axes_template: Literal["YX", "CYX", "YXS"],  # axes of the template image, e.g. YX for grayscale images
     channel_names: Union[str, List[str]],
     channel_name_for_registration: Optional[str] = None,  # name used for the nuclei image. Only required for IF images.
     template_image_name: str = "nuclei",
@@ -474,6 +476,23 @@ def register_images(
     Returns:
         None
     """
+    # make sure the given image names are in a list
+    channel_names = convert_to_list(channel_names)
+
+    # determine the structure of the image axes and check other things
+    if axes_image == "YXS":
+        image_type = "histo"
+
+        # make sure that there is only one image name given
+        if len(channel_names) > 1:
+            raise ValueError(f"More than one image name retrieved ({channel_names})")
+
+        if len(channel_names) == 0:
+            raise ValueError(f"No image name found in file {image_to_be_registered}")
+    elif axes_image in ["CYX", "YXC"]:
+        image_type = "IF"
+    else:
+        raise ValueError(f"Unknown axes configuration {axes_image} for target image. Please use 'YXS' for histo images or 'CYX'/'YXC' for IF images.")
 
     # if image type is IF, the channel name for registration needs to be given
     if image_type == "IF" and channel_name_for_registration is None:
@@ -494,25 +513,21 @@ def register_images(
     if not image_to_be_registered.is_file():
         raise FileNotFoundError(f"No such file found: {str(image_to_be_registered)}")
 
-    # make sure the given image names are in a list
-    channel_names = convert_to_list(channel_names)
+    # axes_template = "YX"
+    # if image_type == "histo":
+    #     axes_image = "YXS"
 
-    # determine the structure of the image axes and check other things
-    axes_template = "YX"
-    if image_type == "histo":
-        axes_image = "YXS"
+    #     # make sure that there is only one image name given
+    #     if len(channel_names) > 1:
+    #         raise ValueError(f"More than one image name retrieved ({channel_names})")
 
-        # make sure that there is only one image name given
-        if len(channel_names) > 1:
-            raise ValueError(f"More than one image name retrieved ({channel_names})")
+    #     if len(channel_names) == 0:
+    #         raise ValueError(f"No image name found in file {image_to_be_registered}")
 
-        if len(channel_names) == 0:
-            raise ValueError(f"No image name found in file {image_to_be_registered}")
-
-    elif image_type == "IF":
-        axes_image = "CYX"
-    else:
-        raise UnknownOptionError(image_type, available=["histo", "IF"])
+    # elif image_type == "IF":
+    #     axes_image = "CYX"
+    # else:
+    #     raise UnknownOptionError(image_type, available=["histo", "IF"])
 
     print(f'\tProcessing following {image_type} images: {tf.Bold}{", ".join(channel_names)}{tf.ResetAll}', flush=True)
 
@@ -552,7 +567,6 @@ def register_images(
     min_good_matches = int(min_good_matches_per_area * image_area)
 
     # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
-    #axes_selected = "YX"
     if image_type == "histo":
         print("\t\tRun color deconvolution", flush=True)
         # deconvolve HE - performed on resized image to save memory
@@ -598,11 +612,10 @@ def register_images(
     imreg_complete.load_and_scale_images()
 
     # setup ImageRegistration object with the nucleus image (either from deconvolution or just selected from IF image)
-    axes_selected = "YX"
     imreg_selected = ImageRegistration(
         image=nuclei_img,
         template=imreg_complete.template,
-        axes_image=axes_selected,
+        axes_image="YX", # at this point the nuclei image was extracted and therefore the axes are always "YX"
         axes_template=axes_template,
         max_width=4000,
         convert_to_grayscale=False,
@@ -696,7 +709,7 @@ def register_images(
             data.images.add_image(
                 image=imreg_selected.registered,
                 name=n,
-                axes=axes_image,
+                axes="YX", # currently the images are added channel wise and therefore it is always "YX"
                 pixel_size=pixel_size,
                 ome_meta=ome_metadata,
                 overwrite=True

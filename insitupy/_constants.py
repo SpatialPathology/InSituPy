@@ -59,7 +59,7 @@ DEFAULT_CONTINUOUS_CMAP = "viridis"
 
 ## fluorescence colormaps
 FLUO_CMAP = [
-    "blue",       # e.g., DAPI
+    #"blue",       # e.g., DAPI
     "green",      # e.g., FITC
     "red",        # e.g., Texas Red
     "cyan",       # e.g., GFP variants

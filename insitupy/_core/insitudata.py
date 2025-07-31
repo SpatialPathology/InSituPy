@@ -1360,11 +1360,27 @@ class InSituData:
             pixel_size = img_metadata['pixel_size']
 
             # check if the current image is RGB
-            is_rgb = self._images.metadata[img_name]["rgb"]
-            axes = ImageAxes(self._images.metadata[img_name]["axes"])
+            #is_rgb = self._images.metadata[img_name]["rgb"]
+            axes_str = self._images.metadata[img_name]["axes"]
+            shape = self._images.metadata[img_name]["shape"]
+            if self._images.metadata[img_name]["axes"] == "CYX":
+                if not len(shape) == 3:
+                    warn((
+                        f"Axes information ({axes_str}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.\n"
+                        f"Error is likely caused by inconsistencies in the metadata file occuring in insitupy versions < 0.9.0."
+                        )
+                         )
+                    axes_str = "YX"
 
-            if not is_rgb and img.ndim == 3:
-                n_channels = img.shape[axes.C]
+            axes = ImageAxes(axes_str)
+            is_rgb = axes.is_rgb
+
+            if not is_rgb and axes.C is not None:
+                if not isinstance(img, list):
+                    n_channels = img.shape[axes.C]
+                else:
+                    n_channels = img[0].shape[axes.C]
+
                 try:
                     # get channel names
                     channel_names = [
@@ -1401,7 +1417,6 @@ class InSituData:
                         warn("The maximum value of the image is 0. Is the image really completely empty?")
                         contrast_limits = (0, 255)
 
-                    print(img_pyramid)
                     # add image to viewer
                     viewer.add_image(
                         img_pyramid,
@@ -1425,7 +1440,6 @@ class InSituData:
                         cmap = grayscale_colormap[n_grayscales]
                         n_grayscales += 1
                     blending = "additive"  # set blending mode
-
 
                 if not isinstance(img, list):
                     # create image pyramid for lazy loading
