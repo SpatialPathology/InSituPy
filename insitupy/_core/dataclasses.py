@@ -1212,7 +1212,7 @@ class ImageData(DeepCopyMixin):
                     name=n,
                     axes=None,
                     pixel_size=pixel_size,
-                    ome_meta=None
+                    ome_meta=None,
                     )
 
     def __repr__(self):
@@ -1242,6 +1242,7 @@ class ImageData(DeepCopyMixin):
         axes: Optional[str] = None, # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
         pixel_size: Optional[Number] = None,
         ome_meta: Optional[dict] = None,
+        is_rgb: Optional[bool] = None,
         overwrite: bool = False,
         verbose: bool = True
         ):
@@ -1311,12 +1312,19 @@ class ImageData(DeepCopyMixin):
                 self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
 
             # check whether the image is RGB or not
-            if len(img_shape) == 3:
-                self._metadata[name]["rgb"] = True
-            elif len(img_shape) == 2:
-                self._metadata[name]["rgb"] = False
+            if is_rgb is None:
+                if len(img_shape) == 3:
+                    channels = img_shape[2]
+                    if channels == 3:
+                        self._metadata[name]["rgb"] = True
+                    else:
+                        self._metadata[name]["rgb"] = False
+                elif len(img_shape) == 2:
+                    self._metadata[name]["rgb"] = False
+                else:
+                    raise ValueError(f"Unknown image shape: {img_shape}")
             else:
-                raise ValueError(f"Unknown image shape: {img_shape}")
+                self._metadata[name]["rgb"] = is_rgb
 
             # # get image contrast limits
             # if self._metadata[name]["rgb"]:

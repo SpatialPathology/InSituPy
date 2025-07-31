@@ -10,6 +10,7 @@ from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
+import dask.array as da
 import dask.dataframe as dd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -23,8 +24,8 @@ from scipy.sparse import issparse
 from tqdm import tqdm
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_COLOR_DICT)
+from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
+                                 LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
 from insitupy._core._configs import _get_viewer_uid
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer
@@ -39,6 +40,7 @@ from insitupy._exceptions import (InSituDataMissingObject,
                                   ModalityNotFoundError)
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
+from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
                                write_dict_to_json)
@@ -1344,56 +1346,111 @@ class InSituData:
     def _add_images_to_viewer(
         self,
         viewer: napari.Viewer,
-        grayscale_colormap: List[str] = ["red", "green", "cyan", "magenta", "yellow", "gray"]
+        grayscale_colormap: List[str] = FLUO_CMAP,
         ):
         images_attr = self._images
         n_images = len(images_attr.metadata)
         n_grayscales = 0 # number of grayscale images
         for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
-        #for i, img_name in enumerate(image_keys):
+            # get image
             img = images_attr[img_name]
-            is_visible = False if i < n_images - 1 else True # only last image is set visible
+
+            # only last image is set visible
+            is_visible = False if i < n_images - 1 else True
             pixel_size = img_metadata['pixel_size']
 
             # check if the current image is RGB
             is_rgb = self._images.metadata[img_name]["rgb"]
+            axes = ImageAxes(self._images.metadata[img_name]["axes"])
 
-            if is_rgb:
-                cmap = None  # default value of cmap
-                blending = "translucent_no_depth"  # set blending mode
-            else:
-                if img_name == "nuclei":
-                    cmap = "blue"
-                else:
-                    cmap = grayscale_colormap[n_grayscales]
+            if not is_rgb and img.ndim == 3:
+                n_channels = img.shape[axes.C]
+                try:
+                    # get channel names
+                    channel_names = [
+                        elem["Name"]
+                        for elem
+                        in self._images.metadata['IF']['OME']['Image']['Pixels']['Channel']
+                        ]
+                except KeyError:
+                    channel_names = [f"Channel {i+1}" for i in range(n_channels)]
+
+                # Multichannel grayscale image
+                for ch in range(n_channels):
+                    # select channel
+                    if not isinstance(img, list):
+                        channel_img = da.take(img, indices=ch, axis=axes.C)
+                    else:
+                        channel_img = [da.take(elem, indices=ch, axis=axes.C) for elem in img]
+                    #channel_img = img[ch]
+
+                    # select color map
+                    cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
                     n_grayscales += 1
-                blending = "additive"  # set blending mode
 
+                    if not isinstance(channel_img, list):
+                        # create image pyramid for lazy loading
+                        img_pyramid = create_img_pyramid(img=channel_img, nsubres=6)
+                    else:
+                        img_pyramid = channel_img
 
-            if not isinstance(img, list):
-                # create image pyramid for lazy loading
-                img_pyramid = create_img_pyramid(img=img, nsubres=6)
+                    # get contrast limits
+                    contrast_limits = _get_contrast_limits(img_pyramid)
+
+                    if contrast_limits[1] == 0:
+                        warn("The maximum value of the image is 0. Is the image really completely empty?")
+                        contrast_limits = (0, 255)
+
+                    print(img_pyramid)
+                    # add image to viewer
+                    viewer.add_image(
+                        img_pyramid,
+                        name=f"{img_name}: {channel_names[ch]}",
+                        colormap=cmap,
+                        blending="additive",
+                        rgb=False,
+                        contrast_limits=contrast_limits,
+                        scale=(pixel_size, pixel_size),
+                        visible=is_visible
+                    )
+
             else:
-                img_pyramid = img
+                if is_rgb:
+                    cmap = None  # default value of cmap
+                    blending = "translucent_no_depth"  # set blending mode
+                else:
+                    if img_name == "nuclei":
+                        cmap = "blue"
+                    else:
+                        cmap = grayscale_colormap[n_grayscales]
+                        n_grayscales += 1
+                    blending = "additive"  # set blending mode
 
-            # infer contrast limits
-            contrast_limits = _get_contrast_limits(img_pyramid)
 
-            if contrast_limits[1] == 0:
-                warn("The maximum value of the image is 0. Is the image really completely empty?")
-                contrast_limits = (0, 255)
+                if not isinstance(img, list):
+                    # create image pyramid for lazy loading
+                    img_pyramid = create_img_pyramid(img=img, nsubres=6)
+                else:
+                    img_pyramid = img
 
-            # add img pyramid to napari viewer
-            viewer.add_image(
-                    img_pyramid,
-                    name=img_name,
-                    colormap=cmap,
-                    blending=blending,
-                    rgb=is_rgb,
-                    contrast_limits=contrast_limits,
-                    scale=(pixel_size, pixel_size),
-                    visible=is_visible
-                )
+                # infer contrast limits
+                contrast_limits = _get_contrast_limits(img_pyramid)
+
+                if contrast_limits[1] == 0:
+                    warn("The maximum value of the image is 0. Is the image really completely empty?")
+                    contrast_limits = (0, 255)
+
+                # add img pyramid to napari viewer
+                viewer.add_image(
+                        img_pyramid,
+                        name=img_name,
+                        colormap=cmap,
+                        blending=blending,
+                        rgb=is_rgb,
+                        contrast_limits=contrast_limits,
+                        scale=(pixel_size, pixel_size),
+                        visible=is_visible
+                    )
 
     def _add_cells_to_viewer(
         self,

@@ -66,10 +66,7 @@ if WITH_NAPARI:
             '_auto_set_uid'
         ] # using slots reduces he memory consumption and accelerates attribute access
 
-        def __init__(
-            self,
-            data: InSituData
-            ):
+        def __init__(self, data):
             self.data = data # required to import changes from Viewer into InSituData
 
             if data.cells is not None:

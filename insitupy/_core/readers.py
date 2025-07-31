@@ -120,7 +120,6 @@ def read_xenium(
     cd = CellData(matrix=matrix, boundaries=boundaries)
     data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
-
     # LOAD IMAGES
     if verbose:
         print("Loading images...", flush=True)
