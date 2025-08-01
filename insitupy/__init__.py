@@ -21,7 +21,7 @@ from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
                                 ImageData, MultiCellData, RegionsData)
 from ._core.insitudata import InSituData
 from ._core.insituexperiment import InSituExperiment
-from ._core.readers import read_xenium
+from ._core.readers import read_qupath, read_xenium
 from ._core.viewer import sync_geometries
 from .images.registration import register_images
 from .palettes import CustomPalettes

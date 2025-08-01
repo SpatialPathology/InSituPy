@@ -1,0 +1,207 @@
+import json
+from pathlib import Path
+
+import anndata
+import numpy as np
+import pandas as pd
+from shapely import MultiPolygon, Polygon
+
+from insitupy._core.dataclasses import BoundariesData
+
+try:
+    from rasterio.features import rasterize
+except ImportError:
+    raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+
+from math import ceil
+
+import dask.array as da
+
+from insitupy.io.geo import parse_geopandas
+from insitupy.utils._shapely import scale_polygon
+from insitupy.utils.utils import convert_int_to_xenium_hex
+
+
+def _list_insitupy_data_folders(project_path):
+    # Define the path to the 'insitupy' export folder
+    project_path = Path(project_path)
+    insitupy_path = Path(project_path) / 'insitupy'
+
+    # Initialize a dictionary to store dataset subdirectory paths
+    dataset_paths = {}
+
+    # Check if the 'insitupy' folder exists
+    if not insitupy_path.exists():
+        print(f"No 'insitupy' folder found at {insitupy_path}")
+        return dataset_paths
+
+    # Iterate through the contents of the 'insitupy' folder
+    for item in insitupy_path.iterdir():
+        if item.is_dir():
+            # Collect full paths to subdirectories (datasets) within each data folder
+            subdirs = [d for d in item.iterdir() if d.is_dir()]
+
+            # if subdirectories were found, add it to the dictionary
+            if len(subdirs) > 1:
+                dataset_paths[item.name] = subdirs
+
+    # Print summary of folders and datasets found
+    print(f"Data folders found in '{insitupy_path}':")
+    for name, paths in dataset_paths.items():
+        print(f"\t- '{name}': {len(paths)} dataset(s)")
+    return dataset_paths
+
+def _read_measurements_qupath(path) -> anndata.AnnData:
+    path = Path(path)
+    df = pd.read_csv(path, sep="\t")
+
+    # Extract metadata
+    metadata = df[[
+        "Object ID", 'Centroid X µm', 'Centroid Y µm',
+        'Nucleus: Area µm^2', 'Nucleus: Length µm', 'Nucleus: Circularity', 'Nucleus: Solidity', 'Nucleus: Max diameter µm', 'Nucleus: Min diameter µm',
+        'Cell: Area µm^2', 'Cell: Length µm', 'Cell: Circularity', 'Cell: Solidity', 'Cell: Max diameter µm', 'Cell: Min diameter µm'
+    ]].copy()
+
+    # Extract measurements into a dictionary
+    measurement_types = ["Nucleus", "Cytoplasm", "Membrane", "Cell"]
+    measurements = {
+        mtype.lower(): df.loc[:, df.columns.str.contains("Mean") & df.columns.str.contains(f"{mtype}:")].copy()
+        for mtype in measurement_types
+    }
+
+    # Format column names
+    for m in measurements.values():
+        m.columns = [col.split(":")[1].strip() for col in m.columns]
+
+    # Move DAPI mean to metadata and drop it from nucleus measurements
+    metadata["DAPI_mean"] = measurements["nucleus"]["DAPI-01"]
+    for m in measurements.values():
+        m.drop(columns=["DAPI-01"], inplace=True, errors="ignore")
+
+    # Extract and format coordinates
+    coordinates = df.loc[:, df.columns.str.contains("Centroid")].copy()
+    coordinates.columns = ["x", "y"]
+
+    # shift coordinates to annotation origin
+    coordinates["x"] -= xmin
+    coordinates["y"] -= ymin
+
+    # Set index
+    cell_names = [convert_int_to_xenium_hex(i) for i in range(len(metadata))]
+    metadata.index = coordinates.index = cell_names
+    for m in measurements.values():
+        m.index = cell_names
+
+    # filter out cells without nucleus measurements
+    ids_wo_na = ~measurements["nucleus"].isna().any(axis=1)
+    metadata = metadata.loc[ids_wo_na, :]
+    coordinates = coordinates.loc[ids_wo_na, :]
+
+    for n, m in measurements.items():
+        measurements[n] = m.loc[ids_wo_na, :]
+
+    adata = anndata.AnnData(measurements["cell"])
+
+    for n, m in measurements.items():
+        if n != "cell":
+            adata.layers[n] = m.values
+
+    # add metadata and coordinates
+    adata.obs = pd.merge(left=adata.obs, right=metadata, left_index=True, right_index=True)
+    adata.obsm["spatial"] = coordinates.values
+
+    return adata
+
+def _convert_to_float_coords(coords, mode):
+    # Convert Decimal to float
+
+    # if len(coords) == 1:
+    if mode == "Polygon":
+        float_coords = [[(float(x), float(y)) for x, y in ring] for ring in coords]
+        poly = Polygon(float_coords[0])
+    elif mode == "MultiPolygon":
+        float_coords = [[[(float(x), float(y)) for x, y in ring] for ring in poly] for poly in coords]
+        poly = MultiPolygon(float_coords)
+    return poly
+
+def _generate_mask(bound_df, key, xmax, ymax, seg_mask_value):
+    # rasterize polygons
+    boundaries_mask = rasterize(
+        list(zip(bound_df[key], seg_mask_value)),
+        out_shape=(ymax,xmax))
+    boundaries_mask = da.from_array(boundaries_mask)
+
+    return boundaries_mask
+
+def _read_boundaries_qupath(bound_path) -> BoundariesData:
+    bound_path = Path(bound_path)
+
+    # --- Read the cellular geometries ---
+    bounds = parse_geopandas(bound_path)
+
+    # --- Read the nuclear geometries ---
+    # Load the GeoJSON file
+    with open(bound_path, 'r') as f:
+        data = json.load(f)
+
+    nucleus_geom = []
+    for feature in data['features']:
+        try:
+            geom = feature['nucleusGeometry']
+        except KeyError:
+            nucleus_geom.append(None)
+        else:
+            coords = geom['coordinates']
+            mode = geom['type']
+
+            poly = _convert_to_float_coords(coords, mode)
+
+            nucleus_geom.append(poly)
+
+    # --- Format the boundaries data ---
+    # add the nucleus geometry to the dataframe
+    bounds["nucleus_geometry"] = nucleus_geom
+
+    # convert nucleus_geometry to geoseries
+    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].astype("geometry")
+
+    # select only cells that were not filtered out yet
+    bounds = bounds.loc[metadata["Object ID"].values]
+
+    # add names from metadata
+    bounds["name"] = metadata.index
+
+    # move the polygons to the annotation origin
+    bounds["geometry"] = bounds["geometry"].translate(xoff=-xmin/pixel_size, yoff=-ymin/pixel_size)
+    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].translate(xoff=-xmin/pixel_size, yoff=-ymin/pixel_size)
+
+    seg_mask_value = range(1, len(bounds)+1)
+
+    # Calculate bounds for rasterization
+    polygon_bounds = bounds["geometry"].bounds
+    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
+    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
+
+    # Convert data into segmentation masks
+    cellbounds_mask = _generate_mask(
+        bounds, key="geometry",
+        xmax=xmax, ymax=ymax,
+        seg_mask_value=seg_mask_value)
+    nucbounds_mask = _generate_mask(
+        bounds, key="nucleus_geometry",
+        xmax=xmax, ymax=ymax,
+        seg_mask_value=seg_mask_value)
+
+    # --- Create BoundariesData object ---
+    boundaries = BoundariesData(
+        cell_names=bounds["name"].values,
+        seg_mask_value=seg_mask_value
+    )
+
+    boundaries.add_boundaries(
+        cell_boundaries=cellbounds_mask,
+        pixel_size=pixel_size,
+        nuclei_boundaries=nucbounds_mask
+    )
+
+    return boundaries

@@ -1311,6 +1311,7 @@ class ImageData(DeepCopyMixin):
             except KeyError:
                 self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
 
+            print(axes)
             # check whether the image is RGB or not
             if is_rgb is None:
                 if len(img_shape) == 3:
