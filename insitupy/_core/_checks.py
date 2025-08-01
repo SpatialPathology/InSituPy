@@ -180,8 +180,8 @@ def _check_assignment(
             print(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")
 
 def _is_experiment(obj):
-    from insitupy._core.insitudata import InSituData
-    from insitupy._core.insituexperiment import InSituExperiment
+    from insitupy._core.data import InSituData
+    from insitupy.experiment.data import InSituExperiment
 
     if isinstance(obj, InSituData):
         return False

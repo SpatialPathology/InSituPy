@@ -22,7 +22,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_ABBR)
 from insitupy._core._checks import _all_obs_names_unique, is_integer_counts
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
+from insitupy._core.data import InSituData
 from insitupy._core.readers import read_xenium
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._textformat import textformat as tf
@@ -115,7 +115,7 @@ class InSituExperiment:
         show(index, return_viewer=True):
     """
 
-    from ._deprecated import plot_overview
+    from .._core._deprecated import plot_overview
     def __init__(self):
         """
         Initialize an InSituExperiment object.
@@ -296,7 +296,7 @@ class InSituExperiment:
             else:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
-        from insitupy._core.insitudata import InSituData
+        from insitupy._core.data import InSituData
         assert dataset.__class__ is InSituData, "Loaded dataset is not an InSituData object."
 
         # # set a unique ID

@@ -15,8 +15,8 @@ from napari.viewer import Viewer
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
-from insitupy._core.insituexperiment import InSituExperiment
+from insitupy._core.data import InSituData
+from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 from insitupy.palettes import map_to_colors
 from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba

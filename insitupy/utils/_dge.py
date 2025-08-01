@@ -5,7 +5,7 @@ from anndata import AnnData
 
 from insitupy._core._checks import _check_assignment
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
+from insitupy._core.data import InSituData
 from insitupy.utils.utils import convert_to_list
 
 

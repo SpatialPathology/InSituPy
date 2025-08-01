@@ -17,12 +17,13 @@ from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
+from ._core.data import InSituData
 from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
                                 ImageData, MultiCellData, RegionsData)
-from ._core.insitudata import InSituData
-from ._core.insituexperiment import InSituExperiment
-from ._core.readers import read_qupath, read_xenium
+from ._core.readers import read_xenium
 from ._core.viewer import sync_geometries
+from .experiment.data import InSituExperiment
+from .experiment.readers import read_qupath_project
 from .images.registration import register_images
 from .palettes import CustomPalettes
 from .tools.dge import differential_gene_expression

@@ -13,7 +13,7 @@ import pandas as pd
 import scanpy as sc
 
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
+from insitupy._core.data import InSituData
 from insitupy.plotting import volcano_plot
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
