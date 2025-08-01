@@ -46,12 +46,21 @@ def read_qupath_project(
             if not measurements_path.exists():
                 raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
 
-            adata = _read_measurements_qupath(measurements_path)
+            adata = _read_measurements_qupath(
+                measurements_path, xmin=xmin, ymin=ymin
+                )
 
+            # --- Read cellular boundaries ---
             if not bound_path.exists():
                 raise FileNotFoundError(f"No boundaries file found at '{bound_path}'.")
 
-            boundaries = _read_boundaries_qupath(bound_path)
+            boundaries = _read_boundaries_qupath(
+                bound_path,
+                object_ids=adata.obs["Object ID"].values,
+                cell_names=adata.obs_names,
+                xmin=xmin, ymin=ymin,
+                pixel_size=pixel_size
+                )
 
             # --- Check image path ---
             if not image_path.exists():
@@ -85,3 +94,5 @@ def read_qupath_project(
 
             # --- Add to InSituExperiment ---
             exp.add(data)
+
+    return exp

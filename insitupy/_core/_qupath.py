@@ -51,7 +51,9 @@ def _list_insitupy_data_folders(project_path):
         print(f"\t- '{name}': {len(paths)} dataset(s)")
     return dataset_paths
 
-def _read_measurements_qupath(path) -> anndata.AnnData:
+def _read_measurements_qupath(
+    path, xmin, ymin
+    ) -> anndata.AnnData:
     path = Path(path)
     df = pd.read_csv(path, sep="\t")
 
@@ -133,7 +135,13 @@ def _generate_mask(bound_df, key, xmax, ymax, seg_mask_value):
 
     return boundaries_mask
 
-def _read_boundaries_qupath(bound_path) -> BoundariesData:
+def _read_boundaries_qupath(
+    bound_path,
+    object_ids,
+    cell_names,
+    xmin, ymin,
+    pixel_size
+    ) -> BoundariesData:
     bound_path = Path(bound_path)
 
     # --- Read the cellular geometries ---
@@ -166,14 +174,18 @@ def _read_boundaries_qupath(bound_path) -> BoundariesData:
     bounds["nucleus_geometry"] = bounds["nucleus_geometry"].astype("geometry")
 
     # select only cells that were not filtered out yet
-    bounds = bounds.loc[metadata["Object ID"].values]
+    bounds = bounds.loc[object_ids]
 
     # add names from metadata
-    bounds["name"] = metadata.index
+    bounds["name"] = cell_names
 
     # move the polygons to the annotation origin
-    bounds["geometry"] = bounds["geometry"].translate(xoff=-xmin/pixel_size, yoff=-ymin/pixel_size)
-    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].translate(xoff=-xmin/pixel_size, yoff=-ymin/pixel_size)
+    bounds["geometry"] = bounds["geometry"].translate(
+        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        )
+    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].translate(
+        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        )
 
     seg_mask_value = range(1, len(bounds)+1)
 

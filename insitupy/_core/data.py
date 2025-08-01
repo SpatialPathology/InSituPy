@@ -1393,6 +1393,9 @@ class InSituData:
 
                 # Multichannel grayscale image
                 for ch in range(n_channels):
+                    # get channel name
+                    ch_name = channel_names[ch]
+
                     # select channel
                     if not isinstance(img, list):
                         channel_img = da.take(img, indices=ch, axis=axes.C)
@@ -1401,8 +1404,11 @@ class InSituData:
                     #channel_img = img[ch]
 
                     # select color map
-                    cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
-                    n_grayscales += 1
+                    if ch_name in ["nuclei", "nucleus"] or "DAPI" in ch_name:
+                        cmap = "blue"
+                    else:
+                        cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
+                        n_grayscales += 1
 
                     if not isinstance(channel_img, list):
                         # create image pyramid for lazy loading
@@ -1420,7 +1426,7 @@ class InSituData:
                     # add image to viewer
                     viewer.add_image(
                         img_pyramid,
-                        name=f"{img_name}: {channel_names[ch]}",
+                        name=f"{img_name}: {ch_name}",
                         colormap=cmap,
                         blending="additive",
                         rgb=False,
@@ -1434,7 +1440,7 @@ class InSituData:
                     cmap = None  # default value of cmap
                     blending = "translucent_no_depth"  # set blending mode
                 else:
-                    if img_name == "nuclei":
+                    if img_name in ["nuclei", "nucleus"] or "DAPI" in img_name:
                         cmap = "blue"
                     else:
                         cmap = grayscale_colormap[n_grayscales]
