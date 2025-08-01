@@ -53,14 +53,14 @@ if WITH_NAPARI:
                     if checks_passed:
                         if object_type == "annotation":
                             # if the InSituData object does not have an annotations attribute, initialize it
-                            if data.annotations is None:
-                                data.annotations = AnnotationsData() # initialize empty object
+                            # if data.annotations is None:
+                            #     data.annotations = AnnotationsData() # initialize empty object
 
                             shapesdata = data.annotations
                         else:
                             # if the InSituData object does not have an regions attribute, initialize it
-                            if data.regions is None:
-                                data.regions = RegionsData() # initialize empty object
+                            # if data.regions is None:
+                            #     data.regions = RegionsData() # initialize empty object
 
                             shapesdata = data.regions
 

@@ -21,9 +21,9 @@ from insitupy._core._xenium import (_read_binned_expression,
                                     _read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
                                     _restructure_transcripts_dataframe)
+from insitupy._core.data import InSituData
 from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
                                         MultiCellData, RegionsData)
-from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.io.files import read_json
 from insitupy.utils.utils import convert_to_list
@@ -158,11 +158,11 @@ def read_xenium(
     # create imageData object
     img_paths = [data.path / elem for elem in img_files]
 
-    if data.images is None:
-        data.images = ImageData(img_paths, img_names)
-    else:
-        for im, n in zip(img_paths, img_names):
-            data.images.add_image(im, n, overwrite=False, verbose=True)
+    # if data.images is None:
+    #     data.images = ImageData(img_paths, img_names)
+    # else:
+    for im, n in zip(img_paths, img_names):
+        data.images.add_image(im, n, overwrite=False, verbose=True)
 
     # LOAD TRANSCRIPTS
     transcript_filename = "transcripts.parquet"

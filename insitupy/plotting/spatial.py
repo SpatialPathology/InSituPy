@@ -19,8 +19,8 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment, check_raw
 from insitupy._core._utils import _get_cell_layer
-from insitupy._core.dataclasses import AnnotationsData, ImageData, RegionsData
 from insitupy._core.data import InSituData
+from insitupy._core.dataclasses import AnnotationsData, ImageData, RegionsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 from insitupy.plotting._colors import (_add_colorlegend_to_axis,
@@ -271,7 +271,7 @@ class _SinglePlotConfig:
             self.ylim = (ymin, ymax)
 
         # extract image information
-        if ImageDataObject is not None:
+        if not ImageDataObject.is_empty:
             # pick the image with the right resolution for plotting
             max_pixel_size = np.max([self.xlim[1] - self.xlim[0], self.ylim[1] - self.ylim[0]]) / pixelwidth_per_subplot
             orig_pixel_size = ImageDataObject.metadata[image_key]["pixel_size"]

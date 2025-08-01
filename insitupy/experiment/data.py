@@ -241,7 +241,7 @@ class InSituExperiment:
         # get obs dataframes
         obs_list = []
         for _, d in self.iterdata():
-            if d.cells is not None:
+            if not d.cells.is_empty:
                 celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
                 obs_list.append(celldata.matrix.obs)
 
@@ -813,7 +813,7 @@ class InSituExperiment:
         ):
         n_cells = 0
         for _, d in self.iterdata():
-            if d.cells is not None:
+            if not d.cells.is_empty:
                 celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
                 n_cells += len(celldata.matrix)
 

@@ -2,6 +2,7 @@
 import functools as ft
 import os
 import shutil
+from copy import deepcopy
 from datetime import datetime
 from numbers import Number
 from os.path import abspath
@@ -178,11 +179,16 @@ class InSituData:
         # self._from_insitudata = from_insitudata
 
         # modalities
-        self._images = None
-        self._cells = None
-        self._annotations = None
+        # self._images = None
+        # self._cells = None
+        # self._annotations = None
+        # self._transcripts = None
+        # self._regions = None
+        self._images = ImageData()
+        self._cells = MultiCellData()
+        self._annotations = AnnotationsData()
+        self._regions = RegionsData()
         self._transcripts = None
-        self._regions = None
 
         # other
         #self._viewer = None
@@ -201,11 +207,11 @@ class InSituData:
             self._path = self._path.resolve()
 
         # check if all modalities are empty
-        is_empty = np.all([elem is None for elem in [self._images, self._cells, self._annotations, self._transcripts, self._regions]])
+        empty_checks = [elem.is_empty for elem in [
+            self._images, self._cells, self._annotations, self._regions
+            ]] + [self._transcripts is None] # transcripts doe not have is_empty property since they are a dataframe
+        all_empty = np.all(empty_checks)
 
-        # if is_empty:
-        #     repr = f"{tf.Bold+tf.Red}InSituData{tf.ResetAll}\nEmpty"
-        # else:
         repr = (
             f"{tf.Bold+tf.Red}InSituData{tf.ResetAll}\n"
             f"{tf.Bold}Method:{tf.ResetAll}\t\t{method}\n"
@@ -224,16 +230,16 @@ class InSituData:
 
         repr += f"{tf.Bold}Metadata file:{tf.ResetAll}\t{mfile}"
 
-        if is_empty:
+        if all_empty:
             repr += "\n\nNo modalities loaded."
         else:
-            if self._images is not None:
+            if not self._images.is_empty:
                 images_repr = self._images.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['images']+tf.Bold} images{tf.ResetAll}\n{tf.SPACER}   " + images_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._cells is not None:
+            if not self._cells.is_empty:
                 cells_repr = self._cells.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
@@ -246,13 +252,13 @@ class InSituData:
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
                 )
 
-            if self._annotations is not None:
+            if not self._annotations.is_empty:
                 annot_repr = self._annotations.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['annotations']+tf.Bold} annotations{tf.ResetAll}\n{tf.SPACER}   " + annot_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._regions is not None:
+            if not self._regions.is_empty:
                 region_repr = self._regions.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['regions']+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
@@ -571,26 +577,11 @@ class InSituData:
         '''
         Function to generate a deep copy of the InSituData object.
         '''
-        from copy import deepcopy
-
-        # had_viewer = False
-        # if self._viewer is not None:
-        #     # make copy of viewer to add it later again
-        #     had_viewer = True
-        #     viewer_copy = self._viewer.copy()
-        #     # remove viewer because there is otherwise a error during deepcopy
-        #     self.viewer = None
-        # make copy
         self_copy = deepcopy(self)
 
         if not keep_path:
             self_copy._path = None
             self_copy.metadata["path"] = None
-
-        # # add viewer again to original object if necessary
-        # if had_viewer:
-        #     self._viewer = viewer_copy
-
         return self_copy
 
     def crop(self,
@@ -618,8 +609,6 @@ class InSituData:
         else:
             _self = self.copy()
 
-        # if layer_name is None and region_tuple is None and (xlim is None or ylim is None):
-        #     raise ValueError("At least one of shape_layer, region_tuple, or xlim/ylim must be provided.")
         if region_tuple is None:
             if xlim is None or ylim is None:
                 raise ValueError("If shape is None, both xlim and ylim must not be None.")
@@ -653,7 +642,7 @@ class InSituData:
         except TypeError:
             pass
 
-        if _self.cells is not None:
+        if not _self.cells.is_empty:
             _self.cells.crop(
                 shape=shape,
                 xlim=xlim, ylim=ylim,
@@ -667,10 +656,10 @@ class InSituData:
                 xlim=xlim, ylim=ylim, verbose=verbose
             )
 
-        if self._images is not None:
+        if not self._images.is_empty:
             _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
 
-        if self._annotations is not None:
+        if not self._annotations.is_empty:
 
             _self.annotations.crop(
                 shape=shape,
@@ -679,7 +668,7 @@ class InSituData:
                 verbose=verbose, inplace=True
                 )
 
-        if self._regions is not None:
+        if not self._regions.is_empty:
             _self.regions.crop(
                 shape=shape,
                 xlim=tuple([elem for elem in xlim]),
@@ -704,68 +693,8 @@ class InSituData:
             for k in _self.metadata["history"].keys():
                 _self.metadata["history"][k] = []
 
-        if inplace:
-            pass
-            # if self._viewer is not None:
-            #     del _self.viewer # delete viewer
-        else:
+        if not inplace:
             return _self
-
-    # def add_alt(self,
-    #             celldata_to_add: CellData,
-    #             key_to_add: str
-    #             ) -> None:
-    #     # check if the current self has already an alt object and add a empty one if not
-    #     #alt_attr_name = "alt"
-    #     #try:
-    #     #    alt_attr = getattr(self, alt_attr_name)
-    #     #except AttributeError:
-    #     #    setattr(self, alt_attr_name, {})
-    #     #    alt_attr = getattr(self, alt_attr_name)
-
-    #     if self._cells is None:
-    #         self._cells = MultiCellData()
-
-    #     # add the celldata to the given key
-    #     self._cells.add_celldata(cd=celldata_to_add, key=key_to_add)
-
-    # def add_baysor(self,
-    #                path: Union[str, os.PathLike, Path],
-    #                read_transcripts: bool = False,
-    #                key_to_add: str = "baysor",
-    #                pixel_size: Number = 1 # the pixel size is usually 1 since baysor runs on the µm coordinates
-    #                ):
-
-    #     # # convert to pathlib path
-    #     path = Path(path)
-
-    #     # read baysor data
-    #     celldata = read_baysor_cells(baysor_output=path, pixel_size=pixel_size)
-
-    #     # add celldata to alt attribute
-    #     self.add_alt(celldata_to_add=celldata, key_to_add=key_to_add)
-
-    #     if read_transcripts:
-    #         #trans_attr_name = "transcripts"
-    #         if self._transcripts is None:
-    #             print("No transcript layer found. Addition of Baysor transcript data is skipped.", flush=True)
-    #         else:
-    #             trans_attr = self._transcripts
-    #             # read baysor transcripts
-    #             baysor_results = read_baysor_transcripts(baysor_output=path)
-    #             baysor_results = baysor_results[["cell"]]
-
-    #             # merge transcripts with existing transcripts
-    #             baysor_results.columns = pd.MultiIndex.from_tuples([("cell_id", key_to_add)])
-    #             trans_attr = pd.merge(left=trans_attr,
-    #                                 right=baysor_results,
-    #                                 left_index=True,
-    #                                 right_index=True
-    #                                 )
-
-    #             # add resulting dataframe to InSituData
-    #             self._transcripts = trans_attr
-
 
     def plot_dimred(self, save: Optional[str] = None):
         '''
@@ -842,8 +771,8 @@ class InSituData:
         if len(files) != len(keys):
             raise ValueError("Length of files and keys must be the same.")
 
-        if self._annotations is None:
-            self._annotations = AnnotationsData()
+        # if self._annotations is None:
+        #     self._annotations = AnnotationsData()
 
         for key, file in zip(keys, files):
             # read annotation and store in dictionary
@@ -883,8 +812,8 @@ class InSituData:
             raise ValueError("Length of files and keys must be the same.")
 
 
-        if self._regions is None:
-            self._regions = RegionsData()
+        # if self._regions is None:
+        #     self._regions = RegionsData()
 
         for key, file in zip(keys, files):
             # read annotation and store in dictionary
@@ -940,11 +869,11 @@ class InSituData:
                 # create imageData object
                 img_paths = [self._path / elem for elem in img_files]
 
-                if self._images is None:
-                    self._images = ImageData(img_paths, img_names)
-                else:
-                    for im, n in zip(img_paths, img_names):
-                        self._images.add_image(im, n, overwrite=overwrite, verbose=verbose)
+                # if self._images is None:
+                #     self._images = ImageData(img_paths, img_names)
+                # else:
+                for im, n in zip(img_paths, img_names):
+                    self._images.add_image(im, n, overwrite=overwrite, verbose=verbose)
 
         else:
             NoProjectLoadWarning()
@@ -1054,7 +983,7 @@ class InSituData:
         self._metadata["data"] = {}
 
         # save images
-        if self._images is not None:
+        if not self._images.is_empty:
             images = self._images
             _save_images(
                 imagedata=images,
@@ -1067,7 +996,7 @@ class InSituData:
                 )
 
         # save cells
-        if self._cells is not None:
+        if not self._cells.is_empty:
             cells = self._cells
             _save_cells(
                 cells=cells,
@@ -1087,7 +1016,7 @@ class InSituData:
                 )
 
         # save annotations
-        if self._annotations is not None:
+        if not self._annotations.is_empty:
             annotations = self._annotations
             _save_annotations(
                 annotations=annotations,
@@ -1096,7 +1025,7 @@ class InSituData:
             )
 
         # save regions
-        if self._regions is not None:
+        if not self._regions.is_empty:
             regions = self._regions
             _save_regions(
                 regions=regions,
@@ -1209,7 +1138,7 @@ class InSituData:
             print(f"Updating project in {path}")
 
         # save cells
-        if self._cells is not None:
+        if not self._cells.is_empty:
             cells = self._cells
             if verbose:
                 print("\tUpdating cells...", flush=True)
@@ -1223,7 +1152,7 @@ class InSituData:
 
 
         # save annotations
-        if self._annotations is not None:
+        if not self._annotations.is_empty:
             annotations = self._annotations
             if verbose:
                 print("\tUpdating annotations...", flush=True)
@@ -1234,7 +1163,7 @@ class InSituData:
             )
 
         # save regions
-        if self._regions is not None:
+        if not self._regions.is_empty:
             regions = self._regions
             if verbose:
                 print("\tUpdating regions...", flush=True)
@@ -1267,7 +1196,7 @@ class InSituData:
         self._quicksave_dir.mkdir(parents=True, exist_ok=True)
 
         # save annotations
-        if self._annotations is None:
+        if self._annotations.is_empty:
             print("No annotations found. Quicksave skipped.", flush=True)
         else:
             annotations = self._annotations
@@ -1336,12 +1265,11 @@ class InSituData:
             raise ValueError(f"More than one quicksave with uid '{uid}' found.")
 
         # add annotations to existing annotations attribute or add a new one
-        if self._annotations is None:
-            self._annotations = AnnotationsData()
-        else:
-            annotations = self._annotations
-            for k in ad.metadata.keys():
-                annotations.add_data(ad[k], k, verbose=True)
+        # if self._annotations is None:
+        #     self._annotations = AnnotationsData()
+        # else:
+        for k in ad.metadata.keys():
+            self._annotations.add_data(ad[k], k, verbose=True)
 
     def _add_images_to_viewer(
         self,
@@ -1480,7 +1408,7 @@ class InSituData:
         cells_layer: Optional[str] = None,
         point_size: int = 8
         ):
-        if self._cells is None:
+        if self.cells.is_empty:
             raise InSituDataMissingObject("cells")
         else:
             celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
@@ -1537,7 +1465,7 @@ class InSituData:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        if self._cells is None:
+        if self.cells.is_empty:
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
             add_geom_widget.max_height = 120
@@ -1696,8 +1624,8 @@ class InSituData:
         current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
 
         # IMAGES
-        if self._images is None:
-            warn("No attribute `.images` found.")
+        if self.images.is_empty:
+            warn("No images found.")
         else:
             self._add_images_to_viewer(viewer=current_viewer)
 
@@ -1769,7 +1697,17 @@ class InSituData:
         return getattr(self, modality)
 
     def get_loaded_modalities(self):
-        loaded_modalities = [m for m in MODALITIES if getattr(self, m) is not None]
+        loaded_modalities = []
+        for m in MODALITIES:
+            try:
+                if not getattr(self, m).is_empty:
+                    loaded_modalities.append(m)
+            except AttributeError:
+                # exception for transcripts
+                if getattr(self, m) is not None:
+                    loaded_modalities.append(m)
+
+        #loaded_modalities = [m for m in MODALITIES if getattr(self, m) is not None]
         return loaded_modalities
 
     def remove_history(self,

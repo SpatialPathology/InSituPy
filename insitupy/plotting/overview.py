@@ -170,7 +170,7 @@ def plot_overview(
     list_gene_count = []
     list_transcript_count = []
     for _, data in data.iterdata():
-        if data.cells is None:
+        if data.cells.is_empty:
             warnings.warn("Cells were not loaded. Loading cells.")
             data.load_cells()
 

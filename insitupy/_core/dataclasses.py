@@ -102,7 +102,7 @@ class ShapesData(DeepCopyMixin):
 
             s = "\n".join(repr_strings)
         else:
-            s = ""
+            s = "empty"
 
         return s
 
@@ -112,6 +112,10 @@ class ShapesData(DeepCopyMixin):
     @property
     def metadata(self):
         return self._metadata
+
+    @property
+    def is_empty(self):
+        return len(self._data) == 0
 
     @metadata.setter
     def metadata(self, value: dict):
@@ -461,15 +465,18 @@ class BoundariesData(DeepCopyMixin):
         self._data = dict()
 
     def __repr__(self):
-        labels = list(self._metadata.keys())
-        if len(labels) == 0:
-            repr = f"Empty BoundariesData object"
+        if len(self._data) > 0:
+            labels = list(self._metadata.keys())
+            if len(labels) == 0:
+                repr = f"Empty BoundariesData object"
+            else:
+                ll = len(labels)
+                repr = f"BoundariesData object with {ll} {'entry' if ll == 1 else 'entries'}:"
+                for l in labels:
+                    if self._data[l] is not None:
+                        repr += f"\n{tf.SPACER+tf.Bold+l+tf.ResetAll}"
         else:
-            ll = len(labels)
-            repr = f"BoundariesData object with {ll} {'entry' if ll == 1 else 'entries'}:"
-            for l in labels:
-                if self._data[l] is not None:
-                    repr += f"\n{tf.SPACER+tf.Bold+l+tf.ResetAll}"
+            repr = "empty"
         return repr
 
     def __getitem__(self, key):
@@ -499,6 +506,10 @@ class BoundariesData(DeepCopyMixin):
     @property
     def seg_mask_value(self):
         return self._seg_mask_value
+
+    @property
+    def is_empty(self):
+        return len(self._data) == 0
 
     def add_boundaries(self,
                        cell_boundaries: Union[da.core.Array, np.ndarray],
@@ -1006,16 +1017,19 @@ class MultiCellData(DeepCopyMixin):
         self._main_key = None
 
     def __repr__(self):
-        if self._main_key is not None:
-            indented_repr = self._layers[self._main_key].__repr__().replace('\n', f'\n{tf.SPACER}')
-            repr = (
-                f"{tf.Bold}MultiCellData with main layer{tf.ResetAll} '{self._main_key}'\n"
-                f"{tf.SPACER}{indented_repr}"
-            )
+        if len(self._layers) > 0:
+            if self._main_key is not None:
+                indented_repr = self._layers[self._main_key].__repr__().replace('\n', f'\n{tf.SPACER}')
+                repr = (
+                    f"{tf.Bold}MultiCellData with main layer{tf.ResetAll} '{self._main_key}'\n"
+                    f"{tf.SPACER}{indented_repr}"
+                )
 
-        non_main_keys = [f"'{k}'" for k in self._layers.keys() if k != self._main_key]
-        if len(non_main_keys) > 0:
-            repr += f"\n\nAdditional layers with keys: {', '.join(non_main_keys)}"
+            non_main_keys = [f"'{k}'" for k in self._layers.keys() if k != self._main_key]
+            if len(non_main_keys) > 0:
+                repr += f"\n\nAdditional layers with keys: {', '.join(non_main_keys)}"
+        else:
+            repr = "empty"
         return repr
 
     def __getitem__(self, key):
@@ -1059,6 +1073,10 @@ class MultiCellData(DeepCopyMixin):
         if value not in self._layers.keys():
             raise ValueError(f"Such layer does not exist.")
         self._main_key = value
+
+    @property
+    def is_empty(self):
+        return len(self._layers) == 0
 
     def add_celldata(self,
                      cd: CellData,
@@ -1216,7 +1234,7 @@ class ImageData(DeepCopyMixin):
                     )
 
     def __repr__(self):
-        if len(self._metadata) > 0:
+        if len(self._data) > 0:
             repr_strings = [f"{tf.Bold}{n}:{tf.ResetAll}\t{metadata['shape']}" for n,metadata in self._metadata.items()]
             s = "\n".join(repr_strings)
         else:
@@ -1234,6 +1252,10 @@ class ImageData(DeepCopyMixin):
     @property
     def names(self):
         return self._names
+
+    @property
+    def is_empty(self):
+        return len(self._data) == 0
 
     def add_image(
         self,

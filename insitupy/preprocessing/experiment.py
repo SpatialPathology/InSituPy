@@ -165,7 +165,7 @@ def normalize_and_transform(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             normalize_and_transform_anndata(
                 adata=celldata.matrix,
@@ -209,7 +209,7 @@ def reduce_dimensions(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
             reduce_dimensions_anndata(
@@ -247,7 +247,7 @@ def cluster_cells(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
             clustering_anndata(

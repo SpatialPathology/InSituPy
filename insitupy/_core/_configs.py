@@ -69,7 +69,7 @@ if WITH_NAPARI:
         def __init__(self, data):
             self.data = data # required to import changes from Viewer into InSituData
 
-            if data.cells is not None:
+            if not data.cells.is_empty:
                 self.data_name = data.cells.main_key # by default, main_key is the first data layer
                 self.has_cells = True
             else:
@@ -161,7 +161,7 @@ if WITH_NAPARI:
             return masks
 
         def _get_pixel_size(self):
-            if self.data.images is not None:
+            if not self.data.images.is_empty:
                 first_key = list(self.data.images.metadata.keys())[0]
                 return self.data.images.metadata[first_key]["pixel_size"]
             return None

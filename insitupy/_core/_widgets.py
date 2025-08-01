@@ -42,21 +42,11 @@ if WITH_NAPARI:
         data = viewer_config.data
 
         if not viewer_config.has_cells:
-        #if xdata.cells is None:
             show_cells_widget = None
             move_to_cell_widget = None
             show_boundaries_widget = None,
             filter_cells_widget = None
         else:
-            # # initialize data_name of viewer
-            # _config.init_data_name(xdata=xdata)
-
-            # # initialize viewer configuration
-            # _config.init_viewer_config(xdata=xdata,
-            #                             #data_name=config.current_data_name
-            #                             )
-            # _config.init_recent_selections()
-
             data_names = data.cells.get_all_keys()
 
             @magicgui(
@@ -323,13 +313,13 @@ if WITH_NAPARI:
 
             viewer.layers.selection.events.active.connect(callback_update_legend)
 
-        if data.annotations is None and data.regions is None:
+        if data.annotations.is_empty and data.regions.is_empty:
             show_geometries_widget = None
         else:
             #TODO: The following section is weirdly complicated and should be simplified.
             # check which geometries are available
-            if data.annotations is not None:
-                if data.regions is not None:
+            if not data.annotations.is_empty:
+                if not data.regions.is_empty:
                     choices = ["Annotations", "Regions"]
                 else:
                     choices = ["Annotations"]
