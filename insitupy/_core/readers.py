@@ -75,44 +75,43 @@ def read_xenium(
 
     # INITIALIZE INSITUDATA
     # initialize the metadata dict
-    metadata = {}
-    metadata["data"] = {}
-    metadata["history"] = {}
-    metadata["history"]["cells"] = []
-    metadata["history"]["annotations"] = []
-    metadata["history"]["regions"] = []
+    # metadata = {}
+    # metadata["data"] = {}
+    # metadata["history"] = {}
+    # metadata["history"]["cells"] = []
+    # metadata["history"]["annotations"] = []
+    # metadata["history"]["regions"] = []
 
     # check if path exists
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
 
     # save paths of this project in metadata
-    metadata["path"] = abspath(path).replace("\\", "/")
-    metadata["metadata_file"] = metadata_filename
+    #metadata["path"] = abspath(path).replace("\\", "/")
+    # metadata = {}
+    # metadata["metadata_file"] = metadata_filename
 
     # read metadata
-    metadata["method_params"] = read_json(path / metadata_filename)
+    xenium_metadata = read_json(path / metadata_filename)
 
     # get slide id and sample id from metadata
-    slide_id = metadata["method_params"]["slide_id"]
-    sample_id = metadata["method_params"]["region_name"]
+    slide_id = xenium_metadata["slide_id"]
+    sample_id = xenium_metadata["region_name"]
 
-    # initialize the uid section
-    metadata["uids"] = [str(uuid4())]
-
-    # add method
-    metadata["method"] = "Xenium"
-
-    data = InSituData(path=path,
-                        metadata=metadata,
-                        slide_id=slide_id,
-                        sample_id=sample_id,
-                        )
+    data = InSituData(
+        path=path,
+        slide_id=slide_id,
+        sample_id=sample_id,
+        method_name="Xenium",
+        method_params=xenium_metadata,
+        )
 
     # LOAD CELLS
     if verbose:
         print("Loading cells...", flush=True)
-    pixel_size = data.metadata["method_params"]["pixel_size"]
+
+    pixel_size = xenium_metadata["pixel_size"]
+
     # read celldata
     matrix = _read_matrix_from_xenium(path=data.path)
     boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)

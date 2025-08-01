@@ -30,12 +30,12 @@ def _save_images(imagedata: ImageData,
         verbose=verbose
         )
 
-    if metadata is not None:
-        metadata["data"]["images"] = {}
-        for n in imagedata.metadata.keys():
-            s = savepaths[n]
-            # collect metadata
-            metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
+    #if metadata is not None:
+    metadata["data"]["images"] = {}
+    for n in imagedata.metadata.keys():
+        s = savepaths[n]
+        # collect metadata
+        metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
 
 def _save_cells(cells: MultiCellData,
                 path,
@@ -56,17 +56,17 @@ def _save_cells(cells: MultiCellData,
         overwrite=overwrite
         )
 
-    if metadata is not None:
-        try:
-            # move old celldata paths to history
-            old_path = metadata["data"]["cells"]
-        except KeyError:
-            pass
-        else:
-            metadata["history"]["cells"].append(old_path)
+    #if metadata is not None:
+    try:
+        # move old celldata paths to history
+        old_path = metadata["data"]["cells"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["cells"].append(old_path)
 
-        # move new paths to data
-        metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
+    # move new paths to data
+    metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
 
 
 def _save_transcripts(transcripts, path, metadata):
@@ -78,8 +78,8 @@ def _save_transcripts(transcripts, path, metadata):
     # save transcripts as parquet and modify metadata
     transcripts.to_parquet(trans_file)
 
-    if metadata is not None:
-        metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
+    #if metadata is not None:
+    metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
 
 def _save_annotations(annotations, path, metadata):
     uid = _generate_time_based_uid()
@@ -88,17 +88,17 @@ def _save_annotations(annotations, path, metadata):
     # save annotations
     annotations.save(annot_path)
 
-    if metadata is not None:
-        try:
-            # move old paths to history
-            old_path = metadata["data"]["annotations"]
-        except KeyError:
-            pass
-        else:
-            metadata["history"]["annotations"].append(old_path)
+    #if metadata is not None:
+    try:
+        # move old paths to history
+        old_path = metadata["data"]["annotations"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["annotations"].append(old_path)
 
-        # add new paths
-        metadata["data"]["annotations"] = Path(relpath(annot_path, path)).as_posix()
+    # add new paths
+    metadata["data"]["annotations"] = Path(relpath(annot_path, path)).as_posix()
 
 def _save_regions(regions, path, metadata):
     uid = _generate_time_based_uid()
@@ -107,14 +107,14 @@ def _save_regions(regions, path, metadata):
     # save annotations
     regions.save(annot_path)
 
-    if metadata is not None:
-        try:
-            # move old paths to history
-            old_path = metadata["data"]["regions"]
-        except KeyError:
-            pass
-        else:
-            metadata["history"]["regions"].append(old_path)
+    #if metadata is not None:
+    try:
+        # move old paths to history
+        old_path = metadata["data"]["regions"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["regions"].append(old_path)
 
-        # add new paths
-        metadata["data"]["regions"] = Path(relpath(annot_path, path)).as_posix()
+    # add new paths
+    metadata["data"]["regions"] = Path(relpath(annot_path, path)).as_posix()

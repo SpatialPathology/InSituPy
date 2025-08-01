@@ -273,7 +273,7 @@ class InSituExperiment:
     def add(self,
             data: Union[str, os.PathLike, Path, InSituData],
             mode: Literal["insitupy", "xenium"] = "insitupy",
-            metadata: Optional[dict] = None
+            metadata: dict = {}
             ):
         """Add a dataset to the experiment and update metadata.
 
@@ -312,9 +312,9 @@ class InSituExperiment:
             'sample_id': dataset.sample_id
         }
 
-        if metadata is not None:
-            # add information from metadata argument
-            new_metadata = metadata | new_metadata
+        #if metadata is not None:
+        # add information from metadata argument
+        metadata.update(new_metadata)
 
         # convert to dataframe
         new_metadata = pd.DataFrame([new_metadata])

@@ -161,10 +161,11 @@ class InSituData:
 
     def __init__(self,
                  path: Union[str, os.PathLike, Path] = None,
-                 metadata: dict = None,
                  slide_id: str = None,
                  sample_id: str = None,
-                #  from_insitudata: bool = None,
+                 method_name: str = "not specified",
+                 method_params: dict = dict(),
+                 pixel_size: Number = 1
                  ):
         """
         """
@@ -173,17 +174,24 @@ class InSituData:
             self._path = Path(path)
         else:
             self._path = None
-        self._metadata = metadata
         self._slide_id = slide_id
         self._sample_id = sample_id
-        # self._from_insitudata = from_insitudata
+
+        # initialize metadata
+        self._metadata = {}
+        self._metadata["data"] = {}
+        self._metadata["history"] = {}
+        self._metadata["history"]["cells"] = []
+        self._metadata["history"]["annotations"] = []
+        self._metadata["history"]["regions"] = []
+        self._metadata["uids"] = [str(uuid4())] # initialize the uid section
+        self._metadata["method"] = method_name
+
+        # add method parameters
+        assert isinstance(method_params, dict), "`method_params` must be a dictionary."
+        self._metadata["method_params"] = method_params
 
         # modalities
-        # self._images = None
-        # self._cells = None
-        # self._annotations = None
-        # self._transcripts = None
-        # self._regions = None
         self._images = ImageData()
         self._cells = MultiCellData()
         self._annotations = AnnotationsData()
@@ -195,13 +203,13 @@ class InSituData:
         self._quicksave_dir = None
 
     def __repr__(self):
-        if self._metadata is None:
+        # if len(self._metadata) == 0:
+        #     method = "unknown"
+        # else:
+        try:
+            method = self._metadata["method"]
+        except KeyError:
             method = "unknown"
-        else:
-            try:
-                method = self._metadata["method"]
-            except KeyError:
-                method = "unknown"
 
         if self._path is not None:
             self._path = self._path.resolve()
@@ -220,15 +228,15 @@ class InSituData:
             f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}\n"
         )
 
-        if self._metadata is not None:
-            if "metadata_file" in self._metadata:
-                mfile = self._metadata["metadata_file"]
-            else:
-                mfile = None
-        else:
-            mfile = None
+        # #if self._metadata is not None:
+        # if "metadata_file" in self._metadata:
+        #     mfile = self._metadata["metadata_file"]
+        # else:
+        #     mfile = None
+        # # else:
+        # #     mfile = None
 
-        repr += f"{tf.Bold}Metadata file:{tf.ResetAll}\t{mfile}"
+        # repr += f"{tf.Bold}Metadata file:{tf.ResetAll}\t{mfile}"
 
         if all_empty:
             repr += "\n\nNo modalities loaded."
@@ -283,8 +291,8 @@ class InSituData:
         return self._metadata
 
     @metadata.setter
-    def metadata(self, metadata: dict):
-        self._metadata = metadata
+    def metadata(self, value):
+        raise AttributeError("Cannot modify 'metadata' attribute after initialization.")
 
     @property
     def slide_id(self):
@@ -322,12 +330,13 @@ class InSituData:
         return self._images
 
     @images.setter
-    def images(self, images: ImageData):
-        self._images = images
+    def images(self, value):
+        raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @images.deleter
     def images(self):
-        self._images = None
+        self._images = ImageData()
+        print("Cleared all data from 'images'.")
 
     @property
     def cells(self):
@@ -338,12 +347,47 @@ class InSituData:
         return self._cells
 
     @cells.setter
-    def cells(self, value: MultiCellData):
-        self._cells = value
+    def cells(self, value):
+        raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @cells.deleter
     def cells(self):
-        self._cells = None
+        self._cells = MultiCellData()
+        print("Cleared all data from 'cells'.")
+
+    @property
+    def annotations(self):
+        """Return annotations of the InSituData object.
+        Returns:
+            insitupy._core.dataclasses.AnnotationsData: Annotations.
+        """
+        return self._annotations
+
+    @annotations.setter
+    def annotations(self, value):
+        raise AttributeError("Cannot modify 'annotations' attribute after initialization.")
+
+    @annotations.deleter
+    def annotations(self):
+        self._annotations = AnnotationsData()
+        print("Cleared all data from 'annotations'.")
+
+    @property
+    def regions(self):
+        """Return regions of the InSituData object.
+        Returns:
+            insitupy._core.dataclasses.RegionsData: Regions.
+        """
+        return self._regions
+
+    @regions.setter
+    def regions(self, value):
+        raise AttributeError("Cannot modify 'regions' attribute after initialization.")
+
+    @regions.deleter
+    def regions(self):
+        self._regions = RegionsData()
+        print("Cleared all data from 'regions'.")
 
     @property
     def transcripts(self):
@@ -364,57 +408,6 @@ class InSituData:
     def transcripts(self):
         self._transcripts = None
 
-    # @property
-    # def viewer(self):
-    #     """Return viewer of the InSituData object.
-    #     """
-    #     return self._viewer
-
-    # @viewer.setter
-    # def viewer(self, value):
-    #     self._viewer = value
-
-    # @viewer.deleter
-    # def viewer(self):
-    #     self._viewer = None
-
-    @property
-    def annotations(self):
-        """Return annotations of the InSituData object.
-        Returns:
-            insitupy._core.dataclasses.AnnotationsData: Annotations.
-        """
-        return self._annotations
-
-    @annotations.setter
-    def annotations(self, value: AnnotationsData):
-        if isinstance(value, AnnotationsData):
-            self._annotations = value
-        else:
-            raise ValueError(f"Value must be of type AnnotationsData, but got {type(value)} instead.")
-
-    @annotations.deleter
-    def annotations(self):
-        self._annotations = None
-
-    @property
-    def regions(self):
-        """Return regions of the InSituData object.
-        Returns:
-            insitupy._core.dataclasses.RegionsData: Regions.
-        """
-        return self._regions
-
-    @regions.setter
-    def regions(self, value: RegionsData):
-        if isinstance(value, RegionsData):
-            self._regions = value
-        else:
-            raise ValueError(f"Value must be of type RegionsData, but got {type(value)} instead.")
-
-    @regions.deleter
-    def regions(self):
-        self._regions = None
 
     def assign_geometries(self,
                           geometry_type: Literal["annotations", "regions"],
@@ -676,22 +669,22 @@ class InSituData:
                 verbose=verbose, inplace=True
             )
 
-        if _self.metadata is not None:
-            # add information about cropping to metadata
-            if "cropping_history" not in _self.metadata:
-                _self.metadata["cropping_history"] = {}
-                _self.metadata["cropping_history"]["xlim"] = []
-                _self.metadata["cropping_history"]["ylim"] = []
-            _self.metadata["cropping_history"]["xlim"].append(tuple([int(elem) for elem in xlim]))
-            _self.metadata["cropping_history"]["ylim"].append(tuple([int(elem) for elem in ylim]))
+        #if _self.metadata is not None:
+        # add information about cropping to metadata
+        if "cropping_history" not in _self.metadata:
+            _self.metadata["cropping_history"] = {}
+            _self.metadata["cropping_history"]["xlim"] = []
+            _self.metadata["cropping_history"]["ylim"] = []
+        _self.metadata["cropping_history"]["xlim"].append(tuple([int(elem) for elem in xlim]))
+        _self.metadata["cropping_history"]["ylim"].append(tuple([int(elem) for elem in ylim]))
 
-            # add new uid to uid history
-            _self.metadata["uids"].append(str(uuid4()))
+        # add new uid to uid history
+        _self.metadata["uids"].append(str(uuid4()))
 
-            # empty current data and data history entry in metadata
-            _self.metadata["data"] = {}
-            for k in _self.metadata["history"].keys():
-                _self.metadata["history"][k] = []
+        # empty current data and data history entry in metadata
+        _self.metadata["data"] = {}
+        for k in _self.metadata["history"].keys():
+            _self.metadata["history"][k] = []
 
         if not inplace:
             return _self

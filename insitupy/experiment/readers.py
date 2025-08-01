@@ -69,30 +69,25 @@ def read_qupath_project(
             # --- Create InSituData object ---
             data = InSituData(
                 path=None,
-                metadata={
-                    "method": method_name,
-                    "method_params": {
-                        "pixel_size": pixel_size
-                    }
-                },
                 slide_id=dataset_name,
-                sample_id=sample_name
+                sample_id=sample_name,
+                method_name=method_name,
+                method_params={}
             )
 
             # --- Add CellData ---
             cd = CellData(matrix=adata, boundaries=boundaries)
-            data.cells = MultiCellData()
             data.cells.add_celldata(
                 cd=cd, key="main", is_main=True
             )
 
-            data.images = ImageData()
+            # --- Add ImageData ---
             data.images.add_image(
                 image=image_path,
                 name="IF",
             )
 
-            # --- Add to InSituExperiment ---
+            # --- Add all modalities to InSituExperiment ---
             exp.add(data)
 
     return exp
