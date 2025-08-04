@@ -52,7 +52,7 @@ def _list_insitupy_data_folders(project_path):
     return dataset_paths
 
 def _read_measurements_qupath(
-    path, xmin, ymin
+    path, xshift, yshift
     ) -> anndata.AnnData:
     path = Path(path)
     df = pd.read_csv(path, sep="\t")
@@ -85,8 +85,8 @@ def _read_measurements_qupath(
     coordinates.columns = ["x", "y"]
 
     # shift coordinates to annotation origin
-    coordinates["x"] -= xmin
-    coordinates["y"] -= ymin
+    coordinates["x"] -= xshift
+    coordinates["y"] -= yshift
 
     # Set index
     cell_names = [convert_int_to_xenium_hex(i) for i in range(len(metadata))]
@@ -139,7 +139,7 @@ def _read_boundaries_qupath(
     bound_path,
     object_ids,
     cell_names,
-    xmin, ymin,
+    xshift, yshift,
     pixel_size
     ) -> BoundariesData:
     bound_path = Path(bound_path)
@@ -181,10 +181,10 @@ def _read_boundaries_qupath(
 
     # move the polygons to the annotation origin
     bounds["geometry"] = bounds["geometry"].translate(
-        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
         )
     bounds["nucleus_geometry"] = bounds["nucleus_geometry"].translate(
-        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
         )
 
     seg_mask_value = range(1, len(bounds)+1)

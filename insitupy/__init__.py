@@ -20,7 +20,7 @@ from . import utils
 from ._core.data import InSituData
 from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
                                 ImageData, MultiCellData, RegionsData)
-from ._core.readers import read_xenium
+from ._core.readers import read_qupath, read_xenium
 from ._core.viewer import sync_geometries
 from .experiment.data import InSituExperiment
 from .experiment.readers import read_qupath_project

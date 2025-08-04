@@ -1,5 +1,6 @@
 import json
 import os
+from numbers import Number
 from os.path import abspath
 from pathlib import Path
 from typing import Literal, Optional, Union
@@ -17,6 +18,8 @@ from PIL import Image
 
 from insitupy import __version__
 from insitupy._constants import ISPY_METADATA_FILE
+from insitupy._core._qupath import (_read_boundaries_qupath,
+                                    _read_measurements_qupath)
 from insitupy._core._xenium import (_read_binned_expression,
                                     _read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
@@ -26,6 +29,7 @@ from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
                                         MultiCellData, RegionsData)
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.io.files import read_json
+from insitupy.io.geo import parse_geopandas
 from insitupy.utils.utils import convert_to_list
 
 
@@ -271,6 +275,126 @@ def read_any(
         if verbose:
             print(f"Loading image from {image_path}", flush=True)
         data.images = ImageData(image_paths=[image_path], image_names=["image"])
+
+    return data
+
+
+def read_qupath(
+    path: Union[str, os.PathLike, Path],
+    pixel_size: Number,
+    dataset_name: str,
+    sample_name: str,
+    method_name: str = "mIF",
+):
+    """
+    Load and process QuPath-exported spatial data into an `InSituData` object.
+
+    This function reads annotation, cellular measurements, cell boundaries, and image data
+    from a specified directory containing QuPath outputs. It applies coordinate shifts to
+    align image data and transcriptomic data relative to the origin.
+    All components are integrated into a structured `InSituData` object
+    for downstream spatial analysis.
+
+    Args:
+        path (Union[str, os.PathLike, Path]): Path to the directory containing QuPath-exported files.
+        pixel_size (Number): Pixel size used to scale coordinates from annotation geometry.
+        dataset_name (str): Identifier for the dataset or slide.
+        sample_name (str): Identifier for the sample within the dataset.
+        method_name (str, optional): Name of the imaging method used. Defaults to multiplexed IF ("mIF").
+
+    Returns:
+        InSituData: A structured object containing image data, cell measurements, and boundaries.
+
+    Raises:
+        FileNotFoundError: If any of the required files (`annotation.geojson`, `measurements.tsv`,
+            `cells.geojson`, or `image.ome.tif`) are missing in the specified path.
+        ValueError: If more than one annotation geometry is found in the annotation file.
+
+    Notes:
+        The expected directory structure should include the following files:
+            - `annotation.geojson`: A single annotation encircling the dataset.
+              Contains information about the shift of the data relative to the origin.
+            - `measurements.tsv`: Tabular data with cellular measurements. Measurements are divided
+              into 'Cell', 'Nucleus', 'Cytoplasm', and 'Membrane'. These are saved as layers
+              in the final `AnnData` object in `data.cells.matrix`.
+            - `cells.geojson`: Nuclear and cellular boundaries of individual cells.
+            - `image.ome.tif`: The corresponding image file.
+
+        To generate data in the correct format from QuPath, use the following export script:
+        https://github.com/SpatialPathology/InSituPy-QuPath/blob/main/scripts/export_for_insitupy.groovy
+
+    Example:
+        >>> data = read_qupath(
+        ...     path="/data/qupath_export",
+        ...     pixel_size=0.65,
+        ...     dataset_name="Slide001",
+        ...     sample_name="SampleA"
+        ... )
+    """
+
+
+    # --- Check file paths ---
+    annot_path = path / "annotation.geojson"
+    measurements_path = path / "measurements.tsv"
+    bound_path = path / "cells.geojson"
+    image_path = path / "image.ome.tif"
+
+    if not annot_path.exists():
+        raise FileNotFoundError(f"No annotation file found at '{annot_path}'.")
+
+    if not measurements_path.exists():
+        raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
+
+    if not bound_path.exists():
+        raise FileNotFoundError(f"No boundaries file found at '{bound_path}'.")
+
+    if not image_path.exists():
+        raise FileNotFoundError(f"No image file found at '{image_path}'.")
+
+    # --- Read annotation encircling the whole dataset to shift coordinates to origin ---
+    annot = parse_geopandas(annot_path)
+
+    if len(annot) > 1:
+        raise ValueError(f"More than one annotation found in '{annot_path}'.")
+
+    # determine the x and y shift of the data
+    xmin = annot["geometry"].item().bounds[0] * pixel_size
+    ymin = annot["geometry"].item().bounds[1] * pixel_size
+
+    # --- Read cellular measurements ---
+    adata = _read_measurements_qupath(
+        measurements_path, xshift=xmin, yshift=ymin
+        )
+
+    # --- Read cellular boundaries ---
+    boundaries = _read_boundaries_qupath(
+        bound_path,
+        object_ids=adata.obs["Object ID"].values,
+        cell_names=adata.obs_names,
+        xshift=xmin, yshift=ymin,
+        pixel_size=pixel_size
+        )
+
+    # --- Create InSituData object ---
+    data = InSituData(
+        path=None,
+        slide_id=dataset_name,
+        sample_id=sample_name,
+        method_name=method_name,
+        method_params={}
+    )
+
+    # --- Add CellData ---
+    cd = CellData(matrix=adata, boundaries=boundaries)
+    data.cells.add_celldata(
+        cd=cd, key="main", is_main=True
+    )
+
+    # --- Add ImageData ---
+    data.images.add_image(
+        image=image_path,
+        name="IF",
+    )
 
     return data
 
