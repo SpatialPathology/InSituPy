@@ -1,12 +1,11 @@
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 from insitupy._core._qupath import _list_insitupy_data_folders
 from insitupy._core.readers import read_qupath
 from insitupy.experiment.data import InSituExperiment
-from insitupy.io.geo import parse_geopandas
 
 
 def read_qupath_project(
@@ -62,9 +61,10 @@ def read_qupath_project(
 
             data = read_qupath(
                 path=p,
+                pixel_size=pixel_size,
                 dataset_name=dataset_name,
                 sample_name=sample_name,
-                pixel_size=pixel_size,
+                method_name=method_name
             )
 
             # --- Add all modalities to InSituExperiment ---

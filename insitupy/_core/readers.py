@@ -1,36 +1,28 @@
-import json
 import os
 from numbers import Number
-from os.path import abspath
 from pathlib import Path
 from typing import Literal, Optional, Union
 from uuid import uuid4
-from warnings import warn
 
 import anndata
 import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import tifffile
 from parse import *
 from PIL import Image
 
 from insitupy import __version__
-from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._core._qupath import (_read_boundaries_qupath,
                                     _read_measurements_qupath)
-from insitupy._core._xenium import (_read_binned_expression,
-                                    _read_boundaries_from_xenium,
+from insitupy._core._xenium import (_read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
                                     _restructure_transcripts_dataframe)
 from insitupy._core.data import InSituData
-from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
-                                        MultiCellData, RegionsData)
+from insitupy._core.dataclasses import CellData, ImageData, MultiCellData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.io.files import read_json
 from insitupy.io.geo import parse_geopandas
-from insitupy.utils.utils import convert_to_list
 
 
 def read_xenium(
