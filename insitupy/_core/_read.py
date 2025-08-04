@@ -39,56 +39,31 @@ def _read_measurements(
     for n, path in measurements_dict.items():
         measurements[n] = pd.read_csv(path, index_col=0)
 
-    # Extract metadata
-    metadata = pd.read_csv(metadata_path, index_col=0)
-
-    # # Extract measurements into a dictionary
-    # measurement_types = ["Nucleus", "Cytoplasm", "Membrane", "Cell"]
-    # measurements = {
-    #     mtype.lower(): df.loc[:, df.columns.str.contains("Mean") & df.columns.str.contains(f"{mtype}:")].copy()
-    #     for mtype in measurement_types
-    # }
-
-    # # Format column names
-    # for m in measurements.values():
-    #     m.columns = [col.split(":")[1].strip() for col in m.columns]
-
-    # # Move DAPI mean to metadata and drop it from nucleus measurements
-    # metadata["DAPI_mean"] = measurements["nucleus"]["DAPI-01"]
-    # for m in measurements.values():
-    #     m.drop(columns=["DAPI-01"], inplace=True, errors="ignore")
+    if metadata_path is not None:
+        # Extract metadata
+        metadata = pd.read_csv(metadata_path, index_col=0)
+    else:
+        metadata = None
 
     # Extract and format coordinates
     coordinates = pd.read_csv(coordinates_path, index_col=0)
-    # coordinates = df.loc[:, df.columns.str.contains("Centroid")].copy()
-    # coordinates.columns = ["x", "y"]
 
     # shift coordinates to annotation origin
     coordinates["x"] -= xshift
     coordinates["y"] -= yshift
 
-    # # Set index
-    # cell_names = [convert_int_to_xenium_hex(i) for i in range(len(metadata))]
-    # metadata.index = coordinates.index = cell_names
-    # for m in measurements.values():
-    #     m.index = cell_names
-
-    # # filter out cells without nucleus measurements
-    # ids_wo_na = ~measurements["nucleus"].isna().any(axis=1)
-    # metadata = metadata.loc[ids_wo_na, :]
-    # coordinates = coordinates.loc[ids_wo_na, :]
-
-    # for n, m in measurements.items():
-    #     measurements[n] = m.loc[ids_wo_na, :]
-
+    # create an AnnData object
     adata = anndata.AnnData(measurements[main_key])
 
     for n, m in measurements.items():
         if n != main_key:
             adata.layers[n] = m.values
 
-    # add metadata and coordinates
-    adata.obs = pd.merge(left=adata.obs, right=metadata, left_index=True, right_index=True)
+    if metadata is not None:
+        # add metadata
+        adata.obs = pd.merge(left=adata.obs, right=metadata, left_index=True, right_index=True)
+
+    # add coordinates
     adata.obsm["spatial"] = coordinates.values
 
     return adata
@@ -99,23 +74,28 @@ def _read_boundaries(
     xshift, yshift,
     pixel_size
     ) -> BoundariesData:
-    cells_path = Path(cells_path)
-    nuclei_path = Path(nuclei_path)
-
     # --- Read the nuclear and cellular geometries ---
     cells = parse_geopandas(cells_path).rename(columns={"geometry": "cells_geometry"})
-    nuclei = parse_geopandas(nuclei_path).rename(columns={"geometry": "nuclei_geometry"})
 
-    bounds = pd.merge(left=nuclei, right=cells,
-                      left_index=True, right_index=True)
+    if nuclei_path is not None:
+        add_nuclei = True
+        nuclei = parse_geopandas(nuclei_path).rename(columns={"geometry": "nuclei_geometry"})
+
+        bounds = pd.merge(left=nuclei, right=cells,
+                        left_index=True, right_index=True)
+    else:
+        add_nuclei = False
+        bounds = cells
 
     # move the polygons to the annotation origin
     bounds["cells_geometry"] = bounds["cells_geometry"].translate(
         xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
         )
-    bounds["nuclei_geometry"] = bounds["nuclei_geometry"].translate(
-        xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
-        )
+
+    if add_nuclei:
+        bounds["nuclei_geometry"] = bounds["nuclei_geometry"].translate(
+            xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
+            )
 
     # get segmentation mask values for rasterization
     seg_mask_value = range(1, len(bounds)+1)
@@ -130,10 +110,14 @@ def _read_boundaries(
         bounds["cells_geometry"],
         xmax=xmax, ymax=ymax,
         seg_mask_value=seg_mask_value)
-    nucbounds_mask = _generate_mask(
-        bounds["nuclei_geometry"],
-        xmax=xmax, ymax=ymax,
-        seg_mask_value=seg_mask_value)
+
+    if add_nuclei:
+        nucbounds_mask = _generate_mask(
+            bounds["nuclei_geometry"],
+            xmax=xmax, ymax=ymax,
+            seg_mask_value=seg_mask_value)
+    else:
+        nucbounds_mask = None
 
     # --- Create BoundariesData object ---
     boundaries = BoundariesData(

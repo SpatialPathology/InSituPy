@@ -70,23 +70,9 @@ def read_xenium(
     if not (path / metadata_filename).exists():
         raise InvalidXeniumDirectory(directory=path)
 
-    # INITIALIZE INSITUDATA
-    # initialize the metadata dict
-    # metadata = {}
-    # metadata["data"] = {}
-    # metadata["history"] = {}
-    # metadata["history"]["cells"] = []
-    # metadata["history"]["annotations"] = []
-    # metadata["history"]["regions"] = []
-
     # check if path exists
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
-
-    # save paths of this project in metadata
-    #metadata["path"] = abspath(path).replace("\\", "/")
-    # metadata = {}
-    # metadata["metadata_file"] = metadata_filename
 
     # read metadata
     xenium_metadata = read_json(path / metadata_filename)
@@ -182,54 +168,113 @@ def read_xenium(
 
 def read_any(
     cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
-    cellular_metadata: Union[str, Path],
-    cellular_coordinates: Union[str, Path], # format: x|y
-    cell_boundaries: Union[str, Path, os.PathLike],
-    nucleus_boundaries: Union[str, Path, os.PathLike],
-    images: Dict[str, Union[str, Path, os.PathLike]],
-    pixel_size: Number,
+    cellular_coordinates: Union[str, Path],
+    cellular_metadata: Optional[Union[str, Path]] = None,
+    cell_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
+    nucleus_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
+    images: Optional[Dict[str, Union[str, Path, os.PathLike]]] = None,
+    pixel_size: Optional[Number] = None,
     dataset_name: Optional[str] = "Data 1",
     sample_name: Optional[str] = "Sample 1",
     method_name: str = "Any",
     xshift: Number = 0,
     yshift: Number = 0,
 ):
+    """
+    Load and assemble spatial data from arbitrary sources into an `InSituData` object.
 
+    This function reads cellular measurements, coordinates, optional metadata, boundaries,
+    and images from user-specified paths. It integrates these components into a structured
+    `InSituData` object for downstream spatial analysis.
+
+    Args:
+        cellular_measurements (Dict[str, Union[str, Path, os.PathLike]]):
+            Dictionary mapping measurement names to file paths.
+        cellular_coordinates (Union[str, Path]):
+            Path to the file containing cellular coordinates.
+        cellular_metadata (Optional[Union[str, Path]], optional):
+            Path to optional metadata file. Defaults to None.
+        cell_boundaries (Optional[Union[str, Path, os.PathLike]], optional):
+            Path to cell boundary file. Required if nucleus_boundaries is provided. Defaults to None.
+        nucleus_boundaries (Optional[Union[str, Path, os.PathLike]], optional):
+            Path to nucleus boundary file. Defaults to None.
+        images (Optional[Dict[str, Union[str, Path, os.PathLike]]], optional):
+            Dictionary mapping image names to image file paths. Defaults to None.
+        pixel_size (Optional[Number], optional):
+            Pixel size used for scaling boundaries and images. Required if boundaries or images are provided. Defaults to None.
+        dataset_name (Optional[str], optional):
+            Identifier for the dataset or slide. Defaults to "Data 1".
+        sample_name (Optional[str], optional):
+            Identifier for the sample within the dataset. Defaults to "Sample 1".
+        method_name (str, optional):
+            Name of the imaging or data acquisition method. Defaults to "Any".
+        xshift (Number, optional):
+            Horizontal shift applied to coordinates. Defaults to 0.
+        yshift (Number, optional):
+            Vertical shift applied to coordinates. Defaults to 0.
+
+    Returns:
+        InSituData: A structured object containing cell measurements, boundaries, and images.
+
+    Raises:
+        FileNotFoundError: If any specified file does not exist.
+        ValueError: If nucleus boundaries are provided without cell boundaries, or if pixel_size is missing when required.
+
+    Notes:
+        - All paths are validated and converted to `Path` objects.
+        - Boundaries and images require `pixel_size` to be specified.
+        - The function supports flexible input formats for integrating diverse spatial datasets.
+    """
+
+
+    # Validate and convert paths for cellular measurements
     for n, measurements_path in cellular_measurements.items():
-        cellular_measurements[n] = measurements_path = Path(measurements_path)
+        measurements_path = Path(measurements_path)
         if not measurements_path.exists():
             raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
+        cellular_measurements[n] = measurements_path
 
-    cell_boundaries = Path(cell_boundaries)
-    if not cell_boundaries.exists():
-        raise FileNotFoundError(f"No boundaries file found at '{boundaries_path}'.")
+    # Convert coordinate path
+    cellular_coordinates = Path(cellular_coordinates)
 
-    nucleus_boundaries = Path(nucleus_boundaries)
-    if not nucleus_boundaries.exists():
-        raise FileNotFoundError(f"No boundaries file found at '{boundaries_path}'.")
+    # Convert metadata path if provided
+    if cellular_metadata is not None:
+        cellular_metadata = Path(cellular_metadata)
 
-    for n, image_path in images.items():
-        images[n] = image_path = Path(image_path)
-        if not image_path.exists():
-            raise FileNotFoundError(f"No image file found at '{image_path}'.")
-
-    # --- Read cellular measurements ---
+    # Read cellular measurements
     adata = _read_measurements(
         cellular_measurements,
         coordinates_path=cellular_coordinates,
         metadata_path=cellular_metadata,
-        xshift=xshift, yshift=yshift
+        xshift=xshift,
+        yshift=yshift
+    )
+
+    # Read boundaries if provided
+    boundaries = None
+
+    cell_boundaries = Path(cell_boundaries) if cell_boundaries is not None else cell_boundaries
+    nucleus_boundaries = Path(nucleus_boundaries) if nucleus_boundaries is not None else nucleus_boundaries
+
+    if nucleus_boundaries is not None and cell_boundaries is None:
+        raise ValueError((
+            f"If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
+            f"If you only have nucleus boundaries, add them as cell boundaries."
+            ))
+
+    if cell_boundaries is not None:
+        if pixel_size is None:
+            raise ValueError("If boundaries are given, `pixel_size` must not be None.")
+
+        boundaries = _read_boundaries(
+            cells_path=cell_boundaries,
+            nuclei_path=nucleus_boundaries,
+            xshift=xshift,
+            yshift=yshift,
+            pixel_size=pixel_size
         )
 
-    # --- Read cellular boundaries ---
-    boundaries = _read_boundaries(
-        cells_path=cell_boundaries,
-        nuclei_path=nucleus_boundaries,
-        xshift=xshift, yshift=yshift,
-        pixel_size=pixel_size
-        )
-
-    # --- Create InSituData object ---
+    # Create InSituData object
     data = InSituData(
         path=None,
         slide_id=dataset_name,
@@ -238,21 +283,22 @@ def read_any(
         method_params={}
     )
 
-    # --- Add CellData ---
+    # Add CellData
     cd = CellData(matrix=adata, boundaries=boundaries)
-    data.cells.add_celldata(
-        cd=cd, key="main", is_main=True
-    )
+    data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
-    # --- Add ImageData ---
-    for img_name, image_path in images.items():
-        data.images.add_image(
-            image=image_path,
-            name=img_name,
-        )
+    # Add ImageData if provided
+    if images is not None:
+        if pixel_size is None:
+            raise ValueError("If `images` is given, `pixel_size` must not be None.")
+
+        for img_name, image_path in images.items():
+            image_path = Path(image_path)
+            if not image_path.exists():
+                raise FileNotFoundError(f"No image file found at '{image_path}'.")
+            data.images.add_image(image=image_path, name=img_name)
 
     return data
-
 
 def read_qupath(
     path: Union[str, os.PathLike, Path],
