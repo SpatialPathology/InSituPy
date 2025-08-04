@@ -203,10 +203,16 @@ if WITH_NAPARI:
                             )
                             return gene_layer
 
+            if len(viewer_config.key_dict["obs"]) > 0:
+                obs_choices = viewer_config.key_dict["obs"]
+            else:
+                obs_choices = ["No filtering options available"]
+
             @magicgui(
                 call_button='Filter',
-                obs_key={'choices': viewer_config.key_dict["obs"], 'label': "Obs:"},
-                operation_type={'choices': ["contains", "is equal to", "is not", "is in"], 'label': 'Operation:'},
+                obs_key={'choices': obs_choices, 'label': "Obs:"},
+                operation_type={'choices': ["contains", "is equal to", "is not", "is in"],
+                                'label': 'Operation:'},
                 obs_value={'label': 'Value:'},
                 reset={'label': 'Reset'}
                 )
