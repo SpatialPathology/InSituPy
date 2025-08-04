@@ -187,7 +187,6 @@ def read_any(
     cell_boundaries: Union[str, Path, os.PathLike],
     nucleus_boundaries: Union[str, Path, os.PathLike],
     images: Dict[str, Union[str, Path, os.PathLike]],
-    image_channels: List[str],
     pixel_size: Number,
     dataset_name: Optional[str] = "Data 1",
     sample_name: Optional[str] = "Sample 1",
