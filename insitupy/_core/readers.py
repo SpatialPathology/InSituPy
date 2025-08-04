@@ -1,7 +1,7 @@
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 from uuid import uuid4
 
 import anndata
@@ -15,6 +15,7 @@ from PIL import Image
 from insitupy import __version__
 from insitupy._core._qupath import (_read_boundaries_qupath,
                                     _read_measurements_qupath)
+from insitupy._core._read import _read_boundaries, _read_measurements
 from insitupy._core._xenium import (_read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
                                     _restructure_transcripts_dataframe)
@@ -179,94 +180,77 @@ def read_xenium(
 
     return data
 
-
-
-# TODO: Finish `read_any`
 def read_any(
-    cellular_data: Optional[Union[str, Path]] = None,
-    cellular_metadata: Optional[Union[str, Path]] = None,
-    cellular_coordinates: Optional[Union[str, Path]] = None, # format: x|y
-    boundaries_path: Optional[Union[str, Path]] = None,
-    image_path: Optional[Union[str, Path]] = None,
-    sample_id: Optional[str] = "unknown_sample",
-    slide_id: Optional[str] = "unknown_slide",
-    verbose: bool = True
-) -> InSituData:
-    """
-    Generalized reader for cellular spatial omics data.
+    cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
+    cellular_metadata: Union[str, Path],
+    cellular_coordinates: Union[str, Path], # format: x|y
+    cell_boundaries: Union[str, Path, os.PathLike],
+    nucleus_boundaries: Union[str, Path, os.PathLike],
+    images: Dict[str, Union[str, Path, os.PathLike]],
+    image_channels: List[str],
+    pixel_size: Number,
+    dataset_name: Optional[str] = "Data 1",
+    sample_name: Optional[str] = "Sample 1",
+    method_name: str = "Any",
+    xshift: Number = 0,
+    yshift: Number = 0,
+):
 
-    Args:
-        cellular_omics_path (str or Path, optional): Path to single-cell transcriptomic/proteomic abundance data (.csv or .h5ad).
-        boundaries_path (str or Path, optional): Path to cell boundary data (.geojson or image mask).
-        image_path (str or Path, optional): Path to OME-TIFF or .qptiff image file.
-        sample_id (str, optional): Sample ID to store in metadata.
-        slide_id (str, optional): Slide ID to store in metadata.
-        verbose (bool, optional): If True, print progress.
+    for n, measurements_path in cellular_measurements.items():
+        cellular_measurements[n] = measurements_path = Path(measurements_path)
+        if not measurements_path.exists():
+            raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
 
-    Returns:
-        InSituData: Object containing the loaded data.
-    """
-    cellular_data = Path(cellular_data) if cellular_data else None
-    boundaries_path = Path(boundaries_path) if boundaries_path else None
-    image_path = Path(image_path) if image_path else None
+    cell_boundaries = Path(cell_boundaries)
+    if not cell_boundaries.exists():
+        raise FileNotFoundError(f"No boundaries file found at '{boundaries_path}'.")
 
-    # Metadata
-    metadata = {
-        "method": "GenericReader",
-        "uids": [str(uuid4())],
-        "path": str(cellular_data or boundaries_path or image_path or "."),
-        "history": {
-            "cells": [],
-            "annotations": [],
-            "regions": []
-        }
-    }
+    nucleus_boundaries = Path(nucleus_boundaries)
+    if not nucleus_boundaries.exists():
+        raise FileNotFoundError(f"No boundaries file found at '{boundaries_path}'.")
 
+    for n, image_path in images.items():
+        images[n] = image_path = Path(image_path)
+        if not image_path.exists():
+            raise FileNotFoundError(f"No image file found at '{image_path}'.")
+
+    # --- Read cellular measurements ---
+    adata = _read_measurements(
+        cellular_measurements,
+        coordinates_path=cellular_coordinates,
+        metadata_path=cellular_metadata,
+        xshift=xshift, yshift=yshift
+        )
+
+    # --- Read cellular boundaries ---
+    boundaries = _read_boundaries(
+        cells_path=cell_boundaries,
+        nuclei_path=nucleus_boundaries,
+        xshift=xshift, yshift=yshift,
+        pixel_size=pixel_size
+        )
+
+    # --- Create InSituData object ---
     data = InSituData(
-        path=Path(metadata["path"]),
-        metadata=metadata,
-        slide_id=slide_id,
-        sample_id=sample_id
+        path=None,
+        slide_id=dataset_name,
+        sample_id=sample_name,
+        method_name=method_name,
+        method_params={}
     )
 
-    # Prepare variables
-    matrix = None
-    boundaries = None
+    # --- Add CellData ---
+    cd = CellData(matrix=adata, boundaries=boundaries)
+    data.cells.add_celldata(
+        cd=cd, key="main", is_main=True
+    )
 
-    # Load expression matrix
-    if cellular_data:
-        if verbose:
-            print(f"Loading expression data from {cellular_data}", flush=True)
-        if cellular_data.suffix == ".csv":
-            matrix = pd.read_csv(cellular_data, index_col=0)
-        elif cellular_data.suffix == ".h5ad":
-            adata = anndata.read_h5ad(cellular_data)
-            matrix = adata.to_df()
-        else:
-            raise ValueError(f"Unsupported transcript format: {cellular_data.suffix}")
-
-    # Load cell boundaries
-    if boundaries_path:
-        if verbose:
-            print(f"Loading boundaries from {boundaries_path}", flush=True)
-        if boundaries_path.suffix == ".geojson":
-            boundaries = gpd.read_file(boundaries_path)
-        elif boundaries_path.suffix.lower() in [".tif", ".tiff", ".png", ".jpg"]:
-            boundaries = np.array(Image.open(boundaries_path))
-        else:
-            raise ValueError(f"Unsupported boundary format: {boundaries_path.suffix}")
-
-    # Combine into CellData and add to InSituData.cells
-    if matrix is not None or boundaries is not None:
-        cd = CellData(matrix=matrix, boundaries=boundaries)
-        data.cells = MultiCellData()
-        data.cells.add_celldata(cd=cd, key="main", is_main=True)
-
-    # Load image
-    if image_path:
-        if verbose:
-            print(f"Loading image from {image_path}", flush=True)
-        data.images = ImageData(image_paths=[image_path], image_names=["image"])
+    # --- Add ImageData ---
+    for img_name, image_path in images.items():
+        data.images.add_image(
+            image=image_path,
+            name=img_name,
+        )
 
     return data
 
@@ -385,7 +369,7 @@ def read_qupath(
     # --- Add ImageData ---
     data.images.add_image(
         image=image_path,
-        name="IF",
+        name=method_name,
     )
 
     return data

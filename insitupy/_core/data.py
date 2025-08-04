@@ -1307,7 +1307,7 @@ class InSituData:
                     channel_names = [
                         elem["Name"]
                         for elem
-                        in self._images.metadata['IF']['OME']['Image']['Pixels']['Channel']
+                        in self._images.metadata[img_name]['OME']['Image']['Pixels']['Channel']
                         ]
                 except KeyError:
                     channel_names = [f"Channel {i+1}" for i in range(n_channels)]

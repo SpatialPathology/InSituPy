@@ -137,12 +137,6 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
         # Remove the original "name" and "color" columns
         dataframe = dataframe.drop(existing_columns_to_move, axis=1)
 
-    # try:
-    #     # remove scale column
-    #     dataframe = dataframe.drop("scale", axis=1)
-    # except KeyError:
-    #     pass
-
     # Write the GeoDataFrame to a GeoJSON file
     dataframe.to_file(file, driver="GeoJSON")
 

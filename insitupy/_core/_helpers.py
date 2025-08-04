@@ -2,6 +2,15 @@ from warnings import warn
 
 import numpy as np
 import pandas as pd
+from shapely import MultiPolygon, Polygon
+
+try:
+    from rasterio.features import rasterize
+except ImportError:
+    raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+
+
+import dask.array as da
 
 
 def _get_expression_values(adata, X, key_type, key):
@@ -28,3 +37,24 @@ def _get_expression_values(adata, X, key_type, key):
         print("Unknown key selected.", flush=True)
 
     return color_value
+
+def _convert_to_float_coords(coords, mode):
+    # Convert Decimal to float
+
+    # if len(coords) == 1:
+    if mode == "Polygon":
+        float_coords = [[(float(x), float(y)) for x, y in ring] for ring in coords]
+        poly = Polygon(float_coords[0])
+    elif mode == "MultiPolygon":
+        float_coords = [[[(float(x), float(y)) for x, y in ring] for ring in poly] for poly in coords]
+        poly = MultiPolygon(float_coords)
+    return poly
+
+def _generate_mask(values, xmax, ymax, seg_mask_value):
+    # rasterize polygons
+    boundaries_mask = rasterize(
+        list(zip(values, seg_mask_value)),
+        out_shape=(ymax,xmax))
+    boundaries_mask = da.from_array(boundaries_mask)
+
+    return boundaries_mask

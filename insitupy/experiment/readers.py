@@ -56,11 +56,11 @@ def read_qupath_project(
     exp = InSituExperiment()
     for dataset_name, path_list in data_dict.items():
         print(f"Reading '{dataset_name}'...")
-        for p in path_list:
-            sample_name = p.name
+        for path in path_list:
+            sample_name = path.name
 
             data = read_qupath(
-                path=p,
+                path=path,
                 pixel_size=pixel_size,
                 dataset_name=dataset_name,
                 sample_name=sample_name,

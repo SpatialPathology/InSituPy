@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from shapely import MultiPolygon, Polygon
 
+from insitupy._core._helpers import _convert_to_float_coords, _generate_mask
 from insitupy._core.dataclasses import BoundariesData
 
 try:
@@ -114,27 +115,6 @@ def _read_measurements_qupath(
 
     return adata
 
-def _convert_to_float_coords(coords, mode):
-    # Convert Decimal to float
-
-    # if len(coords) == 1:
-    if mode == "Polygon":
-        float_coords = [[(float(x), float(y)) for x, y in ring] for ring in coords]
-        poly = Polygon(float_coords[0])
-    elif mode == "MultiPolygon":
-        float_coords = [[[(float(x), float(y)) for x, y in ring] for ring in poly] for poly in coords]
-        poly = MultiPolygon(float_coords)
-    return poly
-
-def _generate_mask(bound_df, key, xmax, ymax, seg_mask_value):
-    # rasterize polygons
-    boundaries_mask = rasterize(
-        list(zip(bound_df[key], seg_mask_value)),
-        out_shape=(ymax,xmax))
-    boundaries_mask = da.from_array(boundaries_mask)
-
-    return boundaries_mask
-
 def _read_boundaries_qupath(
     bound_path,
     object_ids,
@@ -196,11 +176,11 @@ def _read_boundaries_qupath(
 
     # Convert data into segmentation masks
     cellbounds_mask = _generate_mask(
-        bounds, key="geometry",
+        bounds["geometry"],
         xmax=xmax, ymax=ymax,
         seg_mask_value=seg_mask_value)
     nucbounds_mask = _generate_mask(
-        bounds, key="nucleus_geometry",
+        bounds["nucleus_geometry"],
         xmax=xmax, ymax=ymax,
         seg_mask_value=seg_mask_value)
 
