@@ -8,7 +8,7 @@ try:
     from rasterio.features import rasterize
 except ImportError:
     raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-
+from datetime import datetime
 
 import dask.array as da
 
@@ -58,3 +58,19 @@ def _generate_mask(values, xmax, ymax, seg_mask_value):
     boundaries_mask = da.from_array(boundaries_mask)
 
     return boundaries_mask
+
+
+def sort_paths_by_datetime(paths):
+    def extract_datetime(path):
+        # Assumes ID format: "250805-115555000343-2c58ca86"
+        parts = path.name.split("-")
+        date_part = parts[0]  # "250805"
+        time_part = parts[1]  # "115555000343"
+
+        # Combine into full datetime string: "250805115555000343"
+        full_dt_str = date_part + time_part
+
+        # Parse as datetime: YYMMDDHHMMSSffffff
+        return datetime.strptime(full_dt_str, "%y%m%d%H%M%S%f")
+
+    return sorted(paths, key=extract_datetime, reverse=True)

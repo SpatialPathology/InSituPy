@@ -83,6 +83,7 @@ def read_xenium(
 
     data = InSituData(
         path=path,
+        metadata=None, # initializes new metadata
         slide_id=slide_id,
         sample_id=sample_id,
         method_name="Xenium",
@@ -277,6 +278,7 @@ def read_any(
     # Create InSituData object
     data = InSituData(
         path=None,
+        metadata=None, # initializes new metadata
         slide_id=dataset_name,
         sample_id=sample_name,
         method_name=method_name,
@@ -404,6 +406,7 @@ def read_qupath(
     # --- Create InSituData object ---
     data = InSituData(
         path=None,
+        metadata=None, # initializes new metadata
         slide_id=dataset_name,
         sample_id=sample_name,
         method_name=method_name,

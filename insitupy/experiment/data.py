@@ -296,8 +296,11 @@ class InSituExperiment:
             else:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
-        from insitupy._core.data import InSituData
-        assert dataset.__class__ is InSituData, "Loaded dataset is not an InSituData object."
+
+
+        #assert dataset.__class__ is InSituData, f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
+        # checks whether dataset is an instance of InSituData or any subclass of it, and avoids issues with direct object identity comparison
+        assert isinstance(dataset, InSituData), f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
 
         # # set a unique ID
         # dataset._set_uid()

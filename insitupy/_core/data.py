@@ -28,7 +28,8 @@ from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
                                  LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
 from insitupy._core._configs import _get_viewer_uid
-from insitupy._core._helpers import _get_expression_values
+from insitupy._core._helpers import (_get_expression_values,
+                                     sort_paths_by_datetime)
 from insitupy._core._layers import _create_points_layer
 from insitupy._core._save import (_save_annotations, _save_cells, _save_images,
                                   _save_regions, _save_transcripts)
@@ -38,7 +39,8 @@ from insitupy._core.dataclasses import (AnnotationsData, ImageData,
                                         MultiCellData, RegionsData)
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
-                                  ModalityNotFoundError)
+                                  ModalityNotFoundError,
+                                  ModalityNotFoundWarning)
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.images.axes import ImageAxes
@@ -160,9 +162,10 @@ class InSituData:
                               sync_geometries)
 
     def __init__(self,
-                 path: Union[str, os.PathLike, Path] = None,
-                 slide_id: str = None,
-                 sample_id: str = None,
+                 path: Optional[Union[str, os.PathLike, Path]] = None,
+                 metadata: Optional[dict] = None,
+                 slide_id: Optional[str] = None,
+                 sample_id: Optional[str] = None,
                  method_name: str = "not specified",
                  method_params: dict = dict(),
                  pixel_size: Number = 1
@@ -177,15 +180,18 @@ class InSituData:
         self._slide_id = slide_id
         self._sample_id = sample_id
 
-        # initialize metadata
-        self._metadata = {}
-        self._metadata["data"] = {}
-        self._metadata["history"] = {}
-        self._metadata["history"]["cells"] = []
-        self._metadata["history"]["annotations"] = []
-        self._metadata["history"]["regions"] = []
-        self._metadata["uids"] = [str(uuid4())] # initialize the uid section
-        self._metadata["method"] = method_name
+        if metadata is None:
+            # initialize metadata
+            self._metadata = {}
+            self._metadata["data"] = {}
+            self._metadata["history"] = {}
+            self._metadata["history"]["cells"] = []
+            self._metadata["history"]["annotations"] = []
+            self._metadata["history"]["regions"] = []
+            self._metadata["uids"] = [str(uuid4())] # initialize the uid section
+            self._metadata["method"] = method_name
+        else:
+            self._metadata = metadata
 
         # add method parameters
         assert isinstance(method_params, dict), "`method_params` must be a dictionary."
@@ -726,26 +732,34 @@ class InSituData:
         # # extract read functions
         # read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
         # read_funcs = [elem for elem in read_funcs if elem not in ["load_all", "load_quicksave"]]
-
         for f in LOAD_FUNCS:
             if skip is None or skip not in f:
                 func = getattr(self, f)
-                try:
-                    func(verbose=verbose)
-                except ModalityNotFoundError as err:
-                    if verbose:
-                        print(err)
+                # try:
+                func(verbose=verbose)
+                # except ModalityNotFoundError as err:
+                #     if verbose:
+                #         print(err)
 
     def load_annotations(self, verbose: bool = False):
         if verbose:
             print("Loading annotations...", flush=True)
-        try:
-            p = self._metadata["data"]["annotations"]
-        except KeyError:
+        # try:
+        #     p = self._metadata["data"]["annotations"]
+        # except KeyError:
+        #     if verbose:
+        #         raise ModalityNotFoundError(modality="annotations")
+        # extract available paths
+        paths = [p for p in (self.path / "annotations").glob("*") if p.is_dir()]
+
+        if len(paths) == 0:
             if verbose:
-                raise ModalityNotFoundError(modality="annotations")
+                # Example usage
+                warn(ModalityNotFoundWarning("annotations"), stacklevel=2)
         else:
-            self._annotations = read_shapesdata(path=self._path / p, mode="annotations")
+            # extract the latest entry
+            path = sort_paths_by_datetime(paths)[0]
+            self._annotations = read_shapesdata(path=path, mode="annotations")
 
 
     def import_annotations(self,
@@ -780,13 +794,22 @@ class InSituData:
     def load_regions(self, verbose: bool = False):
         if verbose:
             print("Loading regions...", flush=True)
-        try:
-            p = self._metadata["data"]["regions"]
-        except KeyError:
+        # try:
+        #     p = self._metadata["data"]["regions"]
+        # except KeyError:
+        #     if verbose:
+        #         raise ModalityNotFoundError(modality="regions")
+
+        # extract available paths
+        paths = [p for p in (self.path / "regions").glob("*") if p.is_dir()]
+
+        if len(paths) == 0:
             if verbose:
-                raise ModalityNotFoundError(modality="regions")
+                warn(ModalityNotFoundWarning("regions"), stacklevel=2)
         else:
-            self._regions = read_shapesdata(path=self._path / p, mode="regions")
+            # extract the latest entry
+            path = sort_paths_by_datetime(paths)[0]
+            self._regions = read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
                     files: Optional[Union[str, os.PathLike, Path]],
@@ -823,13 +846,22 @@ class InSituData:
             print("Loading cells...", flush=True)
 
         if self.from_insitudata:
-            try:
-                cells_path = self._metadata["data"]["cells"]
-            except KeyError:
+            # try:
+            #     cells_path = self._metadata["data"]["cells"]
+            # except KeyError:
+            #     if verbose:
+            #         raise ModalityNotFoundError(modality="cells")
+
+            # extract available paths
+            paths = [p for p in (self.path / "cells").glob("*") if p.is_dir()]
+
+            if len(paths) == 0:
                 if verbose:
-                    raise ModalityNotFoundError(modality="cells")
+                    warn(ModalityNotFoundWarning("cells"), stacklevel=2)
             else:
-                self._cells = read_multicelldata(path=self._path / cells_path)
+                # extract the latest entry
+                path = sort_paths_by_datetime(paths)[0]
+                self._cells = read_multicelldata(path=path)
         else:
             NoProjectLoadWarning()
 
@@ -843,24 +875,38 @@ class InSituData:
             print("Loading images...", flush=True)
 
         if self.from_insitudata:
-            # check if matrix data is stored in this InSituData
-            try:
-                images_dict = self._metadata["data"]["images"]
-            except KeyError:
+            # check if image data is stored in this InSituData
+            # try:
+            #     images_dict = self._metadata["data"]["images"]
+            # except KeyError:
+            #     if verbose:
+            #         raise ModalityNotFoundError(modality="images")
+
+            img_paths = list((self.path / "images").glob("*.zarr"))
+            if len(img_paths) == 0:
                 if verbose:
-                    raise ModalityNotFoundError(modality="images")
+                    warn(ModalityNotFoundWarning("images"), stacklevel=2)
             else:
-                if names == "all":
-                    img_names = list(images_dict.keys())
-                else:
-                    img_names = convert_to_list(names)
+                img_names = [p.stem for p in img_paths]
 
-                # get file paths and names
-                img_files = [v for k,v in images_dict.items() if k in img_names]
-                img_names = [k for k,v in images_dict.items() if k in img_names]
+                if names != "all":
+                    names = convert_to_list(names)
+                    if not np.all([elem in img_names for elem in names]):
+                        not_available = [elem for elem in names if elem not in img_names]
+                        raise ValueError(f"Following 'names' are not available: {not_available}")
+                    img_names = names
 
-                # create imageData object
-                img_paths = [self._path / elem for elem in img_files]
+                # if names == "all":
+                #     img_names = list(images_dict.keys())
+                # else:
+                #     img_names = convert_to_list(names)
+
+                # # get file paths and names
+                # img_files = [v for k,v in images_dict.items() if k in img_names]
+                # img_names = [k for k,v in images_dict.items() if k in img_names]
+
+                # # create imageData object
+                # img_paths = [self._path / elem for elem in img_files]
 
                 # if self._images is None:
                 #     self._images = ImageData(img_paths, img_names)
@@ -880,27 +926,31 @@ class InSituData:
             print("Loading transcripts...", flush=True)
 
         if self.from_insitudata:
-            # check if transcript data is stored in this InSituData
-            try:
-                transcripts_path = self._metadata["data"]["transcripts"]
-            except KeyError:
+            # # check if transcript data is stored in this InSituData
+            # try:
+            #     transcripts_path = self._metadata["data"]["transcripts"]
+            # except KeyError:
+            #     if verbose:
+            #         raise ModalityNotFoundError(modality="transcripts")
+
+            # extract available paths
+            transcripts_path = Path(self.path) / "transcripts/transcripts.parquet"
+
+            if not transcripts_path.exists():
                 if verbose:
-                    raise ModalityNotFoundError(modality="transcripts")
+                    warn(ModalityNotFoundWarning("transcripts"), stacklevel=2)
             else:
                 if mode == "pandas":
-                    self._transcripts = pd.read_parquet(self._path / transcripts_path)
+                    self._transcripts = pd.read_parquet(transcripts_path)
                 elif mode == "dask":
                     # Load the transcript data using Dask
                     try:
-                        self._transcripts = dd.read_parquet(self._path / transcripts_path)
+                        self._transcripts = dd.read_parquet(transcripts_path)
                     except ArrowInvalid:
-                        parquet_files = list(Path(self._path / transcripts_path).glob("part*.parquet"))
+                        parquet_files = list(Path(transcripts_path).glob("part*.parquet"))
                         self._transcripts = dd.read_parquet(parquet_files)
-
                 else:
                     raise ValueError(f"Invalid value for `mode`: {mode}")
-
-
         else:
             NoProjectLoadWarning()
 
@@ -932,8 +982,7 @@ class InSituData:
         data = cls(path=path,
                    metadata=metadata,
                    slide_id=slide_id,
-                   sample_id=sample_id,
-                   #from_insitudata=True
+                   sample_id=sample_id
                    )
         return data
 
