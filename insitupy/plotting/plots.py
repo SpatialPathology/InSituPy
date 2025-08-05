@@ -548,4 +548,4 @@ def plot_cellular_composition(
         )
 
     if return_data:
-        return compositions
+        return compositions_df
