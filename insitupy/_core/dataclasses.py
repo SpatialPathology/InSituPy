@@ -72,9 +72,9 @@ class ShapesData(DeepCopyMixin):
                 for key, file in zip(keys, files):
                     # read annotation and store in dictionary
                     self.add_data(data=file,
-                                        key=key,
-                                        scale_factor=pixel_size,
-                                        )
+                                  key=key,
+                                  scale_factor=pixel_size,
+                                  )
 
     def __repr__(self):
         if len(self._metadata) > 0:

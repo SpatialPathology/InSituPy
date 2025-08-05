@@ -382,6 +382,11 @@ def read_qupath(
     xmin = annot["geometry"].item().bounds[0] * pixel_size
     ymin = annot["geometry"].item().bounds[1] * pixel_size
 
+    # move the annotation to the origin
+    annot["geometry"] = annot["geometry"].translate(
+        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        )
+
     # --- Read cellular measurements ---
     adata = _read_measurements_qupath(
         measurements_path, xshift=xmin, yshift=ymin
@@ -415,6 +420,13 @@ def read_qupath(
     data.images.add_image(
         image=image_path,
         name=method_name,
+    )
+
+    # --- Add the data annotation as region ---
+    data.regions.add_data(
+        data=annot,
+        key="data",
+        scale_factor=pixel_size
     )
 
     return data

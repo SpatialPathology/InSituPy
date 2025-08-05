@@ -55,6 +55,7 @@ if WITH_NAPARI:
         __slots__ = [
             'data',
             'data_name',
+            'layer_name',
             'has_cells',
             'static_canvas',
             'key_dict',
@@ -71,9 +72,11 @@ if WITH_NAPARI:
 
             if not data.cells.is_empty:
                 self.data_name = data.cells.main_key # by default, main_key is the first data layer
+                self.layer_name = "main"
                 self.has_cells = True
             else:
                 self.data_name = None
+                self.layer_name = None
                 self.has_cells = False
 
             # canvas for static elements like color legends
@@ -128,9 +131,14 @@ if WITH_NAPARI:
         @property
         def X(self):
             """Return the data matrix as a dense array."""
-            if issparse(self.adata.X):
-                return self.adata.X.toarray()
-            return self.adata.X
+            if self.layer_name == "main":
+                X = self.adata.X
+            else:
+                X = self.adata.layers[self.layer_name]
+
+            if issparse(X):
+                return X.toarray()
+            return X
 
         def refresh_variables(self):
             self.key_dict = self._build_key_dict()
@@ -138,8 +146,8 @@ if WITH_NAPARI:
             self.pixel_size = self._get_pixel_size()
             self.recent_selections = []
 
-        def update_data_name(self, new_data_name):
-            self.data_name = new_data_name
+        # def update_data_name(self, new_data_name):
+        #     self.data_name = new_data_name
 
         def _build_key_dict(self):
             return {

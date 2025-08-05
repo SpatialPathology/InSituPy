@@ -1482,7 +1482,7 @@ class InSituData:
             # add widgets to napari window
             if select_data is not None:
                 viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
-                select_data.max_height = 50
+                select_data.max_height = 80
                 select_data.max_width = widgets_max_width
 
             if show_points_widget is not None:

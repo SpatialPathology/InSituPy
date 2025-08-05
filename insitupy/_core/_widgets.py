@@ -48,21 +48,26 @@ if WITH_NAPARI:
             filter_cells_widget = None
         else:
             data_names = data.cells.get_all_keys()
+            layer_names = ["main"] + list(data.cells.matrix.layers)
 
             @magicgui(
                 call_button=False,
-                data_name= {'choices': data_names, 'label': 'Dataset:'}
+                data_name= {'choices': data_names, 'label': 'Dataset:'},
+                layer_name = {'choices': layer_names, 'label': 'Layer:'},
             )
             def select_data(
-                data_name=viewer_config.data_name
+                data_name=viewer_config.data_name,
+                layer_name=viewer_config.layer_name
             ):
                 pass
 
             # connect key change with update function
             @select_data.data_name.changed.connect
+            @select_data.layer_name.changed.connect
             def update_widgets_on_data_change(event=None):
                 # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data.data_name.value
+                viewer_config.layer_name = select_data.layer_name.value
                 viewer_config.refresh_variables()
 
                 _refresh_widgets_after_data_change(
@@ -140,10 +145,16 @@ if WITH_NAPARI:
                         key_type=key_type, key=key
                     )
 
-                    new_layer_name = f"{viewer_config.data_name}-{key}"
+                    if viewer_config.layer_name == "main":
+                        new_layer_name = f"{viewer_config.data_name}-{key}"
+                    else:
+                        new_layer_name = f"{viewer_config.data_name}-{key} [{viewer_config.layer_name}]"
 
                     # get layer names from the current data
-                    layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name)]
+                    if viewer_config.layer_name == "main":
+                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name)]
+                    else:
+                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
 
                     # select only point layers
                     layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
