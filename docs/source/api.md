@@ -2,7 +2,7 @@
 
 ## Core Data Objects
 ```{eval-rst}
-.. module:: insitupy._core
+.. module:: insitupy
 .. currentmodule:: insitupy
 
 .. autosummary::
