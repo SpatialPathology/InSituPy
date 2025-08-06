@@ -21,23 +21,6 @@
     InSituExperiment
 ```
 
-## Core Data Classes
-
-```{eval-rst}
-.. module:: insitupy._core
-.. currentmodule:: insitupy
-
-.. autosummary::
-    :toctree: generated
-
-    MultiCellData
-    CellData
-    BoundariesData
-    ImageData
-    AnnotationsData
-    RegionsData
-```
-
 ## Core reading functions
 
 ```{eval-rst}
