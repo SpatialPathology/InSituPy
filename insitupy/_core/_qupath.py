@@ -23,21 +23,26 @@ from insitupy.utils._shapely import scale_polygon
 from insitupy.utils.utils import convert_int_to_xenium_hex
 
 
-def _list_insitupy_data_folders(project_path):
+def _get_pixel_size_from_qupath_metadata(metadata, name):
+    for elem in metadata["images"]:
+        if elem["serverBuilder"]["metadata"]["name"] == name:
+            return elem["serverBuilder"]["metadata"]["pixelCalibration"]["pixelWidth"]["value"]
+
+def _list_insitupy_data_folders(
+    data_path):
     # Define the path to the 'insitupy' export folder
-    project_path = Path(project_path)
-    insitupy_path = Path(project_path) / 'insitupy'
+    data_path = Path(data_path)
 
     # Initialize a dictionary to store dataset subdirectory paths
     dataset_paths = {}
 
     # Check if the 'insitupy' folder exists
-    if not insitupy_path.exists():
-        print(f"No 'insitupy' folder found at {insitupy_path}")
+    if not data_path.exists():
+        print(f"No 'insitupy' folder found at {data_path}")
         return dataset_paths
 
     # Iterate through the contents of the 'insitupy' folder
-    for item in insitupy_path.iterdir():
+    for item in data_path.iterdir():
         if item.is_dir():
             # Collect full paths to subdirectories (datasets) within each data folder
             subdirs = [d for d in item.iterdir() if d.is_dir()]
@@ -47,7 +52,7 @@ def _list_insitupy_data_folders(project_path):
                 dataset_paths[item.name] = subdirs
 
     # Print summary of folders and datasets found
-    print(f"Data folders found in '{insitupy_path}':")
+    print(f"Data folders found:")
     for name, paths in dataset_paths.items():
         print(f"\t- '{name}': {len(paths)} dataset(s)")
     return dataset_paths

@@ -152,7 +152,7 @@ if WITH_NAPARI:
 
                     # get layer names from the current data
                     if viewer_config.layer_name == "main":
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name)]
+                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and not elem.name.endswith(f"[{viewer_config.layer_name}]")]
                     else:
                         layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
 
@@ -200,6 +200,9 @@ if WITH_NAPARI:
                                 new_name=new_layer_name,
                                 categorical_cmap = colormap
                             )
+                            # move new layer to the top
+                            was_moved = viewer.layers.move(viewer.layers.index(new_layer_name), len(viewer.layers))
+
                         else:
                             # create new points layer for genes
                             gene_layer = _create_points_layer(

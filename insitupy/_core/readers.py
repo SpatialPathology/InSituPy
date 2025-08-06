@@ -354,9 +354,8 @@ def read_qupath(
         ...     sample_name="SampleA"
         ... )
     """
-
-
     # --- Check file paths ---
+    path = Path(path)
     annot_path = path / "annotation.geojson"
     measurements_path = path / "measurements.tsv"
     bound_path = path / "cells.geojson"
