@@ -116,7 +116,8 @@ html_context = {
     "display_github": True,
     "github_user": "SpatialPathology",
     "github_repo": "InSituPy",
-    "github_version": os.environ.get("READTHEDOCS_VERSION", "main"),
+    #"github_version": os.environ.get("READTHEDOCS_VERSION", "main"),
+    "github_version": "dev_reader",
     "conf_py_path": "/docs/source/",
 }
 

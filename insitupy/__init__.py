@@ -9,6 +9,7 @@ try:
 except ImportError:
     WITH_NAPARI = False
 
+from . import _core
 from . import images as im
 from . import io
 from . import plotting as pl
