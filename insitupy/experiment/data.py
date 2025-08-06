@@ -47,19 +47,7 @@ class InSituExperiment:
     This class provides functionality for managing datasets, performing differential gene expression analysis,
     querying metadata, visualizing data, and saving/loading experiments.
 
-    Attributes:
-        data (list): A list of datasets in the experiment.
-        metadata (pd.DataFrame): A DataFrame containing metadata for the datasets.
-        path (str): The save path of the InSituExperiment object.
-        collection (anndata.experimental.AnnCollection): *Experimental feature!* A collection of AnnData objects.
-
     Methods:
-        __repr__():
-            Provides a string representation of the InSituExperiment object.
-        __getitem__(key):
-            Retrieves a subset of the experiment based on the provided key.
-        __len__():
-            Returns the number of datasets in the experiment.
         collection():
             Returns the collection of AnnData objects.
         data():

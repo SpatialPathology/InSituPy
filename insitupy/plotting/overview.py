@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 import os
 import warnings
 from pathlib import Path
@@ -13,6 +10,7 @@ from matplotlib.axes._axes import Axes
 
 from insitupy._core._checks import is_integer_counts
 from insitupy._core._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 
 

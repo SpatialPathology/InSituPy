@@ -106,9 +106,9 @@ html_theme_options = {
     "use_source_button": True,
     "use_issues_button": True,
     "path_to_docs": "./docs",
-    "display_version": True,
-    "logo_only": True,
-    "version_selector": True,
+    # "display_version": True,
+    # "logo_only": True,
+    # "version_selector": True,
     "collapse_navigation": False
 }
 

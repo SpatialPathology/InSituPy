@@ -92,10 +92,6 @@ class InSituData:
         quicksave_dir (Path): *Experimental feature!* Directory for quicksave operations.
 
     Methods:
-        __init__(path, metadata, slide_id, sample_id, from_insitudata):
-            Initializes an InSituData object.
-        __repr__():
-            Returns a string representation of the object.
         assign_geometries(geometry_type, keys, add_masks, add_to_obs, overwrite, cells_layer):
             Assigns geometries (annotations or regions) to the cell data.
         assign_annotations(keys, add_masks, overwrite):
