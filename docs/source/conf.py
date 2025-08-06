@@ -1,5 +1,18 @@
 # Configuration file for the Sphinx documentation builder.
 
+import importlib.util
+import sys
+
+package_name = "insitupy"
+spec = importlib.util.find_spec(package_name)
+
+if spec is None:
+    print(f"❌ Package '{package_name}' is NOT installed!", file=sys.stderr)
+else:
+    print(f"✅ Package '{package_name}' is installed at: {spec.origin}")
+
+
+
 import os
 import sys
 from pathlib import PurePosixPath
