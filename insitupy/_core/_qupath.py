@@ -7,7 +7,7 @@ import pandas as pd
 from shapely import MultiPolygon, Polygon
 
 from insitupy._core._helpers import _convert_to_float_coords, _generate_mask
-from insitupy._core.dataclasses import BoundariesData
+from insitupy.dataclasses.dataclasses import BoundariesData
 
 try:
     from rasterio.features import rasterize

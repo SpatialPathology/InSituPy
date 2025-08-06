@@ -20,10 +20,10 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
 from insitupy._core._checks import _is_experiment, check_raw
 from insitupy._core._utils import _get_cell_layer
 from insitupy._core.data import InSituData
-from insitupy._core.dataclasses import AnnotationsData, ImageData, RegionsData
+from insitupy.dataclasses.dataclasses import AnnotationsData, ImageData, RegionsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
-from insitupy.plotting._colors import (_add_colorlegend_to_axis,
+from insitupy.utils._colors import (_add_colorlegend_to_axis,
                                        _extract_color_values, _rgb2hex_robust,
                                        create_cmap_mapping)
 from insitupy.utils._adata import filter_anndata

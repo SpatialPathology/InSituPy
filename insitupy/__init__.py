@@ -9,25 +9,27 @@ try:
 except ImportError:
     WITH_NAPARI = False
 
-from . import _core
+from . import _core, dataclasses, datasets, experiment
 from . import images as im
 from . import io
 from . import plotting as pl
 from . import preprocessing as pp
+from . import proseg
 from . import tools as tl
 from . import utils
-from ._constants import CACHE
-from ._core.data import InSituData
-from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
-                                ImageData, MultiCellData, RegionsData)
-from ._core.readers import read_qupath, read_xenium
-from ._core.viewer import sync_geometries
-from .experiment.data import InSituExperiment
-from .experiment.readers import read_qupath_project
-from .images.registration import register_images
-from .palettes import CustomPalettes
-from .tools.dge import differential_gene_expression
-from .tools.distance import calc_distance_of_cells_from
+
+# from ._constants import CACHE
+# from ._core.data import InSituData
+# from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
+#                                 ImageData, MultiCellData, RegionsData)
+# from ._core.readers import read_qupath, read_xenium
+# from ._core.viewer import sync_geometries
+# from .experiment.data import InSituExperiment
+# from .experiment.readers import read_qupath_project
+# from .images.registration import register_images
+# from .palettes import CustomPalettes
+# from .tools.dge import differential_gene_expression
+# from .tools.distance import calc_distance_of_cells_from
 
 __all__ = [
     "InSituData",

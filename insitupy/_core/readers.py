@@ -20,7 +20,7 @@ from insitupy._core._xenium import (_read_boundaries_from_xenium,
                                     _read_matrix_from_xenium,
                                     _restructure_transcripts_dataframe)
 from insitupy._core.data import InSituData
-from insitupy._core.dataclasses import CellData, ImageData, MultiCellData
+from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.io.files import read_json
 from insitupy.io.geo import parse_geopandas

@@ -1,7 +1,5 @@
-import logging
-import sys
 from numbers import Number
-from typing import List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple
 from warnings import warn
 
 import matplotlib
@@ -16,11 +14,10 @@ from shapely import (LinearRing, LineString, MultiPoint, MultiPolygon, Point,
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
-                                 REGION_CMAP, REGIONS_SYMBOL)
+                                 REGIONS_SYMBOL)
 from insitupy._core._checks import check_rgb_column
 from insitupy._core._configs import _get_viewer_uid, config_manager
-from insitupy.palettes import CustomPalettes
-from insitupy.plotting._colors import _data_to_rgba, _determine_climits
+from insitupy.utils._colors import _data_to_rgba, _determine_climits
 
 if WITH_NAPARI:
     import napari

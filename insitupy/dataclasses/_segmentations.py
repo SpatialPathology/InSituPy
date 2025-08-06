@@ -63,6 +63,24 @@ def _read_baysor_polygons(
     return df
 
 
+def read_baysor_transcripts(
+    baysor_output: Union[str, os.PathLike, Path]
+    ) -> pd.DataFrame:
+
+    # convert to pathlib path
+    baysor_output = Path(baysor_output)
+
+    # read transcripts from Baysor results
+    print("Parsing transcripts data...", flush=True)
+
+    print("\tRead data", flush=True)
+    segcsv_file = baysor_output / "segmentation.csv"
+    baysor_transcript_dataframe = pd.read_csv(segcsv_file)
+
+    # reshaping
+    transcript_id_col = [elem for elem in ["transcript_id", "molecule_id"] if elem in baysor_transcript_dataframe.columns][0]
+    baysor_transcript_dataframe = baysor_transcript_dataframe.set_index(transcript_id_col)
+    return baysor_transcript_dataframe
 
 
 def _read_proseg_polygons(
@@ -111,6 +129,7 @@ def _read_proseg_polygons(
     df = gpd.GeoDataFrame(df)
 
     return df
+
 
 def _read_proseg_counts(
     path_counts,

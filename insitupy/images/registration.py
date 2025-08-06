@@ -14,7 +14,7 @@ import numpy as np
 from dask_image.imread import imread
 from parse import *
 
-from insitupy import CACHE, __version__
+from insitupy import __version__
 from insitupy._exceptions import UnknownOptionError
 from insitupy._textformat import textformat as tf
 from insitupy.images.axes import ImageAxes, get_height_and_width
@@ -24,7 +24,7 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    scale_to_max_width)
 from insitupy.utils.utils import convert_to_list
 
-from .._constants import SHRT_MAX
+from .._constants import CACHE, SHRT_MAX
 from .._exceptions import NotEnoughFeatureMatchesError
 from ..utils.utils import remove_last_line_from_csv
 from .io import write_ome_tiff

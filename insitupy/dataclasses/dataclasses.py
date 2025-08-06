@@ -21,12 +21,12 @@ from insitupy._core._checks import _is_list_of_dask_arrays
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._textformat import textformat as tf
+from insitupy.dataclasses._segmentations import _read_proseg
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
                                    crop_dask_array_or_pyramid, resize_image)
-from insitupy.io._segmentation import _read_proseg
 from insitupy.io.files import (check_overwrite_and_remove_if_true,
                                write_dict_to_json)
 from insitupy.io.geo import parse_geopandas, write_qupath_geojson
@@ -1108,6 +1108,7 @@ class MultiCellData(DeepCopyMixin):
                 key (str, optional): Key to store the data. Defaults to "proseg".
                 is_main (bool, optional): Flag to indicate if this is the main data. Defaults to False.
         """
+
 
         # generate data paths
         path = Path(path)

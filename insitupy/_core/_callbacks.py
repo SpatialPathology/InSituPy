@@ -10,7 +10,7 @@ from pandas.api.types import is_numeric_dtype
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGIONS_SYMBOL)
-from insitupy.plotting._colors import continuous_data_to_rgba
+from insitupy.utils._colors import continuous_data_to_rgba
 
 if WITH_NAPARI:
     import napari

@@ -21,7 +21,7 @@ from insitupy._core._configs import (ViewerConfig, _get_viewer_uid,
                                      config_manager)
 from insitupy._core._helpers import _get_expression_values
 from insitupy._core._layers import _create_points_layer, _update_points_layer
-from insitupy._core.viewer import save_colorlegends, sync_geometries
+from insitupy.viewer.viewer import save_colorlegends, sync_geometries
 from insitupy.images.utils import create_img_pyramid
 
 if WITH_NAPARI:

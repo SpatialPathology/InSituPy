@@ -1,24 +1,28 @@
 import os
 from math import ceil
 from numbers import Number
+from os.path import relpath
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Literal, Optional, Union
 from warnings import warn
 
 import dask.array as da
 import numpy as np
-import pandas as pd
 import scanpy as sc
 import toml
 import zarr
+from parse import *
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._core.dataclasses import (AnnotationsData, BoundariesData,
-                                        CellData, MultiCellData, RegionsData,
-                                        ShapesData)
-from insitupy.io._segmentation import _read_baysor_polygons
+from insitupy import __version__
+from insitupy.dataclasses._segmentations import _read_baysor_polygons
+from insitupy.dataclasses.dataclasses import (AnnotationsData, BoundariesData,
+                                              CellData, ImageData,
+                                              MultiCellData, RegionsData,
+                                              ShapesData)
 from insitupy.io.files import read_json
-from insitupy.utils.utils import convert_int_to_xenium_hex, convert_to_list
+from insitupy.utils.utils import (_generate_time_based_uid,
+                                  convert_int_to_xenium_hex, convert_to_list)
 
 
 def read_baysor_cells(
@@ -89,26 +93,6 @@ def read_baysor_cells(
     celldata = CellData(matrix=matrix, boundaries=boundaries, config=baysor_config)
 
     return celldata
-
-
-def read_baysor_transcripts(
-    baysor_output: Union[str, os.PathLike, Path]
-    ) -> pd.DataFrame:
-
-    # convert to pathlib path
-    baysor_output = Path(baysor_output)
-
-    # read transcripts from Baysor results
-    print("Parsing transcripts data...", flush=True)
-
-    print("\tRead data", flush=True)
-    segcsv_file = baysor_output / "segmentation.csv"
-    baysor_transcript_dataframe = pd.read_csv(segcsv_file)
-
-    # reshaping
-    transcript_id_col = [elem for elem in ["transcript_id", "molecule_id"] if elem in baysor_transcript_dataframe.columns][0]
-    baysor_transcript_dataframe = baysor_transcript_dataframe.set_index(transcript_id_col)
-    return baysor_transcript_dataframe
 
 
 def read_celldata(
@@ -212,23 +196,6 @@ def read_celldata(
     return celldata
 
 
-# def read_shapesdata(
-#     path: Union[str, os.PathLike, Path],
-# ):
-#     path = Path(path)
-#     metadata = read_json(path / "metadata.json")
-#     keys = metadata.keys()
-#     files = [path / f"{k}.geojson" for k in keys]
-#     data = RegionsData(files, keys)
-
-#     for k, f in zip(keys, files):
-#         data.add_data(data=f, key=k)
-
-#     # overwrite metadata
-#     data.metadata = metadata
-#     return data
-
-
 def read_shapesdata(
     path: Union[str, os.PathLike, Path],
     mode: Literal["annotations", "regions", "shapes"],
@@ -295,3 +262,115 @@ def read_multicelldata(
                 cd = read_celldata(path=path_upper / p)
                 mcd.add_celldata(cd=cd, key=k)
     return mcd
+
+
+def _save_images(imagedata: ImageData,
+                 path: Union[str ,os.PathLike],
+                 metadata: Optional[dict] = None,
+                 images_as_zarr: bool = True,
+                 zipped: bool = False,
+                 max_resolution: Optional[Number] = None, # in µm per pixel,
+                 verbose: bool = False
+                 ):
+    img_path = (path / "images")
+
+    savepaths = imagedata.save(
+        output_folder=img_path,
+        as_zarr=images_as_zarr,
+        zipped=zipped,
+        return_savepaths=True,
+        max_resolution=max_resolution,
+        verbose=verbose
+        )
+
+    #if metadata is not None:
+    metadata["data"]["images"] = {}
+    for n in imagedata.metadata.keys():
+        s = savepaths[n]
+        # collect metadata
+        metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
+
+
+def _save_cells(cells: MultiCellData,
+                path,
+                metadata,
+                boundaries_zipped=False,
+                max_resolution_boundaries: Optional[Number] = None, # in µm per pixel
+                overwrite=False
+                ):
+    # create path for cells
+    uid = _generate_time_based_uid()
+    cells_path = path / "cells" / uid
+
+    # save cells to path and write info to metadata
+    cells.save(
+        path=cells_path,
+        boundaries_zipped=boundaries_zipped,
+        max_resolution_boundaries=max_resolution_boundaries,
+        overwrite=overwrite
+        )
+
+    #if metadata is not None:
+    try:
+        # move old celldata paths to history
+        old_path = metadata["data"]["cells"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["cells"].append(old_path)
+
+    # move new paths to data
+    metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
+
+
+def _save_transcripts(transcripts, path, metadata):
+    # create file path
+    trans_path = path / "transcripts"
+    trans_path.mkdir(parents=True, exist_ok=True) # create directory
+    trans_file = trans_path / "transcripts.parquet"
+
+    # save transcripts as parquet and modify metadata
+    transcripts.to_parquet(trans_file)
+
+    #if metadata is not None:
+    metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
+
+
+def _save_annotations(annotations, path, metadata):
+    uid = _generate_time_based_uid()
+    annot_path = path / "annotations" / uid
+
+    # save annotations
+    annotations.save(annot_path)
+
+    #if metadata is not None:
+    try:
+        # move old paths to history
+        old_path = metadata["data"]["annotations"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["annotations"].append(old_path)
+
+    # add new paths
+    metadata["data"]["annotations"] = Path(relpath(annot_path, path)).as_posix()
+
+
+def _save_regions(regions, path, metadata):
+    uid = _generate_time_based_uid()
+    annot_path = path / "regions" / uid
+
+    # save annotations
+    regions.save(annot_path)
+
+    #if metadata is not None:
+    try:
+        # move old paths to history
+        old_path = metadata["data"]["regions"]
+    except KeyError:
+        pass
+    else:
+        metadata["history"]["regions"].append(old_path)
+
+    # add new paths
+    metadata["data"]["regions"] = Path(relpath(annot_path, path)).as_posix()

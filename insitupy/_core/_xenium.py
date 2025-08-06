@@ -14,7 +14,7 @@ from pandas.api.types import is_numeric_dtype
 from scipy.sparse import csr_matrix
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._core.dataclasses import BoundariesData
+from insitupy.dataclasses.dataclasses import BoundariesData
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.images.utils import _efficiently_resize_array
 from insitupy.utils.utils import (convert_int_to_xenium_hex,

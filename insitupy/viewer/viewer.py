@@ -12,7 +12,6 @@ from shapely import Point
 from insitupy import WITH_NAPARI, __version__
 from insitupy._core._checks import _check_geometry_symbol_and_layer
 from insitupy._core._configs import _get_viewer_uid
-from insitupy._core.dataclasses import AnnotationsData, RegionsData
 from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
 if WITH_NAPARI:
