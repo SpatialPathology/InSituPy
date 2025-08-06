@@ -1,18 +1,5 @@
 # Configuration file for the Sphinx documentation builder.
 
-import importlib.util
-import sys
-
-package_name = "insitupy"
-spec = importlib.util.find_spec(package_name)
-
-if spec is None:
-    print(f"❌ Package '{package_name}' is NOT installed!", file=sys.stderr)
-else:
-    print(f"✅ Package '{package_name}' is installed at: {spec.origin}")
-
-
-
 import os
 import sys
 from pathlib import PurePosixPath
@@ -123,6 +110,14 @@ html_theme_options = {
     # "logo_only": True,
     # "version_selector": True,
     "collapse_navigation": False
+}
+
+html_context = {
+    "display_github": True,
+    "github_user": "SpatialPathology",
+    "github_repo": "InSituPy",
+    "github_version": os.environ.get("READTHEDOCS_VERSION", "main"),
+    "conf_py_path": "/docs/source/",
 }
 
 # -- Options for EPUB output
