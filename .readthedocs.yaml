@@ -13,3 +13,5 @@ python:
 
 sphinx:
   configuration: docs/source/conf.py
+
+docs_dir: docs/source
