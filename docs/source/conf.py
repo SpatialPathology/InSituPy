@@ -105,7 +105,7 @@ html_theme_options = {
     "use_edit_page_button": True,
     "use_source_button": True,
     "use_issues_button": True,
-    "path_to_docs": "./docs",
+    "path_to_docs": "./docs/source",
     # "display_version": True,
     # "logo_only": True,
     # "version_selector": True,
