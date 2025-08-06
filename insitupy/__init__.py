@@ -9,14 +9,13 @@ try:
 except ImportError:
     WITH_NAPARI = False
 
-from insitupy._constants import CACHE
-
 from . import images as im
 from . import io
 from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
+from ._constants import CACHE
 from ._core.data import InSituData
 from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
                                 ImageData, MultiCellData, RegionsData)
