@@ -38,6 +38,21 @@ def _get_expression_values(adata, X, key_type, key):
 
     return color_value
 
+def _fill_multipolygon(mp):
+    filled_polygons = [Polygon(p.exterior) for p in mp.geoms]
+    filled_multipolygon = MultiPolygon(filled_polygons)
+    return filled_multipolygon
+
+def _format_multipolygon_coords(coords):
+    # Convert to proper format
+    formatted_coords = []
+    for poly in coords:
+        exterior = poly[0]
+        holes = poly[1:] if len(poly) > 1 else []
+        formatted_coords.append((exterior, holes))
+
+    return formatted_coords
+
 def _convert_to_float_coords(coords, mode):
     # Convert Decimal to float
 
@@ -47,7 +62,14 @@ def _convert_to_float_coords(coords, mode):
         poly = Polygon(float_coords[0])
     elif mode == "MultiPolygon":
         float_coords = [[[(float(x), float(y)) for x, y in ring] for ring in poly] for poly in coords]
-        poly = MultiPolygon(float_coords)
+        formatted_coords = _format_multipolygon_coords(float_coords)
+
+        # Create MultiPolygon
+        mp = MultiPolygon(formatted_coords)
+
+        # fill holes in the polygons
+        poly = _fill_multipolygon(mp)
+        #poly = MultiPolygon(float_coords)
     else:
         raise ValueError(f"Unknown mode '{mode}'.")
     return poly

@@ -394,7 +394,6 @@ def read_qupath(
         )
 
     # --- Read cellular boundaries ---
-    print(bound_path)
     boundaries = _read_boundaries_qupath(
         bound_path,
         object_ids=adata.obs["Object ID"].values,
