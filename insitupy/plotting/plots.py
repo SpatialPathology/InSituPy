@@ -17,7 +17,7 @@ from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
 from insitupy.palettes import map_to_colors
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,

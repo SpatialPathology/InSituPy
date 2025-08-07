@@ -23,7 +23,7 @@ from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
 from insitupy.experiment.data import InSituExperiment
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils._checks import check_raw
 from insitupy.utils._colors import (_add_colorlegend_to_axis,

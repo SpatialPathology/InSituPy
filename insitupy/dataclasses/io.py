@@ -20,7 +20,7 @@ from insitupy.dataclasses.dataclasses import (AnnotationsData, BoundariesData,
                                               CellData, ImageData,
                                               MultiCellData, RegionsData,
                                               ShapesData)
-from insitupy.io.files import read_json
+from insitupy._io.files import read_json
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 

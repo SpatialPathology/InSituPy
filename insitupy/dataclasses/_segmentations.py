@@ -20,7 +20,7 @@ from insitupy.utils._shapely import scale_polygon
 def _read_baysor_polygons(
     file: Union[str, os.PathLike, Path]
     ) -> gpd.GeoDataFrame:
-    from insitupy.io.files import read_json
+    from insitupy._io.files import read_json
 
     d = read_json(file)
 
@@ -86,7 +86,7 @@ def read_baysor_transcripts(
 def _read_proseg_polygons(
     file: Union[str, os.PathLike, Path]
     ) -> gpd.GeoDataFrame:
-    from insitupy.io.files import read_json
+    from insitupy._io.files import read_json
 
     d = read_json(file)
 

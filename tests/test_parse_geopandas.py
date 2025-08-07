@@ -1,7 +1,7 @@
 from shapely import Point
 from geopandas import GeoDataFrame
 import pandas as pd
-from insitupy.io.geo import parse_geopandas
+from insitupy._io.geo import parse_geopandas
 
 d = {'id': ['i'],
     'objectType': ['o'],

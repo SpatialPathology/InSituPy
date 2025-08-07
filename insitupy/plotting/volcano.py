@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 from matplotlib.font_manager import FontProperties
 
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
 
 
-def volcano_plot(data,
+def plot_volcano(data,
                  logfoldchanges_column: str = 'logfoldchanges',
                  pval_column: str = 'neg_log10_pvals',
                  significance_threshold: Number = 0.05,

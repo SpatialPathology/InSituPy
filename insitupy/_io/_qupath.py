@@ -7,7 +7,7 @@ import pandas as pd
 from parse import *
 
 from insitupy import __version__
-from insitupy.io.geo import parse_geopandas
+from insitupy._io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils.utils import convert_int_to_xenium_hex
 

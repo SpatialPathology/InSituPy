@@ -27,9 +27,9 @@ from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
                                    crop_dask_array_or_pyramid, resize_image)
-from insitupy.io.files import (check_overwrite_and_remove_if_true,
+from insitupy._io.files import (check_overwrite_and_remove_if_true,
                                write_dict_to_json)
-from insitupy.io.geo import parse_geopandas, write_qupath_geojson
+from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy.utils.utils import convert_to_list, decode_robust_series
 
 if WITH_NAPARI:

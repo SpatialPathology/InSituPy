@@ -12,9 +12,9 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy._core.data import InSituData
-from insitupy.plotting import volcano_plot
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.plotting import plot_volcano
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
 
@@ -272,7 +272,7 @@ def differential_gene_expression(
         # remove empty rows
         config_table = config_table.set_index("").dropna(how="all").reset_index()
 
-        volcano_plot(
+        plot_volcano(
             data=df,
             significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,

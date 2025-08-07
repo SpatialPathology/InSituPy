@@ -46,7 +46,7 @@ from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      read_shapesdata)
 from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
-from insitupy.io.files import (check_overwrite_and_remove_if_true, read_json,
+from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                write_dict_to_json)
 from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
