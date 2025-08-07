@@ -16,8 +16,8 @@ from insitupy import __version__
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
-from insitupy.dataclasses.io import _read_boundaries_qupath
-from insitupy.io._qupath import _read_measurements_qupath
+from insitupy.io._qupath import (_read_boundaries_qupath,
+                                 _read_measurements_qupath)
 from insitupy.io._read import _read_boundaries, _read_measurements
 from insitupy.io._xenium import (_read_boundaries_from_xenium,
                                  _read_matrix_from_xenium,
@@ -394,6 +394,7 @@ def read_qupath(
         )
 
     # --- Read cellular boundaries ---
+    print(bound_path)
     boundaries = _read_boundaries_qupath(
         bound_path,
         object_ids=adata.obs["Object ID"].values,
