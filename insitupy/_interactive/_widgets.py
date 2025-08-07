@@ -11,17 +11,17 @@ from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGION_CMAP, REGIONS_SYMBOL)
-from insitupy._core._callbacks import (_refresh_widgets_after_data_change,
+from insitupy._interactive._callbacks import (_refresh_widgets_after_data_change,
                                        _set_show_names_based_on_geom_type,
                                        _update_classes_on_key_change,
                                        _update_colorlegend,
                                        _update_key_on_type_change,
                                        _update_keys_based_on_geom_type)
-from insitupy._core._configs import (ViewerConfig, _get_viewer_uid,
+from insitupy._interactive._configs import (ViewerConfig, _get_viewer_uid,
                                      config_manager)
-from insitupy._core._helpers import _get_expression_values
-from insitupy._core._layers import _create_points_layer, _update_points_layer
-from insitupy.viewer.viewer import save_colorlegends, sync_geometries
+from insitupy.utils._helpers import _get_expression_values
+from insitupy._interactive._layers import _create_points_layer, _update_points_layer
+from insitupy._interactive.viewer import save_colorlegends, sync_geometries
 from insitupy.images.utils import create_img_pyramid
 
 if WITH_NAPARI:

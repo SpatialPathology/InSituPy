@@ -1,5 +1,6 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
+# from __future__ import \
+#     annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
+from insitupy.dataclasses.dataclasses import MultiCellData
 
 
 def _get_cell_layer(

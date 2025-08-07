@@ -48,6 +48,8 @@ def _convert_to_float_coords(coords, mode):
     elif mode == "MultiPolygon":
         float_coords = [[[(float(x), float(y)) for x, y in ring] for ring in poly] for poly in coords]
         poly = MultiPolygon(float_coords)
+    else:
+        raise ValueError(f"Unknown mode '{mode}'.")
     return poly
 
 def _generate_mask(values, xmax, ymax, seg_mask_value):

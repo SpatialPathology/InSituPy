@@ -14,8 +14,8 @@ from pandas.api.types import is_numeric_dtype
 from scipy.sparse import csr_matrix
 from zarr.errors import ArrayNotFoundError
 
-from insitupy.dataclasses.dataclasses import BoundariesData
 from insitupy._exceptions import InvalidFileTypeError
+from insitupy.dataclasses.dataclasses import BoundariesData
 from insitupy.images.utils import _efficiently_resize_array
 from insitupy.utils.utils import (convert_int_to_xenium_hex,
                                   decode_robust_series)
@@ -64,32 +64,6 @@ def _read_boundaries_from_xenium(
     ) -> BoundariesData:
     # # read boundaries data
     path = Path(path)
-
-    # if mode == "dataframe":
-    #     files=["cell_boundaries.parquet", "nucleus_boundaries.parquet"]
-    #     labels=["cellular", "nuclear"]
-
-    #     # generate path for files
-    #     files = [path / f for f in files]
-
-    #     # generate dataframes
-    #     data_dict = {}
-    #     for n, f in zip(labels, files):
-    #         # check the file suffix
-    #         if not f.suffix == ".parquet":
-    #             InvalidFileTypeError(allowed_types=[".parquet"], received_type=f.suffix)
-
-    #         # load dataframe
-    #         df = pd.read_parquet(f)
-
-    #         # decode columns
-    #         df = df.apply(lambda x: decode_robust_series(x), axis=0)
-
-    #         # collect dataframe
-    #         data_dict[n] = df
-
-    #     # create boundariesdata object
-    #     boundaries = BoundariesData()
 
     # else:
     cells_zarr_file = path / "cells.zarr.zip"

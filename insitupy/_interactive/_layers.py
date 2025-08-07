@@ -15,8 +15,8 @@ from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
                                  REGIONS_SYMBOL)
-from insitupy._core._checks import check_rgb_column
-from insitupy._core._configs import _get_viewer_uid, config_manager
+from insitupy.utils._checks import check_rgb_column
+from insitupy._interactive._configs import _get_viewer_uid, config_manager
 from insitupy.utils._colors import _data_to_rgba, _determine_climits
 
 if WITH_NAPARI:

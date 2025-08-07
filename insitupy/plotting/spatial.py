@@ -17,16 +17,18 @@ from pandas.api.types import is_numeric_dtype
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
-from insitupy._core._checks import _is_experiment, check_raw
-from insitupy._core._utils import _get_cell_layer
+from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses.dataclasses import AnnotationsData, ImageData, RegionsData
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
+                                              RegionsData)
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
-from insitupy.utils._colors import (_add_colorlegend_to_axis,
-                                       _extract_color_values, _rgb2hex_robust,
-                                       create_cmap_mapping)
 from insitupy.utils._adata import filter_anndata
+from insitupy.utils._checks import check_raw
+from insitupy.utils._colors import (_add_colorlegend_to_axis,
+                                    _extract_color_values, _rgb2hex_robust,
+                                    create_cmap_mapping)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 

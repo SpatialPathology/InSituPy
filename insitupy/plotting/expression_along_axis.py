@@ -18,7 +18,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, _init_mpl_fontsize
-from insitupy._core._checks import check_raw, has_valid_labels
+from insitupy.utils._checks import check_raw, has_valid_labels
 from insitupy.io.plots import save_and_show_figure
 from insitupy.utils._regression import smooth_fit
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,

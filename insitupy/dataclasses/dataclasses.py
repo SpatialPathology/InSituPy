@@ -17,7 +17,7 @@ from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
-from insitupy._core._checks import _is_list_of_dask_arrays
+from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._textformat import textformat as tf

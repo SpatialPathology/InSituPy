@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._core._checks import _is_experiment
-from insitupy._core._utils import _get_cell_layer
+from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.preprocessing.anndata import (clustering_anndata,
                                             normalize_and_transform_anndata,
                                             reduce_dimensions_anndata)

@@ -1,26 +1,15 @@
-import json
 from pathlib import Path
 
 import anndata
-import numpy as np
 import pandas as pd
-from shapely import MultiPolygon, Polygon
 
-from insitupy._core._helpers import _convert_to_float_coords, _generate_mask
-from insitupy.dataclasses.dataclasses import BoundariesData
+from insitupy.utils._shapely import scale_polygon
+from insitupy.utils.utils import convert_int_to_xenium_hex
 
 try:
     from rasterio.features import rasterize
 except ImportError:
     raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-
-from math import ceil
-
-import dask.array as da
-
-from insitupy.io.geo import parse_geopandas
-from insitupy.utils._shapely import scale_polygon
-from insitupy.utils.utils import convert_int_to_xenium_hex
 
 
 def _get_pixel_size_from_qupath_metadata(metadata, name):
@@ -120,85 +109,3 @@ def _read_measurements_qupath(
 
     return adata
 
-def _read_boundaries_qupath(
-    bound_path,
-    object_ids,
-    cell_names,
-    xshift, yshift,
-    pixel_size
-    ) -> BoundariesData:
-    bound_path = Path(bound_path)
-
-    # --- Read the cellular geometries ---
-    bounds = parse_geopandas(bound_path)
-
-    # --- Read the nuclear geometries ---
-    # Load the GeoJSON file
-    with open(bound_path, 'r') as f:
-        data = json.load(f)
-
-    nucleus_geom = []
-    for feature in data['features']:
-        try:
-            geom = feature['nucleusGeometry']
-        except KeyError:
-            nucleus_geom.append(None)
-        else:
-            coords = geom['coordinates']
-            mode = geom['type']
-
-            poly = _convert_to_float_coords(coords, mode)
-
-            nucleus_geom.append(poly)
-
-    # --- Format the boundaries data ---
-    # add the nucleus geometry to the dataframe
-    bounds["nucleus_geometry"] = nucleus_geom
-
-    # convert nucleus_geometry to geoseries
-    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].astype("geometry")
-
-    # select only cells that were not filtered out yet
-    bounds = bounds.loc[object_ids]
-
-    # add names from metadata
-    bounds["name"] = cell_names
-
-    # move the polygons to the annotation origin
-    bounds["geometry"] = bounds["geometry"].translate(
-        xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
-        )
-    bounds["nucleus_geometry"] = bounds["nucleus_geometry"].translate(
-        xoff=-xshift/pixel_size, yoff=-yshift/pixel_size
-        )
-
-    seg_mask_value = range(1, len(bounds)+1)
-
-    # Calculate bounds for rasterization
-    polygon_bounds = bounds["geometry"].bounds
-    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
-    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
-
-    # Convert data into segmentation masks
-    cellbounds_mask = _generate_mask(
-        bounds["geometry"],
-        xmax=xmax, ymax=ymax,
-        seg_mask_value=seg_mask_value)
-    nucbounds_mask = _generate_mask(
-        bounds["nucleus_geometry"],
-        xmax=xmax, ymax=ymax,
-        seg_mask_value=seg_mask_value)
-
-    # --- Create BoundariesData object ---
-    boundaries = BoundariesData(
-        cell_names=bounds["name"].values,
-        seg_mask_value=seg_mask_value
-    )
-
-    boundaries.add_boundaries(
-        cell_boundaries=cellbounds_mask,
-        pixel_size=pixel_size,
-        nuclei_boundaries=nucbounds_mask
-    )
-
-    return boundaries

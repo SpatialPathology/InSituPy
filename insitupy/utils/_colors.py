@@ -11,7 +11,7 @@ from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
-from insitupy._core._checks import check_raw
+from insitupy.utils._checks import check_raw
 from insitupy.palettes import CustomPalettes
 
 

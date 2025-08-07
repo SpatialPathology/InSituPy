@@ -5,7 +5,7 @@ from typing import List, Optional, Union
 
 import matplotlib.pyplot as plt
 
-from insitupy._core._utils import _get_cell_layer
+from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.plots import save_and_show_figure
 

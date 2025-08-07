@@ -12,8 +12,8 @@ import seaborn as sns
 from anndata import AnnData
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-from insitupy._core._checks import check_integer_counts
-from insitupy._core._utils import _get_cell_layer
+from insitupy.utils._checks import check_integer_counts
+from insitupy.dataclasses._utils import _get_cell_layer
 
 
 def plot_qc_metrics(

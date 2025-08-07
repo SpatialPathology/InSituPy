@@ -4,7 +4,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from insitupy._core._utils import _get_cell_layer
+from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy._core.data import InSituData
 
 

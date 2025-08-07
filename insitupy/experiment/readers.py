@@ -4,7 +4,7 @@ from numbers import Number
 from pathlib import Path
 from typing import Optional, Union
 
-from insitupy._core._qupath import (_get_pixel_size_from_qupath_metadata,
+from insitupy.io._qupath import (_get_pixel_size_from_qupath_metadata,
                                     _list_insitupy_data_folders)
 from insitupy._core.readers import read_qupath
 from insitupy.experiment.data import InSituExperiment

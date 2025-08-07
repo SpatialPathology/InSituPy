@@ -13,15 +13,15 @@ from parse import *
 from PIL import Image
 
 from insitupy import __version__
-from insitupy._core._qupath import (_read_boundaries_qupath,
-                                    _read_measurements_qupath)
-from insitupy._core._read import _read_boundaries, _read_measurements
-from insitupy._core._xenium import (_read_boundaries_from_xenium,
-                                    _read_matrix_from_xenium,
-                                    _restructure_transcripts_dataframe)
 from insitupy._core.data import InSituData
-from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
 from insitupy._exceptions import InvalidXeniumDirectory
+from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
+from insitupy.dataclasses.io import _read_boundaries_qupath
+from insitupy.io._qupath import _read_measurements_qupath
+from insitupy.io._read import _read_boundaries, _read_measurements
+from insitupy.io._xenium import (_read_boundaries_from_xenium,
+                                 _read_matrix_from_xenium,
+                                 _restructure_transcripts_dataframe)
 from insitupy.io.files import read_json
 from insitupy.io.geo import parse_geopandas
 

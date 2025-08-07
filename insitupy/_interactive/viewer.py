@@ -10,8 +10,8 @@ from parse import parse
 from shapely import Point
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._core._checks import _check_geometry_symbol_and_layer
-from insitupy._core._configs import _get_viewer_uid
+from insitupy._interactive._checks import _check_geometry_symbol_and_layer
+from insitupy._interactive._configs import _get_viewer_uid
 from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
 if WITH_NAPARI:
@@ -19,7 +19,7 @@ if WITH_NAPARI:
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
 
-    from insitupy._core._configs import config_manager
+    from insitupy._interactive._configs import config_manager
 
     def sync_geometries():
         name_pattern = "{type_symbol} {class_name} ({annot_key})"
@@ -115,25 +115,6 @@ if WITH_NAPARI:
 
             if plotted:
                 show_info(f"Saved color legend to '{savepath}'")
-
-        # if from_canvas:
-        #     # Check if static_canvas exists
-        #     if not hasattr(config, 'static_canvas'):
-        #         print("Warning: 'static_canvas' attribute not found in config. "
-        #             "Please display data in the napari viewer using '.show()' first.")
-        #         return
-
-        #     try:
-        #         # Save the figure to a PDF file
-        #         config.static_canvas.figure.savefig(savepath)
-        #         print(f"Figure saved as {savepath}")
-        #     except RuntimeError as e:
-        #         if 'FigureCanvasQTAgg has been deleted' in str(e):
-        #             print("Warning: The color legend has been deleted and cannot be saved.")
-        #         else:
-        #             raise  # Re-raise the exception if it's a different error
-        # else:
-
 
     def _remove_geometries(
         layer,
