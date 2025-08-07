@@ -59,12 +59,12 @@ For handling multiple samples:
 .. autosummary::
     :toctree: generated
 
-    AnnotationsData
-    BoundariesData
-    CellData
-    ImageData
-    MultiCellData
-    RegionsData
+    dataclasses.AnnotationsData
+    dataclasses.BoundariesData
+    dataclasses.CellData
+    dataclasses.ImageData
+    dataclasses.MultiCellData
+    dataclasses.RegionsData
 ```
 
 ### Reading Data Classes
@@ -76,9 +76,9 @@ For handling multiple samples:
 .. autosummary::
     :toctree: generated
 
-    read_celldata
-    read_multicelldata
-    read_shapesdata
+    dataclasses.read_celldata
+    dataclasses.read_multicelldata
+    dataclasses.read_shapesdata
 ```
 
 ## Plotting
