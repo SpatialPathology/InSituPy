@@ -11,11 +11,6 @@ from insitupy.io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils.utils import convert_int_to_xenium_hex
 
-try:
-    from rasterio.features import rasterize
-except ImportError:
-    raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-
 
 def _get_pixel_size_from_qupath_metadata(metadata, name):
     for elem in metadata["images"]:

@@ -1,16 +1,10 @@
+from datetime import datetime
 from warnings import warn
 
+import dask.array as da
 import numpy as np
 import pandas as pd
 from shapely import MultiPolygon, Polygon
-
-try:
-    from rasterio.features import rasterize
-except ImportError:
-    raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-from datetime import datetime
-
-import dask.array as da
 
 
 def _get_expression_values(adata, X, key_type, key):
@@ -75,6 +69,10 @@ def _convert_to_float_coords(coords, mode):
     return poly
 
 def _generate_mask(values, xmax, ymax, seg_mask_value):
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
     # rasterize polygons
     boundaries_mask = rasterize(
         list(zip(values, seg_mask_value)),
