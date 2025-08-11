@@ -15,6 +15,7 @@ from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
+from ._constants import CACHE
 from ._core.data import InSituData
 from ._core.readers import read_qupath, read_xenium
 from .experiment.data import InSituExperiment

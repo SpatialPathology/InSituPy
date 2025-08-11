@@ -93,52 +93,73 @@ if WITH_NAPARI:
 
         @property
         def adata(self):
-            """Return the AnnData object."""
-            return self.data.cells[self.data_name].matrix
+            if not self.data.cells.is_empty:
+                """Return the AnnData object."""
+                return self.data.cells[self.data_name].matrix
+            else:
+                return None
 
         @property
         def boundaries(self):
-            return self.data.cells[self.data_name].boundaries
+            if not self.data.cells.is_empty:
+                return self.data.cells[self.data_name].boundaries
+            else:
+                return None
 
         @property
         def genes(self):
-            """Return the gene names."""
-            return sorted(self.adata.var_names.tolist())
+            if not self.adata is None:
+                """Return the gene names."""
+                return sorted(self.adata.var_names.tolist())
+            else:
+                return []
 
         @property
         def observations(self):
-            """Return the observation names."""
-            return sorted(self.adata.obs.columns.tolist())
+            if not self.adata is None:
+                """Return the observation names."""
+                return sorted(self.adata.obs.columns.tolist())
+            else:
+                return []
 
         @property
         def obsm(self):
-            obsm_keys = list(self.adata.obsm.keys())
-            obsm_cats = []
-            for k in sorted(obsm_keys):
-                data = self.adata.obsm[k]
-                if isinstance(data, pd.DataFrame):
-                    obsm_cats.extend([f"{k}#{col}" for col in data.columns])
-                elif isinstance(data, np.ndarray):
-                    obsm_cats.extend([f"{k}#{i+1}" for i in range(data.shape[1])])
+            if not self.adata is None:
+                obsm_keys = list(self.adata.obsm.keys())
+                obsm_cats = []
+                for k in sorted(obsm_keys):
+                    data = self.adata.obsm[k]
+                    if isinstance(data, pd.DataFrame):
+                        obsm_cats.extend([f"{k}#{col}" for col in data.columns])
+                    elif isinstance(data, np.ndarray):
+                        obsm_cats.extend([f"{k}#{i+1}" for i in range(data.shape[1])])
 
-            return obsm_cats
+                return obsm_cats
+            else:
+                return []
 
         @property
         def points(self):
-            """Return the spatial coordinates of the points."""
-            return np.flip(self.adata.obsm["spatial"].copy(), axis=1)
+            if not self.adata is None:
+                """Return the spatial coordinates of the points."""
+                return np.flip(self.adata.obsm["spatial"].copy(), axis=1)
+            else:
+                return None
 
         @property
         def X(self):
-            """Return the data matrix as a dense array."""
-            if self.layer_name == "main":
-                X = self.adata.X
-            else:
-                X = self.adata.layers[self.layer_name]
+            if not self.adata is None:
+                """Return the data matrix as a dense array."""
+                if self.layer_name == "main":
+                    X = self.adata.X
+                else:
+                    X = self.adata.layers[self.layer_name]
 
-            if issparse(X):
-                return X.toarray()
-            return X
+                if issparse(X):
+                    return X.toarray()
+                return X
+            else:
+                None
 
         def refresh_variables(self):
             self.key_dict = self._build_key_dict()
@@ -157,16 +178,17 @@ if WITH_NAPARI:
             }
 
         def _extract_masks(self):
-            masks = []
-            boundaries = self.data.cells[self.data_name].boundaries
+            if not self.data.cells.is_empty:
+                masks = []
+                boundaries = self.data.cells[self.data_name].boundaries
 
-            for n in boundaries.metadata.keys():
-                b = boundaries[n]
-                if b is not None:
-                    if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
-                        masks.append(n)
+                for n in boundaries.metadata.keys():
+                    b = boundaries[n]
+                    if b is not None:
+                        if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
+                            masks.append(n)
 
-            return masks
+                return masks
 
         def _get_pixel_size(self):
             if not self.data.images.is_empty:

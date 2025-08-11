@@ -26,12 +26,12 @@ from tqdm import tqdm
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
                                  LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._interactive._configs import _get_viewer_uid
+from insitupy.interactive._configs import _get_viewer_uid
 from insitupy.utils._helpers import (_get_expression_values,
                                      sort_paths_by_datetime)
-from insitupy._interactive._layers import _create_points_layer
+from insitupy.interactive._layers import _create_points_layer
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy._interactive._widgets import SaveWidget, SyncButton
+from insitupy.interactive._widgets import SaveWidget, SyncButton
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
@@ -57,10 +57,10 @@ if WITH_NAPARI:
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
 
-    from insitupy._interactive._configs import config_manager
+    from insitupy.interactive._configs import config_manager
 
     #from napari.layers.shapes.shapes import Shapes
-    from .._interactive._widgets import _initialize_widgets, add_new_geometries_widget
+    from ..interactive._widgets import _initialize_widgets, add_new_geometries_widget
 
 
 class InSituData:

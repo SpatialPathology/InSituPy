@@ -11,18 +11,17 @@ from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
 from insitupy import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGION_CMAP, REGIONS_SYMBOL)
-from insitupy._interactive._callbacks import (_refresh_widgets_after_data_change,
-                                       _set_show_names_based_on_geom_type,
-                                       _update_classes_on_key_change,
-                                       _update_colorlegend,
-                                       _update_key_on_type_change,
-                                       _update_keys_based_on_geom_type)
-from insitupy._interactive._configs import (ViewerConfig, _get_viewer_uid,
-                                     config_manager)
-from insitupy.utils._helpers import _get_expression_values
-from insitupy._interactive._layers import _create_points_layer, _update_points_layer
-from insitupy._interactive.viewer import save_colorlegends, sync_geometries
 from insitupy.images.utils import create_img_pyramid
+from insitupy.interactive._callbacks import (
+    _refresh_widgets_after_data_change, _set_show_names_based_on_geom_type,
+    _update_classes_on_key_change, _update_colorlegend,
+    _update_key_on_type_change, _update_keys_based_on_geom_type)
+from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
+                                           config_manager)
+from insitupy.interactive._layers import (_create_points_layer,
+                                          _update_points_layer)
+from insitupy.interactive.viewer import save_colorlegends, sync_geometries
+from insitupy.utils._helpers import _get_expression_values
 
 if WITH_NAPARI:
     import napari
@@ -55,25 +54,26 @@ if WITH_NAPARI:
                 data_name= {'choices': data_names, 'label': 'Dataset:'},
                 layer_name = {'choices': layer_names, 'label': 'Layer:'},
             )
-            def select_data(
+            def select_data_widget(
                 data_name=viewer_config.data_name,
                 layer_name=viewer_config.layer_name
             ):
                 pass
 
             # connect key change with update function
-            @select_data.data_name.changed.connect
-            @select_data.layer_name.changed.connect
+            @select_data_widget.data_name.changed.connect
+            @select_data_widget.layer_name.changed.connect
             def update_widgets_on_data_change(event=None):
                 # update data name in config and refresh the variables in the config class
-                viewer_config.data_name = select_data.data_name.value
-                viewer_config.layer_name = select_data.layer_name.value
+                viewer_config.data_name = select_data_widget.data_name.value
+                viewer_config.layer_name = select_data_widget.layer_name.value
                 viewer_config.refresh_variables()
 
                 _refresh_widgets_after_data_change(
                     data,
                     viewer=viewer,
                     viewer_config=viewer_config,
+                    select_data_widget=select_data_widget,
                     show_cells_widget=show_cells_widget,
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
@@ -144,6 +144,11 @@ if WITH_NAPARI:
                         X=viewer_config.X,
                         key_type=key_type, key=key
                     )
+
+                    if viewer_config.layer_name != "main":
+                        if key_type in ["obs", "obsm"]:
+                            show_warning(f"Other layer than 'main' not valid for key type {key_type}. Changed layer to 'main'.")
+                            viewer_config.layer_name = "main"
 
                     if viewer_config.layer_name == "main":
                         new_layer_name = f"{viewer_config.data_name}-{key}"
@@ -316,6 +321,7 @@ if WITH_NAPARI:
                     data,
                     viewer=viewer,
                     viewer_config=viewer_config,
+                    select_data_widget=select_data_widget,
                     show_cells_widget=show_cells_widget,
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
@@ -452,7 +458,7 @@ if WITH_NAPARI:
             move_to_cell_widget,
             show_geometries_widget,
             show_boundaries_widget,
-            select_data,
+            select_data_widget,
             filter_cells_widget,
             #add_new_geometries_widget
             )

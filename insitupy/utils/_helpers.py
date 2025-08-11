@@ -10,10 +10,14 @@ from shapely import MultiPolygon, Polygon
 def _get_expression_values(adata, X, key_type, key):
     # get expression values
     if key_type == "genes":
-        gene_loc = adata.var_names.get_loc(key)
-        color_value = X[:, gene_loc]
+        try:
+            gene_loc = adata.var_names.get_loc(key)
+            color_value = X[:, gene_loc]
+        except KeyError:
+            if key in adata.obs.columns:
+                color_value = adata.obs[key]
     elif key_type == "obs":
-        color_value = adata.obs[key]
+            color_value = adata.obs[key]
     elif key_type == "obsm":
         #TODO: Implement it for obsm
         obsm_key = key.split("#", maxsplit=1)[0]

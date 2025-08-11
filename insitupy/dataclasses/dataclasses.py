@@ -17,9 +17,11 @@ from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
-from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
+from insitupy._io.files import (check_overwrite_and_remove_if_true,
+                                write_dict_to_json)
+from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._segmentations import _read_proseg
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
@@ -27,9 +29,7 @@ from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
                                    crop_dask_array_or_pyramid, resize_image)
-from insitupy._io.files import (check_overwrite_and_remove_if_true,
-                               write_dict_to_json)
-from insitupy._io.geo import parse_geopandas, write_qupath_geojson
+from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy.utils.utils import convert_to_list, decode_robust_series
 
 if WITH_NAPARI:
@@ -105,6 +105,9 @@ class ShapesData(DeepCopyMixin):
             s = "empty"
 
         return s
+
+    def __len__(self):
+        return len(self._data)
 
     def __getitem__(self, key):
         return self._data[key]
@@ -478,6 +481,9 @@ class BoundariesData(DeepCopyMixin):
         else:
             repr = "empty"
         return repr
+
+    def __len__(self):
+        return len(self._data)
 
     def __getitem__(self, key):
         return self._data[key]
@@ -1016,6 +1022,9 @@ class MultiCellData(DeepCopyMixin):
         self._layers = dict()
         self._main_key = None
 
+    def __len__(self):
+        return len(self._layers)
+
     def __repr__(self):
         if len(self._layers) > 0:
             if self._main_key is not None:
@@ -1058,11 +1067,25 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def matrix(self):
-        return self._layers[self._main_key].matrix
+        try:
+            return self._layers[self._main_key].matrix
+        except KeyError:
+            print("MultiCellData object is empty.")
+            return None
+        except AttributeError:
+            print("No matrix available.")
+            return None
 
     @property
     def boundaries(self):
-        return self._layers[self._main_key].boundaries
+        try:
+            return self._layers[self._main_key].boundaries
+        except KeyError:
+            print("MultiCellData object is empty.")
+            return None
+        except AttributeError:
+            print("No boundaries available.")
+            return None
 
     @property
     def main_key(self):
@@ -1242,6 +1265,9 @@ class ImageData(DeepCopyMixin):
             s = "empty"
         #repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
         return s
+
+    def __len__(self):
+        return len(self._data)
 
     def __getitem__(self, key):
         return self._data.get(key)

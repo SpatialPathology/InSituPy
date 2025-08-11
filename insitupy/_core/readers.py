@@ -15,15 +15,15 @@ from PIL import Image
 from insitupy import __version__
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
-from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
 from insitupy._io._qupath import (_read_boundaries_qupath,
-                                 _read_measurements_qupath)
+                                  _read_measurements_qupath)
 from insitupy._io._read import _read_boundaries, _read_measurements
 from insitupy._io._xenium import (_read_boundaries_from_xenium,
-                                 _read_matrix_from_xenium,
-                                 _restructure_transcripts_dataframe)
+                                  _read_matrix_from_xenium,
+                                  _restructure_transcripts_dataframe)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
+from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
 
 
 def read_xenium(
@@ -99,7 +99,7 @@ def read_xenium(
     # read celldata
     matrix = _read_matrix_from_xenium(path=data.path)
     boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)
-    data.cells = MultiCellData()
+    #data.cells = MultiCellData()
     cd = CellData(matrix=matrix, boundaries=boundaries)
     data.cells.add_celldata(cd=cd, key="main", is_main=True)
 

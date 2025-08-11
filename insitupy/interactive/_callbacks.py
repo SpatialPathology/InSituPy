@@ -191,9 +191,13 @@ def _update_colorlegend(viewer, viewer_config):
         pass
 
 
-def _refresh_widgets_after_data_change(xdata, viewer, viewer_config, show_cells_widget, boundaries_widget, filter_widget):
+def _refresh_widgets_after_data_change(xdata, viewer, viewer_config, select_data_widget, show_cells_widget, boundaries_widget, filter_widget):
     #_config.init_viewer_config(xdata)
     #viewer_config.__init__(xdata) # re-initialize ViewerConfig
+
+    if select_data_widget is not None:
+        select_data_widget.data_name.value = viewer_config.data_name
+        select_data_widget.layer_name.value = viewer_config.layer_name
 
     if boundaries_widget is not None:
         # set choices

@@ -14,10 +14,10 @@ from insitupy import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
-from insitupy._interactive._configs import _get_viewer_uid, config_manager
 from insitupy._io.plots import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
+from insitupy.interactive._configs import _get_viewer_uid, config_manager
 from insitupy.palettes import map_to_colors
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
@@ -389,7 +389,7 @@ def plot_cellular_composition(
     force_assignment: bool = False,
     max_cols: int = 4,
     aspect_factor: Number = 1,
-    legend_max_per_col: int = 10,
+    legend_max_per_col: Optional[Union[Literal["auto"], int]] = "auto",
     savepath: Union[str, os.PathLike, Path] = None,
     palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
     return_data: bool = False,
@@ -419,6 +419,14 @@ def plot_cellular_composition(
     if geom_key is not None:
         if modality is None:
             raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or 'annotations'.")
+
+    if legend_max_per_col == "auto":
+        if plot_type == "bar":
+            legend_max_per_col = 10
+        elif plot_type == "barh":
+            legend_max_per_col = 5
+        else:
+            raise ValueError(f"Unknown `plot_type`: {plot_type}. Must be either 'bar' or 'barh'.")
 
     compositions_df = calc_cellular_composition(
         data=data,
