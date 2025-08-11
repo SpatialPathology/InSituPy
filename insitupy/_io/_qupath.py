@@ -53,11 +53,16 @@ def _read_measurements_qupath(
     df = pd.read_csv(path, sep="\t")
 
     # Extract metadata
-    metadata = df[[
-        "Object ID", 'Centroid X µm', 'Centroid Y µm',
-        'Nucleus: Area µm^2', 'Nucleus: Length µm', 'Nucleus: Circularity', 'Nucleus: Solidity', 'Nucleus: Max diameter µm', 'Nucleus: Min diameter µm',
-        'Cell: Area µm^2', 'Cell: Length µm', 'Cell: Circularity', 'Cell: Solidity', 'Cell: Max diameter µm', 'Cell: Min diameter µm'
-    ]].copy()
+    metadata_cols = [
+        "Object ID", 'Centroid X µm', 'Centroid Y µm', 'Nucleus: Area µm^2', 'Nucleus: Length µm',
+        'Nucleus: Circularity', 'Nucleus: Solidity', 'Nucleus: Max diameter µm', 'Nucleus: Min diameter µm',
+        'Cell: Area µm^2', 'Cell: Length µm', 'Cell: Circularity', 'Cell: Solidity', 'Cell: Max diameter µm',
+        'Cell: Min diameter µm'
+    ]
+
+    # select only available columns
+    metadata_cols = [elem for elem in metadata_cols if elem in df.columns]
+    metadata = df[metadata_cols].copy()
 
     # Extract measurements into a dictionary
     measurement_types = ["Nucleus", "Cytoplasm", "Membrane", "Cell"]
