@@ -9,20 +9,24 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
-from napari.utils.notifications import show_info, show_warning
-from napari.viewer import Viewer
 
+from insitupy import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
+from insitupy._interactive._configs import _get_viewer_uid, config_manager
+from insitupy._io.plots import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-from insitupy._io.plots import save_and_show_figure
 from insitupy.palettes import map_to_colors
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+if WITH_NAPARI:
+    import napari
+    from napari.utils.notifications import show_info, show_warning
+    from napari.viewer import Viewer
 
 def _generate_subplots(
     n_plots: int,
@@ -151,9 +155,10 @@ def plot_colorlegend(
         if title is None:
             title = "Color legend"
     else:
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
         # automatically get layer
         if layer_name is None:
-            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{_config.current_data_name}")]
+            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{viewer_config.data_name}")]
             try:
                 layer_name = candidate_layers[0].name
             except IndexError:

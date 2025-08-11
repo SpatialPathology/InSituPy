@@ -70,10 +70,10 @@ def _read_measurements_qupath(
     for m in measurements.values():
         m.columns = [col.split(":")[1].strip() for col in m.columns]
 
-    # Move DAPI mean to metadata and drop it from nucleus measurements
-    metadata["DAPI_mean"] = measurements["nucleus"]["DAPI-01"]
-    for m in measurements.values():
-        m.drop(columns=["DAPI-01"], inplace=True, errors="ignore")
+    # # Move DAPI mean to metadata and drop it from measurements
+    # metadata["DAPI_mean"] = measurements["nucleus"]["DAPI-01"]
+    # for m in measurements.values():
+    #     m.drop(columns=["DAPI-01"], inplace=True, errors="ignore")
 
     # Extract and format coordinates
     coordinates = df.loc[:, df.columns.str.contains("Centroid")].copy()
