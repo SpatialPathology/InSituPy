@@ -35,7 +35,7 @@ Read the `InSituData` object with:
     InSituData.read
 ```
 
-### Handle multiple samples
+### Handle multiple datasets
 
 ```{eval-rst}
 .. module:: insitupy.experiment
@@ -119,8 +119,9 @@ The different data classes can be read using following functions:
 
 ## Read external data
 
-### Individual datasets
+Following functions allow reading data from external sources, e.g. from an *Xenium In Situ* experiment or from [*QuPath*](https://qupath.github.io).
 
+To read an individual dataset on can use following functions:
 ```{eval-rst}
 .. module:: insitupy._core
 .. currentmodule:: insitupy
@@ -132,8 +133,7 @@ The different data classes can be read using following functions:
     read_xenium
 ```
 
-### Multiple datasets
-
+To read multiple datasets into an `InSituExperiment` object, following functions can be used:
 ```{eval-rst}
 .. module:: insitupy.experiment
 .. currentmodule:: insitupy
