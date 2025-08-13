@@ -19,11 +19,11 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
+from insitupy._io.plots import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
 from insitupy.experiment.data import InSituExperiment
-from insitupy._io.plots import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils._checks import check_raw
 from insitupy.utils._colors import (_add_colorlegend_to_axis,
@@ -208,6 +208,7 @@ class _SinglePlotConfig:
         xlim_general: Optional[Tuple[int, int]] = None,
         ylim_general: Optional[Tuple[int, int]] = None,
         histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
+        legend_max_per_col: int = 10
         ):
 
         # add arguments to object
@@ -217,6 +218,7 @@ class _SinglePlotConfig:
         self.idx_key = idx_key
         self.add_legend = add_legend
         self.annotations_mode = annotations_mode
+        self.legend_max_per_col = legend_max_per_col
 
         # retrieve color dictionary
         self.color_dict = color_config[key]["color_dict"]
@@ -273,7 +275,7 @@ class _SinglePlotConfig:
             self.ylim = (ymin, ymax)
 
         # extract image information
-        if not ImageDataObject.is_empty:
+        if not ImageDataObject is None:
             # pick the image with the right resolution for plotting
             max_pixel_size = np.max([self.xlim[1] - self.xlim[0], self.ylim[1] - self.ylim[0]]) / pixelwidth_per_subplot
             orig_pixel_size = ImageDataObject.metadata[image_key]["pixel_size"]
@@ -368,6 +370,7 @@ class MultiSpatialPlot:
         crange: Optional[List[int]] = None,
         crange_type: Literal['minmax', 'percentile'] = 'minmax',
         palette: str = DEFAULT_CATEGORICAL_CMAP,
+        legend_max_per_col: int = 10,
         cmap_center: Optional[float] = None,
         dpi_display: int = 80,
         obsm_key: str = 'spatial',
@@ -412,6 +415,7 @@ class MultiSpatialPlot:
         self.crange = crange
         self.crange_type = crange_type
         self.palette = palette
+        self.legend_max_per_col = legend_max_per_col
         self.cmap_center = cmap_center
         self.dpi_display = dpi_display
         self.obsm_key = obsm_key
@@ -670,7 +674,10 @@ class MultiSpatialPlot:
             sample_name = meta[self.name_column]
 
         if self.image_key is not None:
-            imagedata = xd.images
+            if not xd.images.is_empty:
+                imagedata = xd.images
+            else:
+                imagedata = None
         else:
             imagedata = None
 
@@ -756,7 +763,10 @@ class MultiSpatialPlot:
             # is_categorical = color_config_key["is_categorical"]
             # if is_categorical:
             color_dict = self.color_config[k]["color_dict"]
-            _add_colorlegend_to_axis(color_dict=color_dict, ax=ax)
+            _add_colorlegend_to_axis(
+                color_dict=color_dict,
+                max_per_col=self.legend_max_per_col,
+                ax=ax)
 
             # else:
             #     #if ConfigData.categorical:
@@ -811,7 +821,7 @@ class MultiSpatialPlot:
                 _add_colorlegend_to_axis(
                     color_dict=ConfigData.color_dict,
                     ax=lax,
-                    max_per_col=10,
+                    max_per_col=ConfigData.legend_max_per_col,
                     loc='upper center',
                     bbox_to_anchor=(0.5, -10)
                     )
@@ -919,6 +929,7 @@ def plot_spatial(
     crange: Optional[List[int]] = None,
     crange_type: Literal['minmax', 'percentile'] = 'minmax',
     palette: str = DEFAULT_CATEGORICAL_CMAP,
+    legend_max_per_col: int = 10,
     cmap_center: Optional[float] = None,
     dpi_display: int = 80,
     obsm_key: str = 'spatial',
@@ -933,7 +944,7 @@ def plot_spatial(
     clb_title: Optional[str] = None,
     header: Optional[str] = None,
     name_column: Optional[str] = None,
-    title_size: int = 24,
+    title_size: int = 18,
     label_size: int = 16,
     tick_label_size: int = 14,
     image_key: Optional[str] = None,
@@ -964,6 +975,7 @@ def plot_spatial(
         crange=crange,
         crange_type=crange_type,
         palette=palette,
+        legend_max_per_col=legend_max_per_col,
         cmap_center=cmap_center,
         dpi_display=dpi_display,
         obsm_key=obsm_key,

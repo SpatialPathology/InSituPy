@@ -31,7 +31,7 @@ def differential_gene_expression(
     cells_layer: Optional[str] = None,
     significance_threshold: Number = 0.05,
     fold_change_threshold: Number = 1,
-    plot_volcano: bool = True,
+    show_volcano: bool = True,
     return_results: bool = False,
     method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
     exclude_ambiguous_assignments: bool = False,
@@ -92,7 +92,7 @@ def differential_gene_expression(
                 method='wilcoxon'
             )
     """
-    if not (plot_volcano | return_results):
+    if not (show_volcano | return_results):
         raise ValueError("Both `plot_volcano` and `return_results` are False. At least one of them must be True.")
 
     dge_comparison_column = "DGE_COMPARISON_COLUMN"
@@ -252,7 +252,7 @@ def differential_gene_expression(
         adata=adata_combined, groups="DATA")
     df = res_dict["DATA"]
 
-    if plot_volcano:
+    if show_volcano:
         cell_counts = adata_combined.obs[dge_comparison_column].value_counts()
         data_counts = cell_counts["DATA"]
         ref_counts = cell_counts["REFERENCE"]

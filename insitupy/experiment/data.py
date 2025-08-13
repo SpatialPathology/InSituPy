@@ -504,7 +504,7 @@ class InSituExperiment:
             ref_annotation_tuple=ref_annotation_tuple,
             ref_cell_type_tuple=ref_cell_type_tuple,
             ref_region_tuple=ref_region_tuple,
-            plot_volcano=plot_volcano,
+            show_volcano=plot_volcano,
             method=method,
             exclude_ambiguous_assignments=exclude_ambiguous_assignments,
             force_assignment=force_assignment,

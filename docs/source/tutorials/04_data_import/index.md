@@ -4,13 +4,13 @@ These tutorials explain how to import data from different technologies and tools
 
 ```{eval-rst}
 .. card:: Build an `InSituData` object from custom data
-    :link: 09_InSituPy_build_objects_from_scratch
+    :link: InSituPy_build_objects_from_scratch
     :link-type: doc
 
     Tutorial on how to generate an `InSituData` object from scratch.
 
 .. card:: Read data from QuPath
-    :link: 11_InSituPy_add_proseg_data
+    :link: InSituPy_add_proseg_data
     :link-type: doc
 
     Tutorial showing how to export data from QuPath and read it with `read_qupath_project` or `read_qupath`.
