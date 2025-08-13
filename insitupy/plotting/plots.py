@@ -458,7 +458,8 @@ def plot_cellular_composition(
         if cell_type_col in data.colors:
             color_dict = data.colors[cell_type_col]
         else:
-            color_dict = None
+            data.sync_colors(cell_type_col)
+            color_dict = data.colors[cell_type_col]
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
