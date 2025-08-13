@@ -469,14 +469,7 @@ class MultiSpatialPlot:
                 overwrite=self.overwrite_colors,
                 palette=self.palette
             )
-                # for k in self.keys:
-                #     if k not in self.data.colors:
-                #         # Todo: Need to make sure that the colors are already synchronized if data is categorical and an InSituExperiment
-                #         raise RuntimeError(f"Key '{k}' not in `exp.colors` and `sync_colors=False`, meaning that colors are not being synchronized. "
-                #                 f"In case of categorical data, this might lead to different color mappings "
-                #                 f"between the datasets. Set `sync_colors=True` or manually use InSituExperiments's `.sync_colors(keys='{k}')` function "
-                #                 f"to synchronize colors."
-                #                 )
+
         else:
             self.n_data = 1
             self.is_experiment = False

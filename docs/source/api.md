@@ -11,7 +11,7 @@ Import InSituPy as::
 
 ## Core Data Objects
 
-For individual datasets:
+### Individual datasets
 
 ```{eval-rst}
 .. module:: insitupy._core
@@ -21,10 +21,21 @@ For individual datasets:
     :toctree: generated
 
     InSituData
+```
+
+Read the `InSituData` object with:
+
+```{eval-rst}
+.. module:: insitupy._core
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
     InSituData.read
 ```
 
-For handling multiple samples:
+### Handle multiple samples
 
 ```{eval-rst}
 .. module:: insitupy.experiment
@@ -34,23 +45,25 @@ For handling multiple samples:
     :toctree: generated
 
     InSituExperiment
-    InSituExperiment.read
 ```
 
-## Reading external data
+Read the `InSituExperiment` object with:
 
 ```{eval-rst}
-.. module:: insitupy._core
+.. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated
 
-    read_qupath
-    read_xenium
+    InSituExperiment.read
 ```
 
 ## Core Data Classes
+
+Data classes are used to store the different modalities.
+
+### Cellular data
 
 ```{eval-rst}
 .. module:: insitupy.dataclasses
@@ -59,15 +72,38 @@ For handling multiple samples:
 .. autosummary::
     :toctree: generated
 
-    dataclasses.AnnotationsData
-    dataclasses.BoundariesData
     dataclasses.CellData
-    dataclasses.ImageData
     dataclasses.MultiCellData
+    dataclasses.BoundariesData
+```
+
+### Image data
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.ImageData
+```
+
+### Geometric data
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.ShapesData
+    dataclasses.AnnotationsData
     dataclasses.RegionsData
 ```
 
-### Reading Data Classes
+The different data classes can be read using following functions:
 
 ```{eval-rst}
 .. module:: insitupy.dataclasses
@@ -80,6 +116,34 @@ For handling multiple samples:
     dataclasses.read_multicelldata
     dataclasses.read_shapesdata
 ```
+
+## Read external data
+
+### Individual datasets
+
+```{eval-rst}
+.. module:: insitupy._core
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    read_qupath
+    read_xenium
+```
+
+### Multiple datasets
+
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    read_qupath_project
+```
+
 
 ## Plotting
 
