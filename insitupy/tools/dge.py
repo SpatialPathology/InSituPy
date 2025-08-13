@@ -93,7 +93,7 @@ def differential_gene_expression(
             )
     """
     if not (show_volcano | return_results):
-        raise ValueError("Both `plot_volcano` and `return_results` are False. At least one of them must be True.")
+        raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
 
     dge_comparison_column = "DGE_COMPARISON_COLUMN"
 
