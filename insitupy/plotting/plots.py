@@ -295,7 +295,8 @@ def calc_cellular_composition(
 
                 assignment_series = adata.obsm[modality][geom_key]
                 #cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
-                cats = mod.metadata[geom_key]['classes']
+                #cats = mod.metadata[geom_key]['classes']
+                cats = list(mod[geom_key]["name"].unique())
 
                 # calculate compositions
                 compositions = {}
@@ -306,8 +307,8 @@ def calc_cellular_composition(
                             continue
 
                     # calculate percentage
-                    #idx = assignment_series[assignment_series == cat].index
-                    idx = assignment_series[assignment_series.str.contains(cat)].index
+                    idx = assignment_series[assignment_series == cat].index
+                    #idx = assignment_series[assignment_series.str.contains(cat)].index
                     value_counts = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100
 
                     if cell_type_values is not None:
@@ -391,7 +392,7 @@ def plot_cellular_composition(
     aspect_factor: Number = 1,
     legend_max_per_col: Optional[Union[Literal["auto"], int]] = "auto",
     savepath: Union[str, os.PathLike, Path] = None,
-    palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
+    palette: Optional[Union[ListedColormap, List[str]]] = None,
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
@@ -404,7 +405,10 @@ def plot_cellular_composition(
     within specified regions or annotations. It can optionally save the plot to a file and
     return the composition data.
     """
-    if isinstance(palette, list):
+    if palette is None:
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, list):
         palette = ListedColormap(palette)
         palette_is_dict = False
     elif isinstance(palette, ListedColormap):
@@ -414,7 +418,7 @@ def plot_cellular_composition(
         palette_is_dict = True
         pass
     else:
-        raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
+        raise ValueError(f"palette must be None or a list of colors or a ListedColormap or a dictionary. Instead: {type(palette)}")
 
     if geom_key is not None:
         if modality is None:
@@ -442,6 +446,11 @@ def plot_cellular_composition(
     data_names = compositions_df.columns.levels[1].values
     cell_type_names = compositions_df.index.values
 
+    if len(data_names) == 1:
+        print("Since only one dataset is given, all regions are plotted into one figure.")
+        compositions_df = compositions_df.swaplevel(axis=1)
+        geom_names, data_names = data_names, geom_names # swap values of the two variables
+
     # check data
     is_experiment = _is_experiment(data)
     if is_experiment:
@@ -454,16 +463,38 @@ def plot_cellular_composition(
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
+        # Check and convert to category if needed
+        if not pd.api.types.is_categorical_dtype(celldata.matrix.obs[cell_type_col]):
+            celldata.matrix.obs[cell_type_col] = celldata.matrix.obs[cell_type_col].astype('category')
+            print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
+
         if palette_is_dict:
             color_dict = palette
         else:
-            try:
+            if palette is None:
+                try:
+                    color_dict ={
+                        a: b
+                        for a,b in zip(
+                            celldata.matrix.obs[cell_type_col].cat.categories,
+                            celldata.matrix.uns[f"{cell_type_col}_colors"]
+                            )
+                    }
+                except KeyError:
+                    color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    palette=DEFAULT_CATEGORICAL_CMAP)
+            else:
                 color_dict = map_to_colors(
-                    sorted(celldata.matrix.obs[cell_type_col].unique()),
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
                     palette=palette)
-                #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
-            except KeyError:
-                color_dict = None
+            # try:
+            #     color_dict = map_to_colors(
+            #         sorted(celldata.matrix.obs[cell_type_col].unique()),
+            #         palette=palette)
+            #     #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            # except KeyError:
+            #     color_dict = None
 
     # setup plot
     if len(geom_names) == 1:

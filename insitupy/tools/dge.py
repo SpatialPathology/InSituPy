@@ -30,7 +30,7 @@ def differential_gene_expression(
     ref_region_tuple: Optional[Tuple[str, str]] = "same",
     cells_layer: Optional[str] = None,
     significance_threshold: Number = 0.05,
-    fold_change_threshold: Number = 1,
+    fold_change_threshold: Number = 2,
     show_volcano: bool = True,
     return_results: bool = False,
     method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
@@ -257,8 +257,8 @@ def differential_gene_expression(
         data_counts = cell_counts["DATA"]
         ref_counts = cell_counts["REFERENCE"]
 
-        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > fold_change_threshold))
-        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -fold_change_threshold))
+        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > np.log2(fold_change_threshold)))
+        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -np.log2(fold_change_threshold)))
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
@@ -266,7 +266,6 @@ def differential_gene_expression(
                           for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
             "Target": [elem[1] if isinstance(elem, tuple) else elem
                        for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
-
         })
 
         # remove empty rows
