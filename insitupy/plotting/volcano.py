@@ -24,6 +24,7 @@ def plot_volcano(data,
                  dpi_save: int = 300,
                  show: bool = True,
                  label_top_n: Union[int, List[str]] = 20,
+                 label_sortby: str = "scores",
                  figsize: Tuple[int, int] = (8, 6),
                  config_table=None
                  ):
@@ -108,8 +109,10 @@ def plot_volcano(data,
 
     # select genes
     if isinstance(label_top_n, int):
-        top_up_genes = up_data.nlargest(label_top_n, logfoldchanges_column)
-        top_down_genes = down_data.nsmallest(label_top_n, logfoldchanges_column)
+        # top_up_genes = up_data.nlargest(label_top_n, logfoldchanges_column)
+        # top_down_genes = down_data.nsmallest(label_top_n, logfoldchanges_column)
+        top_up_genes = up_data.nlargest(label_top_n, label_sortby)
+        top_down_genes = down_data.nsmallest(label_top_n, label_sortby)
     elif isinstance(label_top_n, list):
         top_up_genes = up_data
         top_up_genes = top_up_genes[top_up_genes["gene"].isin(label_top_n)]
