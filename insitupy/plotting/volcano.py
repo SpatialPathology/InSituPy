@@ -2,6 +2,7 @@ import os
 from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
+from warnings import warn
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -49,6 +50,12 @@ def plot_volcano(data,
     Returns:
         None
     """
+    # Validate if the label_sortby column exists in the DataFrame
+    if label_sortby not in data.columns:
+        warn(f"The specified label_sortby column '{label_sortby}' does not exist in the input DataFrame. Using '{logfoldchanges_column}' instead.")
+        label_sortby = logfoldchanges_column
+
+
     if adjust_labels:
         try:
             from adjustText import adjust_text
