@@ -60,7 +60,7 @@ def differential_gene_expression(
         ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data by cell type, or "rest" to use the rest of the data, or "same" to use the same cell type as the target. Defaults to "same".
         ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to None.
         significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Log2 fold change threshold for up/down regulation (default is 1).
+        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 1).
         plot_volcano (bool): Whether to generate a volcano plot of the results. Defaults to True.
         return_results (bool): Whether to return the results as dictionary including the dataframe differentially expressed genes and the parameters.
         method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
