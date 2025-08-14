@@ -9,20 +9,24 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
-from napari.utils.notifications import show_info, show_warning
-from napari.viewer import Viewer
 
+from insitupy import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
-from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
-from insitupy._core.insituexperiment import InSituExperiment
-from insitupy.io.plots import save_and_show_figure
+from insitupy._core.data import InSituData
+from insitupy._io.plots import save_and_show_figure
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
+from insitupy.interactive._configs import _get_viewer_uid, config_manager
 from insitupy.palettes import map_to_colors
-from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba
+from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+if WITH_NAPARI:
+    import napari
+    from napari.utils.notifications import show_info, show_warning
+    from napari.viewer import Viewer
 
 def _generate_subplots(
     n_plots: int,
@@ -151,9 +155,10 @@ def plot_colorlegend(
         if title is None:
             title = "Color legend"
     else:
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
         # automatically get layer
         if layer_name is None:
-            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{_config.current_data_name}")]
+            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{viewer_config.data_name}")]
             try:
                 layer_name = candidate_layers[0].name
             except IndexError:
@@ -290,7 +295,8 @@ def calc_cellular_composition(
 
                 assignment_series = adata.obsm[modality][geom_key]
                 #cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
-                cats = mod.metadata[geom_key]['classes']
+                #cats = mod.metadata[geom_key]['classes']
+                cats = list(mod[geom_key]["name"].unique())
 
                 # calculate compositions
                 compositions = {}
@@ -301,8 +307,8 @@ def calc_cellular_composition(
                             continue
 
                     # calculate percentage
-                    #idx = assignment_series[assignment_series == cat].index
-                    idx = assignment_series[assignment_series.str.contains(cat)].index
+                    idx = assignment_series[assignment_series == cat].index
+                    #idx = assignment_series[assignment_series.str.contains(cat)].index
                     value_counts = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100
 
                     if cell_type_values is not None:
@@ -384,9 +390,9 @@ def plot_cellular_composition(
     force_assignment: bool = False,
     max_cols: int = 4,
     aspect_factor: Number = 1,
-    legend_max_per_col: int = 10,
+    legend_max_per_col: Optional[Union[Literal["auto"], int]] = "auto",
     savepath: Union[str, os.PathLike, Path] = None,
-    palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
+    palette: Optional[Union[ListedColormap, List[str]]] = None,
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
@@ -399,7 +405,10 @@ def plot_cellular_composition(
     within specified regions or annotations. It can optionally save the plot to a file and
     return the composition data.
     """
-    if isinstance(palette, list):
+    if palette is None:
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, list):
         palette = ListedColormap(palette)
         palette_is_dict = False
     elif isinstance(palette, ListedColormap):
@@ -409,11 +418,19 @@ def plot_cellular_composition(
         palette_is_dict = True
         pass
     else:
-        raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
+        raise ValueError(f"palette must be None or a list of colors or a ListedColormap or a dictionary. Instead: {type(palette)}")
 
     if geom_key is not None:
         if modality is None:
             raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or 'annotations'.")
+
+    if legend_max_per_col == "auto":
+        if plot_type == "bar":
+            legend_max_per_col = 10
+        elif plot_type == "barh":
+            legend_max_per_col = 5
+        else:
+            raise ValueError(f"Unknown `plot_type`: {plot_type}. Must be either 'bar' or 'barh'.")
 
     compositions_df = calc_cellular_composition(
         data=data,
@@ -429,6 +446,11 @@ def plot_cellular_composition(
     data_names = compositions_df.columns.levels[1].values
     cell_type_names = compositions_df.index.values
 
+    if len(data_names) == 1:
+        print("Since only one dataset is given, all regions are plotted into one figure.")
+        compositions_df = compositions_df.swaplevel(axis=1)
+        geom_names, data_names = data_names, geom_names # swap values of the two variables
+
     # check data
     is_experiment = _is_experiment(data)
     if is_experiment:
@@ -436,21 +458,44 @@ def plot_cellular_composition(
         if cell_type_col in data.colors:
             color_dict = data.colors[cell_type_col]
         else:
-            color_dict = None
+            data.sync_colors(cell_type_col)
+            color_dict = data.colors[cell_type_col]
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
+        # Check and convert to category if needed
+        if not pd.api.types.is_categorical_dtype(celldata.matrix.obs[cell_type_col]):
+            celldata.matrix.obs[cell_type_col] = celldata.matrix.obs[cell_type_col].astype('category')
+            print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
+
         if palette_is_dict:
             color_dict = palette
         else:
-            try:
+            if palette is None:
+                try:
+                    color_dict ={
+                        a: b
+                        for a,b in zip(
+                            celldata.matrix.obs[cell_type_col].cat.categories,
+                            celldata.matrix.uns[f"{cell_type_col}_colors"]
+                            )
+                    }
+                except KeyError:
+                    color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    palette=DEFAULT_CATEGORICAL_CMAP)
+            else:
                 color_dict = map_to_colors(
-                    sorted(celldata.matrix.obs[cell_type_col].unique()),
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
                     palette=palette)
-                #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
-            except KeyError:
-                color_dict = None
+            # try:
+            #     color_dict = map_to_colors(
+            #         sorted(celldata.matrix.obs[cell_type_col].unique()),
+            #         palette=palette)
+            #     #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            # except KeyError:
+            #     color_dict = None
 
     # setup plot
     if len(geom_names) == 1:
@@ -548,4 +593,4 @@ def plot_cellular_composition(
         )
 
     if return_data:
-        return compositions
+        return compositions_df

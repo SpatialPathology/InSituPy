@@ -18,9 +18,11 @@ class ImageAxes:
 
         # find channel axis for RGB
         self.C = self.pattern.find("S")
+        self.is_rgb = True
         if self.C == -1:
             # in this case there was no S in the pattern (no RGB image) and we need to search for a C for multi-channel images
             self.C = self.pattern.find("C")
+            self.is_rgb = False
             if self.C == -1:
                 # no channel axis found (is the case for grayscale image)
                 self.C = None

@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints
-
 import os
 from numbers import Number
 from pathlib import Path
@@ -12,9 +9,9 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 
-from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
-from insitupy.plotting import volcano_plot
+from insitupy._core.data import InSituData
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.plotting import plot_volcano
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
 
@@ -30,8 +27,8 @@ def differential_gene_expression(
     ref_region_tuple: Optional[Tuple[str, str]] = "same",
     cells_layer: Optional[str] = None,
     significance_threshold: Number = 0.05,
-    fold_change_threshold: Number = 1,
-    plot_volcano: bool = True,
+    fold_change_threshold: Number = 2,
+    show_volcano: bool = True,
     return_results: bool = False,
     method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
     exclude_ambiguous_assignments: bool = False,
@@ -60,8 +57,8 @@ def differential_gene_expression(
         ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data by cell type, or "rest" to use the rest of the data, or "same" to use the same cell type as the target. Defaults to "same".
         ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to None.
         significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Log2 fold change threshold for up/down regulation (default is 1).
-        plot_volcano (bool): Whether to generate a volcano plot of the results. Defaults to True.
+        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 1).
+        show_volcano (bool): Whether to generate a volcano plot of the results. Defaults to True.
         return_results (bool): Whether to return the results as dictionary including the dataframe differentially expressed genes and the parameters.
         method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data. Defaults to False.
@@ -92,8 +89,8 @@ def differential_gene_expression(
                 method='wilcoxon'
             )
     """
-    if not (plot_volcano | return_results):
-        raise ValueError("Both `plot_volcano` and `return_results` are False. At least one of them must be True.")
+    if not (show_volcano | return_results):
+        raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
 
     dge_comparison_column = "DGE_COMPARISON_COLUMN"
 
@@ -252,13 +249,13 @@ def differential_gene_expression(
         adata=adata_combined, groups="DATA")
     df = res_dict["DATA"]
 
-    if plot_volcano:
+    if show_volcano:
         cell_counts = adata_combined.obs[dge_comparison_column].value_counts()
         data_counts = cell_counts["DATA"]
         ref_counts = cell_counts["REFERENCE"]
 
-        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > fold_change_threshold))
-        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -fold_change_threshold))
+        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > np.log2(fold_change_threshold)))
+        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -np.log2(fold_change_threshold)))
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
@@ -266,13 +263,12 @@ def differential_gene_expression(
                           for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
             "Target": [elem[1] if isinstance(elem, tuple) else elem
                        for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
-
         })
 
         # remove empty rows
         config_table = config_table.set_index("").dropna(how="all").reset_index()
 
-        volcano_plot(
+        plot_volcano(
             data=df,
             significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,

@@ -18,8 +18,8 @@ from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, _init_mpl_fontsize
-from insitupy._core._checks import check_raw, has_valid_labels
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
+from insitupy.utils._checks import check_raw, has_valid_labels
 from insitupy.utils._regression import smooth_fit
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
@@ -499,20 +499,37 @@ def cell_abundance_along_axis(
     xlim_mask = (data[axis] > xlim[0]) & (data[axis] <= xlim[1])
     data = data[xlim_mask].copy()
 
+    # get color palette
+    color_key = f"{groupby}_colors"
+    if color_key in adata.uns:
+        colors = adata.uns[color_key]
+    else:
+        colors = DEFAULT_CATEGORICAL_CMAP.colors
+
     # Create the histogram
     fig, ax = plt.subplots(1,1, figsize=(figsize[0], figsize[1]))
 
     if not kde:
-        h = sns.histplot(data=data, x=axis,
-                    hue=groupby, palette=DEFAULT_CATEGORICAL_CMAP.colors,
-                    multiple=multiple, element=histplot_element,
-                    alpha=1, ax=ax
-                    )
+        h = sns.histplot(
+            data=data,
+            x=axis,
+            hue=groupby,
+            palette=colors,
+            multiple=multiple,
+            element=histplot_element,
+            alpha=1,
+            ax=ax
+            )
     else:
-        h = sns.kdeplot(data=data, x=axis,
-                    hue=groupby, palette=DEFAULT_CATEGORICAL_CMAP.colors,
-                    alpha=1, ax=ax, multiple=multiple
-                    )
+        h = sns.kdeplot(
+            data=data,
+            x=axis,
+            hue=groupby,
+            palette=colors,
+            alpha=1,
+            ax=ax,
+            multiple=multiple
+            )
         plt.xlim(0, data[axis].max())
 
     # Move the legend outside of the plot

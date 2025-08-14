@@ -1,32 +1,29 @@
-import json
 import os
-from os.path import abspath
+from numbers import Number
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 from uuid import uuid4
-from warnings import warn
 
 import anndata
 import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import tifffile
 from parse import *
 from PIL import Image
 
 from insitupy import __version__
-from insitupy._constants import ISPY_METADATA_FILE
-from insitupy._core._xenium import (_read_binned_expression,
-                                    _read_boundaries_from_xenium,
-                                    _read_matrix_from_xenium,
-                                    _restructure_transcripts_dataframe)
-from insitupy._core.dataclasses import (AnnotationsData, CellData, ImageData,
-                                        MultiCellData, RegionsData)
-from insitupy._core.insitudata import InSituData
+from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
-from insitupy.io.files import read_json
-from insitupy.utils.utils import convert_to_list
+from insitupy._io._qupath import (_read_boundaries_qupath,
+                                  _read_measurements_qupath)
+from insitupy._io._read import _read_boundaries, _read_measurements
+from insitupy._io._xenium import (_read_boundaries_from_xenium,
+                                  _read_matrix_from_xenium,
+                                  _restructure_transcripts_dataframe)
+from insitupy._io.files import read_json
+from insitupy._io.geo import parse_geopandas
+from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
 
 
 def read_xenium(
@@ -73,53 +70,38 @@ def read_xenium(
     if not (path / metadata_filename).exists():
         raise InvalidXeniumDirectory(directory=path)
 
-    # INITIALIZE INSITUDATA
-    # initialize the metadata dict
-    metadata = {}
-    metadata["data"] = {}
-    metadata["history"] = {}
-    metadata["history"]["cells"] = []
-    metadata["history"]["annotations"] = []
-    metadata["history"]["regions"] = []
-
     # check if path exists
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
 
-    # save paths of this project in metadata
-    metadata["path"] = abspath(path).replace("\\", "/")
-    metadata["metadata_file"] = metadata_filename
-
     # read metadata
-    metadata["method_params"] = read_json(path / metadata_filename)
+    xenium_metadata = read_json(path / metadata_filename)
 
     # get slide id and sample id from metadata
-    slide_id = metadata["method_params"]["slide_id"]
-    sample_id = metadata["method_params"]["region_name"]
+    slide_id = xenium_metadata["slide_id"]
+    sample_id = xenium_metadata["region_name"]
 
-    # initialize the uid section
-    metadata["uids"] = [str(uuid4())]
-
-    # add method
-    metadata["method"] = "Xenium"
-
-    data = InSituData(path=path,
-                        metadata=metadata,
-                        slide_id=slide_id,
-                        sample_id=sample_id,
-                        )
+    data = InSituData(
+        path=path,
+        metadata=None, # initializes new metadata
+        slide_id=slide_id,
+        sample_id=sample_id,
+        method_name="Xenium",
+        method_params=xenium_metadata,
+        )
 
     # LOAD CELLS
     if verbose:
         print("Loading cells...", flush=True)
-    pixel_size = data.metadata["method_params"]["pixel_size"]
+
+    pixel_size = xenium_metadata["pixel_size"]
+
     # read celldata
     matrix = _read_matrix_from_xenium(path=data.path)
     boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)
-    data.cells = MultiCellData()
+    #data.cells = MultiCellData()
     cd = CellData(matrix=matrix, boundaries=boundaries)
     data.cells.add_celldata(cd=cd, key="main", is_main=True)
-
 
     # LOAD IMAGES
     if verbose:
@@ -159,11 +141,11 @@ def read_xenium(
     # create imageData object
     img_paths = [data.path / elem for elem in img_files]
 
-    if data.images is None:
-        data.images = ImageData(img_paths, img_names)
-    else:
-        for im, n in zip(img_paths, img_names):
-            data.images.add_image(im, n, overwrite=False, verbose=True)
+    # if data.images is None:
+    #     data.images = ImageData(img_paths, img_names)
+    # else:
+    for im, n in zip(img_paths, img_names):
+        data.images.add_image(im, n, overwrite=False, verbose=True)
 
     # LOAD TRANSCRIPTS
     transcript_filename = "transcripts.parquet"
@@ -185,91 +167,269 @@ def read_xenium(
 
     return data
 
-
 def read_any(
-    cellular_data: Optional[Union[str, Path]] = None,
+    cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
+    cellular_coordinates: Union[str, Path],
     cellular_metadata: Optional[Union[str, Path]] = None,
-    cellular_coordinates: Optional[Union[str, Path]] = None, # format: x|y
-    boundaries_path: Optional[Union[str, Path]] = None,
-    image_path: Optional[Union[str, Path]] = None,
-    sample_id: Optional[str] = "unknown_sample",
-    slide_id: Optional[str] = "unknown_slide",
-    verbose: bool = True
-) -> InSituData:
+    cell_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
+    nucleus_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
+    images: Optional[Dict[str, Union[str, Path, os.PathLike]]] = None,
+    pixel_size: Optional[Number] = None,
+    dataset_name: Optional[str] = "Data 1",
+    sample_name: Optional[str] = "Sample 1",
+    method_name: str = "Any",
+    xshift: Number = 0,
+    yshift: Number = 0,
+):
     """
-    Generalized reader for cellular spatial omics data.
+    Load and assemble spatial data from arbitrary sources into an `InSituData` object.
+
+    This function reads cellular measurements, coordinates, optional metadata, boundaries,
+    and images from user-specified paths. It integrates these components into a structured
+    `InSituData` object for downstream spatial analysis.
 
     Args:
-        cellular_omics_path (str or Path, optional): Path to single-cell transcriptomic/proteomic abundance data (.csv or .h5ad).
-        boundaries_path (str or Path, optional): Path to cell boundary data (.geojson or image mask).
-        image_path (str or Path, optional): Path to OME-TIFF or .qptiff image file.
-        sample_id (str, optional): Sample ID to store in metadata.
-        slide_id (str, optional): Slide ID to store in metadata.
-        verbose (bool, optional): If True, print progress.
+        cellular_measurements (Dict[str, Union[str, Path, os.PathLike]]):
+            Dictionary mapping measurement names to file paths.
+        cellular_coordinates (Union[str, Path]):
+            Path to the file containing cellular coordinates.
+        cellular_metadata (Optional[Union[str, Path]], optional):
+            Path to optional metadata file. Defaults to None.
+        cell_boundaries (Optional[Union[str, Path, os.PathLike]], optional):
+            Path to cell boundary file. Required if nucleus_boundaries is provided. Defaults to None.
+        nucleus_boundaries (Optional[Union[str, Path, os.PathLike]], optional):
+            Path to nucleus boundary file. Defaults to None.
+        images (Optional[Dict[str, Union[str, Path, os.PathLike]]], optional):
+            Dictionary mapping image names to image file paths. Defaults to None.
+        pixel_size (Optional[Number], optional):
+            Pixel size used for scaling boundaries and images. Required if boundaries or images are provided. Defaults to None.
+        dataset_name (Optional[str], optional):
+            Identifier for the dataset or slide. Defaults to "Data 1".
+        sample_name (Optional[str], optional):
+            Identifier for the sample within the dataset. Defaults to "Sample 1".
+        method_name (str, optional):
+            Name of the imaging or data acquisition method. Defaults to "Any".
+        xshift (Number, optional):
+            Horizontal shift applied to coordinates. Defaults to 0.
+        yshift (Number, optional):
+            Vertical shift applied to coordinates. Defaults to 0.
 
     Returns:
-        InSituData: Object containing the loaded data.
+        InSituData: A structured object containing cell measurements, boundaries, and images.
+
+    Raises:
+        FileNotFoundError: If any specified file does not exist.
+        ValueError: If nucleus boundaries are provided without cell boundaries, or if pixel_size is missing when required.
+
+    Notes:
+        - All paths are validated and converted to `Path` objects.
+        - Boundaries and images require `pixel_size` to be specified.
+        - The function supports flexible input formats for integrating diverse spatial datasets.
     """
-    cellular_data = Path(cellular_data) if cellular_data else None
-    boundaries_path = Path(boundaries_path) if boundaries_path else None
-    image_path = Path(image_path) if image_path else None
 
-    # Metadata
-    metadata = {
-        "method": "GenericReader",
-        "uids": [str(uuid4())],
-        "path": str(cellular_data or boundaries_path or image_path or "."),
-        "history": {
-            "cells": [],
-            "annotations": [],
-            "regions": []
-        }
-    }
 
-    data = InSituData(
-        path=Path(metadata["path"]),
-        metadata=metadata,
-        slide_id=slide_id,
-        sample_id=sample_id
+    # Validate and convert paths for cellular measurements
+    for n, measurements_path in cellular_measurements.items():
+        measurements_path = Path(measurements_path)
+        if not measurements_path.exists():
+            raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
+        cellular_measurements[n] = measurements_path
+
+    # Convert coordinate path
+    cellular_coordinates = Path(cellular_coordinates)
+
+    # Convert metadata path if provided
+    if cellular_metadata is not None:
+        cellular_metadata = Path(cellular_metadata)
+
+    # Read cellular measurements
+    adata = _read_measurements(
+        cellular_measurements,
+        coordinates_path=cellular_coordinates,
+        metadata_path=cellular_metadata,
+        xshift=xshift,
+        yshift=yshift
     )
 
-    # Prepare variables
-    matrix = None
+    # Read boundaries if provided
     boundaries = None
 
-    # Load expression matrix
-    if cellular_data:
-        if verbose:
-            print(f"Loading expression data from {cellular_data}", flush=True)
-        if cellular_data.suffix == ".csv":
-            matrix = pd.read_csv(cellular_data, index_col=0)
-        elif cellular_data.suffix == ".h5ad":
-            adata = anndata.read_h5ad(cellular_data)
-            matrix = adata.to_df()
-        else:
-            raise ValueError(f"Unsupported transcript format: {cellular_data.suffix}")
+    cell_boundaries = Path(cell_boundaries) if cell_boundaries is not None else cell_boundaries
+    nucleus_boundaries = Path(nucleus_boundaries) if nucleus_boundaries is not None else nucleus_boundaries
 
-    # Load cell boundaries
-    if boundaries_path:
-        if verbose:
-            print(f"Loading boundaries from {boundaries_path}", flush=True)
-        if boundaries_path.suffix == ".geojson":
-            boundaries = gpd.read_file(boundaries_path)
-        elif boundaries_path.suffix.lower() in [".tif", ".tiff", ".png", ".jpg"]:
-            boundaries = np.array(Image.open(boundaries_path))
-        else:
-            raise ValueError(f"Unsupported boundary format: {boundaries_path.suffix}")
+    if nucleus_boundaries is not None and cell_boundaries is None:
+        raise ValueError((
+            f"If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
+            f"If you only have nucleus boundaries, add them as cell boundaries."
+            ))
 
-    # Combine into CellData and add to InSituData.cells
-    if matrix is not None or boundaries is not None:
-        cd = CellData(matrix=matrix, boundaries=boundaries)
-        data.cells = MultiCellData()
-        data.cells.add_celldata(cd=cd, key="main", is_main=True)
+    if cell_boundaries is not None:
+        if pixel_size is None:
+            raise ValueError("If boundaries are given, `pixel_size` must not be None.")
 
-    # Load image
-    if image_path:
-        if verbose:
-            print(f"Loading image from {image_path}", flush=True)
-        data.images = ImageData(image_paths=[image_path], image_names=["image"])
+        boundaries = _read_boundaries(
+            cells_path=cell_boundaries,
+            nuclei_path=nucleus_boundaries,
+            xshift=xshift,
+            yshift=yshift,
+            pixel_size=pixel_size
+        )
+
+    # Create InSituData object
+    data = InSituData(
+        path=None,
+        metadata=None, # initializes new metadata
+        slide_id=dataset_name,
+        sample_id=sample_name,
+        method_name=method_name,
+        method_params={}
+    )
+
+    # Add CellData
+    cd = CellData(matrix=adata, boundaries=boundaries)
+    data.cells.add_celldata(cd=cd, key="main", is_main=True)
+
+    # Add ImageData if provided
+    if images is not None:
+        if pixel_size is None:
+            raise ValueError("If `images` is given, `pixel_size` must not be None.")
+
+        for img_name, image_path in images.items():
+            image_path = Path(image_path)
+            if not image_path.exists():
+                raise FileNotFoundError(f"No image file found at '{image_path}'.")
+            data.images.add_image(image=image_path, name=img_name)
 
     return data
+
+def read_qupath(
+    path: Union[str, os.PathLike, Path],
+    pixel_size: Number,
+    dataset_name: str,
+    sample_name: str,
+    method_name: str = "mIF",
+):
+    """
+    Load and process QuPath-exported spatial data into an `InSituData` object.
+
+    This function reads annotation, cellular measurements, cell boundaries, and image data
+    from a specified directory containing QuPath outputs. It applies coordinate shifts to
+    align image data and transcriptomic data relative to the origin.
+    All components are integrated into a structured `InSituData` object
+    for downstream spatial analysis.
+
+    Args:
+        path (Union[str, os.PathLike, Path]): Path to the directory containing QuPath-exported files.
+        pixel_size (Number): Pixel size used to scale coordinates from annotation geometry.
+        dataset_name (str): Identifier for the dataset or slide.
+        sample_name (str): Identifier for the sample within the dataset.
+        method_name (str, optional): Name of the imaging method used. Defaults to multiplexed IF ("mIF").
+
+    Returns:
+        InSituData: A structured object containing image data, cell measurements, and boundaries.
+
+    Raises:
+        FileNotFoundError: If any of the required files (`annotation.geojson`, `measurements.tsv`,
+            `cells.geojson`, or `image.ome.tif`) are missing in the specified path.
+        ValueError: If more than one annotation geometry is found in the annotation file.
+
+    Notes:
+        The expected directory structure should include the following files:
+            - `annotation.geojson`: A single annotation encircling the dataset.
+              Contains information about the shift of the data relative to the origin.
+            - `measurements.tsv`: Tabular data with cellular measurements. Measurements are divided
+              into 'Cell', 'Nucleus', 'Cytoplasm', and 'Membrane'. These are saved as layers
+              in the final `AnnData` object in `data.cells.matrix`.
+            - `cells.geojson`: Nuclear and cellular boundaries of individual cells.
+            - `image.ome.tif`: The corresponding image file.
+
+        To generate data in the correct format from QuPath, use the following export script:
+        https://github.com/SpatialPathology/InSituPy-QuPath/blob/main/scripts/export_for_insitupy.groovy
+
+    Example:
+        >>> data = read_qupath(
+        ...     path="/data/qupath_export",
+        ...     pixel_size=0.65,
+        ...     dataset_name="Slide001",
+        ...     sample_name="SampleA"
+        ... )
+    """
+    # --- Check file paths ---
+    path = Path(path)
+    annot_path = path / "annotation.geojson"
+    measurements_path = path / "measurements.tsv"
+    bound_path = path / "cells.geojson"
+    image_path = path / "image.ome.tif"
+
+    if not annot_path.exists():
+        raise FileNotFoundError(f"No annotation file found at '{annot_path}'.")
+
+    if not measurements_path.exists():
+        raise FileNotFoundError(f"No measurements file found at '{measurements_path}'.")
+
+    if not bound_path.exists():
+        raise FileNotFoundError(f"No boundaries file found at '{bound_path}'.")
+
+    if not image_path.exists():
+        raise FileNotFoundError(f"No image file found at '{image_path}'.")
+
+    # --- Read annotation encircling the whole dataset to shift coordinates to origin ---
+    annot = parse_geopandas(annot_path)
+
+    if len(annot) > 1:
+        raise ValueError(f"More than one annotation found in '{annot_path}'.")
+
+    # determine the x and y shift of the data
+    xmin = annot["geometry"].item().bounds[0] * pixel_size
+    ymin = annot["geometry"].item().bounds[1] * pixel_size
+
+    # move the annotation to the origin
+    annot["geometry"] = annot["geometry"].translate(
+        xoff=-xmin/pixel_size, yoff=-ymin/pixel_size
+        )
+
+    # --- Read cellular measurements ---
+    adata = _read_measurements_qupath(
+        measurements_path, xshift=xmin, yshift=ymin
+        )
+
+    # --- Read cellular boundaries ---
+    boundaries = _read_boundaries_qupath(
+        bound_path,
+        object_ids=adata.obs["Object ID"].values,
+        cell_names=adata.obs_names,
+        xshift=xmin, yshift=ymin,
+        pixel_size=pixel_size
+        )
+
+    # --- Create InSituData object ---
+    data = InSituData(
+        path=None,
+        metadata=None, # initializes new metadata
+        slide_id=dataset_name,
+        sample_id=sample_name,
+        method_name=method_name,
+        method_params={}
+    )
+
+    # --- Add CellData ---
+    cd = CellData(matrix=adata, boundaries=boundaries)
+    data.cells.add_celldata(
+        cd=cd, key="main", is_main=True
+    )
+
+    # --- Add ImageData ---
+    data.images.add_image(
+        image=image_path,
+        name=method_name,
+    )
+
+    # --- Add the data annotation as region ---
+    data.regions.add_data(
+        data=annot,
+        key="data",
+        scale_factor=pixel_size
+    )
+
+    return data
+

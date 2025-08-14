@@ -1,7 +1,7 @@
 import anndata
 import numpy as np
 
-from .._core._checks import check_sanity
+from ._checks import check_sanity
 
 
 def split_batches(adata, batch, hvg=None, return_categories=False):

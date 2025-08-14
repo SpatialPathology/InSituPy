@@ -105,11 +105,20 @@ html_theme_options = {
     "use_edit_page_button": True,
     "use_source_button": True,
     "use_issues_button": True,
-    "path_to_docs": "./docs",
-    "display_version": True,
-    "logo_only": True,
-    "version_selector": True,
+    "path_to_docs": "./docs/source",
+    # "display_version": True,
+    # "logo_only": True,
+    # "version_selector": True,
     "collapse_navigation": False
+}
+
+html_context = {
+    "display_github": True,
+    "github_user": "SpatialPathology",
+    "github_repo": "InSituPy",
+    #"github_version": os.environ.get("READTHEDOCS_VERSION", "main"),
+    "github_version": "dev_reader",
+    "conf_py_path": "/docs/source/",
 }
 
 # -- Options for EPUB output

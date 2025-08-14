@@ -121,8 +121,22 @@ class ModalityNotFoundError(Exception):
     def __init__(self,
                  modality: str
                  ):
-        self.message = f"No `{modality}` modality found."
+        self.message = f"No '{modality}' modality found."
         super().__init__(self.message)
+
+import warnings
+
+
+class ModalityNotFoundWarning(UserWarning):
+    """Warning raised if a certain modality is not found by InSituData read modules.
+
+    Args:
+        modality:
+            Name of the modality (e.g. matrix)
+    """
+    def __init__(self, modality: str):
+        message = f"No '{modality}' modality found."
+        super().__init__(message)
 
 class InvalidFileTypeError(Exception):
     def __init__(self,
