@@ -38,17 +38,25 @@ InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you 
 
 Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
-To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html). 
+To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
 
 For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
 
 
 ## Features
 
+- **Data storage**: Store data on both the single sample level and the multi-sample level using the `InSituData` and `InSituExperiment` objects.
 - **Data Preprocessing:** InSituPy provides functions for normalizing, filtering, and transforming raw in situ transcriptomics data.
 - **Interactive Visualization:** Create interactive plots using [napari](https://napari.org/stable/#) to easily explore spatial gene expression patterns.
 - **Annotation:** Annotate _Xenium In Situ_ data in the napari viewer or import annotations from external tools like [QuPath](https://qupath.github.io/).
 - **Multi-sample analysis:** Perform analysis on an experiment-level, i.e. with multiple samples at once.
+
+## QuPath
+
+We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https://qupath.github.io). QuPath has great functionalities to visualize whole slide image data, add annotations, generate segmentations or analyze signal intensities. Scripts to simplify the connection between QuPath and InSituPy, we collect [here](https://github.com/SpatialPathology/InSituPy-QuPath). This includes:
+- Export of annotations as GEOJSON from QuPath
+- Export of images as OME-TIFF from QuPath
+- Collected export of data from a multiplexed IF image to be imported into InSituPy. Import can be performed using either `read_qupath` or `read_qupath_project`. For cell and nucleus segmentation of multiplexed IF images we recommend using [Instanseg](https://github.com/instanseg/instanseg).
 
 ## Contributing
 

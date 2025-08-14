@@ -9,20 +9,24 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
-from napari.viewer import Viewer
 
-import insitupy._core._config as _config
+from insitupy import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
-from insitupy._core._utils import _get_cell_layer
-from insitupy._core.insitudata import InSituData
-from insitupy._core.insituexperiment import InSituExperiment
-from insitupy.io.plots import save_and_show_figure
+from insitupy._core.data import InSituData
+from insitupy._io.plots import save_and_show_figure
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
+from insitupy.interactive._configs import _get_viewer_uid, config_manager
 from insitupy.palettes import map_to_colors
-from insitupy.plotting._colors import _add_colorlegend_to_axis, _data_to_rgba
+from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+if WITH_NAPARI:
+    import napari
+    from napari.utils.notifications import show_info, show_warning
+    from napari.viewer import Viewer
 
 def _generate_subplots(
     n_plots: int,
@@ -137,7 +141,10 @@ def plot_colorlegend(
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
     dpi_save: int = 300,
+    verbose: bool = True,
+    return_status: bool = False
     ):
+    do_plotting = True
     if viewer is None and mapping is None:
         raise ValueError("Both `viewer` and `mapping` are None. One of both must not be None.")
 
@@ -148,9 +155,10 @@ def plot_colorlegend(
         if title is None:
             title = "Color legend"
     else:
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
         # automatically get layer
         if layer_name is None:
-            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{_config.current_data_name}")]
+            candidate_layers = [l for l in viewer.layers if l.name.startswith(f"{viewer_config.data_name}")]
             try:
                 layer_name = candidate_layers[0].name
             except IndexError:
@@ -160,45 +168,59 @@ def plot_colorlegend(
         layer = viewer.layers[layer_name]
 
         # get values
-        values = layer.properties["value"]
+        try:
+            values = layer.properties["value"]
+        except AttributeError:
+            show_warning("The selected layer does not contain any plottable data.")
+            do_plotting = False
+        else:
+            # create color mapping
+            rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
 
-        # create color mapping
-        rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
+            # set title
+            title = layer_name
 
-        # set title
-        title = layer_name
+    if do_plotting:
+        if isinstance(mapping, dict):
+            # categorical colorbar
+            # create a figure for the colorbar
+            fig, ax = plt.subplots(
+                #figsize=(5, 3)
+                )
+            fig.subplots_adjust(bottom=0.5)
 
-    if isinstance(mapping, dict):
-        # categorical colorbar
-        # create a figure for the colorbar
-        fig, ax = plt.subplots(
-            #figsize=(5, 3)
+            # add color legend to axis
+            _add_colorlegend_to_axis(
+                color_dict=mapping,
+                ax=ax,
+                max_per_col=max_per_col,
+                title=title
+                )
+
+        else:
+            # continuous colorlegend
+            # create a figure for the colorbar
+            fig, ax = plt.subplots(
+                figsize=(6, 1)
+                )
+            fig.subplots_adjust(bottom=0.5)
+
+            # Add the colorbar to the figure
+            cbar = fig.colorbar(mapping, orientation='horizontal', cax=ax)
+            cbar.ax.set_title(title)
+
+        save_and_show_figure(
+            savepath=savepath,
+            fig=fig,
+            save_only=save_only,
+            dpi_save=dpi_save,
+            tight=False,
+            verbose=verbose
             )
-        fig.subplots_adjust(bottom=0.5)
+        plt.show()
 
-        # add color legend to axis
-        _add_colorlegend_to_axis(
-            color_dict=mapping,
-            ax=ax,
-            max_per_col=max_per_col,
-            title=title
-            )
-
-
-    else:
-        # continuous colorlegend
-        # create a figure for the colorbar
-        fig, ax = plt.subplots(
-            figsize=(6, 1)
-            )
-        fig.subplots_adjust(bottom=0.5)
-
-        # Add the colorbar to the figure
-        cbar = fig.colorbar(mapping, orientation='horizontal', cax=ax)
-        cbar.ax.set_title(title)
-
-    save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=False)
-    plt.show()
+    if return_status:
+        return do_plotting
 
 def _get_adata(d, cells_layer, mask_col):
     # get data
@@ -223,7 +245,7 @@ def calc_cellular_composition(
     geom_key: Optional[str] = None,
     geom_values: Optional[Union[str, List[str]]] = None,
     modality: Literal["regions", "annotations"] = "regions",
-    uid_column: str = "sample_id",
+    groupby: str = "uid",
     normalize: bool = True,
     force_assignment: bool = False,
     fill_missing_categories: bool = True
@@ -241,18 +263,18 @@ def calc_cellular_composition(
         exp = data
     else:
         exp = InSituExperiment()
-        exp.add(data, metadata={uid_column: data.sample_id})
+        exp.add(data, metadata={groupby: data.sample_id})
 
-    all_data_names = exp.metadata[uid_column].values
+    all_data_names = exp.metadata[groupby].values
 
     if not len(all_data_names) == len(np.unique(all_data_names)):
-        raise ValueError(f"Values in {uid_column} were found to be not unique. Please choose a column with unique values in `.metadata`.")
+        raise ValueError(f"Values in {groupby} were found to be not unique. Please choose a column with unique values in `.metadata`.")
 
     # retrieve cell type compositions
     compositions_dict = {}
     for m, d in exp.iterdata():
 
-        data_name = m[uid_column]
+        data_name = m[groupby]
 
         if geom_key is not None:
             # check whether the key exists in the selected geometry
@@ -273,7 +295,8 @@ def calc_cellular_composition(
 
                 assignment_series = adata.obsm[modality][geom_key]
                 #cats = sorted([elem for elem in assignment_series.unique() if (elem != "unassigned") & ("&" not in elem)])
-                cats = mod.metadata[geom_key]['classes']
+                #cats = mod.metadata[geom_key]['classes']
+                cats = list(mod[geom_key]["name"].unique())
 
                 # calculate compositions
                 compositions = {}
@@ -284,8 +307,8 @@ def calc_cellular_composition(
                             continue
 
                     # calculate percentage
-                    #idx = assignment_series[assignment_series == cat].index
-                    idx = assignment_series[assignment_series.str.contains(cat)].index
+                    idx = assignment_series[assignment_series == cat].index
+                    #idx = assignment_series[assignment_series.str.contains(cat)].index
                     value_counts = adata.obs[cell_type_col].loc[idx].value_counts(normalize=normalize) * 100
 
                     if cell_type_values is not None:
@@ -344,7 +367,7 @@ def calc_cellular_composition(
     # swap multi index levels to have annotations/regions on top of samples
     compositions_df = compositions_df.swaplevel(0, 1, axis=1)
 
-    compositions_df.columns.names = [geom_key, uid_column]
+    compositions_df.columns.names = [geom_key, groupby]
 
     # sort by index
     compositions_df = compositions_df.sort_index()
@@ -362,13 +385,14 @@ def plot_cellular_composition(
     geom_values: Optional[Union[str, List[str]]] = None,
     modality: Optional[Literal["regions", "annotations"]] = None,
     plot_type: Literal["bar", "barh"] = "barh",
-    uid_column: str = "sample_id",
+    groupby: str = "uid",
     normalize: bool = True,
     force_assignment: bool = False,
     max_cols: int = 4,
     aspect_factor: Number = 1,
+    legend_max_per_col: Optional[Union[Literal["auto"], int]] = "auto",
     savepath: Union[str, os.PathLike, Path] = None,
-    palette: Optional[Union[ListedColormap, List[str]]] = DEFAULT_CATEGORICAL_CMAP,
+    palette: Optional[Union[ListedColormap, List[str]]] = None,
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
@@ -381,23 +405,39 @@ def plot_cellular_composition(
     within specified regions or annotations. It can optionally save the plot to a file and
     return the composition data.
     """
-    if isinstance(palette, list):
+    if palette is None:
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, list):
         palette = ListedColormap(palette)
+        palette_is_dict = False
     elif isinstance(palette, ListedColormap):
+        palette_is_dict = False
+        pass
+    elif isinstance(palette, dict):
+        palette_is_dict = True
         pass
     else:
-        raise ValueError(f"palette must be a list of colors or a ListedColormap. Instead: {type(palette)}")
+        raise ValueError(f"palette must be None or a list of colors or a ListedColormap or a dictionary. Instead: {type(palette)}")
 
     if geom_key is not None:
         if modality is None:
             raise ValueError("If `geom_key` is not None, modality must not be None. Choose either 'regions' or 'annotations'.")
+
+    if legend_max_per_col == "auto":
+        if plot_type == "bar":
+            legend_max_per_col = 10
+        elif plot_type == "barh":
+            legend_max_per_col = 5
+        else:
+            raise ValueError(f"Unknown `plot_type`: {plot_type}. Must be either 'bar' or 'barh'.")
 
     compositions_df = calc_cellular_composition(
         data=data,
         cell_type_col=cell_type_col, cell_type_values=cell_type_values,
         cells_layer=cells_layer, mask_col=mask_col,
         geom_key=geom_key, geom_values=geom_values,
-        modality=modality, uid_column=uid_column,
+        modality=modality, groupby=groupby,
         normalize=normalize, force_assignment=force_assignment,
     )
 
@@ -406,6 +446,11 @@ def plot_cellular_composition(
     data_names = compositions_df.columns.levels[1].values
     cell_type_names = compositions_df.index.values
 
+    if len(data_names) == 1:
+        print("Since only one dataset is given, all regions are plotted into one figure.")
+        compositions_df = compositions_df.swaplevel(axis=1)
+        geom_names, data_names = data_names, geom_names # swap values of the two variables
+
     # check data
     is_experiment = _is_experiment(data)
     if is_experiment:
@@ -413,18 +458,44 @@ def plot_cellular_composition(
         if cell_type_col in data.colors:
             color_dict = data.colors[cell_type_col]
         else:
-            color_dict = None
+            data.sync_colors(cell_type_col)
+            color_dict = data.colors[cell_type_col]
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        try:
-            color_dict = map_to_colors(
-                sorted(celldata.matrix.obs[cell_type_col].unique()),
-                palette=palette)
-            #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
-        except KeyError:
-            color_dict = None
+        # Check and convert to category if needed
+        if not pd.api.types.is_categorical_dtype(celldata.matrix.obs[cell_type_col]):
+            celldata.matrix.obs[cell_type_col] = celldata.matrix.obs[cell_type_col].astype('category')
+            print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
+
+        if palette_is_dict:
+            color_dict = palette
+        else:
+            if palette is None:
+                try:
+                    color_dict ={
+                        a: b
+                        for a,b in zip(
+                            celldata.matrix.obs[cell_type_col].cat.categories,
+                            celldata.matrix.uns[f"{cell_type_col}_colors"]
+                            )
+                    }
+                except KeyError:
+                    color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    palette=DEFAULT_CATEGORICAL_CMAP)
+            else:
+                color_dict = map_to_colors(
+                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    palette=palette)
+            # try:
+            #     color_dict = map_to_colors(
+            #         sorted(celldata.matrix.obs[cell_type_col].unique()),
+            #         palette=palette)
+            #     #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            # except KeyError:
+            #     color_dict = None
 
     # setup plot
     if len(geom_names) == 1:
@@ -506,7 +577,7 @@ def plot_cellular_composition(
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             ax=axs[len(geom_names)],
-            max_per_col=5,
+            max_per_col=legend_max_per_col,
             loc='center',
             bbox_to_anchor=(0.5, 0.5),
             mode="rectangle",
@@ -522,4 +593,4 @@ def plot_cellular_composition(
         )
 
     if return_data:
-        return compositions
+        return compositions_df

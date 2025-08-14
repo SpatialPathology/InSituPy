@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 import os
 import warnings
 from pathlib import Path
@@ -11,9 +8,10 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
-from insitupy._core._checks import is_integer_counts
-from insitupy._core._utils import _get_cell_layer
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
+from insitupy.utils._checks import is_integer_counts
 
 
 def _calculate_max_cell_widths_and_sum(df, multiplier=0.2):
@@ -98,6 +96,8 @@ def _calculate_metrics(adata: AnnData, layer: str = None, force_layer: bool = Fa
 
         return df_cells["n_genes_by_counts"].median(), df_cells["total_counts"].median()
 
+
+
 def plot_overview(
     data: InSituExperiment,
     cells_layer: Optional[str] = None,
@@ -170,7 +170,7 @@ def plot_overview(
     list_gene_count = []
     list_transcript_count = []
     for _, data in data.iterdata():
-        if data.cells is None:
+        if data.cells.is_empty:
             warnings.warn("Cells were not loaded. Loading cells.")
             data.load_cells()
 

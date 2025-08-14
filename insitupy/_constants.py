@@ -57,6 +57,21 @@ DEFAULT_CATEGORICAL_CMAP = palettes.tab20_mod
 REGION_CMAP = matplotlib.colormaps["tab10"]
 DEFAULT_CONTINUOUS_CMAP = "viridis"
 
+## fluorescence colormaps
+FLUO_CMAP = [
+    #"blue",       # e.g., DAPI
+    "green",      # e.g., FITC
+    "red",        # e.g., Texas Red
+    "cyan",       # e.g., GFP variants
+    "magenta",    # e.g., Cy5
+    "yellow",     # e.g., YFP
+    "orange",     # e.g., mOrange
+    "lime",       # bright and distinct
+    "purple",     # visually distinct from blue/magenta
+    "white"       # for overlays or reference
+]
+
+
 # font size
 def _init_mpl_fontsize(scale_factor=1):
     '''

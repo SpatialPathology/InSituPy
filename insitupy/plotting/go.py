@@ -3,7 +3,7 @@ import textwrap
 import matplotlib.pyplot as plt
 import numpy as np
 
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
 from insitupy.utils.utils import check_list, get_nrows_maxcols
 
 

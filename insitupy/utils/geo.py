@@ -1,6 +1,8 @@
 import math
 
 import geopandas as gpd
+import shapely
+from shapely import MultiPolygon, Polygon
 from shapely.geometry import Polygon, box
 from shapely.strtree import STRtree
 
@@ -69,3 +71,31 @@ def fast_query_points_within_polygon(polygon: Polygon, points: gpd.GeoSeries):
         point_ids = res[0]
         mask = points.index.isin(point_ids)
     return mask
+
+
+def _parse_geometries(geometry):
+    coords = geometry["coordinates"]
+    if geometry['type'] == 'MultiPolygon':
+        try:
+            multipolygons = MultiPolygon(coords)
+        except TypeError:
+            multipolygons = MultiPolygon([coords])
+        polygon = multipolygons.convex_hull
+        parsed_type = "polygon"
+
+    elif geometry['type'] == 'Polygon':
+        if len(coords) > 2:
+
+            merged_geometry = Polygon(geometry['coordinates'][0])
+            parsed_type = "polygon"
+
+        # # check if there are enough coordinates for a Polygon (some segmented cells are very small in Baysor)
+        # if len(coords) > 2:
+        #     p = shapely.Polygon(coords[0])
+        #     results_dict["geometry"].append(p)
+        #     results_dict["type"].append("polygon")
+
+        # else:
+        #     p = shapely.LineString(coords)
+        #     results_dict["geometry"].append(p)
+        #     results_dict["type"].append("line")

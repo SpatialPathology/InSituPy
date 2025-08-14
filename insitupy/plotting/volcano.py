@@ -2,6 +2,7 @@ import os
 from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
+from warnings import warn
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,10 +11,10 @@ from matplotlib.font_manager import FontProperties
 from typing import Optional
 
 
-from insitupy.io.plots import save_and_show_figure
+from insitupy._io.plots import save_and_show_figure
 
 
-def volcano_plot(data,
+def plot_volcano(data,
                  logfoldchanges_column: str = 'logfoldchanges',
                  pval_column: str = 'neg_log10_pvals',
                  significance_threshold: Number = 0.05,
@@ -26,6 +27,7 @@ def volcano_plot(data,
                  dpi_save: int = 300,
                  show: bool = True,
                  label_top_n: Union[int, List[str]] = 20,
+                 label_sortby: str = "scores",
                  figsize: Tuple[int, int] = (8, 6),
                  config_table=None
                  ):
@@ -50,6 +52,12 @@ def volcano_plot(data,
     Returns:
         None
     """
+    # Validate if the label_sortby column exists in the DataFrame
+    if label_sortby not in data.columns:
+        warn(f"The specified label_sortby column '{label_sortby}' does not exist in the input DataFrame. Using '{logfoldchanges_column}' instead.")
+        label_sortby = logfoldchanges_column
+
+
     if adjust_labels:
         try:
             from adjustText import adjust_text
@@ -110,8 +118,10 @@ def volcano_plot(data,
 
     # select genes
     if isinstance(label_top_n, int):
-        top_up_genes = up_data.nlargest(label_top_n, logfoldchanges_column)
-        top_down_genes = down_data.nsmallest(label_top_n, logfoldchanges_column)
+        # top_up_genes = up_data.nlargest(label_top_n, logfoldchanges_column)
+        # top_down_genes = down_data.nsmallest(label_top_n, logfoldchanges_column)
+        top_up_genes = up_data.nlargest(label_top_n, label_sortby)
+        top_down_genes = down_data.nsmallest(label_top_n, label_sortby)
     elif isinstance(label_top_n, list):
         top_up_genes = up_data
         top_up_genes = top_up_genes[top_up_genes["gene"].isin(label_top_n)]

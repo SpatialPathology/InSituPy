@@ -7,7 +7,7 @@ from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
 from insitupy import __version__
-from insitupy._core._checks import check_integer_counts
+from insitupy.utils._checks import check_integer_counts
 from insitupy._textformat import textformat as tf
 
 

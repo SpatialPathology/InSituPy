@@ -1,6 +1,17 @@
 # API
 
-## Core Dataclasses
+```{eval-rst}
+
+Import InSituPy as::
+
+    import insitupy
+
+.. module:: insitupy
+```
+
+## Core Data Objects
+
+### Individual datasets
 
 ```{eval-rst}
 .. module:: insitupy._core
@@ -10,16 +21,9 @@
     :toctree: generated
 
     InSituData
-    InSituExperiment
-    MultiCellData
-    CellData
-    BoundariesData
-    ImageData
-    AnnotationsData
-    RegionsData
 ```
 
-## Core reading functions
+Read the `InSituData` object with:
 
 ```{eval-rst}
 .. module:: insitupy._core
@@ -28,24 +32,118 @@
 .. autosummary::
     :toctree: generated
 
-    read_xenium
+    InSituData.read
 ```
 
-## IO
+### Handle multiple datasets
 
 ```{eval-rst}
-.. module:: insitupy.io
+.. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated
 
-    io.read_qupath_geojson
-    io.write_qupath_geojson
-    io.read_celldata
-    io.read_multicelldata
-    io.read_shapesdata
+    InSituExperiment
 ```
+
+Read the `InSituExperiment` object with:
+
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    InSituExperiment.read
+```
+
+## Core Data Classes
+
+Data classes are used to store the different modalities.
+
+### Cellular data
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.CellData
+    dataclasses.MultiCellData
+    dataclasses.BoundariesData
+```
+
+### Image data
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.ImageData
+```
+
+### Geometric data
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.ShapesData
+    dataclasses.AnnotationsData
+    dataclasses.RegionsData
+```
+
+The different data classes can be read using following functions:
+
+```{eval-rst}
+.. module:: insitupy.dataclasses
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    dataclasses.read_celldata
+    dataclasses.read_multicelldata
+    dataclasses.read_shapesdata
+```
+
+## Read external data
+
+Following functions allow reading data from external sources, e.g. from an *Xenium In Situ* experiment or from [*QuPath*](https://qupath.github.io).
+
+To read an individual dataset on can use following functions:
+```{eval-rst}
+.. module:: insitupy._core
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    read_qupath
+    read_xenium
+```
+
+To read multiple datasets into an `InSituExperiment` object, following functions can be used:
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    read_qupath_project
+```
+
 
 ## Plotting
 
@@ -60,7 +158,7 @@
     plotting.plot_cellular_composition
     plotting.cell_abundance_along_axis
     plotting.cell_expression_along_axis
-    plotting.volcano_plot
+    plotting.plot_volcano
     plotting.plot_colorlegend
     plotting.plot_overview
 ```
