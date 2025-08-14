@@ -431,7 +431,6 @@ class ImageRegistration:
 def register_images(
     data: InSituData, # type: ignore
     image_to_be_registered: Union[str, os.PathLike, Path],
-    #image_type: Literal["histo", "IF"],
     axes_image: Literal["CYX", "YXS"],  # axes of the image to be registered, e.g. YXS for RGB images, CYX for IF images
     axes_template: Literal["YX", "CYX", "YXS"],  # axes of the template image, e.g. YX for grayscale images
     channel_names: Union[str, List[str]],
