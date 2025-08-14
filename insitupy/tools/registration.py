@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 import gc
 import os
 from datetime import datetime
@@ -15,19 +12,18 @@ from dask_image.imread import imread
 from parse import *
 
 from insitupy import __version__
-from insitupy._exceptions import UnknownOptionError
+from insitupy._constants import CACHE, SHRT_MAX
+from insitupy._core.data import InSituData
+from insitupy._exceptions import (NotEnoughFeatureMatchesError,
+                                  UnknownOptionError)
 from insitupy._textformat import textformat as tf
 from insitupy.images.axes import ImageAxes, get_height_and_width
+from insitupy.images.io import write_ome_tiff
 from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    deconvolve_he, fit_image_to_size_limit,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
-from insitupy.utils.utils import convert_to_list
-
-from .._constants import CACHE, SHRT_MAX
-from .._exceptions import NotEnoughFeatureMatchesError
-from ..utils.utils import remove_last_line_from_csv
-from .io import write_ome_tiff
+from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
 
 
 class ImageRegistration:

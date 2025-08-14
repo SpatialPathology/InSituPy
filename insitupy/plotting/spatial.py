@@ -1,4 +1,3 @@
-#from __future__ import annotations  # this prevents circular imports
 
 import gc
 import math

@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints
-
 import os
 from numbers import Number
 from pathlib import Path

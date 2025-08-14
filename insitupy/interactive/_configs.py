@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 from typing import Dict
 from uuid import uuid4
 

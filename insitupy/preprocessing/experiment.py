@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 from numbers import Number
 from typing import Collection, Literal, Optional, Union
 
@@ -12,12 +9,13 @@ from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._core._checks import _is_experiment
+from insitupy._core.data import InSituData
+from insitupy._exceptions import ModalityNotFoundError
 from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing.anndata import (clustering_anndata,
                                             normalize_and_transform_anndata,
                                             reduce_dimensions_anndata)
-
-from .._exceptions import ModalityNotFoundError
 
 
 def calculate_qc_metrics(
