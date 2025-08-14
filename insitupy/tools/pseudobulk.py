@@ -405,7 +405,7 @@ def get_pseudobulk(
         layers = {'psbulk_props': props}
 
     # Add QC metrics
-    new_obs['psbulk_n_cells'] = ncells
+    new_obs['psbulk_cells'] = ncells
     new_obs['psbulk_counts'] = counts
 
     # Create new AnnData
@@ -468,7 +468,7 @@ def plot_psbulk_samples(adata, groupby, figsize=(5, 5), dpi=100, ax=None, return
     df = adata.obs.copy()
 
     # Transform to log10
-    df['psbulk_n_cells'] = np.log10(df['psbulk_n_cells'])
+    df['psbulk_cells'] = np.log10(df['psbulk_cells'])
     df['psbulk_counts'] = np.log10(df['psbulk_counts'])
 
     if type(groupby) is list and ax is not None:
@@ -479,7 +479,7 @@ def plot_psbulk_samples(adata, groupby, figsize=(5, 5), dpi=100, ax=None, return
         for ax, grp in zip(axes, groupby):
             ax.grid(zorder=0)
             ax.set_axisbelow(True)
-            sns.scatterplot(x='psbulk_n_cells', y='psbulk_counts', hue=grp, ax=ax, data=df, zorder=1, **kwargs)
+            sns.scatterplot(x='psbulk_cells', y='psbulk_counts', hue=grp, ax=ax, data=df, zorder=1, **kwargs)
             ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False, title=grp)
             ax.set_xlabel('Log10 number of cells')
             ax.set_ylabel('Log10 total sum of counts')
@@ -490,7 +490,7 @@ def plot_psbulk_samples(adata, groupby, figsize=(5, 5), dpi=100, ax=None, return
             fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
         ax.grid(zorder=0)
         ax.set_axisbelow(True)
-        sns.scatterplot(x='psbulk_n_cells', y='psbulk_counts', hue=groupby, ax=ax, data=df, zorder=1, **kwargs)
+        sns.scatterplot(x='psbulk_cells', y='psbulk_counts', hue=groupby, ax=ax, data=df, zorder=1, **kwargs)
         ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False, title=groupby)
         ax.set_xlabel('Log10 number of cells')
         ax.set_ylabel('Log10 total sum of counts')
