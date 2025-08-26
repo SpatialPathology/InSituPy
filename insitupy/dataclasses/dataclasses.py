@@ -16,7 +16,7 @@ from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
+from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED
 from insitupy._core._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._io.files import (check_overwrite_and_remove_if_true,
@@ -196,6 +196,9 @@ class ShapesData(DeepCopyMixin):
         else:
             if "name" not in new_df.columns:
                 new_df["name"] = ["None"] * len(new_df)
+                
+            if "color" not in new_df.columns:
+                new_df["color"] = [RED] * len(new_df)
 
             if self._forbidden_names is not None:
                 try:

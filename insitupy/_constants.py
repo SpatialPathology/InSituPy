@@ -71,6 +71,9 @@ FLUO_CMAP = [
     "white"       # for overlays or reference
 ]
 
+## colors
+RED = (255, 0, 0)
+
 
 # font size
 def _init_mpl_fontsize(scale_factor=1):
