@@ -196,8 +196,9 @@ class ShapesData(DeepCopyMixin):
         else:
             if "name" not in new_df.columns:
                 new_df["name"] = ["None"] * len(new_df)
-                
+
             if "color" not in new_df.columns:
+                warnings.warn("No 'color' column found in the imported data. Setting all colors to red.", stacklevel=2)
                 new_df["color"] = [RED] * len(new_df)
 
             if self._forbidden_names is not None:
