@@ -60,25 +60,6 @@ if WITH_NAPARI:
             ):
                 pass
 
-            # connect key change with update function
-            @select_data_widget.data_name.changed.connect
-            @select_data_widget.layer_name.changed.connect
-            def update_widgets_on_data_change(event=None):
-                # update data name in config and refresh the variables in the config class
-                viewer_config.data_name = select_data_widget.data_name.value
-                viewer_config.layer_name = select_data_widget.layer_name.value
-                viewer_config.refresh_variables()
-
-                _refresh_widgets_after_data_change(
-                    data,
-                    viewer=viewer,
-                    viewer_config=viewer_config,
-                    select_data_widget=select_data_widget,
-                    show_cells_widget=show_cells_widget,
-                    boundaries_widget=show_boundaries_widget,
-                    filter_widget=filter_cells_widget
-                    )
-
             if len(viewer_config.masks) > 0:
                 @magicgui(
                     call_button='Show',
@@ -275,11 +256,6 @@ if WITH_NAPARI:
                         fc[:, -1] = 1.
                         current_layer.face_color = fc
 
-            @show_cells_widget.key_type.changed.connect
-            @show_cells_widget.call_button.changed.connect
-            def update_values_on_type_change(event=None):
-                _update_key_on_type_change(show_cells_widget, viewer_config)
-
             @magicgui(
                 call_button='Show',
                 cell={'label': "Cell:"},
@@ -314,6 +290,37 @@ if WITH_NAPARI:
                             )
                 else:
                     print(f"Cell '{cell}' not found.")
+
+            # ---CALLBACKS---
+            # @show_cells_widget.key_type.changed.connect
+            # @show_cells_widget.call_button.changed.connect
+            # @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
+            # @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
+            # def update_values_on_type_change(event=None):
+            #     _update_key_on_type_change(show_cells_widget, viewer_config)
+
+            # connect key change with update function
+            @select_data_widget.data_name.changed.connect
+            @select_data_widget.layer_name.changed.connect
+            @show_cells_widget.key_type.changed.connect
+            @show_cells_widget.call_button.changed.connect
+            @viewer.layers.events.removed.connect
+            @viewer.layers.events.inserted.connect
+            def update_widgets_on_data_change(event=None):
+                # update data name in config and refresh the variables in the config class
+                viewer_config.data_name = select_data_widget.data_name.value
+                viewer_config.layer_name = select_data_widget.layer_name.value
+                #viewer_config.refresh_variables()
+
+                _refresh_widgets_after_data_change(
+                    data,
+                    viewer=viewer,
+                    viewer_config=viewer_config,
+                    select_data_widget=select_data_widget,
+                    show_cells_widget=show_cells_widget,
+                    boundaries_widget=show_boundaries_widget,
+                    filter_widget=filter_cells_widget
+                    )
 
             def callback_refresh(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer
@@ -451,7 +458,7 @@ if WITH_NAPARI:
                         _update_keys_based_on_geom_type(show_geometries_widget, xdata=data)
                         _update_classes_on_key_change(show_geometries_widget, xdata=data)
                         _set_show_names_based_on_geom_type(show_geometries_widget)
-                        _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
+                        #_update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
 
         return (
             show_cells_widget,

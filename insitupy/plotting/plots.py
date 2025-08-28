@@ -560,7 +560,12 @@ def plot_cellular_composition(
                             )
 
         if not separate_legend:
-            ax.legend(title=cell_type_col, bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax.legend(
+                title=cell_type_col,
+                bbox_to_anchor=(1.05, 1),
+                loc='upper left',
+                frameon=True,
+                borderpad=0.4)
 
         if inverty:
             plt.gca().invert_yaxis()
