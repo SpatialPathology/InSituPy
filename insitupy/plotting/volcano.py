@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.font_manager import FontProperties
+from typing import Optional
+
 
 from insitupy._io.plots import save_and_show_figure
 

@@ -49,9 +49,9 @@ def _create_handle_function(mode):
                                marker='o',
                                color='w',
                                markerfacecolor=color,
-                               markersize=15,
+                               markersize=10,
                                markeredgecolor='black',
-                               markeredgewidth=1.5
+                               markeredgewidth=1
                                )
     elif mode == "rectangle":
         def handle_function(color):
@@ -93,9 +93,15 @@ def _add_colorlegend_to_axis(
     n_col = max(1, math.ceil(len(labels) / max_per_col))
 
     legend = ax.legend(
-        handles, labels,
-        loc=loc, ncol=n_col,
+        handles,
+        labels,
+        loc=loc,
+        ncol=n_col,
         frameon=True,
+        borderpad=0.4,
+        labelspacing=0.5,
+        handletextpad=0.8,
+        #markerscale=1.5,
         title=title,
         bbox_to_anchor=bbox_to_anchor
         )
