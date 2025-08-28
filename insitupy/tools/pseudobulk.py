@@ -1,5 +1,5 @@
 """
-Functions in this module were adapted from the decoupler package (https://github.com/scverse/decoupler):
+Functions in this module were adapted from the decoupler package v1.9.0 (https://github.com/scverse/decoupler):
 Badia-i-Mompel P., Vélez Santiago J., Braunger J., Geiss C., Dimitrov D., Müller-Dott S.,
 Taus P., Dugourd A., Holland C.H., Ramirez Flores R.O. and Saez-Rodriguez J. 2022.
 decoupleR: Ensemble of computational methods to infer biological activities from omics data.
@@ -116,6 +116,7 @@ def extract_psbulk_inputs(
         X = csr_matrix(X)
 
     return X, obs, var
+
 def format_psbulk_inputs(sample_col, groups_col, obs):
     # Use one column if the same
     if sample_col == groups_col:
@@ -350,7 +351,7 @@ def check_X(X, mode='sum', skip_checks=False):
                 determine if you are selecting the correct data, which should be positive integer counts when mode='sum'.
                 To override this, set skip_checks=True.
                 """)
-def get_pseudobulk(
+def generate_pseudobulk(
     exp,
     sample_col: str,
     groups_col: str,
@@ -433,68 +434,3 @@ def get_pseudobulk(
         psbulk = psbulk[:, genes]
 
     return psbulk
-
-
-def plot_psbulk_samples(adata, groupby, figsize=(5, 5), dpi=100, ax=None, return_fig=False, save=None, **kwargs):
-    """
-    Quality Control plot to assess the quality of the obtained pseudobulk samples.
-
-    Parameters
-    ----------
-    adata : AnnData
-        AnnData obtained after running ``decoupler.get_pseudobulk``.
-    groupby : str, list
-        Name of the ``.obs`` column to group by. Can also be a list of columns.
-    figsize : tuple
-        Figure size.
-    dpi : int
-        DPI resolution of figure.
-    ax : Axes, None
-        A matplotlib axes object. If None returns new figure.
-    return_fig : bool
-        Whether to return a Figure object or not.
-    save : str, None
-        Path to where to save the plot. Infer the filetype if ending on {``.pdf``, ``.png``, ``.svg``}.
-    kwargs : dict
-        Other keyword arguments are passed through to seaborn.scatterplot().
-
-    Returns
-    -------
-    fig : Figure, None
-        If return_fig, returns Figure object.
-    """
-
-    # Extract obs
-    df = adata.obs.copy()
-
-    # Transform to log10
-    df['psbulk_cells'] = np.log10(df['psbulk_cells'])
-    df['psbulk_counts'] = np.log10(df['psbulk_counts'])
-
-    if type(groupby) is list and ax is not None:
-        raise ValueError("""If a groupby is a list of columns ax must be None.""")
-    elif type(groupby) is list:
-        fig, axes = plt.subplots(1, len(groupby), figsize=figsize, dpi=dpi, tight_layout=True)
-        axes = axes.ravel()
-        for ax, grp in zip(axes, groupby):
-            ax.grid(zorder=0)
-            ax.set_axisbelow(True)
-            sns.scatterplot(x='psbulk_cells', y='psbulk_counts', hue=grp, ax=ax, data=df, zorder=1, **kwargs)
-            ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False, title=grp)
-            ax.set_xlabel('Log10 number of cells')
-            ax.set_ylabel('Log10 total sum of counts')
-    else:
-        # Plot
-        fig = None
-        if ax is None:
-            fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
-        ax.grid(zorder=0)
-        ax.set_axisbelow(True)
-        sns.scatterplot(x='psbulk_cells', y='psbulk_counts', hue=groupby, ax=ax, data=df, zorder=1, **kwargs)
-        ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), frameon=False, title=groupby)
-        ax.set_xlabel('Log10 number of cells')
-        ax.set_ylabel('Log10 total sum of counts')
-
-    if return_fig:
-        return fig
-
