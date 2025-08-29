@@ -37,71 +37,42 @@ from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
 
 class InSituExperiment:
     """
-    Class to manage and analyze multiple spatially resolved single-cell transcriptomics experiments.
+    A class to manage and analyze multiple spatially resolved single-cell transcriptomics experiments.
 
     .. figure:: ../_static/img/insituexperiment_overview.svg
        :width: 400px
        :align: right
        :class: dark-light
 
-    The class consists of multiple :class:`~insitudata._core.InSituData` datasets and associated metadata as `pandas.DataFrame`.
     This class provides functionality for managing datasets, performing differential gene expression analysis,
-    querying metadata, visualizing data, and saving/loading experiments.
+    querying metadata, visualizing data, and saving/loading experiments. It operates on multiple datasets, each
+    represented as an :class:`~insitupy._core.data.InSituData` object, and maintains associated metadata in a
+    `pandas.DataFrame`.
 
-    Methods:
-        collection():
-            Returns the collection of AnnData objects.
-        data():
-            Returns the list of datasets.
-        metadata():
-            Returns a copy of the metadata DataFrame.
-        path():
-            Returns the save path of the InSituExperiment object.
-        _check_obs_uniqueness(cells_layer=None):
-            Checks if observation names are unique across all datasets.
-        add(data, mode="insitupy", metadata=None):
-            Adds a dataset to the experiment and updates metadata.
-        append_metadata(new_metadata, by=None, overwrite=False):
-            Appends metadata to the existing InSituExperiment object.
-        copy():
-            Creates a deep copy of the InSituExperiment object.
-        dge(target_id, ref_id=None, target_annotation_tuple=None, ...):
-            Performs differential gene expression analysis.
-        iterdata():
-            Iterates over the metadata rows and corresponding data.
-        get_n_cells(cells_layer=None):
-            Returns the total number of cells across all datasets.
-        load_all(skip=None):
-            Loads all data modalities for all datasets.
-        load_annotations():
-            Loads annotations for all datasets.
-        load_cells():
-            Loads cell data for all datasets.
-        load_images(names="all", nuclei_type="mip", ...):
-            Loads images for all datasets.
-        load_regions():
-            Loads regions for all datasets.
-        load_transcripts(transcript_filename="transcripts.parquet"):
-            Loads transcript data for all datasets.
-        plot_umaps(cells_layer=None, color=None, title_columns=None, ...):
-            Creates a plot with UMAPs of all datasets as subplots.
-        query(criteria):
-            Queries the experiment based on metadata criteria.
-        concat(objs, new_col_name=None):
-            Concatenates multiple InSituExperiment objects.
-        read(path):
-            Reads an InSituExperiment object from a specified folder.
-        from_config(config_path, mode="insitupy"):
-            Creates an InSituExperiment object from a configuration file.
-        from_regions(data, region_key, region_names=None):
-            Creates an InSituExperiment object from regions of a dataset.
-        remove_history():
-            Removes the history of all datasets.
-        save(verbose=False, overwrite_metadata=True, **kwargs):
-            Saves the InSituExperiment object to its current path.
-        saveas(path, overwrite=False, verbose=False, **kwargs):
-            Saves the InSituExperiment object to a specified path.
-        show(index, return_viewer=True):
+    Attributes:
+        metadata (pd.DataFrame): A DataFrame containing metadata for the datasets.
+        data (list): A list of :class:`~insitupy._core.data.InSituData` objects representing the datasets.
+        path (str or None): The save path of the `InSituExperiment` object.
+        colors (dict): A dictionary mapping metadata keys to color dictionaries for visualization.
+
+    Examples:
+        >>> # Create an InSituExperiment object
+        >>> experiment = InSituExperiment()
+
+        >>> # Add a dataset
+        >>> experiment.add(data="path/to/dataset", mode="insitupy", metadata={"experiment": "test"})
+
+        >>> # Perform differential gene expression analysis
+        >>> experiment.dge(target_id=0, ref_id=1, target_annotation_tuple=("cell_type", "neuron"))
+
+        >>> # Save the experiment
+        >>> experiment.saveas("path/to/save", overwrite=True)
+
+        >>> # Query the experiment
+        >>> subset = experiment.query({"experiment": ["test"]})
+
+        >>> # Plot UMAPs
+        >>> experiment.plot_umaps(color="cell_type", title_column="experiment")
     """
 
     from .._core._deprecated import plot_overview
@@ -116,10 +87,12 @@ class InSituExperiment:
         self._colors = {}
 
     def __repr__(self):
-        """Provide a string representation of the InSituExperiment object.
+        """
+        Provide a string representation of the InSituExperiment object.
 
         Returns:
-            str: A string summarizing the InSituExperiment object.
+            str: A string summarizing the InSituExperiment object, including the number of samples
+            and a table of metadata with loaded modalities.
         """
         # extract metadata
         mdf = self.metadata.copy()
@@ -139,7 +112,8 @@ class InSituExperiment:
                 f"{sample_summary}")
 
     def __getitem__(self, key):
-        """Retrieve a subset of the experiment.
+        """
+        Retrieve a subset of the experiment.
 
         Args:
             key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
@@ -147,6 +121,10 @@ class InSituExperiment:
 
         Returns:
             InSituExperiment: A new InSituExperiment object with the selected subset.
+
+        Raises:
+            IndexError: If the index is out of range.
+            ValueError: If the key is invalid.
         """
         if isinstance(key, int):
             if key > (len(self) - 1):
@@ -189,34 +167,43 @@ class InSituExperiment:
     @property
     def colors(self):
         """
-        Get color dictionaries created by `sync_colors`.
+        Get the color dictionaries created by `sync_colors`.
+
+        Returns:
+            dict: A dictionary mapping metadata keys to color dictionaries.
         """
         return self._colors
 
     @property
     def data(self):
-        """Get the dataset dictionary.
+        """
+        Get the list of datasets.
 
         Returns:
-            dict: A dictionary of datasets, where keys are sample IDs and values are Dataset objects.
+            list: A list of :class:`~insitupy._core.data.InSituData` objects.
         """
         return self._data
 
     @property
     def metadata(self):
-        """Get the metadata DataFrame.
+        """
+        Get the metadata DataFrame.
 
         Returns:
-            pd.DataFrame: A DataFrame containing metadata.
+            pd.DataFrame: A copy of the metadata DataFrame.
         """
         return self._metadata.copy() # the copy prevents the metadata from being modified
 
     @property
     def path(self):
-        """Return save path of the InSituExperiment object.
+        """
+        Check if the observation names are unique across all datasets.
 
-        Returns:
-            str: Save path.
+        Args:
+            cells_layer (Optional[str]): The layer in `xd.cells` to access. Defaults to None.
+
+        Raises:
+            Warning: If observation names are not unique across all datasets.
         """
         return self._path
 
@@ -225,7 +212,7 @@ class InSituExperiment:
         cells_layer: Optional[str] = None
         ):
         """
-        Check if the observation names are unique across all datasets.
+        Check if the names of the observations (index in .obs or .obs_names) are unique across all datasets.
         """
         # get obs dataframes
         obs_list = []
@@ -238,6 +225,30 @@ class InSituExperiment:
         all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
         if not all_obs.index.is_unique:
             warnings.warn("Observation names are not unique across all datasets.")
+
+    def _create_categorical_color_dict(
+        self,
+        obs_col: str,
+        cells_layer: Optional[str] = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
+        ) -> Dict:
+        cols = []
+        for _, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            if obs_col in celldata.matrix.obs.columns:
+                if celldata.matrix.obs[obs_col].isna().all():
+                    raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
+                cols.append(np.unique(celldata.matrix.obs[obs_col]))
+
+        if len(cols) > 0:
+            all_cats = np.sort(np.unique(np.concatenate(cols)))
+
+            # create color dict
+            color_dict = map_to_colors(all_cats, palette=palette)
+            return color_dict
+        else:
+            return None
+
 
     @property
     def cells(self):
@@ -264,13 +275,17 @@ class InSituExperiment:
             mode: Literal["insitupy", "xenium"] = "insitupy",
             metadata: dict = {}
             ):
-        """Add a dataset to the experiment and update metadata.
+        """
+        Add a dataset to the experiment and update metadata.
 
         Args:
-            dataset (InSituData): A InSituData object to be added.
+            data (Union[str, os.PathLike, Path, InSituData]): The dataset to add. Can be a path or an InSituData object.
+            mode (Literal["insitupy", "xenium"], optional): The mode for loading the dataset. Defaults to "insitupy".
+            metadata (dict, optional): Additional metadata to associate with the dataset. Defaults to an empty dictionary.
 
         Raises:
-            TypeError: If the dataset is not an instance of the Dataset class.
+            ValueError: If the mode is invalid.
+            AssertionError: If the loaded dataset is not an InSituData object.
         """
         # Check if the dataset is of the correct type
         try:
@@ -324,12 +339,13 @@ class InSituExperiment:
         Append metadata to the existing InSituExperiment object.
 
         Args:
-            new_metadata (Union[pd.DataFrame, dict, str, os.PathLike, Path]): The new metadata to be added. Can be a DataFrame, a dictionary, or a path to a CSV/Excel file.
+            new_metadata (Union[pd.DataFrame, dict, str, os.PathLike, Path]): The new metadata to be added.
+                Can be a DataFrame, a dictionary, or a path to a CSV/Excel file.
             by (str, optional): The column name to use for pairing metadata. If None, metadata is paired by order.
             overwrite (bool, optional): Whether to overwrite existing columns in the metadata. Defaults to False.
 
         Raises:
-            ValueError: If the 'by' column is not unique in either the existing or new metadata.
+            ValueError: If the 'by' column is not unique or missing in either the existing or new metadata.
         """
         # Convert new_metadata to a DataFrame if it is not already one
         if isinstance(new_metadata, dict):
@@ -395,11 +411,17 @@ class InSituExperiment:
         self._metadata = updated_metadata
 
     def remove_metadata_columns(self, columns):
-        """Remove specified columns from the internal metadata."""
+        """
+        Remove specified columns from the internal metadata.
+
+        Args:
+            columns (list or str): The column(s) to remove from the metadata.
+        """
         self._metadata.drop(columns=columns, inplace=True, errors='ignore')
 
     def copy(self):
-        """Create a deep copy of the InSituExperiment object.
+        """
+        Create a deep copy of the InSituExperiment object.
 
         Returns:
             InSituExperiment: A new InSituExperiment object that is a deep copy of the current object.
@@ -517,6 +539,28 @@ class InSituExperiment:
         if not plot_volcano:
             return dge_res
 
+    def get_n_cells(
+        self,
+        cells_layer: Optional[str] = None
+        ):
+        """
+        Get the total number of cells across all datasets.
+
+        Args:
+            cells_layer (Optional[str], optional): The layer to access. Defaults to None.
+
+        Returns:
+            int: The total number of cells.
+        """
+        n_cells = 0
+        for _, d in self.iterdata():
+            if not d.cells.is_empty:
+                celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
+                n_cells += len(celldata.matrix)
+
+        return n_cells
+
+
     def import_obs(
         self,
         adata: AnnData,
@@ -575,7 +619,8 @@ class InSituExperiment:
 
 
     def iterdata(self):
-        """Iterate over the metadata rows and corresponding data.
+        """
+        Iterate over the metadata rows and corresponding data.
 
         Yields:
             tuple: A tuple containing the index, metadata row as a Series, and the corresponding data.
@@ -595,7 +640,8 @@ class InSituExperiment:
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = False,
     ) -> anndata.AnnData:
-        """Collect AnnData objects from the dataset and concatenate them.
+        """
+        Collect AnnData objects from the dataset and concatenate them.
 
         This function iterates through the dataset, extracts cell data from the specified
         layer, filters the AnnData objects according to the provided key selections,
@@ -696,124 +742,18 @@ class InSituExperiment:
             label=label_col
         )
 
-    # def collect_anndatas(
-    #     self,
-    #     cells_layer: Optional[str],
-    #     label_col: str = "uid",
-    #     obs_keys=None,
-    #     var_keys=None,
-    #     obsm_keys=None,
-    #     uns_keys=None,
-    #     layer_keys=None,
-    #     make_obs_names_unique: bool = False,
-    #     ):
 
-    #     adatas = {}
-    #     for i, (meta, xd) in enumerate(self.iterdata()):
-    #         celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-    #         adata = celldata.matrix
 
-    #         # filter adata
-    #         adata = _select_anndata_elements(
-    #             adata=adata,
-    #             obs_keys=obs_keys, var_keys=var_keys,
-    #             obsm_keys=obsm_keys, uns_keys=uns_keys,
-    #             layer_keys=layer_keys
-    #         )
-
-    #         if make_obs_names_unique:
-    #             adata.obs_names = f"{str(i)}-" + adata.obs_names
-
-    #         adatas[meta[label_col]] = adata
-
-    #     return anndata.concat(
-    #         adatas,
-    #         axis='obs',
-    #         join='inner',
-    #         label=label_col
-    #         )
-
-    def _create_categorical_color_dict(
-        self,
-        obs_col: str,
-        cells_layer: Optional[str] = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
-        ) -> Dict:
-        cols = []
-        for _, xd in self.iterdata():
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            if obs_col in celldata.matrix.obs.columns:
-                if celldata.matrix.obs[obs_col].isna().all():
-                    raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
-                cols.append(np.unique(celldata.matrix.obs[obs_col]))
-
-        if len(cols) > 0:
-            all_cats = np.sort(np.unique(np.concatenate(cols)))
-
-            # create color dict
-            color_dict = map_to_colors(all_cats, palette=palette)
-            return color_dict
-        else:
-            return None
-
-    def sync_colors(
-        self,
-        keys: Union[str, List[str]],
-        cells_layer: Optional[str] = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
-        overwrite: bool = False,
-        verbose: bool = True
-    ):
-        # Make sure obs_cols is a list
-        keys = convert_to_list(keys)
-
-        for obs_col in keys:
-            if obs_col not in self.colors:
-                # create a color dictionary with all categories
-                color_dict = self._create_categorical_color_dict(
-                    obs_col=obs_col,
-                    cells_layer=cells_layer,
-                    palette=palette
-                )
-
-                if color_dict is not None:
-                    # iterate over all datasets and set the colors in .uns
-                    uns_key = f"{obs_col}_colors"
-                    for _, xd in self.iterdata():
-                        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-
-                        try:
-                            cats = celldata.matrix.obs[obs_col].cat.categories.values
-                        except AttributeError:
-                            # convert to categorical
-                            celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
-                            cats = celldata.matrix.obs[obs_col].cat.categories.values
-                            cats = np.unique(celldata.matrix.obs[obs_col])
-                        celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
-
-                    # save color dict in InSituExperiment
-                    self.colors[obs_col] = color_dict
-
-                    if verbose:
-                        print(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
-            # else:
-            #     print(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
-
-    def get_n_cells(
-        self,
-        cells_layer: Optional[str] = None
-        ):
-        n_cells = 0
-        for _, d in self.iterdata():
-            if not d.cells.is_empty:
-                celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
-                n_cells += len(celldata.matrix)
-
-        return n_cells
 
     def load_all(self,
                  skip: Optional[str] = None,
                  ):
+        """
+        Load all data modalities for all datasets.
+
+        Args:
+            skip (Optional[str], optional): A modality to skip during loading. Defaults to None.
+        """
         for xd in tqdm(self._data):
             for f in LOAD_FUNCS:
                 if skip is None or skip not in f:
@@ -891,7 +831,7 @@ class InSituExperiment:
         dpi_save: int = 300,
         **kwargs
         ):
-        """Create a plot with UMAPs of all datasets as subplots using scanpy's pl.umap function.
+        """Create a plot with embeddings of all datasets as subplots using scanpy's sc.pl.embedding function.
 
         Args:
             color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
@@ -1031,6 +971,157 @@ class InSituExperiment:
 
         else:
             raise TypeError("Criteria must be either a dictionary or a string.")
+
+
+
+    def remove_history(self):
+        for xd in tqdm(self._data):
+            xd.remove_history(verbose=False)
+
+    def save(self,
+             verbose: bool = False,
+             overwrite_metadata: bool = True,
+             overwrite_colors: bool = True,
+             metadata_only: bool = False,
+             **kwargs
+             ):
+        if metadata_only and not overwrite_metadata:
+            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
+
+        if not metadata_only:
+            if self.path is None:
+                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
+                return
+            else:
+                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
+                if not np.all(parent_path_identical):
+                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
+                else:
+                    for xd in tqdm(self._data):
+                        xd.save(
+                            verbose=verbose,
+                            **kwargs
+                            )
+
+            if overwrite_colors:
+                with open(self.path / "colors.json", 'w') as f:
+                    json.dump(self.colors, f)
+
+        if overwrite_metadata:
+            # Optionally, save the metadata as a CSV file
+            self._metadata.to_csv(self.path / "metadata.csv", index=True)
+
+
+
+    def saveas(
+        self,
+        path: Union[str, os.PathLike, Path],
+        overwrite: bool = False,
+        verbose: bool = False, **kwargs):
+        """Save all datasets to a specified folder.
+
+        Args:
+            path (Union[str, os.PathLike, Path]): The path to the folder where datasets will be saved.
+        """
+        # Create the main directory if it doesn't exist
+        path = Path(path)
+
+        # check overwrite
+        check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
+
+        print(f"Saving InSituExperiment to {str(path)}") if verbose else None
+
+        # Iterate over the datasets and save each one in a numbered subfolder
+        for index, dataset in enumerate(tqdm(self._data)):
+            subfolder_path = path / f"data-{str(index).zfill(3)}"
+            dataset.saveas(subfolder_path, verbose=False, **kwargs)
+
+        # Optionally, save the metadata as a CSV file
+        self._metadata.to_csv(path / "metadata.csv", index=True)
+
+        with open(path / "colors.json", 'w') as f:
+            json.dump(self.colors, f)
+
+        print("Saved.") if verbose else None
+
+    def show(
+        self,
+        index: int,
+        verbose: bool = False
+        ):
+        """
+        Displays the dataset at the specified index.
+
+        Args:
+            index (int): The index of the dataset to display.
+            return_viewer (bool, optional): If True, returns the viewer object of the dataset. Defaults to True.
+
+        Returns:
+            Viewer: The viewer object of the dataset if return_viewer is True.
+        """
+        dataset = self.data[index]
+        dataset.show(verbose=verbose)
+
+    def show_modality(self, modality, uid_column: str = "sample_id"):
+        repr_string = ""
+        for meta, data in self.iterdata():
+            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
+            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+
+        print(repr_string)
+
+    def sync_colors(
+        self,
+        keys: Union[str, List[str]],
+        cells_layer: Optional[str] = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        overwrite: bool = False,
+        verbose: bool = True
+    ):
+        """
+        Synchronize color dictionaries for categorical metadata across datasets.
+
+        Args:
+            keys (Union[str, List[str]]): The metadata keys to synchronize colors for.
+            cells_layer (Optional[str], optional): The layer to access. Defaults to None.
+            palette (ListedColormap, optional): The color palette to use. Defaults to DEFAULT_CATEGORICAL_CMAP.
+            overwrite (bool, optional): Whether to overwrite existing color dictionaries. Defaults to False.
+            verbose (bool, optional): Whether to print status messages. Defaults to True.
+        """
+        # Make sure obs_cols is a list
+        keys = convert_to_list(keys)
+
+        for obs_col in keys:
+            if obs_col not in self.colors or overwrite:
+                # create a color dictionary with all categories
+                color_dict = self._create_categorical_color_dict(
+                    obs_col=obs_col,
+                    cells_layer=cells_layer,
+                    palette=palette
+                )
+
+                if color_dict is not None:
+                    # iterate over all datasets and set the colors in .uns
+                    uns_key = f"{obs_col}_colors"
+                    for _, xd in self.iterdata():
+                        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+
+                        try:
+                            cats = celldata.matrix.obs[obs_col].cat.categories.values
+                        except AttributeError:
+                            # convert to categorical
+                            celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
+                            cats = celldata.matrix.obs[obs_col].cat.categories.values
+                            cats = np.unique(celldata.matrix.obs[obs_col])
+                        celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
+
+                    # save color dict in InSituExperiment
+                    self.colors[obs_col] = color_dict
+
+                    if verbose:
+                        print(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+            else:
+                print(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
 
 
     @classmethod
@@ -1234,99 +1325,3 @@ class InSituExperiment:
                 experiment.add(data=cropped_data, metadata=metadata)
 
         return experiment
-
-    def remove_history(self):
-        for xd in tqdm(self._data):
-            xd.remove_history(verbose=False)
-
-    def save(self,
-             verbose: bool = False,
-             overwrite_metadata: bool = True,
-             overwrite_colors: bool = True,
-             metadata_only: bool = False,
-             **kwargs
-             ):
-        if metadata_only and not overwrite_metadata:
-            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
-
-        if not metadata_only:
-            if self.path is None:
-                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
-                return
-            else:
-                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
-                if not np.all(parent_path_identical):
-                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
-                else:
-                    for xd in tqdm(self._data):
-                        xd.save(
-                            verbose=verbose,
-                            **kwargs
-                            )
-
-            if overwrite_colors:
-                with open(self.path / "colors.json", 'w') as f:
-                    json.dump(self.colors, f)
-
-        if overwrite_metadata:
-            # Optionally, save the metadata as a CSV file
-            self._metadata.to_csv(self.path / "metadata.csv", index=True)
-
-
-
-    def saveas(
-        self,
-        path: Union[str, os.PathLike, Path],
-        overwrite: bool = False,
-        verbose: bool = False, **kwargs):
-        """Save all datasets to a specified folder.
-
-        Args:
-            path (Union[str, os.PathLike, Path]): The path to the folder where datasets will be saved.
-        """
-        # Create the main directory if it doesn't exist
-        path = Path(path)
-
-        # check overwrite
-        check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
-
-        print(f"Saving InSituExperiment to {str(path)}") if verbose else None
-
-        # Iterate over the datasets and save each one in a numbered subfolder
-        for index, dataset in enumerate(tqdm(self._data)):
-            subfolder_path = path / f"data-{str(index).zfill(3)}"
-            dataset.saveas(subfolder_path, verbose=False, **kwargs)
-
-        # Optionally, save the metadata as a CSV file
-        self._metadata.to_csv(path / "metadata.csv", index=True)
-
-        with open(path / "colors.json", 'w') as f:
-            json.dump(self.colors, f)
-
-        print("Saved.") if verbose else None
-
-    def show(
-        self,
-        index: int,
-        verbose: bool = False
-        ):
-        """
-        Displays the dataset at the specified index.
-
-        Args:
-            index (int): The index of the dataset to display.
-            return_viewer (bool, optional): If True, returns the viewer object of the dataset. Defaults to True.
-
-        Returns:
-            Viewer: The viewer object of the dataset if return_viewer is True.
-        """
-        dataset = self.data[index]
-        dataset.show(verbose=verbose)
-
-    def show_modality(self, modality, uid_column: str = "sample_id"):
-        repr_string = ""
-        for meta, data in self.iterdata():
-            repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
-            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
-
-        print(repr_string)
