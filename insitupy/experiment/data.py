@@ -184,6 +184,9 @@ class InSituExperiment:
 
     @property
     def regions(self):
+        """
+        Displays a summary of the 'transcripts' modality for all datasets.
+        """
         self.show_modality("regions")
 
     @property
@@ -1082,8 +1085,7 @@ class InSituExperiment:
 
     @classmethod
     def concat(cls, objs, new_col_name=None):
-        """
-        Concatenate multiple InSituExperiment objects.
+        """Concatenate multiple InSituExperiment objects.
 
         Args:
             objs (Union[List[InSituExperiment], Dict[str, InSituExperiment]]):
@@ -1134,8 +1136,7 @@ class InSituExperiment:
                     mode: Literal["insitupy", "xenium"] = "insitupy",
                     **kwargs
                     ):
-        """
-        Create an InSituExperiment object from a configuration file.
+        """Create an InSituExperiment object from a configuration file.
 
         Args:
             config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
@@ -1216,6 +1217,23 @@ class InSituExperiment:
                     region_key: str,
                     region_names: Optional[Union[List[str], str]] = None
                     ):
+        """Creates an `InSituExperiment` object from specified regions in the given `InSituData`.
+
+        Args:
+            data (InSituData): The input data containing regions to extract.
+            region_key (str): The key identifying the region of interest in `data.regions`.
+            region_names (Optional[Union[List[str], str]]): A list of region names or a single region name to include
+            in the experiment. If None, all regions under the specified `region_key` are included.
+
+        Returns:
+            InSituExperiment: An instance of `InSituExperiment` containing the cropped data and metadata
+            for the specified regions.
+
+        Notes:
+            - The `region_names` parameter is converted to a list if a single string is provided.
+            - The method iterates over the sorted list of region names in the `region_key` dataframe,
+                crops the data for each region, and adds it to the experiment along with its metadata.
+        """
 
         # Retrieve the regions dataframe
         region_df = data.regions[region_key]
@@ -1281,8 +1299,6 @@ class InSituExperiment:
         experiment._colors = colors
 
         return experiment
-
-
 
     def _check_obs_uniqueness(
         self,
