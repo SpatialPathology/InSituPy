@@ -7,13 +7,11 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
 import anndata
-import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
-from matplotlib.axes._axes import Axes
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 from tqdm import tqdm
@@ -27,10 +25,8 @@ from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._io.plots import save_and_show_figure
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.experiment._checks import _all_obs_names_unique
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils._checks import is_integer_counts
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -69,7 +65,7 @@ class InSituExperiment:
         >>> experiment.plot_umaps(color="cell_type", title_column="experiment")
     """
 
-    from .._core._deprecated import plot_overview
+    from ._deprecated import plot_overview
     def __init__(self):
         """
         Initialize an InSituExperiment object.
@@ -161,28 +157,28 @@ class InSituExperiment:
     @property
     def cells(self):
         """
-        Show a summary of :attr:`~insitupy._core.data.InSituData.cells` for all datasets.
+        Displays a summary of :attr:`~insitupy._core.data.InSituData.cells` for all datasets.
         """
         self.show_modality("cells")
 
     @property
     def images(self):
         """
-        Show a summary of the 'images' modality for all datasets.
+        Displays a summary of the 'images' modality for all datasets.
         """
         self.show_modality("images")
 
     @property
     def transcripts(self):
         """
-        Show a summary of the 'transcripts' modality for all datasets.
+        Displays a summary of the 'transcripts' modality for all datasets.
         """
         self.show_modality("transcripts")
 
     @property
     def annotations(self):
         """
-        Show a summary of the 'transcripts' modality for all datasets.
+        Displays a summary of the 'transcripts' modality for all datasets.
         """
         self.show_modality("annotations")
 
@@ -1133,45 +1129,6 @@ class InSituExperiment:
         return new_experiment
 
     @classmethod
-    def read(cls, path: Union[str, os.PathLike, Path]):
-        """Read an InSituExperiment object from a specified folder.
-
-        Args:
-            path (Union[str, os.PathLike, Path]): The path to the folder where datasets are saved.
-
-        Returns:
-            InSituExperiment: A new InSituExperiment object with the loaded data.
-        """
-        path = Path(path)
-
-        # Load metadata
-        metadata_path = path / "metadata.csv"
-        metadata = pd.read_csv(metadata_path, index_col=0)
-
-        try:
-            # load colors
-            with open(path / "colors.json", 'r') as f:
-                colors = json.load(f)
-        except FileNotFoundError:
-            colors = {}
-
-        # Load each dataset
-        data = []
-        dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
-        for dataset_path in tqdm(dataset_paths):
-            dataset = InSituData.read(dataset_path)
-            data.append(dataset)
-
-        # Create a new InSituExperiment object
-        experiment = cls()
-        experiment._metadata = metadata
-        experiment._data = data
-        experiment._path = path
-        experiment._colors = colors
-
-        return experiment
-
-    @classmethod
     def from_config(cls,
                     config_path: Union[str, os.PathLike, Path],
                     mode: Literal["insitupy", "xenium"] = "insitupy",
@@ -1285,6 +1242,47 @@ class InSituExperiment:
                 experiment.add(data=cropped_data, metadata=metadata)
 
         return experiment
+
+    @classmethod
+    def read(cls, path: Union[str, os.PathLike, Path]):
+        """Read an InSituExperiment object from a specified folder.
+
+        Args:
+            path (Union[str, os.PathLike, Path]): The path to the folder where datasets are saved.
+
+        Returns:
+            InSituExperiment: A new InSituExperiment object with the loaded data.
+        """
+        path = Path(path)
+
+        # Load metadata
+        metadata_path = path / "metadata.csv"
+        metadata = pd.read_csv(metadata_path, index_col=0)
+
+        try:
+            # load colors
+            with open(path / "colors.json", 'r') as f:
+                colors = json.load(f)
+        except FileNotFoundError:
+            colors = {}
+
+        # Load each dataset
+        data = []
+        dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
+        for dataset_path in tqdm(dataset_paths):
+            dataset = InSituData.read(dataset_path)
+            data.append(dataset)
+
+        # Create a new InSituExperiment object
+        experiment = cls()
+        experiment._metadata = metadata
+        experiment._data = data
+        experiment._path = path
+        experiment._colors = colors
+
+        return experiment
+
+
 
     def _check_obs_uniqueness(
         self,

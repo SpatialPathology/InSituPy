@@ -29,9 +29,6 @@ def normalize_and_transform(self, *args, **kwargs):
 def reduce_dimensions(self, *args, **kwargs):
     warn("`reduce_dimensions()` is deprecated. Instead, use `insitupy.preprocessing.reduce_dimensions()` for dimensionality reduction and `insitupy.preprocessing.cluster_cells()` for clustering.", DeprecationWarning, stacklevel=2)
 
-def plot_overview(self, *args, **kwargs):
-    warn("`plot_overview()` is deprecated. Use `insitupy.plotting.plot_overview()` instead.", DeprecationWarning, stacklevel=2)
-
 def save_current_colorlegend(self, *args, **kwargs):
     warn("`save_current_colorlegend()` is deprecated. Use `.save_colorlegends()` instead.", DeprecationWarning, stacklevel=2)
 
