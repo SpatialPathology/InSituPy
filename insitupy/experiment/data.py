@@ -49,12 +49,6 @@ class InSituExperiment:
     represented as an :class:`~insitupy._core.data.InSituData` object, and maintains associated metadata in a
     `pandas.DataFrame`.
 
-    Attributes:
-        metadata (pd.DataFrame): A DataFrame containing metadata for the datasets.
-        data (list): A list of :class:`~insitupy._core.data.InSituData` objects representing the datasets.
-        path (str or None): The save path of the `InSituExperiment` object.
-        colors (dict): A dictionary mapping metadata keys to color dictionaries for visualization.
-
     Examples:
         >>> # Create an InSituExperiment object
         >>> experiment = InSituExperiment()
@@ -157,7 +151,7 @@ class InSituExperiment:
         return new_experiment
 
     def __len__(self):
-        """Return the number of datasets in the experiment.
+        """Returns the number of datasets in the experiment.
 
         Returns:
             int: The number of datasets.
@@ -165,9 +159,41 @@ class InSituExperiment:
         return len(self._data)
 
     @property
+    def cells(self):
+        """
+        Show a summary of :attr:`~insitupy._core.data.InSituData.cells` for all datasets.
+        """
+        self.show_modality("cells")
+
+    @property
+    def images(self):
+        """
+        Show a summary of the 'images' modality for all datasets.
+        """
+        self.show_modality("images")
+
+    @property
+    def transcripts(self):
+        """
+        Show a summary of the 'transcripts' modality for all datasets.
+        """
+        self.show_modality("transcripts")
+
+    @property
+    def annotations(self):
+        """
+        Show a summary of the 'transcripts' modality for all datasets.
+        """
+        self.show_modality("annotations")
+
+    @property
+    def regions(self):
+        self.show_modality("regions")
+
+    @property
     def colors(self):
         """
-        Get the color dictionaries created by `sync_colors`.
+        Color dictionaries created by :meth:`~insitupy.experiment.data.InSituExperiment.sync_colors`.
 
         Returns:
             dict: A dictionary mapping metadata keys to color dictionaries.
@@ -177,7 +203,7 @@ class InSituExperiment:
     @property
     def data(self):
         """
-        Get the list of datasets.
+        List of datasets as :class:`~insitupy._core.data.InSituData` objects.
 
         Returns:
             list: A list of :class:`~insitupy._core.data.InSituData` objects.
@@ -187,7 +213,7 @@ class InSituExperiment:
     @property
     def metadata(self):
         """
-        Get the metadata DataFrame.
+        Experiment-level metadata.
 
         Returns:
             pd.DataFrame: A copy of the metadata DataFrame.
@@ -197,78 +223,12 @@ class InSituExperiment:
     @property
     def path(self):
         """
-        Check if the observation names are unique across all datasets.
+        Save path of the InSituExperiment object.
 
-        Args:
-            cells_layer (Optional[str]): The layer in `xd.cells` to access. Defaults to None.
-
-        Raises:
-            Warning: If observation names are not unique across all datasets.
+        Returns:
+            str or None: The save path of the object, or None if not set.
         """
         return self._path
-
-    def _check_obs_uniqueness(
-        self,
-        cells_layer: Optional[str] = None
-        ):
-        """
-        Check if the names of the observations (index in .obs or .obs_names) are unique across all datasets.
-        """
-        # get obs dataframes
-        obs_list = []
-        for _, d in self.iterdata():
-            if not d.cells.is_empty:
-                celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
-                obs_list.append(celldata.matrix.obs)
-
-        # concatenate the obs dataframes
-        all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
-        if not all_obs.index.is_unique:
-            warnings.warn("Observation names are not unique across all datasets.")
-
-    def _create_categorical_color_dict(
-        self,
-        obs_col: str,
-        cells_layer: Optional[str] = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
-        ) -> Dict:
-        cols = []
-        for _, xd in self.iterdata():
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            if obs_col in celldata.matrix.obs.columns:
-                if celldata.matrix.obs[obs_col].isna().all():
-                    raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
-                cols.append(np.unique(celldata.matrix.obs[obs_col]))
-
-        if len(cols) > 0:
-            all_cats = np.sort(np.unique(np.concatenate(cols)))
-
-            # create color dict
-            color_dict = map_to_colors(all_cats, palette=palette)
-            return color_dict
-        else:
-            return None
-
-
-    @property
-    def cells(self):
-        self.show_modality("cells")
-
-    @property
-    def images(self):
-        self.show_modality("images")
-
-    @property
-    def transcripts(self):
-        self.show_modality("transcripts")
-
-    @property
-    def annotations(self):
-        self.show_modality("annotations")
-
-    @property
-    def regions(self):
-        self.show_modality("regions")
 
     def add(self,
             data: Union[str, os.PathLike, Path, InSituData],
@@ -1325,3 +1285,51 @@ class InSituExperiment:
                 experiment.add(data=cropped_data, metadata=metadata)
 
         return experiment
+
+    def _check_obs_uniqueness(
+        self,
+        cells_layer: Optional[str] = None
+        ):
+        """
+        Check if the observation names are unique across all datasets.
+
+        Args:
+            cells_layer (Optional[str]): The layer in `xd.cells` to access. Defaults to None.
+
+        Raises:
+            Warning: If observation names are not unique across all datasets.
+        """
+        # get obs dataframes
+        obs_list = []
+        for _, d in self.iterdata():
+            if not d.cells.is_empty:
+                celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
+                obs_list.append(celldata.matrix.obs)
+
+        # concatenate the obs dataframes
+        all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
+        if not all_obs.index.is_unique:
+            warnings.warn("Observation names are not unique across all datasets.")
+
+    def _create_categorical_color_dict(
+        self,
+        obs_col: str,
+        cells_layer: Optional[str] = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
+        ) -> Dict:
+        cols = []
+        for _, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            if obs_col in celldata.matrix.obs.columns:
+                if celldata.matrix.obs[obs_col].isna().all():
+                    raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
+                cols.append(np.unique(celldata.matrix.obs[obs_col]))
+
+        if len(cols) > 0:
+            all_cats = np.sort(np.unique(np.concatenate(cols)))
+
+            # create color dict
+            color_dict = map_to_colors(all_cats, palette=palette)
+            return color_dict
+        else:
+            return None
