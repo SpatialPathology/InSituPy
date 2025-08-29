@@ -1149,10 +1149,10 @@ class InSituExperiment:
 
         Example of a valid configuration file:
             +---------------------+------------------+------------+------------+
-            | directory           | experiment_name  | date       | patient    |
+            | directory           | experiment_name  | patient    | treatment  |
             +---------------------+------------------+------------+------------+
-            | /path/to/dataset1   | Experiment 1     | 2023-09-01 | Patient A  |
-            | /path/to/dataset2   | Experiment 2     | 2023-09-02 | Patient B  |
+            | /path/to/dataset1   | Experiment 1     | Patient A  | Drug A     |
+            | /path/to/dataset2   | Experiment 2     | Patient B  | Drug B     |
             +---------------------+------------------+------------+------------+
 
         """
