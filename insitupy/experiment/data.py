@@ -1269,7 +1269,7 @@ class InSituExperiment:
             path (Union[str, os.PathLike, Path]): The path to the folder where datasets are saved.
 
         Returns:
-            InSituExperiment: A new InSituExperiment object with the loaded data.
+            InSituExperiment: :class:`~insitupy.experiment.data.InSituExperiment` object.
         """
         path = Path(path)
 

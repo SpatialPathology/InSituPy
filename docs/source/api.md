@@ -23,7 +23,7 @@ Import InSituPy as::
     InSituData
 ```
 
-Read the `InSituData` object with:
+Read a saved `InSituData` object with:
 
 ```{eval-rst}
 .. module:: insitupy._core
@@ -47,7 +47,7 @@ Read the `InSituData` object with:
     InSituExperiment
 ```
 
-Read the `InSituExperiment` object with:
+Read a saved `InSituExperiment` project with:
 
 ```{eval-rst}
 .. module:: insitupy.experiment
@@ -57,6 +57,40 @@ Read the `InSituExperiment` object with:
     :toctree: generated
 
     InSituExperiment.read
+```
+
+To generate a new `InSituExperiment` object, following functions are available:
+
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    InSituExperiment.from_config
+```
+
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    InSituExperiment.from_regions
+```
+
+To concatenate multiple `InSituExperiment` objects, one can use:
+
+```{eval-rst}
+.. module:: insitupy.experiment
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated
+
+    InSituExperiment.concat
 ```
 
 ## Core Data Classes
