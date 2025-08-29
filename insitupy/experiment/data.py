@@ -1152,6 +1152,7 @@ class InSituExperiment:
             | directory           | experiment_name  | patient    | treatment  |
             +---------------------+------------------+------------+------------+
             | /path/to/dataset1   | Experiment 1     | Patient A  | Drug A     |
+            +---------------------+------------------+------------+------------+
             | /path/to/dataset2   | Experiment 2     | Patient B  | Drug B     |
             +---------------------+------------------+------------+------------+
 
