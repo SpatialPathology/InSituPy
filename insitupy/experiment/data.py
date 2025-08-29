@@ -1148,14 +1148,13 @@ class InSituExperiment:
         - **Other columns**: These columns can contain any additional metadata you want to associate with each dataset. The metadata will be extracted from these columns and stored in the InSituExperiment object.
 
         Example of a valid configuration file:
+            +---------------------+------------------+------------+------------+
+            | directory           | experiment_name  | date       | patient    |
+            +---------------------+------------------+------------+------------+
+            | /path/to/dataset1   | Experiment 1     | 2023-09-01 | Patient A  |
+            | /path/to/dataset2   | Experiment 2     | 2023-09-02 | Patient B  |
+            +---------------------+------------------+------------+------------+
 
-        | directory         | experiment_name | date       | patient    |
-        |-------------------|-----------------|------------|------------|
-        | /path/to/dataset1 | Experiment 1    | 2023-09-01 | Patient A  |
-        | /path/to/dataset2 | Experiment 2    | 2023-09-02 | Patient B  |
-
-        Returns:
-            InSituExperiment: A new InSituExperiment object with the loaded data and metadata.
         """
         config_path = Path(config_path)
 
