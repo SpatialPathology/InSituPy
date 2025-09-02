@@ -147,6 +147,7 @@ figures/
 data/
 
 .DS_Store
+._*
 
 # build files
 jupyter_execute/
