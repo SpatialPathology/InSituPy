@@ -26,18 +26,15 @@ from tqdm import tqdm
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
                                  LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy.interactive._configs import _get_viewer_uid
-from insitupy.utils._helpers import (_get_expression_values,
-                                     sort_paths_by_datetime)
-from insitupy.interactive._layers import _create_points_layer
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.interactive._widgets import SaveWidget, SyncButton
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
+from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
+                                write_dict_to_json)
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
+from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               MultiCellData, RegionsData)
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
@@ -46,8 +43,11 @@ from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      read_shapesdata)
 from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
-from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
-                               write_dict_to_json)
+from insitupy.interactive._configs import _get_viewer_uid
+from insitupy.interactive._layers import _create_points_layer
+from insitupy.interactive._widgets import SaveWidget, SyncButton
+from insitupy.utils._helpers import (_get_expression_values,
+                                     sort_paths_by_datetime)
 from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
@@ -60,7 +60,8 @@ if WITH_NAPARI:
     from insitupy.interactive._configs import config_manager
 
     #from napari.layers.shapes.shapes import Shapes
-    from ..interactive._widgets import _initialize_widgets, add_new_geometries_widget
+    from ..interactive._widgets import (_initialize_widgets,
+                                        add_new_geometries_widget)
 
 
 class InSituData:
@@ -746,7 +747,7 @@ class InSituData:
         #     if verbose:
         #         raise ModalityNotFoundError(modality="annotations")
         # extract available paths
-        paths = [p for p in (self.path / "annotations").glob("*") if p.is_dir()]
+        paths = [p for p in (self.path / "annotations").glob("[!.]*") if p.is_dir()]
 
         if len(paths) == 0:
             if verbose:
@@ -797,7 +798,7 @@ class InSituData:
         #         raise ModalityNotFoundError(modality="regions")
 
         # extract available paths
-        paths = [p for p in (self.path / "regions").glob("*") if p.is_dir()]
+        paths = [p for p in (self.path / "regions").glob("[!.]*") if p.is_dir()]
 
         if len(paths) == 0:
             if verbose:
@@ -849,7 +850,7 @@ class InSituData:
             #         raise ModalityNotFoundError(modality="cells")
 
             # extract available paths
-            paths = [p for p in (self.path / "cells").glob("*") if p.is_dir()]
+            paths = [p for p in (self.path / "cells").glob("[!.]*") if p.is_dir()]
 
             if len(paths) == 0:
                 if verbose:
@@ -878,7 +879,7 @@ class InSituData:
             #     if verbose:
             #         raise ModalityNotFoundError(modality="images")
 
-            img_paths = list((self.path / "images").glob("*.zarr"))
+            img_paths = list((self.path / "images").glob("[!.]*.zarr"))
             if len(img_paths) == 0:
                 if verbose:
                     warn(ModalityNotFoundWarning("images"), stacklevel=2)
@@ -1274,7 +1275,7 @@ class InSituData:
             "uid": [],
             "note": []
         }
-        for d in self._quicksave_dir.glob("*"):
+        for d in self._quicksave_dir.glob("[!.]*"):
             parse_res = parse(pattern, d.stem).named
             for key, value in parse_res.items():
                 res[key].append(value)
@@ -1755,7 +1756,7 @@ class InSituData:
         for cat in ["annotations", "cells", "regions"]:
             dirs_to_remove = []
             #if hasattr(self, cat):
-            files = sorted((self._path / cat).glob("*"))
+            files = sorted((self._path / cat).glob("[!.]*"))
             if len(files) > 1:
                 dirs_to_remove = files[:-1]
 

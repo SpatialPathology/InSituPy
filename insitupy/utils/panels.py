@@ -16,7 +16,7 @@ class XeniumPanels:
         # panel_dir = panel_dir.resolve()
         script_dir = Path(__file__).parent
         panel_dir = (script_dir / "../_xenium_panels/").resolve()
-        panel_paths = sorted(panel_dir.glob("*.csv"))
+        panel_paths = sorted(panel_dir.glob("[!.]*.csv"))
 
         for p in panel_paths:
             name = p.stem.split("_")[1]
