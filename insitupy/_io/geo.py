@@ -126,6 +126,8 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
                 # convert numpy arrays to lists
                 if isinstance(entry, np.ndarray):
                     entry = convert_to_list(entry)
+                elif isinstance(entry, tuple):
+                    entry = convert_to_list(entry)
 
                 classification_dict[column] = entry
             # Append the dictionary to the list

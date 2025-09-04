@@ -15,12 +15,12 @@ from parse import *
 from zarr.errors import ArrayNotFoundError
 
 from insitupy import __version__
+from insitupy._io.files import read_json
 from insitupy.dataclasses._segmentations import _read_baysor_polygons
 from insitupy.dataclasses.dataclasses import (AnnotationsData, BoundariesData,
                                               CellData, ImageData,
                                               MultiCellData, RegionsData,
                                               ShapesData)
-from insitupy._io.files import read_json
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 
