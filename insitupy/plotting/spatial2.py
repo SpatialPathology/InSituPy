@@ -1,7 +1,7 @@
 
 import gc
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import List, Literal, Optional, Tuple, Union
 
 import dask.array as da
@@ -35,180 +35,28 @@ FilterMode = Literal[
     ]
 
 
-
-
-# class _SinglePlotConfig:
-#     '''
-#     Object extracting spatial coordinates and expression data from anndata object.
-#     '''
-#     def __init__(
-#         self,
-#         adata: AnnData,
-#         key: List[str],
-#         ax: plt.Axes,
-#         name: str,
-#         idx_key: int,
-#         color_config: dict,
-#         add_legend: bool,
-#         RegionDataObject: Optional[RegionsData],
-#         region_tuple: Optional[Tuple[str, str]],
-#         AnnotationsDataObject: Optional[AnnotationsData],
-#         annotations_key: Optional[Union[str, Tuple[str, Optional[Union[Literal["all"], str, List[str]]]]]],
-#         annotations_mode: Literal["outlined", "filled"] = "outlined",
-#         ImageDataObject: Optional[ImageData] = None,
-#         image_key: Optional[str] = None,
-#         pixelwidth_per_subplot: int = 200,
-#         raw: bool = False,
-#         layer: Optional[str] = None,
-#         obsm_key: str = 'spatial',
-#         origin_zero: bool = False, # whether to start axes ticks at 0
-#         xlim_general: Optional[Tuple[int, int]] = None,
-#         ylim_general: Optional[Tuple[int, int]] = None,
-#         histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
-#         legend_max_per_col: int = 10
-#         ):
-
-        # # add arguments to object
-        # self.key = key
-        # self.ax = ax
-        # self.name = name
-        # self.idx_key = idx_key
-        # self.add_legend = add_legend
-        # self.annotations_mode = annotations_mode
-        # self.legend_max_per_col = legend_max_per_col
-
-        # # retrieve color dictionary
-        # self.color_dict = color_config[key]["color_dict"]
-        # self.crange = color_config[key]["crange"]
-        # self.categorical = color_config[key]["is_categorical"] # True if color_dict is not None
-        # self.crange = color_config[key]["crange"]
-
-        # # prepare limits using region or lim arguments
-        # if region_tuple is not None:
-        #     if xlim_general is not None or ylim_general is not None:
-        #         raise ValueError("If region_tuple is given, xlim and ylim need to be None.")
-        #     else:
-        #         region_df = RegionDataObject[region_tuple[0]]
-        #         geom = region_df[region_df["name"] == region_tuple[1]]["geometry"].item()
-        #         self.xlim = [geom.bounds[0], geom.bounds[2]]
-        #         self.ylim = [geom.bounds[1], geom.bounds[3]]
-        # else:
-        #     # make sure limits are lists
-        #     self.xlim = list(xlim_general) if xlim_general is not None else xlim_general
-        #     self.ylim = list(ylim_general) if ylim_general is not None else ylim_general
-
-        # ## Extract coordinates
-        # # extract x and y pixel coordinates and convert to micrometer
-        # self.x_coords = adata.obsm[obsm_key][:, 0].copy()
-        # self.y_coords = adata.obsm[obsm_key][:, 1].copy()
-
-        # # shift coordinates that they start at (0,0)
-        # if origin_zero:
-        #     self.x_offset = self.x_coords.min()
-        #     self.y_offset = self.y_coords.min()
-        #     self.x_coords -= self.x_offset
-        #     self.y_coords -= self.y_offset
-        # else:
-        #     self.x_offset = self.y_offset = 0
-
-        # if self.xlim is None:
-        #     # xmin = np.min([self.x_coords.min(), self.y_coords.min()]) # make sure that result is always a square
-        #     # xmax = np.max([self.x_coords.max(), self.y_coords.max()])
-        #     xmin = self.x_coords.min()
-        #     xmax = self.x_coords.max()
-
-        #     # include margin
-        #     #self.xlim = (xmin - spot_size, xmax + spot_size)
-        #     self.xlim = (xmin, xmax)
-
-        # if self.ylim is None:
-        #     # ymin = np.min([self.x_coords.min(), self.y_coords.min()])
-        #     # ymax = np.max([self.x_coords.max(), self.y_coords.max()])
-        #     ymin = self.y_coords.min()
-        #     ymax = self.y_coords.max()
-
-        #     # include margin
-        #     #self.ylim = (ymin - spot_size, ymax + spot_size)
-        #     self.ylim = (ymin, ymax)
-
-        # # extract image information
-        # if not ImageDataObject is None:
-        #     # pick the image with the right resolution for plotting
-        #     max_pixel_size = np.max([self.xlim[1] - self.xlim[0], self.ylim[1] - self.ylim[0]]) / pixelwidth_per_subplot
-        #     orig_pixel_size = ImageDataObject.metadata[image_key]["pixel_size"]
-        #     img_pyramid = ImageDataObject[image_key]
-        #     pixel_sizes_levels = np.array([orig_pixel_size * (2**i) for i in range(len(img_pyramid))])
-
-        #     try:
-        #         selected_level = np.where(pixel_sizes_levels <= max_pixel_size)[0][-1].item()
-        #         selected_pixel_size = pixel_sizes_levels[selected_level].item()
-        #     except IndexError:
-        #         selected_level = 0
-        #         selected_pixel_size = pixel_sizes_levels[selected_level].item()
-
-        #     # extract parameters from ImageDataObject
-        #     self.pixel_size = selected_pixel_size
-        #     self.image = img_pyramid[selected_level]
-
-        #     ywidth = self.image.shape[0]
-        #     xwidth = self.image.shape[1]
-
-        #     # determine limits for selected pyramid image - clip to maximum image dims (important for extent of image during plotting)
-        #     self.pixel_xlim = np.clip([int(elem / selected_pixel_size) for elem in self.xlim], a_min=0, a_max=xwidth).tolist()
-        #     self.pixel_ylim = np.clip([int(elem / selected_pixel_size) for elem in self.ylim], a_min=0, a_max=ywidth).tolist()
-
-        #     # crop image
-        #     self.image = self.image[
-        #         self.pixel_ylim[0]:self.pixel_ylim[1],
-        #         self.pixel_xlim[0]:self.pixel_xlim[1]
-        #         ]
-
-        #     if histogram_setting is None:
-        #         self.vmin = self.vmax = None
-        #     elif histogram_setting == "auto":
-        #         self.vmin = da.percentile(self.image.ravel(), 30).compute().item()
-        #         self.vmax = da.percentile(self.image.ravel(), 99.5).compute().item()
-        #     elif isinstance(histogram_setting, tuple):
-        #         self.vmin = histogram_setting[0]
-        #         self.vmax = histogram_setting[1]
-        #     else:
-        #         raise ValueError(f"Unknown type for histogram_setting: {type(histogram_setting)}")
-        # else:
-        #     self.image = None
-
-        # if annotations_key is not None:
-        #     if isinstance(annotations_key, tuple):
-        #         ankey = annotations_key[0]
-        #         anvalues = annotations_key[1]
-
-        #         # get annotations dataframe
-        #         self.annotations_df = AnnotationsDataObject[ankey]
-
-        #         if anvalues not in ("all", None):
-        #             # filter them by what is provided in the values of the tuple
-        #             anvalues = convert_to_list(anvalues)
-        #             mask = self.annotations_df["name"].isin(anvalues)
-        #             self.annotations_df = self.annotations_df[mask]
-        #     elif isinstance(annotations_key, str):
-        #         # get annotations dataframe
-        #         self.annotations_df = AnnotationsDataObject[annotations_key]
-        #     else:
-        #         raise ValueError(f"Unknown type for annotations_key: {type(annotations_key)}. Must be either a tuple or a string.")
-
-        # else:
-        #     self.annotations_df = None
-
-        # # get color values for expression data or categories
-        # self.color_values, self.categorical = _extract_color_values(
-        #     adata=adata, key=self.key, raw=raw, layer=layer
-        # )
-
 # -------------------------------
 # CONFIG OBJECTS
 # -------------------------------
 
+class UpdatableConfig:
+    def update_values(self, **kwargs):
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise AttributeError(f"{key} is not a valid attribute of {self.__class__.__name__}.")
+
+    def show_all(self):
+        print(f"Configuration parameters for {self.__class__.__name__}:")
+        for field in fields(self):
+            name = field.name
+            value = getattr(self, name)
+            print(f"\t{name}: {value}")
+
+
 @dataclass
-class DataConfig:
+class DataConfig(UpdatableConfig):
     # data extraction config
     layer: Optional[str] = None
     raw: bool = False
@@ -224,16 +72,15 @@ class DataConfig:
     filter_mode: Optional[str] = None
     filter_tuple: Optional[Tuple] = None
 
-
 @dataclass
-class PlotConfig:
+class PlotConfig(UpdatableConfig):
     xlim: Optional[Tuple[float, float]] = None
     ylim: Optional[Tuple[float, float]] = None
     spot_size: float = 10
-    spot_type: str = "o"
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
     palette: str = DEFAULT_CATEGORICAL_CMAP
+    spot_type: str = "o"
     background_color: str = "white"
     cmap_center: Optional[float] = None
     normalize: Optional[colors.Normalize] = None
@@ -241,9 +88,8 @@ class PlotConfig:
     clb_title: Optional[str] = None
     annotations_mode: Literal["outlined", "filled"] = "outlined"
     crange: Optional[List[int]] = None
-    crange_type: Literal['minmax', 'max', 'percentile'] = 'minmax'
+    crange_type: Literal['minmax', 'max', 'upper_percentile', 'percentile'] = 'upper_percentile'
     origin_zero: bool = False
-    # name_column: Optional[str] = None
     label_size: int = 16
     title_size: int = 18
     tick_label_size: int = 14
@@ -256,8 +102,8 @@ class PlotConfig:
             self.normalize = colors.CenteredNorm(vcenter=self.cmap_center)
 
 @dataclass
-class LayoutConfig:
-    max_cols: Optional[int] = 4 # if None and
+class LayoutConfig(UpdatableConfig):
+    max_cols: Optional[int] = 4
     header: Optional[str] = None
     multikeys: bool = False
     multidata: bool = False
@@ -318,29 +164,20 @@ class LayoutConfig:
                     self.n_rows = 1
                     self.n_cols = self.n_plots
 
-        self.figsize = (6 * self.n_cols, 6 * self.n_rows)
-
-# @dataclass
-# class DataFilterConfig:
-#     filter_mode: Optional[str] = None
-#     filter_tuple: Optional[Tuple] = None
-#     region_tuple: Optional[Tuple[str, str]] = None,
-
-# @dataclass
-# class ImageConfig:
-#     image_key: Optional[str] = None
-#     pixelwidth_per_subplot: int = 200
-#     histogram_setting: Union[Literal["auto"], Tuple[int, int], None] = "auto"
+        if self.figsize is None:
+            self.figsize = (6 * self.n_cols, 6 * self.n_rows)
 
 def _get_crange(color_values, crange_type):
-    if crange_type == "max":
+    if crange_type == 'max':
         crange = [0, np.max(color_values)]
-    elif crange_type == "minmax":
+    elif crange_type == 'minmax':
         crange = [np.min(color_values), np.max(color_values)]
-    elif crange_type == "percentile":
+    elif crange_type == 'upper_percentile':
         crange = [0, np.percentile(color_values, 99)]
+    elif crange_type == 'percentile':
+        crange = [np.percentile(color_values, 1), np.percentile(color_values, 99)]
     else:
-        raise ValueError(f"Unknown crange_type: {crange_type}. Must be one of 'max', 'minmax', or 'percentile'.")
+        raise ValueError(f"Unknown crange_type: {crange_type}. Must be one of 'max', 'minmax', 'upper_percentile' or 'percentile'.")
 
     return crange
 
@@ -352,18 +189,9 @@ class ColorConfigMultiPlot:
         plot_config: PlotConfig,
         cells_layer: Optional[str] = None,
         keys: Union[str, List[str]] = None,
-        # palette = DEFAULT_CATEGORICAL_CMAP,
-        # crange: Optional[List[int]] = None,
-        # crange_type: Literal['minmax', 'max', 'percentile'] = 'minmax'
         ):
         # add properties
         self._dict = {}
-
-        # get parameters
-        # self.cells_layer = cells_layer
-        # self.raw = raw
-        # self.layer = layer
-        # self.palette = palette
 
         if _is_experiment(data):
             data_list = data.data
@@ -393,8 +221,6 @@ class ColorConfigMultiPlot:
                     cells_layer=cells_layer,
                     data_config=data_config,
                     plot_config=plot_config
-                    # crange=plot_config.crange,
-                    # crange_type=plot_config.crange_type
                     )
 
             # add entry to dictionary
@@ -476,7 +302,7 @@ class ColorConfigMultiPlot:
 
                 # extract the data
                 color_values, is_categorical = _extract_color_values(
-                    adata=ad, key=key, raw=plot_config.raw, layer=plot_config.layer
+                    adata=ad, key=key, raw=data_config.raw, layer=data_config.layer
                 )
 
                 if is_categorical:
@@ -499,10 +325,14 @@ class ColorConfigMultiPlot:
                 color_entry["max_value"] = np.max(value_list)
                 color_entry["is_categorical"] = False
                 # color_entry["crange"] = [0, color_entry["max_value"]]
-                color_entry["crange"] = _get_crange(
-                    color_values=value_list,
-                    crange_type=plot_config.crange_type
-                    )
+
+                if plot_config.crange is not None:
+                    color_entry["crange"] = plot_config.crange
+                else:
+                    color_entry["crange"] = _get_crange(
+                        color_values=value_list,
+                        crange_type=plot_config.crange_type
+                        )
             else:
                 raise ValueError(f"Values found for key {key} showed mixed type (categorical/numeric).")
 
@@ -513,18 +343,33 @@ def plot_spatial2(
     data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
     cells_layer: Optional[str] = None,
-    # raw: bool = False,
-    # layer: Optional[str] = None,
-    # obsm_key: str = 'spatial',
-    #ax: Optional[plt.Axes] = None,
+    layer: Optional[str] = None,
 
-    # SAVE CONFIGs
+    # data attribute keys
+    region_tuple: Optional[Tuple[str, str]] = None,
+    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
+    image_key: Optional[str] = None,
+
+    # filters
+    filter_mode: Optional[str] = None,
+    filter_tuple: Optional[Tuple] = None,
+
+    # plotting configs
+    xlim: Optional[Tuple[float, float]] = None,
+    ylim: Optional[Tuple[float, float]] = None,
+    spot_size: float = 10,
+    alpha: float = 1.0,
+
+    # layout configs
+    max_cols: Optional[int] = 4,
+
+    # save configs
     savepath: Optional[str] = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
 
-    # CONFIGs
+    # init config classes
     plot_config: PlotConfig = PlotConfig(),
     layout_config: LayoutConfig = LayoutConfig(),
     data_config: DataConfig = DataConfig(),
@@ -535,16 +380,28 @@ def plot_spatial2(
     # convert arguments to lists
     keys = convert_to_list(keys)
 
+    # update some values depending on function arguments
+    data_config.update_values(
+        layer=layer,
+        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
+        filter_mode=filter_mode, filter_tuple=filter_tuple
+        )
+    plot_config.update_values(
+        xlim=xlim, ylim=ylim,
+        spot_size=spot_size, alpha=alpha
+    )
+    layout_config.update_values(
+        max_cols=max_cols
+    )
+
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
         n_data = len(data)
-        # is_experiment = True
 
         # synchronize colors before plotting
         data.sync_colors(
             keys=keys,
             cells_layer=cells_layer,
-            #overwrite=overwrite_colors,
             palette=plot_config.palette
         )
     else:
@@ -557,10 +414,6 @@ def plot_spatial2(
         keys=keys,
         data_config=data_config,
         plot_config=plot_config
-        # raw=raw,
-        # layer=layer,
-        # palette=plot_config.palette,
-        # crange=plot_config.crange
     )
 
     layout_config.calc_subplot_params(
@@ -615,12 +468,13 @@ def setup_subplots(
         else:
             axs = np.array([axs])
 
-    remove_empty_subplots(
-        axes=axs,
-        nplots=layout_config.n_plots,
-        nrows=layout_config.n_rows,
-        ncols=layout_config.n_cols
-        )
+    if not (layout_config.multidata and layout_config.multikeys):
+        remove_empty_subplots(
+            axes=axs,
+            nplots=layout_config.n_plots,
+            nrows=layout_config.n_rows,
+            ncols=layout_config.n_cols
+            )
 
     if layout_config.header is not None:
         plt.suptitle(layout_config.header, fontsize=18, x=0.5, y=0.98)
@@ -1021,9 +875,6 @@ def single_spatial(
             annotations_key=data_config.annotations_key
         )
 
-
-
-
         # set the axes (add titles, set limits, etc.)
         _configure_axis_and_title(
             ax=ax,
@@ -1121,9 +972,6 @@ def single_spatial(
                 crange[0],
                 crange[1]
                 )
-            # else:
-            #     if self.crange_type == 'percentile':
-            #         clb.mappable.set_clim(0, np.percentile(ConfigData.color_values, 99))
 
         if annotations_df is not None:
             # convert rgb colors to hex colors
@@ -1162,119 +1010,3 @@ def single_spatial(
                     )
             else:
                 raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
-
-
-# def plot_spatial(
-#     data: Union[InSituData, InSituExperiment],
-#     keys: Union[str, List[str]],
-#     cells_layer: Optional[str] = None,
-#     raw: bool = False,
-#     layer: Optional[str] = None,
-#     filter_mode: Optional[FilterMode] = None,
-#     filter_tuple: Optional[Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]] = None,
-#     fig: Optional[plt.Figure] = None,
-#     ax: Optional[plt.Axes] = None,
-#     max_cols: int = 4,
-#     xlim: Optional[Tuple[float, float]] = None,
-#     ylim: Optional[Tuple[float, float]] = None,
-#     region_tuple: Tuple[str, str] = None,
-#     annotations_key: Optional[Union[str, Tuple[str, Optional[Union[Literal["all"], str, List[str]]]]]] = None,
-#     annotations_mode: Literal["outlined", "filled"] = "outlined",
-#     crange: Optional[List[int]] = None,
-#     crange_type: Literal['minmax', 'percentile'] = 'minmax',
-#     palette: str = DEFAULT_CATEGORICAL_CMAP,
-#     legend_max_per_col: int = 10,
-#     cmap_center: Optional[float] = None,
-#     dpi_display: int = 80,
-#     obsm_key: str = 'spatial',
-#     origin_zero: bool = False,
-#     spot_size: float = 10,
-#     spot_type: str = 'o',
-#     cmap: str = DEFAULT_CONTINUOUS_CMAP,
-#     overwrite_colors: bool = False,
-#     background_color: str = 'white',
-#     alpha: float = 1,
-#     colorbar: bool = True,
-#     clb_title: Optional[str] = None,
-#     header: Optional[str] = None,
-#     name_column: Optional[str] = None,
-#     title_size: int = 18,
-#     label_size: int = 16,
-#     tick_label_size: int = 14,
-#     image_key: Optional[str] = None,
-#     pixelwidth_per_subplot: int = 200,
-#     histogram_setting: Optional[Union[Literal["auto"], Tuple[int, int]]] = "auto",
-#     savepath: Optional[str] = None,
-#     save_only: bool = False,
-#     dpi_save: int = 300,
-#     show: bool = True,
-#     verbose: bool = False,
-# ):
-    # plotter = MultiSpatialPlot(
-    #     data=data,
-    #     keys=keys,
-    #     cells_layer=cells_layer,
-    #     raw=raw,
-    #     layer=layer,
-    #     filter_mode=filter_mode,
-    #     filter_tuple=filter_tuple,
-    #     fig=fig,
-    #     ax=ax,
-    #     max_cols=max_cols,
-    #     xlim=xlim,
-    #     ylim=ylim,
-    #     region_tuple=region_tuple,
-    #     annotations_key=annotations_key,
-    #     annotations_mode=annotations_mode,
-    #     crange=crange,
-    #     crange_type=crange_type,
-    #     palette=palette,
-    #     legend_max_per_col=legend_max_per_col,
-    #     cmap_center=cmap_center,
-    #     dpi_display=dpi_display,
-    #     obsm_key=obsm_key,
-    #     origin_zero=origin_zero,
-    #     spot_size=spot_size,
-    #     spot_type=spot_type,
-    #     cmap=cmap,
-    #     overwrite_colors=overwrite_colors,
-    #     background_color=background_color,
-    #     alpha=alpha,
-    #     colorbar=colorbar,
-    #     clb_title=clb_title,
-    #     header=header,
-    #     name_column=name_column,
-    #     title_size=title_size,
-    #     label_size=label_size,
-    #     tick_label_size=tick_label_size,
-    #     image_key=image_key,
-    #     pixelwidth_per_subplot=pixelwidth_per_subplot,
-    #     histogram_setting=histogram_setting,
-    #     savepath=savepath,
-    #     save_only=save_only,
-    #     dpi_save=dpi_save,
-    #     show=show,
-    #     verbose=verbose,
-    # )
-
-    # # Now use the config object as before
-    # plotter.prepare_colors()
-
-    # if plotter.ax is None:
-    #     plotter.setup_subplots()
-    # else:
-    #     assert plotter.fig is not None, "If axis for plotting is given, also a figure object needs to be provided via `fig`"
-    #     assert len(plotter.keys) == 1, "If single axis is given not more than one key is allowed."
-
-    # plotter.plot_to_subplots()
-
-    # save_and_show_figure(
-    #     savepath=plotter.savepath,
-    #     fig=plotter.fig,
-    #     save_only=plotter.save_only,
-    #     show=plotter.show,
-    #     dpi_save=plotter.dpi_save
-    # )
-
-    # gc.collect()
-
