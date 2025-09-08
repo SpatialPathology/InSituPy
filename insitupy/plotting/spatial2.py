@@ -110,6 +110,8 @@ class LayoutConfig(UpdatableConfig):
     n_rows: int = None
     n_cols: int = None
     n_plots: int = None
+    subplot_width: int = 6
+    subplot_height: int = 6
     figsize: Optional[Tuple] = None
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
@@ -165,7 +167,7 @@ class LayoutConfig(UpdatableConfig):
                     self.n_cols = self.n_plots
 
         if self.figsize is None:
-            self.figsize = (6 * self.n_cols, 6 * self.n_rows)
+            self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
 def _get_crange(color_values, crange_type):
     if crange_type == 'max':
@@ -370,15 +372,23 @@ def plot_spatial2(
     show: bool = True,
 
     # init config classes
-    plot_config: PlotConfig = PlotConfig(),
-    layout_config: LayoutConfig = LayoutConfig(),
-    data_config: DataConfig = DataConfig(),
+    plot_config: PlotConfig = None,
+    layout_config: LayoutConfig = None,
+    data_config: DataConfig = None,
 
     # others
     verbose: bool = False,
     ):
     # convert arguments to lists
     keys = convert_to_list(keys)
+
+    # init config classes
+    if plot_config is None:
+        plot_config = PlotConfig()
+    if layout_config is None:
+        layout_config = LayoutConfig()
+    if data_config is None:
+        data_config = DataConfig()
 
     # update some values depending on function arguments
     data_config.update_values(
