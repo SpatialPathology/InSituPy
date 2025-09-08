@@ -57,6 +57,24 @@ class UpdatableConfig:
 
 @dataclass
 class DataConfig(UpdatableConfig):
+    """Configuration class for data extraction and preprocessing.
+
+    Attributes:
+        layer (Optional[str]): The data layer to extract from, if applicable.
+        raw (bool): Whether to use raw data (default: False).
+        obsm_key (str): The key in `.obsm` containing spatial coordinates (default: 'spatial').
+        name_column (Optional[str]): Column name for sample/observation names.
+        region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region or subset of the data.
+        annotations_key (Optional[Tuple[str, Optional[Union[str, List[str]]]]]): Key(s) for annotations to extract.
+        image_key (Optional[str]): Key for accessing associated images.
+        filter_mode (Optional[str]): Filtering mode, if any (e.g., 'threshold', 'percentile').
+        filter_tuple (Optional[Tuple]): Parameters used for filtering data.
+
+    Methods:
+        update_values(**kwargs): Update one or more configuration attributes dynamically.
+        show_all(): Display all current configuration values.
+    """
+
     # data extraction config
     layer: Optional[str] = None
     raw: bool = False
@@ -74,6 +92,36 @@ class DataConfig(UpdatableConfig):
 
 @dataclass
 class PlotConfig(UpdatableConfig):
+    """Configuration class for plot appearance and rendering.
+
+    Attributes:
+        xlim (Optional[Tuple[float, float]]): X-axis limits.
+        ylim (Optional[Tuple[float, float]]): Y-axis limits.
+        spot_size (float): Size of scatter plot spots (default: 10).
+        alpha (float): Transparency level for plotted elements (default: 1.0).
+        cmap (str): Colormap for continuous variables.
+        palette (str): Color palette for categorical variables.
+        spot_type (str): Marker type for scatter plots (default: "o").
+        background_color (str): Background color of the plot (default: "white").
+        cmap_center (Optional[float]): Center value for diverging colormaps.
+        normalize (Optional[colors.Normalize]): Normalization strategy for color scaling.
+        legend_max_per_col (int): Maximum number of legend items per column (default: 10).
+        clb_title (Optional[str]): Title for the colorbar.
+        annotations_mode (Literal["outlined", "filled"]): How annotations are displayed (default: "outlined").
+        crange (Optional[List[int]]): Value range for color scaling.
+        crange_type (Literal["minmax", "max", "upper_percentile", "percentile"]): Method for computing color ranges (default: "upper_percentile").
+        origin_zero (bool): Whether to enforce origin at zero (default: False).
+        label_size (int): Font size for labels (default: 16).
+        title_size (int): Font size for titles (default: 18).
+        tick_label_size (int): Font size for tick labels (default: 14).
+        pixelwidth_per_subplot (int): Pixel width per subplot (default: 200).
+        histogram_setting (Union[Literal["auto"], Tuple[int, int], None]): Histogram bin settings (default: "auto").
+
+    Methods:
+        update_values(**kwargs): Update one or more configuration attributes dynamically.
+        show_all(): Display all current configuration values.
+    """
+
     xlim: Optional[Tuple[float, float]] = None
     ylim: Optional[Tuple[float, float]] = None
     spot_size: float = 10
@@ -103,6 +151,29 @@ class PlotConfig(UpdatableConfig):
 
 @dataclass
 class LayoutConfig(UpdatableConfig):
+    """Configuration class for subplot layout and figure arrangement.
+
+    Attributes:
+        max_cols (Optional[int]): Maximum number of columns in the subplot grid (default: 4).
+        header (Optional[str]): Figure header or title.
+        multikeys (bool): Whether multiple keys are plotted simultaneously (default: False).
+        multidata (bool): Whether multiple datasets are plotted simultaneously (default: False).
+        n_rows (int): Number of subplot rows.
+        n_cols (int): Number of subplot columns.
+        n_plots (int): Total number of subplots.
+        subplot_width (int): Width of each subplot in inches (default: 6).
+        subplot_height (int): Height of each subplot in inches (default: 6).
+        figsize (Optional[Tuple]): Overall figure size, computed if not provided.
+        add_legend_to_last_subplot (bool): Whether to add a legend to the last subplot (default: False).
+        dpi_display (int): Display resolution in DPI (default: 80).
+
+    Methods:
+        update_values(**kwargs): Update one or more configuration attributes dynamically.
+        show_all(): Display all current configuration values.
+        calc_subplot_params(keys, n_data, color_config): Compute subplot grid parameters
+            (rows, columns, number of plots) based on the given keys and datasets.
+    """
+
     max_cols: Optional[int] = 4
     header: Optional[str] = None
     multikeys: bool = False
@@ -379,6 +450,89 @@ def plot_spatial(
     # others
     verbose: bool = False,
     ):
+    """Plot spatial transcriptomics data with optional images, annotations, and regions.
+
+    This function generates spatial plots of molecular data from one or multiple
+    `InSituData` or `InSituExperiment` objects. It supports categorical and continuous
+    features, overlays images and annotations, and provides flexible configuration
+    for plotting, layout, and saving.
+
+    Parameters
+    ----------
+    Data arguments
+        data : InSituData or InSituExperiment
+            Input dataset or experiment.
+        keys : str or list of str
+            Feature key(s) to plot (e.g., gene names or annotations).
+        cells_layer : str, optional
+            Name of the cell layer to extract data from.
+        layer : str, optional
+            AnnData layer to extract values from.
+        region_tuple : tuple of (str, str), optional
+            Region identifier (dataset key, region name).
+        annotations_key : tuple or str, optional
+            Key(s) for annotations to overlay.
+        image_key : str, optional
+            Key for associated images to overlay.
+        filter_mode : str, optional
+            Mode used for filtering cells (e.g., "contains", "greater than").
+        filter_tuple : tuple, optional
+            Parameters for filtering (depends on ``filter_mode``).
+
+    Plot arguments
+        xlim : tuple of float, optional
+            X-axis limits.
+        ylim : tuple of float, optional
+            Y-axis limits.
+        spot_size : float, default=10
+            Marker size for cells.
+        alpha : float, default=1.0
+            Transparency for plotted markers.
+
+    Layout arguments
+        max_cols : int, optional, default=4
+            Maximum number of subplot columns.
+
+    Save/display arguments
+        savepath : str, optional
+            Path to save the figure (if None, figure is not saved).
+        save_only : bool, default=False
+            If True, save figure without displaying.
+        dpi_save : int, default=300
+            Resolution in DPI for saving the figure.
+        show : bool, default=True
+            Whether to display the plot.
+
+    Config objects
+        plot_config : PlotConfig, optional
+            Plot configuration object (overrides defaults if provided).
+        layout_config : LayoutConfig, optional
+            Layout configuration object (overrides defaults if provided).
+        data_config : DataConfig, optional
+            Data configuration object (overrides defaults if provided).
+
+    Miscellaneous
+        verbose : bool, default=False
+            If True, print progress messages.
+
+    Returns
+    -------
+    None
+        Displays and/or saves the generated spatial plot(s).
+
+    Raises
+    ------
+    ValueError
+        If filter parameters or layout arguments are invalid.
+    ValueError
+        If mixed categorical and continuous values are encountered for a key.
+
+    Examples
+    --------
+    >>> plot_spatial(data, keys="GeneA")
+    >>> plot_spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
+    """
+
     # convert arguments to lists
     keys = convert_to_list(keys)
 
