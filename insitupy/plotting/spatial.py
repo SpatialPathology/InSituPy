@@ -163,7 +163,7 @@ class _ColorConfigMultiPlot:
 
             if np.all(categorical_list):
                 # all values are categorical - concatenate all values
-                all_values = np.unique(np.concat(value_list))
+                all_values = np.unique(np.concatenate(value_list))
                 color_entry["color_dict"] = create_cmap_mapping(
                     all_values, cmap=self.palette
                     )
