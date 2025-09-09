@@ -1,7 +1,7 @@
 
 import gc
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
 
 import dask.array as da
@@ -17,6 +17,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._io.plots import save_and_show_figure
+from insitupy._mixins import _UpdatablePlottingConfig
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
@@ -34,29 +35,12 @@ FilterMode = Literal[
     "greater than", "less than", "greater or equal", "less or equal"
     ]
 
-
 # -------------------------------
 # CONFIG OBJECTS
 # -------------------------------
 
-class UpdatableConfig:
-    def update_values(self, **kwargs):
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
-                raise AttributeError(f"{key} is not a valid attribute of {self.__class__.__name__}.")
-
-    def show_all(self):
-        print(f"Configuration parameters for {self.__class__.__name__}:")
-        for field in fields(self):
-            name = field.name
-            value = getattr(self, name)
-            print(f"\t{name}: {value}")
-
-
 @dataclass
-class DataConfig(UpdatableConfig):
+class DataConfig(_UpdatablePlottingConfig):
     """Configuration class for data extraction and preprocessing.
 
     Attributes:
@@ -87,11 +71,11 @@ class DataConfig(UpdatableConfig):
     image_key: Optional[str] = None
 
     # filters
-    filter_mode: Optional[str] = None
+    filter_mode: Optional[FilterMode] = None,
     filter_tuple: Optional[Tuple] = None
 
 @dataclass
-class PlotConfig(UpdatableConfig):
+class PlotConfig(_UpdatablePlottingConfig):
     """Configuration class for plot appearance and rendering.
 
     Attributes:
@@ -150,7 +134,7 @@ class PlotConfig(UpdatableConfig):
             self.normalize = colors.CenteredNorm(vcenter=self.cmap_center)
 
 @dataclass
-class LayoutConfig(UpdatableConfig):
+class LayoutConfig(_UpdatablePlottingConfig):
     """Configuration class for subplot layout and figure arrangement.
 
     Attributes:
@@ -240,21 +224,490 @@ class LayoutConfig(UpdatableConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
-def _get_crange(color_values, crange_type):
-    if crange_type == 'max':
-        crange = [0, np.max(color_values)]
-    elif crange_type == 'minmax':
-        crange = [np.min(color_values), np.max(color_values)]
-    elif crange_type == 'upper_percentile':
-        crange = [0, np.percentile(color_values, 99)]
-    elif crange_type == 'percentile':
-        crange = [np.percentile(color_values, 1), np.percentile(color_values, 99)]
+def plot_spatial(
+    data: Union[InSituData, InSituExperiment],
+    keys: Union[str, List[str]],
+    cells_layer: Optional[str] = None,
+    layer: Optional[str] = None,
+
+    # data attribute keys
+    region_tuple: Optional[Tuple[str, str]] = None,
+    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
+    image_key: Optional[str] = None,
+
+    # filters
+    filter_mode: Optional[FilterMode] = None,
+    filter_tuple: Optional[Tuple] = None,
+
+    # plotting configs
+    xlim: Optional[Tuple[float, float]] = None,
+    ylim: Optional[Tuple[float, float]] = None,
+    spot_size: float = 10,
+    alpha: float = 1.0,
+
+    # layout configs
+    max_cols: Optional[int] = 4,
+
+    # save configs
+    savepath: Optional[str] = None,
+    save_only: bool = False,
+    dpi_save: int = 300,
+    show: bool = True,
+
+    # init config classes
+    plot_config: PlotConfig = None,
+    layout_config: LayoutConfig = None,
+    data_config: DataConfig = None,
+
+    # others
+    verbose: bool = False,
+    ):
+    """Plot spatial transcriptomics data with optional images, annotations, and regions.
+
+    This function generates spatial plots of molecular data from one or multiple
+    `InSituData` or `InSituExperiment` objects. It supports categorical and continuous
+    features, overlays images and annotations, and provides flexible configuration
+    for plotting, layout, and saving.
+
+    Parameters
+    ----------
+    Data arguments
+        data : InSituData or InSituExperiment
+            Input dataset or experiment.
+        keys : str or list of str
+            Feature key(s) to plot (e.g., gene names or annotations).
+        cells_layer : str, optional
+            Name of the cell layer to extract data from.
+        layer : str, optional
+            AnnData layer to extract values from.
+        region_tuple : tuple of (str, str), optional
+            Region identifier (dataset key, region name).
+        annotations_key : tuple or str, optional
+            Key(s) for annotations to overlay.
+        image_key : str, optional
+            Key for associated images to overlay.
+        filter_mode : str, optional
+            Mode used for filtering cells (e.g., "contains", "greater than").
+        filter_tuple : tuple, optional
+            Parameters for filtering (depends on ``filter_mode``).
+
+    Plot arguments
+        xlim : tuple of float, optional
+            X-axis limits.
+        ylim : tuple of float, optional
+            Y-axis limits.
+        spot_size : float, default=10
+            Marker size for cells.
+        alpha : float, default=1.0
+            Transparency for plotted markers.
+
+    Layout arguments
+        max_cols : int, optional, default=4
+            Maximum number of subplot columns.
+
+    Save/display arguments
+        savepath : str, optional
+            Path to save the figure (if None, figure is not saved).
+        save_only : bool, default=False
+            If True, save figure without displaying.
+        dpi_save : int, default=300
+            Resolution in DPI for saving the figure.
+        show : bool, default=True
+            Whether to display the plot.
+
+    Config objects
+        plot_config : PlotConfig, optional
+            Plot configuration object (overrides defaults if provided).
+        layout_config : LayoutConfig, optional
+            Layout configuration object (overrides defaults if provided).
+        data_config : DataConfig, optional
+            Data configuration object (overrides defaults if provided).
+
+    Miscellaneous
+        verbose : bool, default=False
+            If True, print progress messages.
+
+    Returns
+    -------
+    None
+        Displays and/or saves the generated spatial plot(s).
+
+    Raises
+    ------
+    ValueError
+        If filter parameters or layout arguments are invalid.
+    ValueError
+        If mixed categorical and continuous values are encountered for a key.
+
+    Examples
+    --------
+    >>> plot_spatial(data, keys="GeneA")
+    >>> plot_spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
+    """
+
+    # convert arguments to lists
+    keys = convert_to_list(keys)
+
+    # init config classes
+    if plot_config is None:
+        plot_config = PlotConfig()
+    if layout_config is None:
+        layout_config = LayoutConfig()
+    if data_config is None:
+        data_config = DataConfig()
+
+    # update some values depending on function arguments
+    data_config.update_values(
+        layer=layer,
+        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
+        filter_mode=filter_mode, filter_tuple=filter_tuple
+        )
+    plot_config.update_values(
+        xlim=xlim, ylim=ylim,
+        spot_size=spot_size, alpha=alpha
+    )
+    layout_config.update_values(
+        max_cols=max_cols
+    )
+
+    # check whether the data is an InSituExperiment or a single InSituData
+    if _is_experiment(data):
+        n_data = len(data)
+
+        # synchronize colors before plotting
+        data.sync_colors(
+            keys=keys,
+            cells_layer=cells_layer,
+            palette=plot_config.palette
+        )
     else:
-        raise ValueError(f"Unknown crange_type: {crange_type}. Must be one of 'max', 'minmax', 'upper_percentile' or 'percentile'.")
+        n_data = 1
+        # is_experiment = False
 
-    return crange
+    color_config = _ColorConfigMultiPlot(
+        data=data,
+        cells_layer=cells_layer,
+        keys=keys,
+        data_config=data_config,
+        plot_config=plot_config
+    )
 
-class ColorConfigMultiPlot:
+    layout_config.calc_subplot_params(
+        keys=keys,
+        n_data=n_data,
+        color_config=color_config
+        )
+
+    # setup the subplots
+    fig, axs = setup_subplots(
+        layout_config=layout_config,
+        verbose=verbose
+    )
+
+    plot_to_subplots(
+        data,
+        keys,
+        cells_layer,
+        fig,
+        axs,
+        plot_config,
+        layout_config,
+        data_config,
+        color_config
+    )
+
+    save_and_show_figure(
+        savepath=savepath,
+        fig=fig,
+        save_only=save_only,
+        show=show,
+        dpi_save=dpi_save
+    )
+
+    gc.collect()
+
+def setup_subplots(
+    layout_config: LayoutConfig,
+    verbose: bool = False
+    ):
+    print("Setup subplots.") if verbose else None
+
+    fig, axs = plt.subplots(
+        layout_config.n_rows, layout_config.n_cols,
+        figsize=layout_config.figsize,
+        dpi=layout_config.dpi_display
+        )
+
+    if not layout_config.multidata or (layout_config.multidata and not layout_config.multikeys):
+        if layout_config.n_plots > 1:
+            axs = axs.ravel()
+        else:
+            axs = np.array([axs])
+
+    if not (layout_config.multidata and layout_config.multikeys):
+        remove_empty_subplots(
+            axes=axs,
+            nplots=layout_config.n_plots,
+            nrows=layout_config.n_rows,
+            ncols=layout_config.n_cols
+            )
+
+    if layout_config.header is not None:
+        plt.suptitle(layout_config.header, fontsize=18, x=0.5, y=0.98)
+
+    return fig, axs
+
+def plot_to_subplots(
+    data,
+    keys,
+    cells_layer,
+    fig,
+    axs,
+    plot_config,
+    layout_config,
+    data_config,
+    color_config,
+    verbose: bool = False
+):
+    print("Do plotting.") if verbose else None
+
+    if _is_experiment(data):
+        n_data = len(data)
+    else:
+        n_data = 1
+
+    #i = 0
+    for idx in range(n_data):
+
+        # retrieve data
+        ad, sample_name, image_data, regions_data, annotations_data = _get_data(
+            data, idx, cells_layer, data_config,
+            )
+
+        for idx_key, key in enumerate(keys):
+            # get axis to plot
+            ax, add_legend = _determine_axes(axs, idx, idx_key, layout_config)
+
+            # plot single spatial plot in given axis
+            _single_spatial(
+                adata=ad,
+                key=key, idx_key=idx_key, name=sample_name,
+                fig=fig, ax=ax, add_legend=add_legend,
+                color_config=color_config, data_config=data_config,
+                layout_config=layout_config, plot_config=plot_config,
+                regions_data=regions_data, annotations_data=annotations_data, image_data=image_data
+            )
+
+    if layout_config.add_legend_to_last_subplot:
+        # get axis of last subplots for color legend
+        ax = axs[layout_config.n_plots-1]
+
+        k = list(color_config.keys())[0]
+        color_config_key = color_config[k]
+        # is_categorical = color_config_key["is_categorical"]
+        # if is_categorical:
+        color_dict = color_config[k]["color_dict"]
+        _add_colorlegend_to_axis(
+            color_dict=color_dict,
+            max_per_col=plot_config.legend_max_per_col,
+            ax=ax)
+
+def _single_spatial(
+    adata: AnnData,
+    key: List[str],
+    idx_key: int,
+    name: str,
+
+    # figure
+    fig: plt.Figure,
+    ax: plt.Axes,
+    add_legend: bool,
+
+    # configs
+    color_config: dict,
+    data_config: DataConfig,
+    layout_config: LayoutConfig,
+    plot_config: PlotConfig,
+
+    # data attributes
+    regions_data: Optional[RegionsData] = None,
+    annotations_data: Optional[AnnotationsData] = None,
+    image_data: Optional[ImageData] = None,
+    ):
+
+    # get color values for expression data or categories
+    color_values, categorical = _extract_color_values(
+        adata=adata, key=key, raw=data_config.raw, layer=data_config.layer
+    )
+
+    if color_values is None:
+        print("Key '{}' not found.".format(key), flush=True)
+        ax.set_axis_off()
+
+    else:
+        # retrieve color dictionary
+        color_dict = color_config[key]["color_dict"]
+        crange = color_config[key]["crange"]
+        categorical = color_config[key]["is_categorical"] # True if color_dict is not None
+
+        x_coords, y_coords, plot_config.xlim, plot_config.ylim = _prepare_limits_and_coordinates(
+            adata=adata,
+            regions_data=regions_data,
+            region_tuple=data_config.region_tuple,
+            xlim=plot_config.xlim, ylim=plot_config.ylim,
+            obsm_key=data_config.obsm_key,
+            origin_zero=plot_config.origin_zero
+            )
+
+        image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = _extract_image_information(
+            image_data, image_key=data_config.image_key,
+            xlim=plot_config.xlim, ylim=plot_config.ylim,
+            pixelwidth_per_subplot=plot_config.pixelwidth_per_subplot,
+            histogram_setting=plot_config.histogram_setting
+        )
+
+        annotations_df = _extract_annotations_information(
+            annotations_data,
+            annotations_key=data_config.annotations_key
+        )
+
+        # set the axes (add titles, set limits, etc.)
+        _configure_axis_and_title(
+            ax=ax,
+            key=key, idx_key=idx_key, sample_name=name,
+            plot_config=plot_config, layout_config=layout_config
+        )
+
+        # calculate the marker size - must be done AFTER the axes are configured!
+        size = _calculate_marker_size(
+            ax=ax,
+            plot_config=plot_config,
+            fig=fig)
+
+        # size=5
+
+        if image is not None:
+            # plot image data
+            extent = (
+                pixel_xlim[0] * pixel_size - 0.5,
+                pixel_xlim[1] * pixel_size - 0.5,
+                pixel_ylim[1] * pixel_size - 0.5,
+                pixel_ylim[0] * pixel_size - 0.5
+                )
+
+            ax.imshow(
+                image,
+                extent=extent,
+                origin='upper', cmap='gray', vmin=vmin, vmax=vmax)
+
+        # plot transcriptomic data
+        if categorical:
+            sns.scatterplot(
+                x=x_coords, y=y_coords,
+                hue=color_values,
+                marker=plot_config.spot_type,
+                s=size,
+                linewidth=0,
+                palette=color_dict,
+                alpha=plot_config.alpha,
+                ax=ax
+                )
+
+            # add legend
+            # divide axis to fit legend
+            divider = make_axes_locatable(ax)
+            lax = divider.append_axes("bottom", size="2%", pad=0)
+
+            if add_legend:
+                _add_colorlegend_to_axis(
+                    color_dict=color_dict,
+                    ax=lax,
+                    max_per_col=plot_config.legend_max_per_col,
+                    loc='upper center',
+                    bbox_to_anchor=(0.5, -10)
+                    )
+
+            # Remove the axis ticks and labels
+            lax.set_xticks([])
+            lax.set_yticks([])
+            lax.axis('off')
+
+            # Remove the legend from the main axis
+            ax.legend().remove()
+        else:
+            s = ax.scatter(
+                x_coords,
+                y_coords,
+                c=color_values,
+                marker=plot_config.spot_type,
+                s=size,
+                alpha=plot_config.alpha,
+                linewidths=0,
+                cmap=plot_config.cmap,
+                norm=plot_config.normalize
+                )
+
+            # divide axis to fit colorbar
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="4%", pad=0.1)
+
+            # add colorbar
+            clb = fig.colorbar(s, cax=cax, orientation='vertical')
+            # set colorbar
+            clb.ax.tick_params(labelsize=plot_config.tick_label_size)
+
+            if plot_config.clb_title is not None:
+                clb.ax.set_xlabel(
+                    plot_config.clb_title,  # Change to xlabel for horizontal orientation
+                    fontdict={"fontsize": plot_config.label_size},
+                    labelpad=20
+                    )
+
+            # if crange is not None:
+            clb.mappable.set_clim(
+                crange[0],
+                crange[1]
+                )
+
+        if annotations_df is not None:
+            # convert rgb colors to hex colors
+            hex_colors = [
+                _rgb2hex_robust(elem, scale_to_one=True, max_value=255)
+                for elem
+                in annotations_df.color
+                ]
+
+            if plot_config.annotations_mode == "outlined":
+                # plot the annotations as outlines
+                annotations_df.plot(
+                    edgecolor=hex_colors,
+                    linewidth=4,
+                    facecolor="none",
+                    ax=ax,
+                    aspect=1
+                    )
+            elif plot_config.annotations_mode == "filled":
+                # plot the annotations filled with transparent colors
+                annotations_df.plot(
+                    color=hex_colors,
+                    edgecolor="none",
+                    alpha=0.3,
+                    ax=ax,
+                    aspect=1
+                    )
+
+                # plot outlines in black
+                annotations_df.plot(
+                    facecolor="none",
+                    edgecolor="black",
+                    linewidth=2,
+                    ax=ax,
+                    aspect=1
+                    )
+            else:
+                raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
+
+class _ColorConfigMultiPlot:
     def __init__(
         self,
         data: Union[InSituData, InSituExperiment],
@@ -411,239 +864,19 @@ class ColorConfigMultiPlot:
 
         return color_entry
 
-
-def plot_spatial(
-    data: Union[InSituData, InSituExperiment],
-    keys: Union[str, List[str]],
-    cells_layer: Optional[str] = None,
-    layer: Optional[str] = None,
-
-    # data attribute keys
-    region_tuple: Optional[Tuple[str, str]] = None,
-    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
-    image_key: Optional[str] = None,
-
-    # filters
-    filter_mode: Optional[str] = None,
-    filter_tuple: Optional[Tuple] = None,
-
-    # plotting configs
-    xlim: Optional[Tuple[float, float]] = None,
-    ylim: Optional[Tuple[float, float]] = None,
-    spot_size: float = 10,
-    alpha: float = 1.0,
-
-    # layout configs
-    max_cols: Optional[int] = 4,
-
-    # save configs
-    savepath: Optional[str] = None,
-    save_only: bool = False,
-    dpi_save: int = 300,
-    show: bool = True,
-
-    # init config classes
-    plot_config: PlotConfig = None,
-    layout_config: LayoutConfig = None,
-    data_config: DataConfig = None,
-
-    # others
-    verbose: bool = False,
-    ):
-    """Plot spatial transcriptomics data with optional images, annotations, and regions.
-
-    This function generates spatial plots of molecular data from one or multiple
-    `InSituData` or `InSituExperiment` objects. It supports categorical and continuous
-    features, overlays images and annotations, and provides flexible configuration
-    for plotting, layout, and saving.
-
-    Parameters
-    ----------
-    Data arguments
-        data : InSituData or InSituExperiment
-            Input dataset or experiment.
-        keys : str or list of str
-            Feature key(s) to plot (e.g., gene names or annotations).
-        cells_layer : str, optional
-            Name of the cell layer to extract data from.
-        layer : str, optional
-            AnnData layer to extract values from.
-        region_tuple : tuple of (str, str), optional
-            Region identifier (dataset key, region name).
-        annotations_key : tuple or str, optional
-            Key(s) for annotations to overlay.
-        image_key : str, optional
-            Key for associated images to overlay.
-        filter_mode : str, optional
-            Mode used for filtering cells (e.g., "contains", "greater than").
-        filter_tuple : tuple, optional
-            Parameters for filtering (depends on ``filter_mode``).
-
-    Plot arguments
-        xlim : tuple of float, optional
-            X-axis limits.
-        ylim : tuple of float, optional
-            Y-axis limits.
-        spot_size : float, default=10
-            Marker size for cells.
-        alpha : float, default=1.0
-            Transparency for plotted markers.
-
-    Layout arguments
-        max_cols : int, optional, default=4
-            Maximum number of subplot columns.
-
-    Save/display arguments
-        savepath : str, optional
-            Path to save the figure (if None, figure is not saved).
-        save_only : bool, default=False
-            If True, save figure without displaying.
-        dpi_save : int, default=300
-            Resolution in DPI for saving the figure.
-        show : bool, default=True
-            Whether to display the plot.
-
-    Config objects
-        plot_config : PlotConfig, optional
-            Plot configuration object (overrides defaults if provided).
-        layout_config : LayoutConfig, optional
-            Layout configuration object (overrides defaults if provided).
-        data_config : DataConfig, optional
-            Data configuration object (overrides defaults if provided).
-
-    Miscellaneous
-        verbose : bool, default=False
-            If True, print progress messages.
-
-    Returns
-    -------
-    None
-        Displays and/or saves the generated spatial plot(s).
-
-    Raises
-    ------
-    ValueError
-        If filter parameters or layout arguments are invalid.
-    ValueError
-        If mixed categorical and continuous values are encountered for a key.
-
-    Examples
-    --------
-    >>> plot_spatial(data, keys="GeneA")
-    >>> plot_spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
-    """
-
-    # convert arguments to lists
-    keys = convert_to_list(keys)
-
-    # init config classes
-    if plot_config is None:
-        plot_config = PlotConfig()
-    if layout_config is None:
-        layout_config = LayoutConfig()
-    if data_config is None:
-        data_config = DataConfig()
-
-    # update some values depending on function arguments
-    data_config.update_values(
-        layer=layer,
-        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
-        filter_mode=filter_mode, filter_tuple=filter_tuple
-        )
-    plot_config.update_values(
-        xlim=xlim, ylim=ylim,
-        spot_size=spot_size, alpha=alpha
-    )
-    layout_config.update_values(
-        max_cols=max_cols
-    )
-
-    # check whether the data is an InSituExperiment or a single InSituData
-    if _is_experiment(data):
-        n_data = len(data)
-
-        # synchronize colors before plotting
-        data.sync_colors(
-            keys=keys,
-            cells_layer=cells_layer,
-            palette=plot_config.palette
-        )
+def _get_crange(color_values, crange_type):
+    if crange_type == 'max':
+        crange = [0, np.max(color_values)]
+    elif crange_type == 'minmax':
+        crange = [np.min(color_values), np.max(color_values)]
+    elif crange_type == 'upper_percentile':
+        crange = [0, np.percentile(color_values, 99)]
+    elif crange_type == 'percentile':
+        crange = [np.percentile(color_values, 1), np.percentile(color_values, 99)]
     else:
-        n_data = 1
-        # is_experiment = False
+        raise ValueError(f"Unknown crange_type: {crange_type}. Must be one of 'max', 'minmax', 'upper_percentile' or 'percentile'.")
 
-    color_config = ColorConfigMultiPlot(
-        data=data,
-        cells_layer=cells_layer,
-        keys=keys,
-        data_config=data_config,
-        plot_config=plot_config
-    )
-
-    layout_config.calc_subplot_params(
-        keys=keys,
-        n_data=n_data,
-        color_config=color_config
-        )
-
-    # setup the subplots
-    fig, axs = setup_subplots(
-        layout_config=layout_config,
-        verbose=verbose
-    )
-
-    plot_to_subplots(
-        data,
-        keys,
-        cells_layer,
-        fig,
-        axs,
-        plot_config,
-        layout_config,
-        data_config,
-        color_config
-    )
-
-    save_and_show_figure(
-        savepath=savepath,
-        fig=fig,
-        save_only=save_only,
-        show=show,
-        dpi_save=dpi_save
-    )
-
-    gc.collect()
-
-def setup_subplots(
-    layout_config: LayoutConfig,
-    verbose: bool = False
-    ):
-    print("Setup subplots.") if verbose else None
-
-    fig, axs = plt.subplots(
-        layout_config.n_rows, layout_config.n_cols,
-        figsize=layout_config.figsize,
-        dpi=layout_config.dpi_display
-        )
-
-    if not layout_config.multidata or (layout_config.multidata and not layout_config.multikeys):
-        if layout_config.n_plots > 1:
-            axs = axs.ravel()
-        else:
-            axs = np.array([axs])
-
-    if not (layout_config.multidata and layout_config.multikeys):
-        remove_empty_subplots(
-            axes=axs,
-            nplots=layout_config.n_plots,
-            nrows=layout_config.n_rows,
-            ncols=layout_config.n_cols
-            )
-
-    if layout_config.header is not None:
-        plt.suptitle(layout_config.header, fontsize=18, x=0.5, y=0.98)
-
-    return fig, axs
+    return crange
 
 def _configure_axis_and_title(
     ax,
@@ -762,60 +995,7 @@ def _get_data(
 
     return adata, sample_name, imagedata, regions, annotations
 
-def plot_to_subplots(
-    data,
-    keys,
-    cells_layer,
-    fig,
-    axs,
-    plot_config,
-    layout_config,
-    data_config,
-    color_config,
-    verbose: bool = False
-):
-    print("Do plotting.") if verbose else None
 
-    if _is_experiment(data):
-        n_data = len(data)
-    else:
-        n_data = 1
-
-    #i = 0
-    for idx in range(n_data):
-
-        # retrieve data
-        ad, sample_name, image_data, regions_data, annotations_data = _get_data(
-            data, idx, cells_layer, data_config,
-            )
-
-        for idx_key, key in enumerate(keys):
-            # get axis to plot
-            ax, add_legend = _determine_axes(axs, idx, idx_key, layout_config)
-
-            # plot single spatial plot in given axis
-            single_spatial(
-                adata=ad,
-                key=key, idx_key=idx_key, name=sample_name,
-                fig=fig, ax=ax, add_legend=add_legend,
-                color_config=color_config, data_config=data_config,
-                layout_config=layout_config, plot_config=plot_config,
-                regions_data=regions_data, annotations_data=annotations_data, image_data=image_data
-            )
-
-    if layout_config.add_legend_to_last_subplot:
-        # get axis of last subplots for color legend
-        ax = axs[layout_config.n_plots-1]
-
-        k = list(color_config.keys())[0]
-        color_config_key = color_config[k]
-        # is_categorical = color_config_key["is_categorical"]
-        # if is_categorical:
-        color_dict = color_config[k]["color_dict"]
-        _add_colorlegend_to_axis(
-            color_dict=color_dict,
-            max_per_col=plot_config.legend_max_per_col,
-            ax=ax)
 
         # else:
         #     #if ConfigData.categorical:
@@ -875,7 +1055,7 @@ def _prepare_limits_and_coordinates(
 
     return x_coords, y_coords, xlim, ylim
 
-def extract_image_information(
+def _extract_image_information(
     ImageDataObject,
     image_key,
     xlim,
@@ -937,7 +1117,7 @@ def extract_image_information(
 
     return image, selected_pixel_size, vmin, vmax, pixel_xlim, pixel_ylim
 
-def extract_annotations_information(
+def _extract_annotations_information(
     annotations_data,
     annotations_key
     ):
@@ -979,198 +1159,3 @@ def _calculate_marker_size(
     size = (72. / fig.dpi * pxs)**2
 
     return size
-
-def single_spatial(
-    adata: AnnData,
-    key: List[str],
-    idx_key: int,
-    name: str,
-
-    # figure
-    fig: plt.Figure,
-    ax: plt.Axes,
-    add_legend: bool,
-
-    # configs
-    color_config: dict,
-    data_config: DataConfig,
-    layout_config: LayoutConfig,
-    plot_config: PlotConfig,
-
-    # data attributes
-    regions_data: Optional[RegionsData] = None,
-    annotations_data: Optional[AnnotationsData] = None,
-    image_data: Optional[ImageData] = None,
-    ):
-
-    # get color values for expression data or categories
-    color_values, categorical = _extract_color_values(
-        adata=adata, key=key, raw=data_config.raw, layer=data_config.layer
-    )
-
-    if color_values is None:
-        print("Key '{}' not found.".format(key), flush=True)
-        ax.set_axis_off()
-
-    else:
-        # retrieve color dictionary
-        color_dict = color_config[key]["color_dict"]
-        crange = color_config[key]["crange"]
-        categorical = color_config[key]["is_categorical"] # True if color_dict is not None
-
-        x_coords, y_coords, plot_config.xlim, plot_config.ylim = _prepare_limits_and_coordinates(
-            adata=adata,
-            regions_data=regions_data,
-            region_tuple=data_config.region_tuple,
-            xlim=plot_config.xlim, ylim=plot_config.ylim,
-            obsm_key=data_config.obsm_key,
-            origin_zero=plot_config.origin_zero
-            )
-
-        image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = extract_image_information(
-            image_data, image_key=data_config.image_key,
-            xlim=plot_config.xlim, ylim=plot_config.ylim,
-            pixelwidth_per_subplot=plot_config.pixelwidth_per_subplot,
-            histogram_setting=plot_config.histogram_setting
-        )
-
-        annotations_df = extract_annotations_information(
-            annotations_data,
-            annotations_key=data_config.annotations_key
-        )
-
-        # set the axes (add titles, set limits, etc.)
-        _configure_axis_and_title(
-            ax=ax,
-            key=key, idx_key=idx_key, sample_name=name,
-            plot_config=plot_config, layout_config=layout_config
-        )
-
-        # calculate the marker size - must be done AFTER the axes are configured!
-        size = _calculate_marker_size(
-            ax=ax,
-            plot_config=plot_config,
-            fig=fig)
-
-        # size=5
-
-        if image is not None:
-            # plot image data
-            extent = (
-                pixel_xlim[0] * pixel_size - 0.5,
-                pixel_xlim[1] * pixel_size - 0.5,
-                pixel_ylim[1] * pixel_size - 0.5,
-                pixel_ylim[0] * pixel_size - 0.5
-                )
-
-            ax.imshow(
-                image,
-                extent=extent,
-                origin='upper', cmap='gray', vmin=vmin, vmax=vmax)
-
-        # plot transcriptomic data
-        if categorical:
-            sns.scatterplot(
-                x=x_coords, y=y_coords,
-                hue=color_values,
-                marker=plot_config.spot_type,
-                s=size,
-                linewidth=0,
-                palette=color_dict,
-                alpha=plot_config.alpha,
-                ax=ax
-                )
-
-            # add legend
-            # divide axis to fit legend
-            divider = make_axes_locatable(ax)
-            lax = divider.append_axes("bottom", size="2%", pad=0)
-
-            if add_legend:
-                _add_colorlegend_to_axis(
-                    color_dict=color_dict,
-                    ax=lax,
-                    max_per_col=plot_config.legend_max_per_col,
-                    loc='upper center',
-                    bbox_to_anchor=(0.5, -10)
-                    )
-
-            # Remove the axis ticks and labels
-            lax.set_xticks([])
-            lax.set_yticks([])
-            lax.axis('off')
-
-            # Remove the legend from the main axis
-            ax.legend().remove()
-        else:
-            s = ax.scatter(
-                x_coords,
-                y_coords,
-                c=color_values,
-                marker=plot_config.spot_type,
-                s=size,
-                alpha=plot_config.alpha,
-                linewidths=0,
-                cmap=plot_config.cmap,
-                norm=plot_config.normalize
-                )
-
-            # divide axis to fit colorbar
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="4%", pad=0.1)
-
-            # add colorbar
-            clb = fig.colorbar(s, cax=cax, orientation='vertical')
-            # set colorbar
-            clb.ax.tick_params(labelsize=plot_config.tick_label_size)
-
-            if plot_config.clb_title is not None:
-                clb.ax.set_xlabel(
-                    plot_config.clb_title,  # Change to xlabel for horizontal orientation
-                    fontdict={"fontsize": plot_config.label_size},
-                    labelpad=20
-                    )
-
-            # if crange is not None:
-            clb.mappable.set_clim(
-                crange[0],
-                crange[1]
-                )
-
-        if annotations_df is not None:
-            # convert rgb colors to hex colors
-            hex_colors = [
-                _rgb2hex_robust(elem, scale_to_one=True, max_value=255)
-                for elem
-                in annotations_df.color
-                ]
-
-            if plot_config.annotations_mode == "outlined":
-                # plot the annotations as outlines
-                annotations_df.plot(
-                    edgecolor=hex_colors,
-                    linewidth=4,
-                    facecolor="none",
-                    ax=ax,
-                    aspect=1
-                    )
-            elif plot_config.annotations_mode == "filled":
-                # plot the annotations filled with transparent colors
-                annotations_df.plot(
-                    color=hex_colors,
-                    edgecolor="none",
-                    alpha=0.3,
-                    ax=ax,
-                    aspect=1
-                    )
-
-                # plot outlines in black
-                annotations_df.plot(
-                    facecolor="none",
-                    edgecolor="black",
-                    linewidth=2,
-                    ax=ax,
-                    aspect=1
-                    )
-            else:
-                raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")

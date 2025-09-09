@@ -17,7 +17,7 @@ from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED
-from insitupy._core._mixins import DeepCopyMixin
+from insitupy._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._io.files import (check_overwrite_and_remove_if_true,
                                 write_dict_to_json)
