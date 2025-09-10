@@ -13,7 +13,7 @@ from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-from insitupy.preprocessing.anndata import (clustering_anndata,
+from insitupy.preprocessing.anndata import (cluster_anndata,
                                             normalize_and_transform_anndata,
                                             reduce_dimensions_anndata)
 
@@ -248,7 +248,7 @@ def cluster_cells(
         if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
-            clustering_anndata(
+            cluster_anndata(
                 adata=celldata.matrix,
                 method=method,
                 verbose=False
