@@ -3,7 +3,7 @@
 ```{eval-rst}
 Import InSituPy as::
 
-    import insitupy
+    import insitupy as isp
 
 .. module:: insitupy
 ```
@@ -85,6 +85,15 @@ To concatenate multiple `InSituExperiment` objects:
     InSituExperiment.concat
 ```
 
+### Import
+
+Import the data objects like this:
+```{eval-rst}
+.. code-block:: python
+
+    from insitupy import InSituData, InSituExperiment
+```
+
 ---
 
 ## Core Data Classes
@@ -152,26 +161,26 @@ The different data classes can be read using following functions:
 Following functions allow reading data from external sources, e.g. from an *Xenium In Situ* experiment or from [*QuPath*](https://qupath.github.io).
 To read an individual dataset on can use following functions:
 ```{eval-rst}
-.. module:: insitupy._core
+.. module:: insitupy.io
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/external_data
 
-    read_qupath
-    read_xenium
+    io.read_qupath
+    io.read_xenium
 ```
 
 To read multiple datasets exported from QuPath into an `InSituExperiment` object, following functions can be used:
 
 ```{eval-rst}
-.. module:: insitupy.experiment
+.. module:: insitupy.io
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/external_data
 
-    read_qupath_project
+    io.read_qupath_project
 ```
 
 ---
