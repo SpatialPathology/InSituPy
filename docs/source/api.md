@@ -195,7 +195,7 @@ To read multiple datasets exported from QuPath into an `InSituExperiment` object
 
 ## Plotting
 
-Import plotting submodule either as {code}`isp.plotting` or {code}`isp.pl`.
+Import the plotting submodule either as {code}`isp.plotting` or {code}`isp.pl`.
 
 ```{eval-rst}
 .. module:: insitupy.plotting

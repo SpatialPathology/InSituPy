@@ -116,6 +116,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     background_color: str = "white"
     cmap_center: Optional[float] = None
     normalize: Optional[colors.Normalize] = None
+    show_legend: bool = True
     legend_max_per_col: int = 10
     clb_title: Optional[str] = None
     annotations_mode: Literal["outlined", "filled"] = "outlined"
@@ -123,7 +124,9 @@ class PlotConfig(_UpdatablePlottingConfig):
     crange_type: Literal['minmax', 'max', 'upper_percentile', 'percentile'] = 'upper_percentile'
     origin_zero: bool = False
     label_size: int = 16
+    show_title: bool = True
     title_size: int = 18
+    show_scale: bool = True
     tick_label_size: int = 14
     pixelwidth_per_subplot: int = 200
     histogram_setting: Union[Literal["auto"], Tuple[int, int], None] = "auto"
@@ -167,6 +170,8 @@ class LayoutConfig(_UpdatablePlottingConfig):
     n_plots: int = None
     subplot_width: int = 6
     subplot_height: int = 6
+    wspace: Optional[float] = 0.4
+    hspace: Optional[float] = 0.2
     figsize: Optional[Tuple] = None
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
@@ -422,7 +427,8 @@ def spatial(
         fig=fig,
         save_only=save_only,
         show=show,
-        dpi_save=dpi_save
+        dpi_save=dpi_save,
+        tight=False
     )
 
     gc.collect()
@@ -443,6 +449,9 @@ def setup_subplots(
         figsize=layout_config.figsize,
         dpi=layout_config.dpi_display
         )
+
+    # adjust the subplots
+    fig.subplots_adjust(wspace=layout_config.wspace, hspace=layout_config.hspace)
 
     if not layout_config.multidata or (layout_config.multidata and not layout_config.multikeys):
         if layout_config.n_plots > 1:
@@ -494,6 +503,9 @@ def plot_to_subplots(
             # get axis to plot
             ax, add_legend = _determine_axes(axs, idx, idx_key, layout_config)
 
+            # only add legend if this is allowed by config class
+            add_legend = plot_config.show_legend and add_legend
+
             # plot single spatial plot in given axis
             _single_spatial(
                 adata=ad,
@@ -504,7 +516,7 @@ def plot_to_subplots(
                 regions_data=regions_data, annotations_data=annotations_data, image_data=image_data
             )
 
-    if layout_config.add_legend_to_last_subplot:
+    if layout_config.add_legend_to_last_subplot and plot_config.show_legend:
         # get axis of last subplots for color legend
         ax = axs[layout_config.n_plots-1]
 
@@ -892,31 +904,43 @@ def _configure_axis_and_title(
     plot_config,
     layout_config
     ):
-    # set axis
+
+    # configure axis
     ax.set_xlim(plot_config.xlim[0], plot_config.xlim[1])
     ax.set_ylim(plot_config.ylim[0], plot_config.ylim[1])
-    ax.set_xlabel('µm', fontsize=plot_config.label_size)
-    ax.set_ylabel('µm', fontsize=plot_config.label_size)
     ax.invert_yaxis()
     ax.grid(False)
     ax.set_aspect(1)
     ax.set_facecolor(plot_config.background_color)
-    ax.tick_params(labelsize=plot_config.tick_label_size)
+
+    if plot_config.show_scale:
+        ax.set_xlabel('µm', fontsize=plot_config.label_size)
+        ax.set_ylabel('µm', fontsize=plot_config.label_size)
+        ax.tick_params(labelsize=plot_config.tick_label_size)
+
+    else:
+        # hide axis
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
 
     if layout_config.multidata and not layout_config.multikeys:
-        ax.set_title(
-            sample_name + "\n" + key,
-            fontsize=plot_config.title_size, #fontweight='bold',
-            pad=10,
-            rotation=0
-            )
+        if plot_config.show_title:
+            ax.set_title(
+                sample_name + "\n" + key,
+                fontsize=plot_config.title_size, #fontweight='bold',
+                pad=10,
+                rotation=0
+                )
     else:
+        if plot_config.show_title:
         # set titles
-        ax.set_title(
-            key,
-            fontsize=plot_config.title_size, #fontweight='bold'
-            pad=10
-            )
+            ax.set_title(
+                key,
+                fontsize=plot_config.title_size, #fontweight='bold'
+                pad=10
+                )
 
         if idx_key == 0:
             ax.annotate(
