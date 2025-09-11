@@ -224,7 +224,7 @@ class LayoutConfig(_UpdatablePlottingConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
-def plot_spatial(
+def spatial(
     data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
     cells_layer: Optional[str] = None,
@@ -262,16 +262,16 @@ def plot_spatial(
     # others
     verbose: bool = False,
     ):
-    """Plot spatial transcriptomics data with optional images, annotations, and regions.
+    """Plot spatial omics data with optional images, annotations, and regions.
 
-    This function generates spatial plots of molecular data from one or multiple
-    `InSituData` or `InSituExperiment` objects. It supports categorical and continuous
-    features, overlays images and annotations, and provides flexible configuration
+    This function generates spatial scatter plots of spatially-resolved omics data from one or multiple
+    :class:`~insitupy._core.data.InSituData` or :class:`~insitupy.experiment.data.InSituExperiment` objects.
+    It supports categorical and continuous features, overlays images and annotations, and provides flexible configuration
     for plotting, layout, and saving.
 
     Parameters
     ----------
-    Data arguments
+    Main
         data : InSituData or InSituExperiment
             Input dataset or experiment.
         keys : str or list of str
@@ -291,7 +291,7 @@ def plot_spatial(
         filter_tuple : tuple, optional
             Parameters for filtering (depends on ``filter_mode``).
 
-    Plot arguments
+    Plotting
         xlim : tuple of float, optional
             X-axis limits.
         ylim : tuple of float, optional
@@ -301,11 +301,11 @@ def plot_spatial(
         alpha : float, default=1.0
             Transparency for plotted markers.
 
-    Layout arguments
+    Layout
         max_cols : int, optional, default=4
             Maximum number of subplot columns.
 
-    Save/display arguments
+    Save
         savepath : str, optional
             Path to save the figure (if None, figure is not saved).
         save_only : bool, default=False
@@ -315,7 +315,7 @@ def plot_spatial(
         show : bool, default=True
             Whether to display the plot.
 
-    Config objects
+    Configuration
         plot_config : PlotConfig, optional
             Plot configuration object (overrides defaults if provided).
         layout_config : LayoutConfig, optional
@@ -341,8 +341,9 @@ def plot_spatial(
 
     Examples
     --------
-    >>> plot_spatial(data, keys="GeneA")
-    >>> plot_spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
+    >>> import insitupy as isp
+    >>> isp.pl.spatial(data, keys="GeneA")
+    >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
     """
 
     # convert arguments to lists
@@ -425,6 +426,11 @@ def plot_spatial(
     )
 
     gc.collect()
+
+# deprecated version
+def plot_spatial(*args, **kwargs):
+    from insitupy._warnings import plot_functions_deprecations_warning
+    plot_functions_deprecations_warning(name="spatial")
 
 def setup_subplots(
     layout_config: LayoutConfig,

@@ -8,13 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.font_manager import FontProperties
-from typing import Optional
-
 
 from insitupy._io.plots import save_and_show_figure
 
 
-def plot_volcano(data,
+def volcano(data,
                  logfoldchanges_column: str = 'logfoldchanges',
                  pval_column: str = 'neg_log10_pvals',
                  significance_threshold: Number = 0.05,
@@ -233,3 +231,8 @@ def plot_volcano(data,
         show=show
         )
     #plt.show()
+
+# deprecated functions
+def plot_volcano(*args, **kwargs):
+    from .._warnings import plot_functions_deprecations_warning
+    plot_functions_deprecations_warning(name="volcano")

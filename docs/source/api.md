@@ -188,12 +188,12 @@ To read multiple datasets into an `InSituExperiment` object, following functions
 .. autosummary::
     :toctree: generated
 
-    plotting.plot_spatial
-    plotting.plot_cellular_composition
+    plotting.spatial
+    plotting.cellular_composition
     plotting.cell_abundance_along_axis
     plotting.cell_expression_along_axis
-    plotting.plot_volcano
-    plotting.plot_colorlegend
-    plotting.plot_overview
+    plotting.volcano
+    plotting.colorlegend
+    plotting.overview
 ```
 

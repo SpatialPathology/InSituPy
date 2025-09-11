@@ -89,7 +89,7 @@ if WITH_NAPARI:
         max_per_col: int = 10,
         save_only: bool = True
         ):
-        from insitupy.plotting.plots import plot_colorlegend
+        from insitupy.plotting.plots import colorlegend
 
         viewer = napari.current_viewer()
         config = config_manager[_get_viewer_uid(viewer)]
@@ -102,7 +102,7 @@ if WITH_NAPARI:
         for layer in selected_layers:
             savepath = output_folder / f"colorlegend-{layer.name}.pdf"
 
-            plotted = plot_colorlegend(
+            plotted = colorlegend(
                 viewer=viewer,
                 mapping=None,
                 layer_name=layer.name,
