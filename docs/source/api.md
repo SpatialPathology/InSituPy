@@ -1,11 +1,19 @@
 # API
 
+## Importing InSituPy
 ```{eval-rst}
-Import InSituPy as::
+.. code-block:: python
 
     import insitupy as isp
+```
 
-.. module:: insitupy
+Individual submodules can then be imported like this:
+```{eval-rst}
+.. code-block:: python
+
+    isp.dataclasses
+    isp.io
+    isp.plotting
 ```
 
 ---
@@ -85,7 +93,7 @@ To concatenate multiple `InSituExperiment` objects:
     InSituExperiment.concat
 ```
 
-### Import
+### Import data objects
 
 Import the data objects like this:
 ```{eval-rst}
@@ -186,6 +194,8 @@ To read multiple datasets exported from QuPath into an `InSituExperiment` object
 ---
 
 ## Plotting
+
+Import plotting submodule either as {code}`isp.plotting` or {code}`isp.pl`.
 
 ```{eval-rst}
 .. module:: insitupy.plotting
