@@ -43,9 +43,6 @@ from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      read_shapesdata)
 from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
-from insitupy.interactive._configs import _get_viewer_uid
-from insitupy.interactive._layers import _create_points_layer
-from insitupy.interactive._widgets import SaveWidget, SyncButton
 from insitupy.utils._helpers import (_get_expression_values,
                                      sort_paths_by_datetime)
 from insitupy.utils.geo import fast_query_points_within_polygon
@@ -57,7 +54,9 @@ if WITH_NAPARI:
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
 
-    from insitupy.interactive._configs import config_manager
+    from insitupy.interactive._configs import _get_viewer_uid, config_manager
+    from insitupy.interactive._layers import _create_points_layer
+    from insitupy.interactive._widgets import SaveWidget, SyncButton
 
     #from napari.layers.shapes.shapes import Shapes
     from ..interactive._widgets import (_initialize_widgets,
