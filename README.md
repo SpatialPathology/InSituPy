@@ -13,6 +13,17 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 For the latest developments check out the [releases](https://github.com/SpatialPathology/InSituPy/releases).
 
+### Big improvements in `0.9.0`
+
+This version contains multiple bigger changes:
+- Implementation of `generate_pseudobulk` function
+- Working with multiple open napari viewers in parallel
+- Sync and save buttons in napari viewer
+- Implementation of readers for multiplex-IF data exported from QuPath. For scripts to work with QuPath and InSituPy see [this repository](https://github.com/SpatialPathology/InSituPy-QuPath)
+- Changed syntax of the `plotting` submodule: The prefix `"plot_"` was removed from all functions. E.g. `plot_spatial` can be now called with `.pl.spatial`.
+- Completely revised code in `.pl.spatial` introducing different configuration objects to format the plots.
+- Improved documentation
+
 ## Getting started
 
 ### Documentation
