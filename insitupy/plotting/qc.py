@@ -1,8 +1,5 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,8 +9,9 @@ import seaborn as sns
 from anndata import AnnData
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
-from insitupy._core._checks import check_integer_counts
-from insitupy._core._utils import _get_cell_layer
+from insitupy._core.data import InSituData
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.utils._checks import check_integer_counts
 
 
 def plot_qc_metrics(

@@ -7,8 +7,8 @@ from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
 from insitupy import __version__
-from insitupy._core._checks import check_integer_counts
 from insitupy._textformat import textformat as tf
+from insitupy.utils._checks import check_integer_counts
 
 
 def normalize_and_transform_anndata(
@@ -108,19 +108,21 @@ def reduce_dimensions_anndata(
             batch correction if applicable. It does not return any value.
     """
     # dimensionality reduction
-    print("Dimensionality reduction...") if verbose else None
+    print("Calculate PCA...") if verbose else None
     sc.pp.pca(adata)
 
     # calculate neighbors
+    print("Calculate neighbors...") if verbose else None
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
     # dimensionality reduction
+    print(f"Calculate {method}...") if verbose else None
     if method.lower() == "umap":
         sc.tl.umap(adata, **kwargs)
     elif method.lower() == "tsne":
         sc.tl.tsne(adata, **kwargs)
 
-def clustering_anndata(
+def cluster_anndata(
     adata,
     method: Literal["leiden", "louvain"] = "leiden",
     verbose: bool = True

@@ -29,9 +29,6 @@ def normalize_and_transform(self, *args, **kwargs):
 def reduce_dimensions(self, *args, **kwargs):
     warn("`reduce_dimensions()` is deprecated. Instead, use `insitupy.preprocessing.reduce_dimensions()` for dimensionality reduction and `insitupy.preprocessing.cluster_cells()` for clustering.", DeprecationWarning, stacklevel=2)
 
-def plot_overview(self, *args, **kwargs):
-    warn("`plot_overview()` is deprecated. Use `insitupy.plotting.plot_overview()` instead.", DeprecationWarning, stacklevel=2)
-
 def save_current_colorlegend(self, *args, **kwargs):
     warn("`save_current_colorlegend()` is deprecated. Use `.save_colorlegends()` instead.", DeprecationWarning, stacklevel=2)
 
@@ -42,4 +39,10 @@ def add_baysor(self, *args, **kwargs):
     warn("`add_baysor()` is deprecated. Use `.cells.add_{}()` instead.", DeprecationWarning, stacklevel=2)
 
 def store_geometries(self, *args, **kwargs):
-    warn("`store_geometries()` is deprecated. Use `.cells.sync_geometries()` instead.", DeprecationWarning, stacklevel=2)
+    warn("`store_geometries()` is deprecated. Use the `sync_geometries()` or the 'Sync Geometries' button in the napari viewer instead.", DeprecationWarning, stacklevel=2)
+
+def sync_geometries(self, *args, **kwargs):
+    warn("`store_geometries()` as function of `InSituData` is deprecated. Use `sync_geometries()` as external function or the 'Sync Geometries' button in the napari viewer instead.", DeprecationWarning, stacklevel=2)
+
+def save_colorlegends(self, *args, **kwargs):
+    warn("`save_colorlegends()` as function of `InSituData` is deprecated. Use `save_colorlegends()` as external function or the 'Save Colorlegends' button in the napari viewer instead.", DeprecationWarning, stacklevel=2)

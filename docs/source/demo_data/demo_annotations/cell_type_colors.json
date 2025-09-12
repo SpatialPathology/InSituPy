@@ -1,0 +1,16 @@
+{
+    "Adipocytes": "#1f77b4",
+    "B cells": "#ff7f0e",
+    "Breast cancer subtype 1": "#279e68",
+    "Breast cancer subtype 2": "#d62728",
+    "Breast cancer subtype 3": "#aa40fc",
+    "Breast cancer subtype 4": "#8c564b",
+    "Breast cancer subtype 5": "#e377c2",
+    "Breast glandular cells": "#b5bd61",
+    "Breast myoepithelial cells": "#17becf",
+    "Endothelial cells": "#aec7e8",
+    "Macrophages": "#ffbb78",
+    "Smooth muscle cells": "#98df8a",
+    "Stromal cells": "#ff9896",
+    "T cells": "#c5b0d5"
+}

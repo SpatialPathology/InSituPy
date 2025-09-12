@@ -1,6 +1,3 @@
-from __future__ import \
-    annotations  # this prevents circular imports of type hints such as InSituExperiment in this case
-
 from numbers import Number
 from typing import Collection, Literal, Optional, Union
 
@@ -12,12 +9,13 @@ from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._core._checks import _is_experiment
-from insitupy._core._utils import _get_cell_layer
-from insitupy.preprocessing.anndata import (clustering_anndata,
+from insitupy._core.data import InSituData
+from insitupy._exceptions import ModalityNotFoundError
+from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.data import InSituExperiment
+from insitupy.preprocessing.anndata import (cluster_anndata,
                                             normalize_and_transform_anndata,
                                             reduce_dimensions_anndata)
-
-from .._exceptions import ModalityNotFoundError
 
 
 def calculate_qc_metrics(
@@ -165,7 +163,7 @@ def normalize_and_transform(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             normalize_and_transform_anndata(
                 adata=celldata.matrix,
@@ -209,7 +207,7 @@ def reduce_dimensions(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
             reduce_dimensions_anndata(
@@ -247,10 +245,10 @@ def cluster_cells(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if xd.cells is not None:
+        if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
-            clustering_anndata(
+            cluster_anndata(
                 adata=celldata.matrix,
                 method=method,
                 verbose=False

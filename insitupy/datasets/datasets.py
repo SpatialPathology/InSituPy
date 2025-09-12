@@ -4,9 +4,9 @@ import shutil
 from pathlib import Path
 
 from insitupy._constants import CACHE
-from insitupy._core.insitudata import InSituData
-from insitupy._core.readers import read_xenium
+from insitupy._core.data import InSituData
 from insitupy.datasets.download import download_url
+from insitupy.io.data import read_xenium
 
 # parameters for download functions
 DEMODIR = CACHE / 'demo_datasets'

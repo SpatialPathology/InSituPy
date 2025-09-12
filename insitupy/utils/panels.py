@@ -7,14 +7,16 @@ import pandas as pd
 
 class XeniumPanels:
     '''
-    Class containing a collection of custom color palettes.
+    Class containing a collection of Xenium Panels
     '''
     def __init__(self, verbose=False):
         # read all panels
-        script_dir = Path(os.path.realpath(__file__)).parent
-        panel_dir = script_dir / Path("../xenium_panels/")
-        panel_dir = panel_dir.resolve()
-        panel_paths = sorted(panel_dir.glob("*.csv"))
+        # script_dir = Path(os.path.realpath(__file__)).parent
+        # panel_dir = script_dir / Path("../xenium_panels/")
+        # panel_dir = panel_dir.resolve()
+        script_dir = Path(__file__).parent
+        panel_dir = (script_dir / "../_xenium_panels/").resolve()
+        panel_paths = sorted(panel_dir.glob("[!.]*.csv"))
 
         for p in panel_paths:
             name = p.stem.split("_")[1]
@@ -24,7 +26,7 @@ class XeniumPanels:
 
             # make sure that the column names are correct
             panel.columns = ["Gene", "Ensembl_ID", "Coverage", "Codewords", "Annotation"]
-        
+
     def show_all(self):
         '''
         Prints all available panels.
@@ -33,8 +35,8 @@ class XeniumPanels:
         panel_list = [elem for elem in panel_list if elem not in ["show_all"]]
         for p in panel_list:
             print(p)
-            
-            
+
+
 def generate_mock_reference(
     dataframe: pd.DataFrame,
     annotation_column: str = "Annotation",
@@ -65,5 +67,5 @@ def generate_mock_reference(
     annotation_df.index = count_matrix.index
     # create adata
     reference = anndata.AnnData(X = count_matrix, obs = annotation_df)
-    
+
     return reference

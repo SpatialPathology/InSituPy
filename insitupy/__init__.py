@@ -9,23 +9,16 @@ try:
 except ImportError:
     WITH_NAPARI = False
 
-from insitupy._constants import CACHE
-
+from . import _core, dataclasses, datasets, experiment
 from . import images as im
 from . import io
 from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
-from ._core.dataclasses import (AnnotationsData, BoundariesData, CellData,
-                                ImageData, MultiCellData, RegionsData)
-from ._core.insitudata import InSituData
-from ._core.insituexperiment import InSituExperiment
-from ._core.readers import read_xenium
-from .images.registration import register_images
-from .palettes import CustomPalettes
-from .tools.dge import differential_gene_expression
-from .tools.distance import calc_distance_of_cells_from
+from ._constants import CACHE
+from ._core.data import InSituData
+from .experiment.data import InSituExperiment
 
 __all__ = [
     "InSituData",
