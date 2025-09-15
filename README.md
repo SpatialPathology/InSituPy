@@ -26,6 +26,17 @@ This version contains multiple bigger changes:
 
 ## Getting started
 
+### Overall data structure
+
+A key feature of InSituPy is its hierarchical data structure, centered around the `InSituExperiment` and `InSituData` objects:
+- `InSituData`: Represents and manages at the individual sample level. It integrates all modalities of spatial omics datasets, including cellular readouts, cellular boundaries, images, transcripts, regions, and annotations.
+- `InSituExperiment`: Aggregates multiple `InSituData` instances and links them with associated metadata, enabling cross-sample analysis and organization.
+
+<p align="center">
+   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="500">
+</p>
+
+
 ### Documentation
 
 For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).

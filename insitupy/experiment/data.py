@@ -35,7 +35,7 @@ class InSituExperiment:
     """
     A class to manage and analyze multiple spatially resolved single-cell transcriptomics experiments.
 
-    .. figure:: ../_static/img/insituexperiment_overview.svg
+    .. figure:: ../../_static/img/insituexperiment_overview.svg
        :width: 400px
        :align: right
        :class: dark-light
