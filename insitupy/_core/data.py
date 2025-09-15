@@ -1264,17 +1264,21 @@ class InSituData:
         widgets_max_width: int = 500,
         verbose: bool = False
         ):
+
+        # check if napari is installed
+        try:
+            import napari
+        except ImportError:
+            raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
+
         # initialize a config class manager with new ID
         uid_viewer = config_manager.add_config(data=self)
         current_viewer_config = config_manager[uid_viewer] # get current viewer config
         if verbose:
             current_viewer_config.verbose = True
 
-        try:
-            # create viewer
-            current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
-        except NameError:
-            raise ImportError("Napari is not installed. Please install napari with `pip install napari` to use this functionality.")
+        # create viewer
+        current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
 
         # IMAGES
         if self.images.is_empty:
