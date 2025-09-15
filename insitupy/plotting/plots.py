@@ -17,7 +17,6 @@ from insitupy._core.data import InSituData
 from insitupy._io.plots import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-from insitupy.interactive._configs import _get_viewer_uid, config_manager
 from insitupy.palettes import map_to_colors
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
@@ -27,6 +26,8 @@ if WITH_NAPARI:
     import napari
     from napari.utils.notifications import show_info, show_warning
     from napari.viewer import Viewer
+
+    from insitupy.interactive._configs import _get_viewer_uid, config_manager
 
 def _generate_subplots(
     n_plots: int,
@@ -133,7 +134,7 @@ def _generate_experiment_subplots(
 
 
 def colorlegend(
-    viewer: Optional[Viewer] = None,
+    viewer: Optional["napari.Viewer"] = None,
     mapping: Optional[None] = None,
     layer_name: Optional[str] = None,
     max_per_col: int = 10,

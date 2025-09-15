@@ -1,32 +1,33 @@
-from typing import List, Optional
-
-import numpy as np
-from matplotlib.colors import ListedColormap
-from napari.utils.notifications import show_info, show_warning
-from qtpy.QtCore import QSize, Qt
-from qtpy.QtGui import QFontMetrics, QIcon
-from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
-                            QVBoxLayout, QWidget)
-
 from insitupy import WITH_NAPARI
-from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
-                                 REGION_CMAP, REGIONS_SYMBOL)
-from insitupy.images.utils import create_img_pyramid
-from insitupy.interactive._callbacks import (
-    _refresh_widgets_after_data_change, _set_show_names_based_on_geom_type,
-    _update_classes_on_key_change, _update_colorlegend,
-    _update_key_on_type_change, _update_keys_based_on_geom_type)
-from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
-                                           config_manager)
-from insitupy.interactive._layers import (_create_points_layer,
-                                          _update_points_layer)
-from insitupy.interactive.viewer import save_colorlegends, sync_geometries
-from insitupy.utils._helpers import _get_expression_values
 
 if WITH_NAPARI:
+    from typing import List, Optional
+
     import napari
+    import numpy as np
     from magicgui import magic_factory, magicgui
     from magicgui.widgets import FunctionGui
+    from matplotlib.colors import ListedColormap
+    from napari.utils.notifications import show_info, show_warning
+    from qtpy.QtCore import QSize, Qt
+    from qtpy.QtGui import QFontMetrics, QIcon
+    from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
+                                QVBoxLayout, QWidget)
+
+
+    from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+                                     REGION_CMAP, REGIONS_SYMBOL)
+    from insitupy.images.utils import create_img_pyramid
+    from insitupy.interactive._callbacks import (
+        _refresh_widgets_after_data_change, _set_show_names_based_on_geom_type,
+        _update_classes_on_key_change, _update_colorlegend,
+        _update_key_on_type_change, _update_keys_based_on_geom_type)
+    from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
+                                               config_manager)
+    from insitupy.interactive._layers import (_create_points_layer,
+                                              _update_points_layer)
+    from insitupy.interactive.viewer import save_colorlegends, sync_geometries
+    from insitupy.utils._helpers import _get_expression_values
 
     from ._layers import _add_geometries_as_layer
 
