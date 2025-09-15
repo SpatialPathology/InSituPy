@@ -32,6 +32,7 @@ dependencies = [
     "dask-geopandas>=0.4.2",
     "imagecodecs>=2024.12.30",
     "rasterio>=1.4.3",
+    "requests",
     "tornado>=6.5.0" # security patch
 ]
 

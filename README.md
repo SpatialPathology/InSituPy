@@ -34,6 +34,8 @@ InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you 
 
 ## Installation
 
+Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
+
 **Create and activate a conda environment:**
 
    ```bash
@@ -54,8 +56,6 @@ If you want to use the graphical interface features powered by [napari](https://
    ```bash
    pip install insitupy-spatial[gui]
    ```
-
-Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
 To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
 

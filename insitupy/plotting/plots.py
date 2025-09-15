@@ -134,7 +134,7 @@ def _generate_experiment_subplots(
 
 
 def colorlegend(
-    viewer: Optional[Viewer] = None,
+    viewer: Optional["napari.Viewer"] = None,
     mapping: Optional[None] = None,
     layer_name: Optional[str] = None,
     max_per_col: int = 10,
