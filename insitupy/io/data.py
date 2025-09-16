@@ -1,16 +1,11 @@
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Union
-from uuid import uuid4
+from typing import Dict, Literal, Optional, Union
 
-import anndata
 import dask.dataframe as dd
-import geopandas as gpd
-import numpy as np
 import pandas as pd
 from parse import *
-from PIL import Image
 
 from insitupy import __version__
 from insitupy._core.data import InSituData
@@ -23,7 +18,7 @@ from insitupy._io._xenium import (_read_boundaries_from_xenium,
                                   _restructure_transcripts_dataframe)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
-from insitupy.dataclasses.dataclasses import CellData, ImageData, MultiCellData
+from insitupy.dataclasses.dataclasses import CellData
 
 
 def read_xenium(
@@ -167,6 +162,7 @@ def read_xenium(
 
     return data
 
+
 def read_any(
     cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
     cellular_coordinates: Union[str, Path],
@@ -302,6 +298,7 @@ def read_any(
 
     return data
 
+
 def read_qupath(
     path: Union[str, os.PathLike, Path],
     pixel_size: Number,
@@ -432,4 +429,3 @@ def read_qupath(
     )
 
     return data
-

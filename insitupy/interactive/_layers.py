@@ -1,27 +1,28 @@
-from numbers import Number
-from typing import List, Literal, Optional, Tuple
-from warnings import warn
-
-import matplotlib
-import numpy as np
-import pandas as pd
-from matplotlib.colors import rgb2hex
-from napari.utils.notifications import show_info, show_warning
-from pandas.api.types import is_numeric_dtype
-from shapely import (LinearRing, LineString, MultiPoint, MultiPolygon, Point,
-                     Polygon)
-
 from insitupy import WITH_NAPARI
-from insitupy._constants import (ANNOTATIONS_SYMBOL, DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
-                                 REGIONS_SYMBOL)
-from insitupy.utils._checks import check_rgb_column
-from insitupy.interactive._configs import _get_viewer_uid, config_manager
-from insitupy.utils._colors import _data_to_rgba, _determine_climits
 
 if WITH_NAPARI:
+    from numbers import Number
+    from typing import List, Literal, Optional, Tuple
+    from warnings import warn
+
+    import matplotlib
     import napari
+    import numpy as np
+    import pandas as pd
+    from matplotlib.colors import rgb2hex
     from napari.types import LayerDataTuple
+    from napari.utils.notifications import show_info, show_warning
+    from pandas.api.types import is_numeric_dtype
+    from shapely import (LinearRing, LineString, MultiPoint, MultiPolygon,
+                         Point, Polygon)
+
+    from insitupy._constants import (ANNOTATIONS_SYMBOL,
+                                     DEFAULT_CATEGORICAL_CMAP,
+                                     DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
+                                     REGIONS_SYMBOL)
+    from insitupy.interactive._configs import _get_viewer_uid, config_manager
+    from insitupy.utils._checks import check_rgb_column
+    from insitupy.utils._colors import _data_to_rgba, _determine_climits
 
     def _add_geometries_as_layer(
         dataframe: pd.DataFrame,
@@ -355,33 +356,33 @@ if WITH_NAPARI:
             layer.name = new_name
 
 #TODO: Why is this function not used anywhere?
-def _determine_color_settings(
-    color_values,
-    cmap,
-    upper_climit_pct
-    ):
-    # check if the data should be plotted categorical or continous
-    if is_numeric_dtype(color_values):
-        is_categorical = False # if the data is numeric it should be plotted continous
-    else:
-        is_categorical = True # if the data is not numeric it should be plotted categorically
+# def _determine_color_settings(
+#     color_values,
+#     cmap,
+#     upper_climit_pct
+#     ):
+#     # check if the data should be plotted categorical or continous
+#     if is_numeric_dtype(color_values):
+#         is_categorical = False # if the data is numeric it should be plotted continous
+#     else:
+#         is_categorical = True # if the data is not numeric it should be plotted categorically
 
-    if is_categorical:
-        # get color cycle for categorical data
-        color_mode = "cycle"
-        # palettes = CustomPalettes()
-        # color_cycle = getattr(palettes, "tab20_mod").colors
-        color_cycle = DEFAULT_CATEGORICAL_CMAP.colors
-        color_map = None
-        climits = None
-    else:
-        color_mode = "colormap"
-        color_map = cmap
-        color_cycle = None
+#     if is_categorical:
+#         # get color cycle for categorical data
+#         color_mode = "cycle"
+#         # palettes = CustomPalettes()
+#         # color_cycle = getattr(palettes, "tab20_mod").colors
+#         color_cycle = DEFAULT_CATEGORICAL_CMAP.colors
+#         color_map = None
+#         climits = None
+#     else:
+#         color_mode = "colormap"
+#         color_map = cmap
+#         color_cycle = None
 
-        climits = _determine_climits(
-            color_values=color_values,
-            upper_climit_pct=upper_climit_pct
-        )
+#         climits = _determine_climits(
+#             color_values=color_values,
+#             upper_climit_pct=upper_climit_pct
+#         )
 
-    return color_mode, color_cycle, color_map, climits
+#     return color_mode, color_cycle, color_map, climits

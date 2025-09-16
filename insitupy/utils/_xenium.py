@@ -131,11 +131,7 @@ def copy_files_from_xenium_output(
         FileNotFoundError: If the specified file or signature file does not exist in a subdirectory.
 
     Example:
-        copy_files_from_folder("/path/to/source", "/path/to/target", "data.txt")
-
-    This function ensures the target directory exists, iterates through all subdirectories in the source directory,
-    checks for the presence of a signature file, and copies the specified file to the target directory with a new name
-    based on metadata from the signature file.
+        copy_files_from_xenium_output("/path/to/source", "/path/to/target", "data.txt")
     """
     # Ensure the target directory exists
     target_path = Path(target_dir)

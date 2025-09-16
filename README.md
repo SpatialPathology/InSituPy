@@ -13,7 +13,29 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 For the latest developments check out the [releases](https://github.com/SpatialPathology/InSituPy/releases).
 
+### Big improvements in `0.9.0`
+
+This version contains multiple bigger changes:
+- Implementation of `generate_pseudobulk` function
+- Working with multiple open napari viewers in parallel
+- Sync and save buttons in napari viewer
+- Implementation of readers for multiplex-IF data exported from QuPath. For scripts to work with QuPath and InSituPy see [this repository](https://github.com/SpatialPathology/InSituPy-QuPath)
+- Changed syntax of the `plotting` submodule: The prefix `"plot_"` was removed from all functions. E.g. `plot_spatial` can be now called with `.pl.spatial`.
+- Completely revised code in `.pl.spatial` introducing different configuration objects to format the plots.
+- Improved documentation
+
 ## Getting started
+
+### Overall data structure
+
+A key feature of InSituPy is its hierarchical data structure, centered around the `InSituExperiment` and `InSituData` objects:
+- `InSituData`: Represents and manages at the individual sample level. It integrates all modalities of spatial omics datasets, including cellular readouts, cellular boundaries, images, transcripts, regions, and annotations.
+- `InSituExperiment`: Aggregates multiple `InSituData` instances and links them with associated metadata, enabling cross-sample analysis and organization.
+
+<p align="center">
+   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="800">
+</p>
+
 
 ### Documentation
 
@@ -22,6 +44,8 @@ For detailed instructions on using InSituPy, refer to the [official documentatio
 InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you are not familiar with these platforms, see the documentation of [Project Jupyter](https://jupyter.org/).
 
 ## Installation
+
+Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
 **Create and activate a conda environment:**
 
@@ -36,7 +60,13 @@ InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you 
    pip install insitupy-spatial
    ```
 
-Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
+## Optional: Install with GUI support (napari viewer):
+
+If you want to use the graphical interface features powered by [napari](https://napari.org/dev/index.html), install with the gui extra:
+
+   ```bash
+   pip install insitupy-spatial[gui]
+   ```
 
 To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
 

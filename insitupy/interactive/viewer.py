@@ -1,25 +1,20 @@
-import os
-from pathlib import Path
-from typing import Optional, Union
-
-import napari
-import numpy as np
-from geopandas import GeoDataFrame
-from napari.utils.notifications import show_info, show_warning
-from parse import parse
-from shapely import Point
-
 from insitupy import WITH_NAPARI, __version__
-from insitupy.interactive._checks import _check_geometry_symbol_and_layer
-from insitupy.interactive._configs import _get_viewer_uid
-from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
 if WITH_NAPARI:
+    import os
+    from pathlib import Path
+    from typing import Union
+
     import napari
+    from geopandas import GeoDataFrame
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
+    from parse import parse
+    from shapely import Point
 
-    from insitupy.interactive._configs import config_manager
+    from insitupy.interactive._checks import _check_geometry_symbol_and_layer
+    from insitupy.interactive._configs import _get_viewer_uid, config_manager
+    from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
     def sync_geometries():
         name_pattern = "{type_symbol} {class_name} ({annot_key})"
@@ -89,7 +84,7 @@ if WITH_NAPARI:
         max_per_col: int = 10,
         save_only: bool = True
         ):
-        from insitupy.plotting.plots import plot_colorlegend
+        from insitupy.plotting.plots import colorlegend
 
         viewer = napari.current_viewer()
         config = config_manager[_get_viewer_uid(viewer)]
@@ -102,7 +97,7 @@ if WITH_NAPARI:
         for layer in selected_layers:
             savepath = output_folder / f"colorlegend-{layer.name}.pdf"
 
-            plotted = plot_colorlegend(
+            plotted = colorlegend(
                 viewer=viewer,
                 mapping=None,
                 layer_name=layer.name,

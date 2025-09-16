@@ -98,7 +98,7 @@ def _calculate_metrics(adata: AnnData, layer: str = None, force_layer: bool = Fa
 
 
 
-def plot_overview(
+def overview(
     data: InSituExperiment,
     cells_layer: Optional[str] = None,
     columns_to_plot: List[str] = [],
@@ -230,3 +230,7 @@ def plot_overview(
 
     #plt.show()
 
+# deprecated version
+def plot_overview(*args, **kwargs):
+    from insitupy._warnings import plot_functions_deprecations_warning
+    plot_functions_deprecations_warning(name="overview")

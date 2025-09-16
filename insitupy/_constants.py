@@ -72,8 +72,7 @@ FLUO_CMAP = [
 ]
 
 ## colors
-RED = (255, 0, 0)
-
+RED = [255, 0, 0]
 
 # font size
 def _init_mpl_fontsize(scale_factor=1):

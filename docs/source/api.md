@@ -1,13 +1,22 @@
 # API
 
+## Importing InSituPy
 ```{eval-rst}
+.. code-block:: python
 
-Import InSituPy as::
-
-    import insitupy
-
-.. module:: insitupy
+    import insitupy as isp
 ```
+
+Individual submodules can then be imported like this:
+```{eval-rst}
+.. code-block:: python
+
+    isp.dataclasses
+    isp.io
+    isp.plotting
+```
+
+---
 
 ## Core Data Objects
 
@@ -18,7 +27,7 @@ Import InSituPy as::
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituData
 ```
@@ -30,7 +39,7 @@ Read a saved `InSituData` object with:
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituData.read
 ```
@@ -42,7 +51,7 @@ Read a saved `InSituData` object with:
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituExperiment
 ```
@@ -54,44 +63,46 @@ Read a saved `InSituExperiment` project with:
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituExperiment.read
 ```
 
-To generate a new `InSituExperiment` object, following functions are available:
+To generate a new `InSituExperiment` object, either from a configurations file or from histological regions, following functions are available:
 
 ```{eval-rst}
 .. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituExperiment.from_config
-```
-
-```{eval-rst}
-.. module:: insitupy.experiment
-.. currentmodule:: insitupy
-
-.. autosummary::
-    :toctree: generated
-
     InSituExperiment.from_regions
 ```
 
-To concatenate multiple `InSituExperiment` objects, one can use:
+To concatenate multiple `InSituExperiment` objects:
 
 ```{eval-rst}
 .. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_objects
 
     InSituExperiment.concat
 ```
+
+### Import data objects
+
+Import the data objects like this:
+```{eval-rst}
+.. code-block:: python
+
+    from insitupy import InSituData, InSituExperiment
+```
+
+---
 
 ## Core Data Classes
 
@@ -104,7 +115,7 @@ Data classes are used to store the different modalities.
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_classes
 
     dataclasses.CellData
     dataclasses.MultiCellData
@@ -118,7 +129,7 @@ Data classes are used to store the different modalities.
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_classes
 
     dataclasses.ImageData
 ```
@@ -130,7 +141,7 @@ Data classes are used to store the different modalities.
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_classes
 
     dataclasses.ShapesData
     dataclasses.AnnotationsData
@@ -144,56 +155,60 @@ The different data classes can be read using following functions:
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/core_data_classes
 
     dataclasses.read_celldata
     dataclasses.read_multicelldata
     dataclasses.read_shapesdata
 ```
 
+---
+
 ## Read external data
 
 Following functions allow reading data from external sources, e.g. from an *Xenium In Situ* experiment or from [*QuPath*](https://qupath.github.io).
-
 To read an individual dataset on can use following functions:
 ```{eval-rst}
-.. module:: insitupy._core
+.. module:: insitupy.io
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/external_data
 
-    read_qupath
-    read_xenium
+    io.read_qupath
+    io.read_xenium
 ```
 
-To read multiple datasets into an `InSituExperiment` object, following functions can be used:
+To read multiple datasets exported from QuPath into an `InSituExperiment` object, following functions can be used:
+
 ```{eval-rst}
-.. module:: insitupy.experiment
+.. module:: insitupy.io
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/external_data
 
-    read_qupath_project
+    io.read_qupath_project
 ```
 
+---
 
 ## Plotting
+
+Import the plotting submodule either as {code}`isp.plotting` or {code}`isp.pl`.
 
 ```{eval-rst}
 .. module:: insitupy.plotting
 .. currentmodule:: insitupy
 
 .. autosummary::
-    :toctree: generated
+    :toctree: generated/plotting
 
-    plotting.plot_spatial
-    plotting.plot_cellular_composition
+    plotting.spatial
+    plotting.cellular_composition
     plotting.cell_abundance_along_axis
     plotting.cell_expression_along_axis
-    plotting.plot_volcano
-    plotting.plot_colorlegend
-    plotting.plot_overview
+    plotting.volcano
+    plotting.colorlegend
+    plotting.overview
 ```
-

@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Optional, Union
 
 from insitupy._io._qupath import (_get_pixel_size_from_qupath_metadata,
-                                    _list_insitupy_data_folders)
-from insitupy._core.readers import read_qupath
+                                  _list_insitupy_data_folders)
 from insitupy.experiment.data import InSituExperiment
+from insitupy.io.data import read_qupath
 
 
 def read_qupath_project(
