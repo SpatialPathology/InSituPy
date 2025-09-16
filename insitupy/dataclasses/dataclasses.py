@@ -263,18 +263,7 @@ class ShapesData(DeepCopyMixin):
                     if np.any(is_not_polygon):
                         annot_df = annot_df.loc[~is_not_polygon]
                         show_warning(f"Some {self._shape_name} were not shapely.Polygon objects and skipped.")
-                        # warnings.warn(
-                        #     f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
-                        #     stacklevel=2
-                        #     )
 
-            # # check that the dataframe is not empty
-            # if len(annot_df) == 0:
-            #     add = False
-            # else:
-            #     add = True
-
-            # if add:
             # check that the dataframe is not empty
             if len(annot_df) > 0:
                 # add dataframe to AnnotationData object
