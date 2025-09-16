@@ -14,7 +14,6 @@ if WITH_NAPARI:
     from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
                                 QVBoxLayout, QWidget)
 
-
     from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                      REGION_CMAP, REGIONS_SYMBOL)
     from insitupy.images.utils import create_img_pyramid
@@ -52,8 +51,8 @@ if WITH_NAPARI:
 
             @magicgui(
                 call_button=False,
-                data_name= {'choices': data_names, 'label': 'Dataset:'},
-                layer_name = {'choices': layer_names, 'label': 'Layer:'},
+                data_name= {'choices': data_names, 'label': 'CellData layer:'},
+                layer_name = {'choices': layer_names, 'label': 'AnnData layer:'},
             )
             def select_data_widget(
                 data_name=viewer_config.data_name,
