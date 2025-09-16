@@ -5,3 +5,4 @@ from .plots import plot_cellular_composition, plot_colorlegend
 from .qc import plot_qc_metrics, test_transformations
 from .spatial import plot_spatial
 from .volcano import plot_volcano
+from .facs import facs_plot
