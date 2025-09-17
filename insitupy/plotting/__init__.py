@@ -8,4 +8,5 @@ from .qc import plot_qc_metrics, test_transformations
 from .spatial import (DataConfig, LayoutConfig, PlotConfig, plot_spatial,
                       spatial)
 from .volcano import plot_volcano, volcano
+from .volcano_two_sides import volcano_two_sides
 from .facs import facs_plot
