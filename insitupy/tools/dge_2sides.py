@@ -273,7 +273,6 @@ def differential_gene_expression_two_sides(
     
 
     # plotting
-        print(df)
         volcano(
             data=df,
             significance_threshold=significance_threshold,
@@ -286,7 +285,7 @@ def differential_gene_expression_two_sides(
             adjust_labels=True,
             **volcano_kwargs
             )
-        print(df_neighbors)
+        
         volcano(
             data=df_neighbors,
             significance_threshold=significance_threshold,
@@ -300,24 +299,20 @@ def differential_gene_expression_two_sides(
             **volcano_kwargs
             )
         
-        volcano_two_sides(
+        merged=volcano_two_sides(
             data_x=df,
             data_y=df_neighbors,
-            significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,
             title=title,
-            savepath = savepath,
-            save_only = save_only,
-            dpi_save = dpi_save,
-            config_table = config_table,
-            adjust_labels=True,
             **volcano_kwargs) 
-        
-         
+                
     if return_results:
         return {
             "results": df,
-            "params": adata_combined.uns["rank_genes_groups"]["params"]
+            "params": adata_combined.uns["rank_genes_groups"]["params"],
+            "merged_df":merged
         }
+    
+    
       
        
