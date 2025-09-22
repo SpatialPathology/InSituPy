@@ -11,7 +11,15 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 ```
 
 ```{eval-rst}
-.. card:: Generating pseudobulk data
+.. card:: Split datasets
+    :link: InSituPy_Pseudobulk
+    :link-type: doc
+
+    Sometimes data from multiple datasets can be present in one dataset. This notebook shows how to split those datasets.
+```
+
+```{eval-rst}
+.. card:: Generate pseudobulk data
     :link: InSituPy_Pseudobulk
     :link-type: doc
 
@@ -23,5 +31,6 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 :maxdepth: 1
 
 InSituPy_InSituExperiment
+InSituPy_split_datasets
 InSituPy_Pseudobulk
 ```
