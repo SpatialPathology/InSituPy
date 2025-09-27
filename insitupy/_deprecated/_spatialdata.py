@@ -3,18 +3,61 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 
-from typing import List
+from typing import List, Literal, Optional, Union
+from warnings import warn
 
 import dask.dataframe as dd
 import numpy as np
 from anndata import AnnData
+from spatialdata._core.validation import check_valid_name
 from spatialdata.models import (Image2DModel, Labels2DModel, PointsModel,
                                 ShapesModel, TableModel)
 from spatialdata.transformations.transformations import Identity, Scale
 from xarray import DataArray
 
 from insitupy import InSituData
+from insitupy._constants import MODALITIES, SAMPLE_STR
+from insitupy.images.axes import ImageAxes
+from insitupy.utils.utils import convert_to_list
 
+
+def _generate_key(
+    sample_id: str,
+    modality: Literal[MODALITIES],
+    locator: Optional[Union[str, tuple, List]]
+    ):
+    if not modality.lower() in MODALITIES:
+        raise ValueError(f"Modality '{modality}' not recognized. Choose from {MODALITIES}.")
+
+    if modality == "transcripts":
+        assert locator is None, "Locator must be None for modality 'transcripts'."
+    else:
+        assert locator is not None, f"Locator cannot be None for modality '{modality}'."
+
+    if sample_id is None:
+        sample_part = ""
+    else:
+        sample_part = f"{SAMPLE_STR}.{sample_id}-"
+
+    if locator is not None:
+        locator = convert_to_list(locator)
+
+        locator_checked = []
+        for elem in locator:
+            try:
+                check_valid_name(elem)
+            except ValueError as e:
+                raise ValueError(f"Name '{elem}' does not meet the naming requirements of SpatialData. {e}")
+
+            if "." in elem or "-" in elem:
+                warn(f"Replacing '.' and '-' in '{elem}' with '_' to meet naming requirements.")
+                elem = elem.replace(".", "_").replace("-", "_")
+
+            locator_checked.append(elem)
+
+        return f"{sample_part}{modality.upper()}.{'.'.join(locator_checked)}"
+    else:
+        return f"{sample_part}{modality.upper()}"
 
 def _transform_anndata(adata: AnnData, cells_as_circles: bool = True):
 
@@ -23,15 +66,12 @@ def _transform_anndata(adata: AnnData, cells_as_circles: bool = True):
     attrs = {}
     attrs["instance_key"] = "cell_id" if cells_as_circles else "cell_labels"
     adata.obs["cell_id"] = adata.obs.index
-    # adata.obs.index = range(len(adata.obs))
-    # adata.obs.index = adata.obs.index.astype(str)
     attrs[region_str] = "cell_circles" if cells_as_circles else "cell_labels"
     adata.obs[region_str] = attrs[region_str]
     adata.obs[region_str] = adata.obs[region_str].astype("category")
     attrs["region_key"] = region_str
     adata.uns["spatialdata_attrs"] = attrs
     if cells_as_circles:
-        #transform = Scale([1.0 / data.metadata["method_params"]["pixel_size"], 1.0 / data.metadata["method_params"]["pixel_size"]], axes=("x", "y"))
         transform = Scale([1.0, 1.0], axes=("x", "y"))
         radius = np.sqrt(adata.obs["cell_area"].to_numpy() / np.pi)
         circles = ShapesModel.parse(
@@ -43,45 +83,39 @@ def _transform_anndata(adata: AnnData, cells_as_circles: bool = True):
         )
     return adata, circles
 
-from insitupy.images.axes import ImageAxes
 
-# def _get_scale_factors(image_list, axes_config):
 
-#     sf_list = [
-#         int(image_list[i].shape[axes_config.X] / image_list[i+1].shape[axes_config.X])
-#         for i in range(len(image_list)-1)
-#         ]
-#     return sf_list
-
-def _transform_images(xd: InSituData, levels: int = 5):
+def _transform_images(
+    xd: InSituData,
+    levels: int = 5,
+    sample_id: Optional[str] = None
+    ):
     images = {}
-    # image_types = {}
     if xd.images is not None:
         for name in xd.images.names:
             image_list =  xd.images[name]
             img = image_list[0]
             axes_isp = xd.images.metadata[name]["axes"]
             axes_config = ImageAxes(axes_isp)
-            # sf_list = _get_scale_factors(image_list, axes_config)
-            #if len(xd.images.metadata[name]["shape"]) == 3:
             is_rgb = xd.images.metadata[name]["rgb"]
+
+            dict_key = _generate_key(
+                sample_id=sample_id,
+                modality="images",
+                locator=name
+            )
             if is_rgb:
                 axes = tuple(list(axes_isp.lower().replace("s", "c")))
-                #axes = ("y", "x", "c")
                 array = DataArray(
                     data=image_list[0],
                     name=name,
                     dims=axes
                     )
-                images[name] = Image2DModel.parse(
+                images[dict_key] = Image2DModel.parse(
                     array,
                     rgb=True,
-                    #dims=axes,
-                    #c_coords=["r", "g", "b"],
-                    #chunks=(1, 4096, 4096),
                     scale_factors=[2 for _ in range(levels)]
                     )
-                # image_types[name] = "image"
             else:
                 c_dim = axes_config.C if axes_config.C is not None else 1
 
@@ -95,52 +129,23 @@ def _transform_images(xd: InSituData, levels: int = 5):
                     name=name,
                     dims=("c", "y", "x")
                     )
-                images[name] = Image2DModel.parse(
+                images[dict_key] = Image2DModel.parse(
                     array,
-                    #dims=("c", "y", "x"),
-                    #chunks=(1, 4096, 4096),
                     scale_factors=[2 for _ in range(levels)]
                     )
-                # image_types[name] = "image"
-    return images#, image_types
+    return images
 
 
-def _transform_labels(xd: InSituData, n_levels: int = 5):
-    labels = {}
-    # label_types = {}
-    if xd.cells is not None and xd.cells.boundaries is not None:
-
-        for name in xd.cells.boundaries.metadata.keys():
-            labels_list =  xd.cells.boundaries[name]
-            #n_levels = len(labels_list)
-            if isinstance(labels_list, list):
-                top_array = labels_list[0]
-            array = DataArray(data=top_array, name=name, dims=("y", "x"))
-            labels[name] = Labels2DModel.parse(
-                array,
-                #dims=("y", "x"),
-                #chunks=(4096, 4096),
-                scale_factors=[2 for _ in range(n_levels)]
-                )
-            # label_types[name] = "labels"
-    return labels#, label_types
 
 
-def _transform_transcripts(xd: InSituData):
+
+def _transform_transcripts(
+    xd: InSituData,
+    sample_id: Optional[str] = None
+    ):
     points = {}
-    # point_types = {}
     if xd.transcripts is not None:
-        #df = dd.from_pandas(xd.transcripts, npartitions=1)
         df = xd.transcripts
-        #df.columns = df.columns.droplevel(0)
-        #df['transcript_id'] = df.index
-        # df = df.reset_index(drop=True)
-        # rename_dict = {
-        #                 "xenium": "cell_id",
-        #                 "gene": "feature_name"
-        #             }
-        # df = df.rename(columns=rename_dict)
-        #scale = Scale([1.0 / xd.metadata["method_params"]["pixel_size"], 1.0 / xd.metadata["method_params"]["pixel_size"], 1.0], axes=("x", "y", "z"))
         scale = Scale([1, 1, 1], axes=("x", "y", "z"))
         parsed_points = PointsModel.parse(
             df,
@@ -150,35 +155,127 @@ def _transform_transcripts(xd: InSituData):
             transformations={"global": scale},
             sort=True
             )
-        points = {"transcripts": parsed_points}
-        #point_types = {"transcripts": "points"}
+
+        dict_key = _generate_key(
+            sample_id=sample_id,
+            modality="transcripts",
+            locator=None
+        )
+
+        points = {dict_key: parsed_points}
     return points
 
-def _transform_matrix_annotations(xd: InSituData):
-    #tables, shapes, table_types, shape_type = {}, {}, {}, {}
-    tables, shapes = {}, {}
-    if xd.cells is not None and xd.cells.matrix is not None:
-        adata, circles = _transform_anndata(xd.cells.matrix.copy())
-        tables["table"] = TableModel.parse(adata)
-        shapes["cell_circles"] = circles
-        # table_types["table"] = "tables"
-        # shape_type["cell_circles"] = "shapes"
 
-    # if xd.alt is not None:
-    #     for key in xd.alt.keys():
-    #         if hasattr(xd.alt[key], "matrix"):
-    #             adata, circles = _transform_anndata(xd.alt[key].matrix.copy())
-    #             tables[key] = TableModel.parse(adata)
+def _transform_matrix(
+    xd: InSituData,
+    sample_id: Optional[str] = None
+    ):
+    tables, cell_shapes = {}, {}
+    #if xd.cells is not None and xd.cells.matrix is not None:
+    if xd.cells is not None:
+        for cell_key in xd.cells.keys():
+            if xd.cells[cell_key].matrix is not None:
+                adata, circles = _transform_anndata(xd.cells[cell_key].matrix)
 
+                tables_key = _generate_key(
+                    sample_id=sample_id,
+                    modality="cells",
+                    locator=[cell_key, "matrix"]
+                )
+
+                cell_key = _generate_key(
+                    sample_id=sample_id,
+                    modality="cells",
+                    locator=[cell_key, "circles"]
+                )
+
+                tables[tables_key] = TableModel.parse(adata)
+                cell_shapes[cell_key] = circles
+
+    return tables, cell_shapes
+
+def _transform_cell_boundaries(
+    xd: InSituData,
+    n_levels: int = 5,
+    sample_id: Optional[str] = None
+    ):
+    cell_boundaries = {}
+    #if xd.cells is not None and xd.cells.boundaries is not None:
+    if xd.cells is not None:
+        for cell_key in xd.cells.keys():
+            if xd.cells[cell_key].boundaries is not None:
+                celldata = xd.cells[cell_key]
+                for name in celldata.boundaries.metadata.keys():
+                    # get list of available boundaries
+                    labels_list =  celldata.boundaries[name]
+
+                    if isinstance(labels_list, list):
+                        top_array = labels_list[0]
+                    array = DataArray(data=top_array, name=name, dims=("y", "x"))
+
+                    dict_key = _generate_key(
+                        sample_id=sample_id,
+                        modality="cells",
+                        locator=[cell_key, "boundaries", name]
+                    )
+
+                    cell_boundaries[dict_key] = Labels2DModel.parse(
+                        array,
+                        scale_factors=[2 for _ in range(n_levels)]
+                        )
+    return cell_boundaries
+
+def _transform_annotations(
+    xd: InSituData,
+    sample_id: Optional[str] = None
+    ):
+    shapes = {}
     if xd.annotations is not None:
         for key in xd.annotations.metadata.keys():
             gdf = ShapesModel.parse(
                 xd.annotations[key],
-                #transformations={"global": Identity()}
                 )
-            shapes[key] = gdf
-            # shape_type[key] = "shapes"
-    return tables | shapes#, table_types | shape_type
+
+            dict_key = _generate_key(
+                sample_id=sample_id,
+                modality="annotations",
+                locator=key
+            )
+
+            shapes[dict_key] = gdf
+    return shapes
+
+
+
+def _transform_regions(
+    xd: InSituData,
+    sample_id: Optional[str] = None
+    ):
+    shapes = {}
+    if xd.annotations is not None:
+        for key in xd.regions.metadata.keys():
+            gdf = ShapesModel.parse(
+                xd.regions[key],
+                )
+            dict_key = _generate_key(
+                sample_id=sample_id,
+                modality="regions",
+                locator=key
+            )
+
+            shapes[dict_key] = gdf
+    return shapes
+
+def _merge_dicts_with_warning(*dicts):
+    merged = {}
+    seen_keys = set()
+    for d in dicts:
+        for key in d:
+            if key in seen_keys:
+                print(f"Warning: Duplicate key detected - '{key}'")
+            seen_keys.add(key)
+        merged.update(d)
+    return merged
 
 
 def convert_to_spatialdata_dict(data, levels: int = 5):
@@ -196,11 +293,13 @@ def convert_to_spatialdata_dict(data, levels: int = 5):
         Dict: a dictionary with all modalities saved in SpatialData format.
     """
     transcripts = _transform_transcripts(data)
-    matrix_shapes = _transform_matrix_annotations(data)
+    tables, cell_shapes = _transform_matrix(data)
+    annotations = _transform_annotations(data)
+    regions = _transform_regions(data)
     images = _transform_images(data, levels)
-    labels = _transform_labels(data)
-    merged_dict = transcripts | matrix_shapes | images | labels
-    # merged_dict_names = points_names | matrix_shapes_names | images_names | labels_names
+    labels = _transform_cell_boundaries(data)
+    merged_dict = _merge_dicts_with_warning(transcripts, tables, cell_shapes, annotations, regions, images, labels)
+    # merged_dict = transcripts | tables | cell_shapes | annotations | regions | images | labels
     return merged_dict
 
 def convert_to_spatialdata(data, levels: int = 5):
@@ -216,7 +315,7 @@ def convert_to_spatialdata(data, levels: int = 5):
 
     """
 
-    sd_dict, _ = convert_to_spatialdata_dict(data, levels=levels)
+    sd_dict = convert_to_spatialdata_dict(data, levels=levels)
     sdata = SpatialData.from_elements_dict(sd_dict)
     return sdata
 

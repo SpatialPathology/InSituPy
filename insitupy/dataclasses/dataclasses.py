@@ -1184,7 +1184,7 @@ class MultiCellData(DeepCopyMixin):
         if not inplace:
             return _self
 
-    def get_all_keys(self):
+    def keys(self):
         return self._layers.keys()
 
     def save(self,
@@ -1216,7 +1216,7 @@ class MultiCellData(DeepCopyMixin):
         write_dict_to_json(dictionary=multicelldata_metadata, file=path / ".multicelldata")
 
     def set_main(self, key):
-        if key in self.get_all_keys():
+        if key in self.keys():
             self._main_key = key
 
     def sync(self):

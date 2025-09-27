@@ -33,6 +33,9 @@ MODALITIES_COLOR_DICT = {
     "regions": tf.Yellow
 }
 
+# spatialdata
+SAMPLE_STR = "SAMPLE"
+
 # naming
 ISPY_METADATA_FILE = ".ispy"
 XENIUM_HEX_RANGE = string.ascii_lowercase[:16]

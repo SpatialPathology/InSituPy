@@ -534,7 +534,7 @@ class InSituData:
         overwrite: bool = True
     ):
         if cells_layers is None:
-            layers_list = self._cells.get_all_keys()
+            layers_list = self._cells.keys()
         else:
             layers_list = convert_to_list(cells_layers)
 
@@ -555,7 +555,7 @@ class InSituData:
         overwrite: bool = True
     ):
         if cells_layers is None:
-            layers_list = self._cells.get_all_keys()
+            layers_list = self._cells.keys()
         else:
             layers_list = convert_to_list(cells_layers)
 

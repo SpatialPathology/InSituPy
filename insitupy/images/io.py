@@ -1,9 +1,9 @@
 import os
-import warnings
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 from typing import List, Literal, Optional, Union
+from warnings import warn
 
 import dask.array as da
 import numpy as np
@@ -73,6 +73,13 @@ def read_image(
             axes = tif.series[0].axes # get axes
             ome_meta = tif.ome_metadata # read OME metadata
             ome_meta = xmltodict.parse(ome_meta, attr_prefix="")["OME"] # convert XML to dict
+
+        # here img should be always a pyramid
+        if axes == "CYX":
+            shape = img[0].shape
+            if not len(shape) == 3:
+                warn(f"Axes information ({axes}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.")
+                axes = "YX"
 
     else:
         raise InvalidFileTypeError(

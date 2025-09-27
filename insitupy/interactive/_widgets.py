@@ -46,7 +46,7 @@ if WITH_NAPARI:
             show_boundaries_widget = None,
             filter_cells_widget = None
         else:
-            data_names = data.cells.get_all_keys()
+            data_names = data.cells.keys()
             layer_names = ["main"] + list(data.cells.matrix.layers)
 
             @magicgui(
