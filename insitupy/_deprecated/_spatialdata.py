@@ -3,6 +3,7 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 
+from collections import defaultdict
 from typing import List, Literal, Optional, Union
 from warnings import warn
 
@@ -37,7 +38,7 @@ def _generate_key(
     if sample_id is None:
         sample_part = ""
     else:
-        sample_part = f"{SAMPLE_STR}.{sample_id}-"
+        sample_part = f"{SAMPLE_STR}.{sample_id}.."
 
     if locator is not None:
         locator = convert_to_list(locator)
@@ -55,32 +56,42 @@ def _generate_key(
 
             locator_checked.append(elem)
 
-        return f"{sample_part}{modality.upper()}.{'.'.join(locator_checked)}"
+        key = f"{sample_part}{modality.upper()}.{'.'.join(locator_checked)}"
     else:
-        return f"{sample_part}{modality.upper()}"
+        key = f"{sample_part}{modality.upper()}"
 
-def _transform_anndata(adata: AnnData, cells_as_circles: bool = True):
+    # check key for validity
+    check_valid_name(key)
+    return key
+
+def _transform_anndata(
+    adata: AnnData,
+    #cells_as_circles: bool = True
+    cells_key: str
+    ):
 
     adata = adata.copy()
     region_str = "region"
     attrs = {}
-    attrs["instance_key"] = "cell_id" if cells_as_circles else "cell_labels"
+    #attrs["instance_key"] = "cell_id" if cells_as_circles else "cell_labels"
+    attrs["instance_key"] = "cell_id"
     adata.obs["cell_id"] = adata.obs.index
-    attrs[region_str] = "cell_circles" if cells_as_circles else "cell_labels"
-    adata.obs[region_str] = attrs[region_str]
+    #attrs[region_str] = "cell_circles" if cells_as_circles else "cell_labels"
+    attrs[region_str] = cells_key
+    adata.obs[region_str] = cells_key
     adata.obs[region_str] = adata.obs[region_str].astype("category")
     attrs["region_key"] = region_str
     adata.uns["spatialdata_attrs"] = attrs
-    if cells_as_circles:
-        transform = Scale([1.0, 1.0], axes=("x", "y"))
-        radius = np.sqrt(adata.obs["cell_area"].to_numpy() / np.pi)
-        circles = ShapesModel.parse(
-                adata.obsm["spatial"].copy(),
-                geometry=0,
-                radius=radius,
-                transformations={"global": transform},
-                index=adata.obs.index.copy(),
-        )
+    #if cells_as_circles:
+    #transform = Scale([1.0, 1.0], axes=("x", "y"))
+    radius = np.sqrt(adata.obs["cell_area"].to_numpy() / np.pi)
+    circles = ShapesModel.parse(
+            adata.obsm["spatial"].copy(),
+            geometry=0,
+            radius=radius,
+            #transformations={"global": transform},
+            index=adata.obs.index.copy(),
+    )
     return adata, circles
 
 
@@ -94,6 +105,9 @@ def _transform_images(
     if xd.images is not None:
         for name in xd.images.names:
             image_list =  xd.images[name]
+            meta = xd.images.metadata[name]
+            pixel_size = meta["pixel_size"]
+            transformations = {"global": Scale([pixel_size, pixel_size], axes=("x", "y"))}
             img = image_list[0]
             axes_isp = xd.images.metadata[name]["axes"]
             axes_config = ImageAxes(axes_isp)
@@ -114,7 +128,8 @@ def _transform_images(
                 images[dict_key] = Image2DModel.parse(
                     array,
                     rgb=True,
-                    scale_factors=[2 for _ in range(levels)]
+                    scale_factors=[2 for _ in range(levels)],
+                    transformations=transformations
                     )
             else:
                 c_dim = axes_config.C if axes_config.C is not None else 1
@@ -131,13 +146,10 @@ def _transform_images(
                     )
                 images[dict_key] = Image2DModel.parse(
                     array,
-                    scale_factors=[2 for _ in range(levels)]
+                    scale_factors=[2 for _ in range(levels)],
+                    transformations=transformations
                     )
     return images
-
-
-
-
 
 def _transform_transcripts(
     xd: InSituData,
@@ -146,13 +158,13 @@ def _transform_transcripts(
     points = {}
     if xd.transcripts is not None:
         df = xd.transcripts
-        scale = Scale([1, 1, 1], axes=("x", "y", "z"))
+        #scale = Scale([1, 1, 1], axes=("x", "y", "z"))
         parsed_points = PointsModel.parse(
             df,
             coordinates={"x": "x_location", "y": "y_location", "z": "z_location"},
             feature_key="feature_name",
             instance_key="cell_id",
-            transformations={"global": scale},
+            #transformations={"global": scale},
             sort=True
             )
 
@@ -175,22 +187,26 @@ def _transform_matrix(
     if xd.cells is not None:
         for cell_key in xd.cells.keys():
             if xd.cells[cell_key].matrix is not None:
-                adata, circles = _transform_anndata(xd.cells[cell_key].matrix)
-
                 tables_key = _generate_key(
                     sample_id=sample_id,
                     modality="cells",
                     locator=[cell_key, "matrix"]
                 )
 
-                cell_key = _generate_key(
+                cell_dict_key = _generate_key(
                     sample_id=sample_id,
                     modality="cells",
                     locator=[cell_key, "circles"]
                 )
 
+                adata, circles = _transform_anndata(
+                    xd.cells[cell_key].matrix,
+                    cells_key=cell_dict_key
+                    )
+
+                # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
                 tables[tables_key] = TableModel.parse(adata)
-                cell_shapes[cell_key] = circles
+                cell_shapes[cell_dict_key] = circles
 
     return tables, cell_shapes
 
@@ -277,6 +293,26 @@ def _merge_dicts_with_warning(*dicts):
         merged.update(d)
     return merged
 
+def _check_case_insensitive_conflicts(keys):
+    keys = convert_to_list(keys)
+    grouped = defaultdict(list)
+
+    for key in keys:
+        grouped[key.lower()].append(key)
+
+    conflicts = {k: v for k, v in grouped.items() if len(set(v)) > 1}
+
+    if conflicts:
+        message_lines = ["Case-insensitive key conflicts detected:"]
+        for lower_key, variants in conflicts.items():
+            message_lines.append(f"  - '{lower_key}': {variants}")
+        message_lines.append(
+            "\nThese conflicts can lead to problems when saving the SpatialData object, "
+            "as some tools treat keys in a case-insensitive manner."
+        )
+        warn("\n".join(message_lines), category=UserWarning)
+    else:
+        print("No case-insensitive conflicts found.")
 
 def convert_to_spatialdata_dict(data, levels: int = 5):
 
@@ -292,6 +328,7 @@ def convert_to_spatialdata_dict(data, levels: int = 5):
     Returns:
         Dict: a dictionary with all modalities saved in SpatialData format.
     """
+    # create SpatialData dictionary
     transcripts = _transform_transcripts(data)
     tables, cell_shapes = _transform_matrix(data)
     annotations = _transform_annotations(data)
@@ -299,7 +336,10 @@ def convert_to_spatialdata_dict(data, levels: int = 5):
     images = _transform_images(data, levels)
     labels = _transform_cell_boundaries(data)
     merged_dict = _merge_dicts_with_warning(transcripts, tables, cell_shapes, annotations, regions, images, labels)
-    # merged_dict = transcripts | tables | cell_shapes | annotations | regions | images | labels
+
+    # check whether there are keys in the dictionary that could later lead to problems saving the data
+    _check_case_insensitive_conflicts(merged_dict.keys())
+
     return merged_dict
 
 def convert_to_spatialdata(data, levels: int = 5):
