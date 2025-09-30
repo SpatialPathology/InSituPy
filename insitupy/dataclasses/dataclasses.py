@@ -4,7 +4,7 @@ from copy import deepcopy
 from numbers import Number
 from os.path import relpath
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import dask.array as da
 import geopandas as gpd
@@ -1020,8 +1020,8 @@ class MultiCellData(DeepCopyMixin):
     Data object containing multiple CellData objects.
     '''
     def __init__(self):
-        self._layers = dict()
-        self._main_key = None
+        self._layers: Dict[str, CellData] = dict()
+        self._main_key: Optional[str] = None
 
     def __len__(self):
         return len(self._layers)
@@ -1048,9 +1048,17 @@ class MultiCellData(DeepCopyMixin):
         # else:
         return self._layers.get(key)
 
-    def __setitem__(self, key: str, item):
+    def __setitem__(self, key: str, item: CellData):
         if isinstance(item, CellData):
+            # check whether this is the first data that is added
+            is_first_key = True if len(self._layers) == 0 else False
+
+            # add data
             self._layers[key] = item
+
+            # set key as main key if it is the first data to be added to the layer
+            if is_first_key:
+                self.main_key = key
         else:
             raise ValueError(f"Item must be of type CellData. Instead: {type(item)}.")
 
