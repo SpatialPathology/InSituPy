@@ -16,8 +16,9 @@ from spatialdata.models import (Image2DModel, Labels2DModel, PointsModel,
 from spatialdata.transformations.transformations import Identity, Scale
 from xarray import DataArray
 
-from insitupy import InSituData
-from insitupy._constants import MODALITIES, SAMPLE_STR
+from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
+                                 MODALITIES, SAMPLE_STR)
+from insitupy._core.data import InSituData
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
 
@@ -67,7 +68,8 @@ def _generate_key(
 def _transform_anndata(
     adata: AnnData,
     #cells_as_circles: bool = True
-    cells_key: str
+    cells_key: str,
+    cell_area_key: Optional[str] = "cell_area"
     ):
 
     adata = adata.copy()
@@ -82,17 +84,32 @@ def _transform_anndata(
     adata.obs[region_str] = adata.obs[region_str].astype("category")
     attrs["region_key"] = region_str
     adata.uns["spatialdata_attrs"] = attrs
-    #if cells_as_circles:
-    #transform = Scale([1.0, 1.0], axes=("x", "y"))
-    radius = np.sqrt(adata.obs["cell_area"].to_numpy() / np.pi)
+
+    if cell_area_key is not None:
+        try:
+            cell_areas = adata.obs[cell_area_key].to_numpy()
+        except KeyError:
+            print(f"Key '{cell_area_key}' not found in AnnData. Skipped generation of sized circles.")
+            circles_sized = None
+        else:
+            radius = np.sqrt(cell_areas / np.pi)
+            circles_sized = ShapesModel.parse(
+                    adata.obsm["spatial"].copy(),
+                    geometry=0, # means "Circles" (3 is Polygon, 6 is MultiPolygon)
+                    radius=radius,
+                    index=adata.obs.index.copy(),
+            )
+    else:
+        circles_sized = None
+
     circles = ShapesModel.parse(
-            adata.obsm["spatial"].copy(),
-            geometry=0,
-            radius=radius,
-            #transformations={"global": transform},
-            index=adata.obs.index.copy(),
-    )
-    return adata, circles
+        adata.obsm["spatial"].copy(),
+        geometry=0,
+        radius=5,
+        index=adata.obs.index.copy()
+        )
+
+    return adata, circles_sized, circles
 
 
 
@@ -129,7 +146,8 @@ def _transform_images(
                     array,
                     rgb=True,
                     scale_factors=[2 for _ in range(levels)],
-                    transformations=transformations
+                    transformations=transformations,
+                    chunks=(3, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                     )
             else:
                 c_dim = axes_config.C if axes_config.C is not None else 1
@@ -147,7 +165,8 @@ def _transform_images(
                 images[dict_key] = Image2DModel.parse(
                     array,
                     scale_factors=[2 for _ in range(levels)],
-                    transformations=transformations
+                    transformations=transformations,
+                    chunks=(1, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                     )
     return images
 
@@ -193,20 +212,30 @@ def _transform_matrix(
                     locator=[cell_key, "matrix"]
                 )
 
-                cell_dict_key = _generate_key(
+                circles_dict_key = _generate_key(
                     sample_id=sample_id,
                     modality="cells",
                     locator=[cell_key, "circles"]
                 )
 
-                adata, circles = _transform_anndata(
+                adata, circles_sized, circles = _transform_anndata(
                     xd.cells[cell_key].matrix,
-                    cells_key=cell_dict_key
+                    cells_key=circles_dict_key
                     )
 
                 # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
                 tables[tables_key] = TableModel.parse(adata)
-                cell_shapes[cell_dict_key] = circles
+                cell_shapes[circles_dict_key] = circles
+
+                if circles_sized is not None:
+                    circles_sized_dict_key = _generate_key(
+                        sample_id=sample_id,
+                        modality="cells",
+                        locator=[cell_key, "circles_sized"]
+                    )
+
+                    # add sized circles
+                    cell_shapes[circles_sized_dict_key] = circles_sized
 
     return tables, cell_shapes
 
@@ -221,6 +250,9 @@ def _transform_cell_boundaries(
         for cell_key in xd.cells.keys():
             if xd.cells[cell_key].boundaries is not None:
                 celldata = xd.cells[cell_key]
+                meta = celldata.boundaries.metadata[name]
+                pixel_size = meta["pixel_size"]
+                transformations = {"global": Scale([pixel_size, pixel_size], axes=("x", "y"))}
                 for name in celldata.boundaries.metadata.keys():
                     # get list of available boundaries
                     labels_list =  celldata.boundaries[name]
@@ -237,7 +269,9 @@ def _transform_cell_boundaries(
 
                     cell_boundaries[dict_key] = Labels2DModel.parse(
                         array,
-                        scale_factors=[2 for _ in range(n_levels)]
+                        scale_factors=[2 for _ in range(n_levels)],
+                        transformations=transformations,
+                        chunks=(DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                         )
     return cell_boundaries
 
