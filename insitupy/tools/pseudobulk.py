@@ -45,13 +45,13 @@ from adjustText import adjust_text
 from insitupy.dataclasses._utils import _get_cell_layer
 
 
-def extract_adata_from_InSituExperiment(exp, cell_layer:str):
+def extract_adata_from_InSituExperiment(exp, cell_layer:str, sample_col):
     
     adatas={}
     for id, data in exp.iterdata():
         layer= _get_cell_layer(cells=data.cells,cells_layer=cell_layer)
         adata = layer.matrix
-        adatas[data.sample_id]=adata
+        adatas[layer.matrix.obs[sample_col].unique().tolist()[0]]=adata
     
     return adatas
 
@@ -63,15 +63,14 @@ def concatenate_adatas_for_pseudobulk(adatas: dict,label:str):
     return adata
 
 
-def get_neighborhood(exp: InSituExperiment, cells_layer: Optional[str] = None, radius: Number = 30):
+def get_neighborhood(exp: InSituExperiment, sample_col: str, cells_layer: Optional[str] = None, radius: Number = 30):
+    matrices = {}
     
-    matrices={}
-    #  calculation of neighborhood for each sample
     for id, data in exp.iterdata():
-        layer= _get_cell_layer(cells=data.cells,cells_layer=cells_layer)
+        layer = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
         coords = layer.matrix.obsm["spatial"]
         A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
-        matrices[data.sample_id]=A
+        matrices[layer.matrix.obs[sample_col].unique().tolist()[0]] = A
         
     return matrices
 
@@ -85,8 +84,9 @@ def neighborhoods_pseudobulk(matrices, exp,cells_layers,groups_col,raw_counts,sa
     
     pseudobulks={}
     for id, data in exp.iterdata():
-        print(data.sample_id)
         layer= _get_cell_layer(cells=data.cells,cells_layer=cells_layers)
+        print(layer.matrix.obs[sample_col].unique().tolist()[0])
+        
         layer.matrix.obs["cell_id"] = [f"{i}" for i in range(layer.matrix.n_obs)]
         layer.matrix.X=layer.matrix.layers[raw_counts].copy()
         celltype_pdata={}
@@ -95,7 +95,7 @@ def neighborhoods_pseudobulk(matrices, exp,cells_layers,groups_col,raw_counts,sa
             cell_names=cell_names.tolist()
             cell_names = [int(x) for x in cell_names]
         
-            A = matrices[data.sample_id] 
+            A = matrices[layer.matrix.obs[sample_col].unique().tolist()[0]] 
             neighbors= []
             for i in cell_names:  
                 neighbors.append(A[i].nonzero()[1])
@@ -114,7 +114,7 @@ def neighborhoods_pseudobulk(matrices, exp,cells_layers,groups_col,raw_counts,sa
         pdata_big=concatenate_adatas_for_pseudobulk(celltype_pdata,label=groups_col)
         
         pdata_big.obs['pseudo_neighbors'] = (pdata_big.obs.index.astype(str)+ "_" + pdata_big.obs[groups_col].astype(str)  + "_neighbors" )
-        pseudobulks[data.sample_id]=pdata_big 
+        pseudobulks[layer.matrix.obs[sample_col].unique().tolist()[0]]=pdata_big 
         pdata_neighbors=concatenate_adatas_for_pseudobulk(pseudobulks,label=sample_col)
         
           
@@ -134,7 +134,7 @@ def concatenate_pdata_and_pdata_neighbors(pdata,pdata_neighbors):
     return pdata_final
 
 
-def generate_pseudobulk_neighbors(exp,cell_layer,raw_counts,sample_col,groups_col,radius):
+def generate_pseudobulk(exp,cell_layer,raw_counts,sample_col,groups_col,radius:Optional[str] = None,calculate_neighbors:Optional[str] = None):
     
     try:
         import decoupler as dc
@@ -142,7 +142,7 @@ def generate_pseudobulk_neighbors(exp,cell_layer,raw_counts,sample_col,groups_co
     except ImportError:
         print(("Decoupler is not installed. Interactive visualization using `.show()` will not be possible. If you want to use these features, install decoupler with `pip install decoupler`"))
     
-    adatas=extract_adata_from_InSituExperiment(exp=exp, cell_layer=cell_layer)
+    adatas=extract_adata_from_InSituExperiment(exp=exp, cell_layer=cell_layer,sample_col=sample_col)
     
     pseudobulks={}
     for id, adata in adatas.items():
@@ -152,13 +152,17 @@ def generate_pseudobulk_neighbors(exp,cell_layer,raw_counts,sample_col,groups_co
     
     pdata_big=concatenate_adatas_for_pseudobulk(pseudobulks,label=sample_col)
     
-    matrices=get_neighborhood(exp=exp,cells_layer=cell_layer,radius=radius)
+    if calculate_neighbors == True: 
+        
+        matrices=get_neighborhood(exp=exp,cells_layer=cell_layer,radius=radius, sample_col=sample_col)
     
-    pdata_neighbors=neighborhoods_pseudobulk(matrices=matrices,exp=exp,cells_layers=cell_layer,groups_col=groups_col,raw_counts=raw_counts,sample_col=sample_col)
+        pdata_neighbors=neighborhoods_pseudobulk(matrices=matrices,exp=exp,cells_layers=cell_layer,groups_col=groups_col,raw_counts=raw_counts,sample_col=sample_col)
     
-    pdata_final=concatenate_pdata_and_pdata_neighbors(pdata_big,pdata_neighbors)
+        pdata_final=concatenate_pdata_and_pdata_neighbors(pdata_big,pdata_neighbors)
+        return pdata_final  
     
-    return pdata_final   
+    else:
+        return pdata_big 
     
     
 def two_sides_volcano(results_df_normal,results_df_neighbors,significance_threshold,fold_change_threshold):
