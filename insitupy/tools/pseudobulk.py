@@ -6,10 +6,6 @@ decoupleR: Ensemble of computational methods to infer biological activities from
 Bioinformatics Advances. https://doi.org/10.1093/bioadv/vbac016
 
 """
-
-
-from typing import Literal, Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -20,417 +16,230 @@ from scipy.sparse import csr_matrix, issparse, vstack
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 
+import insitupy
+from insitupy._core.data import InSituData,ImageData, CACHE
+#from insitupy import InSituExperiment
+from insitupy.io import read_xenium
+import scanpy as sc
 
-def psbulk_profile(profile, mode='sum'):
-    if mode == 'sum':
-        profile = np.sum(profile, axis=0)
-    elif mode == 'mean':
-        profile = np.mean(profile, axis=0)
-    elif mode == 'median':
-        profile = np.median(profile, axis=0)
-    elif callable(mode):
-        profile = np.apply_along_axis(mode, 0, profile)
-    else:
-        raise ValueError("""mode={0} can be 'sum', 'mean', 'median' or a callable function.""".format(mode))
-    return profile
+from pathlib import Path
+import dask
+import os
+import glob
+import copy
 
-def extract_psbulk_inputs(
-    exp: InSituExperiment,
-    cells_layer: str,
-    layer: str
-    ):
+from insitupy.io import read_xenium
+import anndata as ad
+import sys
 
-    obs_columns_list = []
-    for _, data in exp.iterdata():
-        celldata = _get_cell_layer(
-            cells=data.cells,
-            cells_layer=cells_layer
-        )
-        obs_columns_list.append(set(celldata.matrix.obs.columns))
+from tqdm import tqdm
+from sklearn.neighbors import radius_neighbors_graph
+from numbers import Number
+from typing import List, Literal, Optional, Tuple, Union
+from warnings import catch_warnings, filterwarnings, warn
 
-    common_obs_columns = sorted(set.intersection(*obs_columns_list))
+from sklearn.neighbors import radius_neighbors_graph
+from typing import Literal, Optional
+import os
+from adjustText import adjust_text
+from insitupy.dataclasses._utils import _get_cell_layer
 
-    obs = pd.DataFrame()
-    #obs = {}
 
-    # for c in common_obs_columns:
-    #     column_dict={}
-    #     for metadata, data in exp.iterdata():
-    #         celldata = _get_cell_layer(
-    #             cells=data.cells,
-    #             cells_layer=cells_layer
-    #     )
-    #         column_dict[metadata["uid"]] = celldata.matrix.obs[c].copy()
+def extract_adata_from_InSituExperiment(exp, cell_layer:str):
+    
+    adatas={}
+    for id, data in exp.iterdata():
+        layer= _get_cell_layer(cells=data.cells,cells_layer=cell_layer)
+        adata = layer.matrix
+        adatas[data.sample_id]=adata
+    
+    return adatas
 
-    #     column=pd.concat([
-    #         s.reset_index(drop=True) for s in column_dict.values()],
-    #                      axis=0)
-    #     obs[c]=column
 
-    obs_per_data = {}
-    for metadata, data in exp.iterdata():
-        celldata = _get_cell_layer(
-            cells=data.cells,
-            cells_layer=cells_layer
-        )
+def concatenate_adatas_for_pseudobulk(adatas: dict,label:str):
+    
+    adata=ad.concat(adatas,label=label)
+    
+    return adata
 
-        obs_per_data[metadata["uid"]] = celldata.matrix.obs[common_obs_columns]
 
-    obs = pd.concat(obs_per_data).reset_index(level=0, names="batch")
+def get_neighborhood(exp: InSituExperiment, cells_layer: Optional[str] = None, radius: Number = 30):
+    
+    matrices={}
+    #  calculation of neighborhood for each sample
+    for id, data in exp.iterdata():
+        layer= _get_cell_layer(cells=data.cells,cells_layer=cells_layer)
+        coords = layer.matrix.obsm["spatial"]
+        A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
+        matrices[data.sample_id]=A
+        
+    return matrices
 
-    var_names = []
-    for _, data in exp.iterdata():
-        celldata = _get_cell_layer(
-                    cells=data.cells,
-                    cells_layer=cells_layer
-                )
-        var_names.append(set(celldata.matrix.var_names))
 
-    common_var_names = sorted(set.intersection(*var_names))
+def neighborhoods_pseudobulk(matrices, exp,cells_layers,groups_col,raw_counts,sample_col):
+    try:
+        import decoupler as dc
+    
+    except ImportError:
+        print(("Decoupler is not installed. Interactive visualization using `.show()` will not be possible. If you want to use these features, install decoupler with `pip install decoupler`"))
+    
+    pseudobulks={}
+    for id, data in exp.iterdata():
+        print(data.sample_id)
+        layer= _get_cell_layer(cells=data.cells,cells_layer=cells_layers)
+        layer.matrix.obs["cell_id"] = [f"{i}" for i in range(layer.matrix.n_obs)]
+        layer.matrix.X=layer.matrix.layers[raw_counts].copy()
+        celltype_pdata={}
+        for celltype in layer.matrix.obs[groups_col].unique():
+            cell_names=layer.matrix[layer.matrix.obs[groups_col]==celltype].obs['cell_id']
+            cell_names=cell_names.tolist()
+            cell_names = [int(x) for x in cell_names]
+        
+            A = matrices[data.sample_id] 
+            neighbors= []
+            for i in cell_names:  
+                neighbors.append(A[i].nonzero()[1])
+            
+            all_indices = np.concatenate(neighbors)
+            unique_indices = np.unique(all_indices)
+            unique_list = unique_indices.tolist()
+            unique_list = [str(x) for x in unique_list]
+            
+           
+            filtered=layer.matrix[layer.matrix.obs['cell_id'].isin(unique_list)].copy()
+           
+            pdata = dc.pp.pseudobulk(adata=filtered,sample_col=sample_col,groups_col=None, mode="sum") 
+            
+            celltype_pdata[celltype]=pdata
+        pdata_big=concatenate_adatas_for_pseudobulk(celltype_pdata,label=groups_col)
+        
+        pdata_big.obs['pseudo_neighbors'] = (pdata_big.obs.index.astype(str)+ "_" + pdata_big.obs[groups_col].astype(str)  + "_neighbors" )
+        pseudobulks[data.sample_id]=pdata_big 
+        pdata_neighbors=concatenate_adatas_for_pseudobulk(pseudobulks,label=sample_col)
+        
+          
+    return pdata_neighbors
 
-    var = pd.DataFrame({"genes": common_var_names})
 
-        # Extract count matrix X
-    X_list=[]
-    for metadata, data in exp.iterdata():
-            celldata = _get_cell_layer(
-                        cells=data.cells,
-                        cells_layer=cells_layer
-                    )
-            ad = celldata.matrix
-            ad = ad[:, ad.var_names.isin(common_var_names)]
-            if layer is not None:
-                X_list.append(ad.layers[layer])
-            else:
-                X_list.append(ad.X)
-    X = vstack(X_list)
+def concatenate_pdata_and_pdata_neighbors(pdata,pdata_neighbors):
+    
+    pdata_neighbors.obs = pdata_neighbors.obs.set_index("pseudo_neighbors")
 
-    # Sort genes
-    msk = np.argsort(var["genes"])
+    ps={'pdata_neighbors':pdata_neighbors,
+        'pdata':pdata}
+    
+    pdata_final=ad.concat(ps)
+    pdata_final.obs['neighbors'] = np.where(pdata_final.obs.index.str.contains("neighbors"),'neighbors','cell')
+    
+    return pdata_final
 
-    X = X[:, msk]
-    var = var.iloc[msk]
-    var.set_index('genes', inplace=True)
 
-    if issparse(X) and not isinstance(X, csr_matrix):
-        X = csr_matrix(X)
+def generate_pseudobulk_neighbors(exp,cell_layer,raw_counts,sample_col,groups_col,radius):
+    
+    try:
+        import decoupler as dc
+    
+    except ImportError:
+        print(("Decoupler is not installed. Interactive visualization using `.show()` will not be possible. If you want to use these features, install decoupler with `pip install decoupler`"))
+    
+    adatas=extract_adata_from_InSituExperiment(exp=exp, cell_layer=cell_layer)
+    
+    pseudobulks={}
+    for id, adata in adatas.items():
+        adata.X=adata.layers[raw_counts].copy()
+        pdata = dc.pp.pseudobulk(adata=adata,sample_col=sample_col,groups_col=groups_col, mode="sum") 
+        pseudobulks[id]=pdata
+    
+    pdata_big=concatenate_adatas_for_pseudobulk(pseudobulks,label=sample_col)
+    
+    matrices=get_neighborhood(exp=exp,cells_layer=cell_layer,radius=radius)
+    
+    pdata_neighbors=neighborhoods_pseudobulk(matrices=matrices,exp=exp,cells_layers=cell_layer,groups_col=groups_col,raw_counts=raw_counts,sample_col=sample_col)
+    
+    pdata_final=concatenate_pdata_and_pdata_neighbors(pdata_big,pdata_neighbors)
+    
+    return pdata_final   
+    
+    
+def two_sides_volcano(results_df_normal,results_df_neighbors,significance_threshold,fold_change_threshold):
+    
+    n_upreg_target = np.sum((results_df_normal["pvalue"] <= significance_threshold) & (results_df_normal["log2FoldChange"] > np.log2(fold_change_threshold)))
+    n_downreg_target = np.sum((results_df_normal["pvalue"] <= significance_threshold) & (results_df_normal["log2FoldChange"] < -np.log2(fold_change_threshold)))
+    
+    n_upreg_target = np.sum((results_df_neighbors["pvalue"] <= significance_threshold) & (results_df_neighbors["log2FoldChange"] > np.log2(fold_change_threshold)))
+    n_downreg_target = np.sum((results_df_neighbors["pvalue"] <= significance_threshold) & (results_df_neighbors["log2FoldChange"] < -np.log2(fold_change_threshold)))
+    
+    #valid_genes = de_genes_df[(de_genes_df['logfoldchanges'] > 1.0) & (de_genes_df['logfoldchanges'] < 10.0)].index.tolist()
+    valid_genes = results_df_normal[(results_df_normal['log2FoldChange'] > 1.0)].index.tolist()
+    print(valid_genes)
+    
+    filtered_data_y=results_df_neighbors[results_df_neighbors.index.isin(valid_genes)]
+    filtered_data_x=results_df_normal[results_df_normal.index.isin(valid_genes)]
+    
+    merged = pd.merge(
+    filtered_data_x[["log2FoldChange","pvalue"]],
+    filtered_data_y[["log2FoldChange"]],
+    left_index=True,
+    right_index=True,
+    suffixes=("_target_vs_reference", "_target_vs_neighbors"))
+    merged = merged.reset_index().rename(columns={"index": "gene"})
 
-    return X, obs, var
+    merged["neg_log10_pvals"]=-np.log10(merged['pvalue'])
+    sig = merged["neg_log10_pvals"] > 1.3
+    
+    
+    plt.figure(figsize=(7,7))
+    plt.axhspan(0, merged['log2FoldChange_target_vs_neighbors'].max(), facecolor="lightgreen", alpha=0.3)
+    plt.axhspan(-1, 0, facecolor="lightyellow", alpha=0.3)
+    
+    if merged['log2FoldChange_target_vs_neighbors'].min() < -1:
+        plt.axhspan(merged['log2FoldChange_target_vs_neighbors'].min(),-1, facecolor="lightcoral", alpha=0.3)
+    
+    
 
-def format_psbulk_inputs(sample_col, groups_col, obs):
-    # Use one column if the same
-    if sample_col == groups_col:
-        groups_col = None
+    plt.scatter(merged['log2FoldChange_target_vs_reference'][sig], merged['log2FoldChange_target_vs_neighbors'][sig],c="black", label="significant",alpha=1.0,s=20)
+    plt.scatter(merged['log2FoldChange_target_vs_reference'][~sig], merged['log2FoldChange_target_vs_neighbors'][~sig],c="gray", label="non significant",alpha=1.0, s=15)
+    
+    plt.axhline(0, color="black", linestyle="--", linewidth=1)
+    plt.axhline(-1, color="black", linestyle="--", linewidth=1)
+    plt.axvline(fold_change_threshold, color="black", linestyle="--", linewidth=1)
 
-    if groups_col is None:
-        # Filter extra columns in obs
-        cols = obs.groupby(sample_col, observed=True).nunique(dropna=False).eq(1).all(0)
-        cols = np.hstack([sample_col, cols[cols].index])
-        obs = obs.loc[:, cols]
-
-        # Get unique samples
-        smples = np.unique(obs[sample_col].values)
-        groups = None
-
-        # Get number of samples and features
-        n_rows = len(smples)
-    else:
-        # Check if extra grouping is needed
-        if type(groups_col) is list:
-            obs = obs.copy()
-            joined_cols = '_'.join(groups_col)
-            obs[joined_cols] = obs[groups_col[0]].str.cat(obs[groups_col[1:]].astype('U'), sep='_')
-            groups_col = joined_cols
-
-        # Filter extra columns in obs
-        cols = obs.groupby([sample_col, groups_col], observed=True).nunique(dropna=False).eq(1).all(0)
-        cols = np.hstack([sample_col, groups_col, cols[cols].index])
-        obs = obs.loc[:, cols]
-
-        # Get unique samples and groups
-        smples = np.unique(obs[sample_col].values)
-        groups = np.unique(obs[groups_col].values)
-
-        # Get number of samples and features
-        n_rows = len(smples) * len(groups)
-
-    return obs, groups_col, smples, groups, n_rows
-def psbulk_profile(profile, mode='sum'):
-    if mode == 'sum':
-        profile = np.sum(profile, axis=0)
-    elif mode == 'mean':
-        profile = np.mean(profile, axis=0)
-    elif mode == 'median':
-        profile = np.median(profile, axis=0)
-    elif callable(mode):
-        profile = np.apply_along_axis(mode, 0, profile)
-    else:
-        raise ValueError("""mode={0} can be 'sum', 'mean', 'median' or a callable function.""".format(mode))
-    return profile
-def compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                   new_obs, min_cells, min_counts, mode, dtype):
-
-    # Init empty variables
-    psbulk = np.zeros((n_rows, n_cols))
-    props = np.zeros((n_rows, n_cols))
-    ncells = np.zeros(n_rows)
-    counts = np.zeros(n_rows)
-
-    # Iterate for each group and sample
-    i = 0
-    if groups_col is None:
-        for smp in smples:
-            # Write new meta-data
-            tmp = obs[obs[sample_col] == smp].drop_duplicates().values
-            new_obs.loc[smp, :] = tmp
-
-            # Get cells from specific sample
-            profile = X[(obs[sample_col] == smp).values]
-            if isinstance(X, csr_matrix):
-                profile = profile.toarray()
-
-            # Skip if few cells or not enough counts
-            ncell = profile.shape[0]
-            count = np.sum(profile)
-            ncells[i] = ncell
-            counts[i] = count
-            if ncell < min_cells or np.abs(count) < min_counts:
-                i += 1
-                continue
-
-            # Get prop of non zeros
-            prop = np.sum(profile != 0, axis=0) / profile.shape[0]
-
-            # Pseudo-bulk
-            profile = psbulk_profile(profile, mode=mode)
-
-            # Append
-            props[i] = prop
-            psbulk[i] = profile
-            i += 1
-    else:
-        for grp in groups:
-            for smp in smples:
-                # Write new meta-data
-                index = smp + '-' + grp
-                tmp = obs[(obs[sample_col] == smp) & (obs[groups_col] == grp)].drop_duplicates().values
-                if tmp.shape[0] == 0:
-                    tmp = np.full(tmp.shape[1], np.nan)
-                new_obs.loc[index, :] = tmp
-
-                # Get cells from specific sample and group
-                profile = X[((obs[sample_col] == smp) & (obs[groups_col] == grp)).values]
-                if isinstance(X, csr_matrix):
-                    profile = profile.toarray()
-
-                # Skip if few cells or not enough counts
-                ncell = profile.shape[0]
-                count = np.sum(profile)
-                ncells[i] = ncell
-                counts[i] = count
-                if ncell < min_cells or np.abs(count) < min_counts:
-                    i += 1
-                    continue
-
-                # Get prop of non zeros
-                prop = np.sum(profile != 0, axis=0) / profile.shape[0]
-
-                # Pseudo-bulk
-                profile = psbulk_profile(profile, mode=mode)
-
-                # Append
-                props[i] = prop
-                psbulk[i] = profile
-                i += 1
-
-    return psbulk, ncells, counts, props
-
-def filter_by_prop(adata, min_prop=0.2, min_smpls=2):
-    """
-    Determine which genes are expressed in a sufficient proportion of cells across samples.
-
-    This function selects genes that are sufficiently expressed across cells in each sample and that this condition is
-    met across a minimum number of samples.
-
-    Parameters
-    ----------
-    adata : AnnData
-        AnnData obtained after running ``decoupler.get_pseudobulk``. It requires ``.layer['psbulk_props']``.
-    min_prop : float
-        Minimum proportion of cells that express a gene in a sample.
-    min_smpls : int
-        Minimum number of samples with bigger or equal proportion of cells with expression than ``min_prop``.
-
-    Returns
-    -------
-    genes : ndarray
-        List of genes to be kept.
-    """
-
-    # Define limits
-    min_prop = np.clip(min_prop, 0, 1)
-    min_smpls = np.clip(min_smpls, 0, adata.shape[0])
-
-    if isinstance(adata, AnnData):
-        layer_keys = adata.layers.keys()
-        if 'psbulk_props' in list(layer_keys):
-            var_names = adata.var_names.values.astype('U')
-            props = adata.layers['psbulk_props']
-            if isinstance(props, pd.DataFrame):
-                props = props.values
-
-            # Compute n_smpl
-            nsmpls = np.sum(props >= min_prop, axis=0)
-
-            # Set features to 0
-            msk = nsmpls >= min_smpls
-            genes = var_names[msk]
-            return genes
-    raise ValueError("""adata must be an AnnData object that contains the layer 'psbulk_props'. Please check the function
-                     decoupler.get_pseudobulk.""")
-
-def swap_layer(adata, layer_key, X_layer_key='X', inplace=False):
-    """
-    Swaps an ``adata.X`` for a given layer.
-
-    Swaps an AnnData ``X`` matrix with a given layer. Generates a new object by default.
-
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix.
-    layer_key : str
-        ``.layers`` key to place in ``.X``.
-    X_layer_key : str, None
-        ``.layers`` key where to move and store the original ``.X``. If None, the original ``.X`` is discarded.
-    inplace : bool
-        If ``False``, return a copy. Otherwise, do operation inplace and return ``None``.
-
-    Returns
-    -------
-    layer : AnnData, None
-        If ``inplace=False``, new AnnData object.
-    """
-
-    cdata = None
-    if inplace:
-        if X_layer_key is not None:
-            adata.layers[X_layer_key] = adata.X
-        adata.X = adata.layers[layer_key]
-    else:
-        cdata = adata.copy()
-        if X_layer_key is not None:
-            cdata.layers[X_layer_key] = cdata.X
-        cdata.X = cdata.layers[layer_key]
-
-    return cdata
-def check_X(X, mode='sum', skip_checks=False):
-    if isinstance(X, csr_matrix):
-        is_finite = np.all(np.isfinite(X.data))
-    else:
-        is_finite = np.all(np.isfinite(X))
-    if not is_finite:
-        raise ValueError('Data contains non finite values (nan or inf), please set them to 0 or remove them.')
-    skip_checks = type(mode) is dict or callable(mode) or skip_checks
-    if not skip_checks:
-        if isinstance(X, csr_matrix):
-            is_positive = np.all(X.data >= 0)
+    subset_green = merged[(merged["log2FoldChange_target_vs_neighbors"] > 0) & (merged["log2FoldChange_target_vs_reference"] > fold_change_threshold)]   
+    texts=[]
+    for _, row in subset_green.iterrows():
+        if row['neg_log10_pvals']  > 1.3:
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=12, color="black")
         else:
-            is_positive = np.all(X >= 0)
-        if not is_positive:
-            raise ValueError("""Data contains negative values. Check the parameters use_raw and layers to
-            determine if you are selecting the correct matrix. To override this, set skip_checks=True.
-            """)
-        if mode == 'sum':
-            if isinstance(X, csr_matrix):
-                is_integer = float(np.sum(X.data)).is_integer()
-            else:
-                is_integer = float(np.sum(X)).is_integer()
-            if not is_integer:
-                raise ValueError("""Data contains float (decimal) values. Check the parameters use_raw and layers to
-                determine if you are selecting the correct data, which should be positive integer counts when mode='sum'.
-                To override this, set skip_checks=True.
-                """)
-def generate_pseudobulk(
-    exp,
-    sample_col: str,
-    groups_col: str,
-    cells_layer: Optional[str] = None,
-    counts_layer: str = "counts",
-    # use_raw: bool = False,
-    mode: Literal["sum", "mean", "median"] = "sum",
-    min_cells: int = 10,
-    min_counts: int = 1000,
-    dtype = np.float32,
-    skip_checks: bool = False,
-    min_prop=None,
-    min_smpls=None,
-    remove_empty=True
-    ):
-
-    min_cells, min_counts = np.clip(min_cells, 1, None), np.clip(min_counts, 1, None)
-
-    X, obs, var = extract_psbulk_inputs(
-        exp=exp,
-        cells_layer=cells_layer,
-        layer=counts_layer
-        )
-
-    check_X(X, mode=mode, skip_checks=skip_checks)
-
-    obs, groups_col, smples, groups, n_rows = format_psbulk_inputs(
-        sample_col, groups_col, obs
-        )
-
-    n_cols = X.shape[1]
-    new_obs = pd.DataFrame(columns=obs.columns)
-
-    if type(mode) is dict:
-        psbulks = []
-        for l_name in mode:
-            func = mode[l_name]
-            if not callable(func):
-                raise ValueError("""mode requieres a dictionary of layer names and callable functions. The layer {0} does not
-                contain one.""".format(l_name))
-            else:
-                # Compute psbulk
-                psbulk, ncells, counts, props = compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                                                               new_obs, min_cells, min_counts, func, dtype)
-                psbulks.append(psbulk)
-        layers = {k: v for k, v in zip(mode.keys(), psbulks)}
-        layers['psbulk_props'] = props
-    elif type(mode) is str or callable(mode):
-        # Compute psbulk
-        psbulk, ncells, counts, props = compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                                                       new_obs, min_cells, min_counts, mode, dtype)
-        layers = {'psbulk_props': props}
-
-    # Add QC metrics
-    new_obs['psbulk_cells'] = ncells
-    new_obs['psbulk_counts'] = counts
-
-    # Create new AnnData
-    psbulk = AnnData(psbulk.astype(dtype), obs=new_obs, var=var, layers=layers)
-
-    # Remove empty samples and features
-    if remove_empty:
-        msk = psbulk.X == 0
-        psbulk = psbulk[~np.all(msk, axis=1), ~np.all(msk, axis=0)].copy()
-
-    # Place first element of mode dict as X
-    if type(mode) is dict:
-        swap_layer(psbulk, layer_key=list(mode.keys())[0], X_layer_key=None, inplace=True)
-
-    # Filter by genes if not None.
-    if min_prop is not None and min_smpls is not None:
-        if groups_col is None:
-            genes = filter_by_prop(psbulk, min_prop=min_prop, min_smpls=min_smpls)
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=10, color="gray",fontstyle="oblique")
+        texts.append(t)
+    adjust_text(texts,arrowprops=dict(arrowstyle='->', color='gray', lw=0.5)) 
+        
+    subset_red = merged[(merged["log2FoldChange_target_vs_neighbors"] < -1) & (merged["log2FoldChange_target_vs_reference"] > fold_change_threshold)]
+    texts = []
+    for _, row in subset_red.iterrows():
+        if row['neg_log10_pvals']  > 1.3:
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=12, color="black")    
         else:
-            genes = []
-            for group in groups:
-                g = filter_by_prop(psbulk[psbulk.obs[groups_col] == group], min_prop=min_prop, min_smpls=min_smpls)
-                genes.extend(g)
-            genes = np.unique(genes)
-        psbulk = psbulk[:, genes]
-
-    return psbulk
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=10, color="gray")
+        texts.append(t)
+    adjust_text(texts,arrowprops=dict(arrowstyle='->', color='gray', lw=0.5)) 
+      
+    
+    subset_yellow = merged[(merged["log2FoldChange_target_vs_neighbors"] > -1) & (merged["log2FoldChange_target_vs_neighbors"] < 0)]
+    texts = []
+    for _, row in subset_yellow.iterrows():
+        if row['neg_log10_pvals']  > 1.3:
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=12, color="black")    
+        else:
+            t=plt.text(row["log2FoldChange_target_vs_reference"], row["log2FoldChange_target_vs_neighbors"], row["gene"], fontsize=10, color="gray")
+        texts.append(t)
+        
+    adjust_text(texts,arrowprops=dict(arrowstyle='->', color='gray', lw=0.5)) 
+    
+    plt.legend(title='pvals (target_vs_reference)',loc='center left', bbox_to_anchor=(1, 0.5))   
+    plt.xlabel("pos. log2FC target_vs_reference")
+    plt.ylabel("log2FC target_vs_neighbors")
+    #plt.title(title)
+    plt.show()
+    
+    return merged

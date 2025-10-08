@@ -313,6 +313,6 @@ def differential_gene_expression_two_sides(
             "merged_df":merged
         }
     
-    
+    return df
       
        

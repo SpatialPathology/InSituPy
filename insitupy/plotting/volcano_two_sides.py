@@ -66,7 +66,7 @@ def volcano_two_sides(data_x,
         texts.append(t)
     adjust_text(texts,arrowprops=dict(arrowstyle='->', color='gray', lw=0.5)) 
       
-    plt.legend(title='pvals (target_vs_reference)')   
+    plt.legend(title='pvals (target_vs_reference)',loc='center left', bbox_to_anchor=(1, 0.5))   
     plt.xlabel("pos. log2FC target_vs_reference")
     plt.ylabel("log2FC target_vs_neighbors")
     plt.title(title)

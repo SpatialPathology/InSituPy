@@ -690,6 +690,7 @@ class BoundariesData(DeepCopyMixin):
                     if isinstance(bound_data, list):
                         for i, b in enumerate(bound_data):
                             comp = f"masks/{n}/{i}"
+                            b = b.rechunk((1024, 1024))
                             b.to_zarr(dirstore, component=comp)
                     else:
                         bound_data.to_zarr(dirstore, component=f"masks/{n}")
