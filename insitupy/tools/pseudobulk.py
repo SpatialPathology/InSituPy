@@ -167,6 +167,7 @@ def psbulk_profile(profile, mode='sum'):
     else:
         raise ValueError("""mode={0} can be 'sum', 'mean', 'median' or a callable function.""".format(mode))
     return profile
+
 def compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
                    new_obs, min_cells, min_counts, mode, dtype):
 

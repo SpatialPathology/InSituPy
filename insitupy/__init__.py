@@ -7,7 +7,6 @@ try:
     import napari
     WITH_NAPARI = True
 except ImportError:
-    from warnings import warn
     print((
         f"Napari is not installed. Interactive visualization using `.show()` will not be possible. "
         f"If you want to use these features, install insitupy with `pip install insitupy[gui]` or "

@@ -123,6 +123,17 @@ class StructuredMultiCellData:
             print("No matrix available.")
             return None
 
+    @property
+    def boundaries(self):
+        try:
+            return self._layers[self._main_key].boundaries
+        except KeyError:
+            print("MultiCellData object is empty.")
+            return None
+        except AttributeError:
+            print("No boundaries available.")
+            return None
+
 
 class StructuredShapesData:
     def __init__(self, shape_name="shapes"):
