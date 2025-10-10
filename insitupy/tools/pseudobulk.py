@@ -1,56 +1,15 @@
-"""
-Functions in this module were adapted from the decoupler package v1.9.0 (https://github.com/scverse/decoupler):
-Badia-i-Mompel P., Vélez Santiago J., Braunger J., Geiss C., Dimitrov D., Müller-Dott S.,
-Taus P., Dugourd A., Holland C.H., Ramirez Flores R.O. and Saez-Rodriguez J. 2022.
-decoupleR: Ensemble of computational methods to infer biological activities from omics data.
-Bioinformatics Advances. https://doi.org/10.1093/bioadv/vbac016
-
-"""
-import copy
-import glob
-import os
-import sys
 from numbers import Number
-from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
-from warnings import catch_warnings, filterwarnings, warn
+from typing import Literal, Optional
 
 import anndata as ad
-import dask
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scanpy as sc
-import seaborn as sns
 from adjustText import adjust_text
-from anndata import AnnData
-from scipy.sparse import csr_matrix, issparse, vstack
 from sklearn.neighbors import radius_neighbors_graph
-from tqdm import tqdm
 
-import insitupy
-from insitupy._core.data import CACHE, ImageData, InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-#from insitupy import InSituExperiment
-from insitupy.io import read_xenium
-
-# def extract_adata_from_InSituExperiment(exp, cell_layer:str, sample_col):
-
-#     adatas={}
-#     for id, data in exp.iterdata():
-#         layer= _get_cell_layer(cells=data.cells,cells_layer=cell_layer)
-#         adata = layer.matrix
-#         adatas[layer.matrix.obs[sample_col].unique().tolist()[0]]=adata
-
-#     return adatas
-
-
-# def concatenate_adatas_for_pseudobulk(adatas: dict,label:str):
-
-#     adata=ad.concat(adatas,label=label)
-
-#     return adata
 
 
 def get_neighborhood(
@@ -71,7 +30,6 @@ def get_neighborhood(
     return matrices
 
 
-#def neighborhoods_pseudobulk(matrices, exp,cells_layers,groups_col,raw_counts,sample_col):
 def neighborhoods_pseudobulk(
     celldata,
     groups_col,
@@ -86,14 +44,7 @@ def neighborhoods_pseudobulk(
     except ImportError:
         print(("Decoupler is not installed. Interactive visualization using `.show()` will not be possible. If you want to use these features, install decoupler with `pip install decoupler`"))
 
-    # pseudobulks={}
-    # for id, data in exp.iterdata():
-    # layer= _get_cell_layer(cells=data.cells,cells_layer=cells_layers)
-    # print(layer.matrix.obs[sample_col].unique().tolist()[0])
-
-    # celldata.matrix.obs["cell_id"] = [f"{i}" for i in range(celldata.matrix.n_obs)]
     adata = celldata.matrix
-    # adata.X = adata.layers[raw_counts].copy()
     coords = celldata.matrix.obsm["spatial"]
     A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
 
@@ -107,24 +58,6 @@ def neighborhoods_pseudobulk(
 
         # filter for such neighboring cells
         filtered = adata[any_mask]
-        # cell_names = celldata.matrix[celldata.matrix.obs[groups_col] == celltype].obs['cell_id']
-        # cell_names = cell_names.tolist()
-        # cell_names = [int(x) for x in cell_names]
-
-        # #A = matrices[layer.matrix.obs[sample_col].unique().tolist()[0]]
-        # neighbors= []
-        # for i in cell_names:
-        #     neighbors.append(A[i].nonzero()[1])
-
-        # all_indices = np.concatenate(neighbors)
-        # unique_indices = np.unique(all_indices)
-        # unique_list = unique_indices.tolist()
-        # unique_list = [str(x) for x in unique_list]
-
-
-        # filtered=celldata.matrix[celldata.matrix.obs['cell_id'].isin(unique_list)].copy()
-
-        # calculate pseudobulk for neighboring cells that are in the neighborhood of at least one cell of that type
         pdata = dc.pp.pseudobulk(
             adata=filtered,
             sample_col=sample_col,
@@ -136,15 +69,8 @@ def neighborhoods_pseudobulk(
         celltype_pdata[celltype] = pdata
 
     pdata_big = ad.concat(celltype_pdata, label=groups_col)
-    # pdata_big=concatenate_adatas_for_pseudobulk(celltype_pdata,label=groups_col)
-
     pdata_big.obs['pseudo_neighbors'] = (pdata_big.obs.index.astype(str)+ "_" + pdata_big.obs[groups_col].astype(str)  + "_neighbors" )
     pdata_big.obs = pdata_big.obs.set_index("pseudo_neighbors")
-    # pseudobulks[layer.matrix.obs[sample_col].unique().tolist()[0]]=pdata_big
-
-    # pdata_neighbors=concatenate_adatas_for_pseudobulk(pseudobulks,label=sample_col)
-
-    # return pdata_neighbors
     return pdata_big
 
 
@@ -176,13 +102,11 @@ def generate_pseudobulk(
         import decoupler as dc
 
     except ImportError:
-        print(("Decoupler is not installed. Interactive visualization using `.show()` will not be possible. If you want to use these features, install decoupler with `pip install decoupler`"))
-
-    # adatas=extract_adata_from_InSituExperiment(
-    #     exp=exp,
-    #     cell_layer=cell_layer,
-    #     sample_col=sample_col
-    #     )
+        print((
+            f"Decoupler is not installed. Interactive visualization using `.show()` "
+            f"will not be possible. If you want to use these features, "
+            f"please install decoupler with `pip install decoupler`"
+            ))
 
     pseudobulks={}
     # matrices = {}
@@ -237,26 +161,6 @@ def generate_pseudobulk(
     pdata_final = ad.concat(pseudobulks, label=uid)
 
     return pdata_final
-
-    # if calculate_neighbors:
-
-    #     # matrices=get_neighborhood(exp=exp,cells_layer=cells_layer,radius=radius, sample_col=sample_col)
-
-    #     pdata_neighbors=neighborhoods_pseudobulk(
-    #         matrices=matrices,
-    #         exp=exp,
-    #         cells_layers=cells_layer,
-    #         groups_col=groups_col,
-    #         counts_layer=counts_layer,
-    #         sample_col=sample_col
-    #         )
-
-    #     pdata_final=concatenate_pdata_and_pdata_neighbors(pdata_big,pdata_neighbors)
-    #     return pdata_final
-
-    # else:
-    #     return pdata_big
-
 
 def two_sides_volcano(results_df_normal,results_df_neighbors,significance_threshold,fold_change_threshold):
 
