@@ -962,7 +962,12 @@ class InSituData:
         """
         path = Path(path) # make sure the path is a pathlib path
 
-        assert (path / ISPY_METADATA_FILE).exists(), "No insitupy metadata file found."
+        if not path.exists() or not path.is_dir():
+            raise FileNotFoundError(f"Path does not exist or is not a directory: {str(path)}")
+
+        if not (path / ISPY_METADATA_FILE).exists():
+            raise FileNotFoundError(f"No InSituPy metadata file found in the specified directory: {str(path)}")
+
         # read InSituData metadata
         insitupy_metadata_file = path / ISPY_METADATA_FILE
         metadata = read_json(insitupy_metadata_file)

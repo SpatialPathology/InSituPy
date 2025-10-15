@@ -211,12 +211,22 @@ class InSituExperiment:
 
     @property
     def metadata(self):
+
         """
-        Experiment-level metadata.
+        Returns a copy of the experiment-level metadata.
+
+        Note:
+            This is a **copy** of the internal metadata DataFrame.
+            Any modifications to this copy (e.g., adding columns) will **not** affect the actual metadata.
+            To modify metadata, use `add_metadata_column()` instead.
 
         Returns:
             pd.DataFrame: A copy of the metadata DataFrame.
         """
+        print(
+            f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
+            f"Use `add_metadata_column()` to add new columns."
+        )
         return self._metadata.copy() # the copy prevents the metadata from being modified
 
     @property
@@ -288,6 +298,13 @@ class InSituExperiment:
         # Concatenate the new metadata with the existing metadata
         self._metadata = pd.concat([self._metadata, new_metadata], axis=0, ignore_index=True)
 
+
+    def add_metadata_column(
+        self,
+        column_name: str,
+        values: Union[List, str, pd.Series, np.ndarray]
+        ):
+        self._metadata[column_name] = values
 
     def append_metadata(self,
                         new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],

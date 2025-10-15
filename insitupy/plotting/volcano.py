@@ -7,6 +7,7 @@ from warnings import warn
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from adjustText import adjust_text
 from matplotlib.font_manager import FontProperties
 
 from insitupy._io.plots import save_and_show_figure
@@ -54,7 +55,6 @@ def volcano(data,
     if label_sortby not in data.columns:
         warn(f"The specified label_sortby column '{label_sortby}' does not exist in the input DataFrame. Using '{logfoldchanges_column}' instead.")
         label_sortby = logfoldchanges_column
-
 
     if adjust_labels:
         try:
@@ -236,3 +236,102 @@ def volcano(data,
 def plot_volcano(*args, **kwargs):
     from .._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="volcano")
+
+
+def volcano_nb(
+    results_df_normal: pd.DataFrame,
+    results_df_neighbors: pd.DataFrame,
+    significance_threshold: Number,
+    fold_change_threshold: Number,
+    logfc_col: str = "log2FoldChange",
+    pval_col: str = "pvalue",
+    patch_colors: List[str] = ["lightgreen", "lightyellow", "lightcoral"],
+    adjust_labels: bool = True,
+    ax: Optional[plt.Axes] = None,
+
+):
+    """
+    Create a volcano-style scatter plot comparing log2 fold changes between two datasets.
+
+    Args:
+        results_df_normal (pd.DataFrame): DataFrame containing log2 fold changes and p-values for the target vs. reference comparison.
+        results_df_neighbors (pd.DataFrame): DataFrame containing log2 fold changes for the target vs. neighbors comparison.
+        significance_threshold (Number): P-value threshold for significance.
+        fold_change_threshold (Number): Minimum log2 fold change to include in the plot.
+        logfc_col (str): Column name for log2 fold change values.
+        pval_col (str): Column name for p-values.
+        patch_colors (List[str]): Background patch colors for different y-axis regions.
+        adjust_labels (bool, optional): If True, adjusts the labels to avoid overlap. Default is False.
+        ax (Optional[plt.Axes]): Matplotlib Axes object to plot on. If None, a new figure and axes are created.
+
+    Returns:
+        None. Displays a matplotlib plot.
+    """
+    if adjust_labels:
+        try:
+            from adjustText import adjust_text
+        except ImportError:
+            raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
+
+    # Filter for genes with log2FC above threshold
+    filtered_data_x = results_df_normal[results_df_normal[logfc_col] > fold_change_threshold].copy()
+    filtered_data_y = results_df_neighbors[results_df_neighbors.index.isin(filtered_data_x.index)]
+
+    # Extract values for plotting
+    x_values = filtered_data_x[logfc_col]
+    y_values = filtered_data_y[logfc_col]
+    p_values = filtered_data_x[pval_col]
+    sig = p_values < significance_threshold
+    genes = filtered_data_x.index
+
+    if ax is None:
+        # Initialize plot
+        fig, ax = plt.subplots(1, 1, figsize=(7, 7))
+
+    # determine figure limites
+    xmin, xmax = x_values.min(), x_values.max()
+    ymin, ymax = y_values.min(), y_values.max()
+    ax.set_xlim(xmin - 0.1*xmin, xmax + 0.1*xmax)
+    ax.set_ylim(ymin - 0.1*ymin, ymax + 0.1*ymax)
+
+    # Add background patches
+    plt.axhspan(0, ymax, facecolor=patch_colors[0], alpha=0.3)
+    plt.axhspan(-1, 0, facecolor=patch_colors[1], alpha=0.3)
+    if ymin < -1:
+        plt.axhspan(ymin, -1, facecolor=patch_colors[2], alpha=0.3)
+
+    # Plot significant and non-significant points
+    plt.scatter(x_values[sig], y_values[sig], c="black", label="significant", alpha=1.0, s=20)
+    plt.scatter(x_values[~sig], y_values[~sig], c="gray", label="not significant", alpha=1.0, s=15)
+
+    # Add reference lines
+    objects_to_avoid = []
+    objects_to_avoid.append(plt.axhline(0, color="black", linestyle="--", linewidth=1))
+    objects_to_avoid.append(plt.axhline(-1, color="black", linestyle="--", linewidth=1))
+    objects_to_avoid.append(plt.axvline(fold_change_threshold, color="black", linestyle="--", linewidth=1))
+
+    # Annotate points with gene names
+    texts = []
+    for x, y, gene, pval in zip(x_values, y_values, genes, p_values):
+        if pval < significance_threshold:
+            t = plt.text(x, y, gene, fontsize=12, color="black")
+        else:
+            t = plt.text(x, y, gene, fontsize=10, color="gray", fontstyle="oblique")
+        texts.append(t)
+
+
+    # Adjust text to avoid overlap
+    adjust_text(
+        texts, ax=ax,
+        objects=objects_to_avoid,
+        only_move={"text": "xy", "static": "xy", "explode": "xy", "pull": "xy"},
+        arrowprops=dict(arrowstyle='->', color='gray', lw=0.5),
+        max_move=None
+    )
+
+    # Final plot settings
+    plt.legend(title='pvals (target_vs_reference)', loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.xlabel(f"{logfc_col} target_vs_reference")
+    plt.ylabel(f"{logfc_col} target_vs_neighbors")
+    #plt.tight_layout()
+    plt.show()
