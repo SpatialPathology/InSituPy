@@ -12,10 +12,9 @@ from sklearn.neighbors import radius_neighbors_graph
 
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.plotting import volcano
+from insitupy.plotting import single_volcano, volcano_two_sides
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
-from insitupy.plotting import volcano_two_sides
 
 
 def differential_gene_expression_two_sides(
@@ -41,9 +40,9 @@ def differential_gene_expression_two_sides(
     save_only: bool = False,
     dpi_save: int = 300,
     verbose: bool = False,
-    **volcano_kwargs 
+    **volcano_kwargs
 ):
-    
+
     if not (show_volcano | return_results):
         raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
 
@@ -194,21 +193,21 @@ def differential_gene_expression_two_sides(
     #defining neighborhood
     coords = target.cells[cells_layer].matrix.obsm["spatial"]
     A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
-    
+
     target_mask = target.cells[cells_layer].matrix.obs[target_cell_type_tuple[0]] == target_cell_type_tuple[1]
     target_idx = np.where(target_mask)[0]
-    
-    neighbors = A[target_idx].nonzero()[1]   
+
+    neighbors = A[target_idx].nonzero()[1]
     neighbors = np.unique(neighbors)
-    
+
     neighbors_non_target_celltype = [i for i in neighbors if target.cells[cells_layer].matrix.obs.iloc[i][target_cell_type_tuple[0]] != target_cell_type_tuple[1]]
-    
+
     target.cells[cells_layer].matrix.obs["neighbors"] = "other"
     target.cells[cells_layer].matrix.obs.iloc[target_idx, target.cells[cells_layer].matrix.obs.columns.get_loc("neighbors")] = target_cell_type_tuple[1]
     target.cells[cells_layer].matrix.obs.iloc[neighbors_non_target_celltype,  target.cells[cells_layer].matrix.obs.columns.get_loc("neighbors")] = "neighbors"
-    
+
     print(target.cells[cells_layer].matrix.obs['neighbors'].unique())
-    
+
     print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}' for target dataset and neighbors")
     sc.tl.rank_genes_groups(adata=target.cells[cells_layer].matrix,
                             groupby="neighbors",
@@ -216,8 +215,8 @@ def differential_gene_expression_two_sides(
                             reference="neighbors",
                             method=method,
                             )
-    
-    
+
+
     # create dataframe from neighbor_results
     neighbors_dict = create_deg_dataframe(
         adata=target.cells[cells_layer].matrix, groups=target_cell_type_tuple[1])
@@ -237,8 +236,8 @@ def differential_gene_expression_two_sides(
             "Target": [data_counts_neighbors, n_upreg_neigh]
         })
         config_table_neighbors = config_table_neighbors.set_index("").dropna(how="all").reset_index()
-    
-    
+
+
     print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}'.")
     sc.tl.rank_genes_groups(adata=adata_combined,
                             groupby=dge_comparison_column,
@@ -270,10 +269,10 @@ def differential_gene_expression_two_sides(
 
         # remove empty rows
         config_table = config_table.set_index("").dropna(how="all").reset_index()
-    
+
 
     # plotting
-        volcano(
+        single_volcano(
             data=df,
             significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,
@@ -285,8 +284,8 @@ def differential_gene_expression_two_sides(
             adjust_labels=True,
             **volcano_kwargs
             )
-        
-        volcano(
+
+        single_volcano(
             data=df_neighbors,
             significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,
@@ -298,21 +297,20 @@ def differential_gene_expression_two_sides(
             adjust_labels=True,
             **volcano_kwargs
             )
-        
+
         merged=volcano_two_sides(
             data_x=df,
             data_y=df_neighbors,
             fold_change_threshold=fold_change_threshold,
             title=title,
-            **volcano_kwargs) 
-                
+            **volcano_kwargs)
+
     if return_results:
         return {
             "results": df,
             "params": adata_combined.uns["rank_genes_groups"]["params"],
             "merged_df":merged
         }
-    
+
     return df
-      
-       
+

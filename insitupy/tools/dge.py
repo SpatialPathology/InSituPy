@@ -17,7 +17,7 @@ from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.results import DiffExprResults
 from insitupy.experiment.data import InSituExperiment
-from insitupy.plotting import volcano
+from insitupy.plotting import single_volcano
 from insitupy.plotting.dge import dual_foldchange_plot
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils._helpers import suppress_output
@@ -276,7 +276,7 @@ def differential_gene_expression(
         # remove empty rows
         config_table = config_table.set_index("").dropna(how="all").reset_index()
 
-        volcano(
+        single_volcano(
             data=df,
             significance_threshold=significance_threshold,
             fold_change_threshold=fold_change_threshold,

@@ -8,4 +8,4 @@ from .plots import (cellular_composition, colorlegend,
 from .qc import plot_qc_metrics, test_transformations
 from .spatial import (DataConfig, LayoutConfig, PlotConfig, plot_spatial,
                       spatial)
-from .volcano import plot_volcano, volcano
+from .volcano import volcano

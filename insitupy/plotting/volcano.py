@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
 from warnings import warn
 
+import decoupler as dc
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -15,12 +16,12 @@ from insitupy._io.plots import save_and_show_figure
 from insitupy.dataclasses.results import DiffExprResults
 
 
-def volcano(
+def single_volcano(
     data,
     logfoldchanges_column: str = 'log2FoldChange',
     pval_column: str = 'pvalue',
     significance_threshold: Number = 0.05,
-    fold_change_threshold: Number = 2,
+    foldchange_threshold: Number = 2,
     title: str = None,
     adjust_labels: bool = True,
     ax: Optional[plt.Axes] = None,
@@ -42,7 +43,7 @@ def volcano(
         logfoldchanges_column (str): Column name for log fold changes (default is 'logfoldchanges').
         pval_column (str): Column name for negative log10 p-values (default is 'neg_log10_pvals').
         significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 2).
+        foldchange_threshold (float): Fold change threshold for up/down regulation (default is 2).
         title (str): Title of the plot (default is "Volcano Plot").
         adjust_labels (bool, optional): If True, adjusts the labels to avoid overlap. Default is False.
         savepath (Union[str, os.PathLike, Path], optional): Path to save the plot (default is None).
@@ -66,7 +67,7 @@ def volcano(
     neg_log_pval_column = "neg_log10_pvals"
     data[neg_log_pval_column] = -np.log10(data[pval_column])
     neg_log_sig_thresh = -np.log10(significance_threshold)
-    lfc_threshold = np.log2(fold_change_threshold)
+    lfc_threshold = np.log2(foldchange_threshold)
 
     # Determine colors based on significance and fold change
     colors = []
@@ -127,25 +128,27 @@ def volcano(
 
     # infer x and y limits
     if len(down_data) > 0:
-        xmin = min(down_data[logfoldchanges_column].min()*1.1, -(lfc_threshold*2))
+        xmin = min(
+            down_data[logfoldchanges_column].min()*1.1,
+            -(lfc_threshold*1.1))
         ymin = 0 #down_data[pval_column].min()*1.1
     else:
-        xmin = -(lfc_threshold*2)
+        xmin = -(lfc_threshold*1.1)
         ymin = 0
 
     if len(up_data) > 0:
         xmax = max(
             up_data[logfoldchanges_column].max()*1.1,
-            lfc_threshold*2
+            lfc_threshold*1.1
             )
         ymax = max(
             up_data[neg_log_pval_column].max()*1.1,
             down_data[neg_log_pval_column].max()*1.1,
-            neg_log_sig_thresh*2
+            neg_log_sig_thresh*1.1
             )
     else:
-        xmax = lfc_threshold*2
-        ymax = neg_log_sig_thresh*2
+        xmax = lfc_threshold*1.1
+        ymax = neg_log_sig_thresh*1.1
 
     xlims = (xmin, xmax)
     ylims = (ymin, ymax)
@@ -161,9 +164,9 @@ def volcano(
 
     # Annotate top genes
     texts = []
-    for i, row in top_genes.iterrows():
+    for gene, row in top_genes.iterrows():
         texts.append(ax.annotate(
-            row['gene'],
+            gene,
             (row[logfoldchanges_column], row[neg_log_pval_column]),
             fontsize=14,  # Increased font size
             alpha=0.75))
@@ -177,39 +180,7 @@ def volcano(
             )
 
     if config_table is not None:
-        # Add labels to the top of the plot, outside the plot area
-        ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
-                    xytext=(-65, 0), textcoords='offset points',
-                    ha='left', va='center', fontsize=14, color='black',
-                    arrowprops=dict(arrowstyle='->', color='black'))
-
-        ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
-                    xytext=(93, 0), textcoords='offset points',
-                    ha='right', va='center', fontsize=14, color='black',
-                    arrowprops=dict(arrowstyle='->', color='black'))
-
-        # Create table data
-        # Add table at the bottom of the plot
-        table = ax.table(
-            cellText=config_table.values,
-            colLabels=config_table.columns,
-            cellLoc='center',
-            colWidths=[.2,.4,.4],
-            loc='bottom',
-            bbox=[-0.12, -0.2-(0.1*(len(config_table)+1)), 1.12, 0.1*(len(config_table)+1)]
-            )
-
-        # make first row and first column bold
-        for (row, col), cell in table.get_celld().items():
-            if (row == 0) | (col == 0):
-                cell.set_text_props(fontproperties=FontProperties(weight='bold'))
-
-        table.scale(xscale=2, yscale=1)
-        # adjust position of axes (alternative to subplots_adjust above)
-        pos = ax.get_position()
-        new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
-        ax.set_position(new_pos)
-
+        _add_config_table(config_table, ax)
 
     # save and show figure
     save_and_show_figure(
@@ -227,28 +198,85 @@ def plot_volcano(*args, **kwargs):
     plot_functions_deprecations_warning(name="volcano")
 
 
-def volcano_neighbors(
+def _add_config_table(config_table, ax):
+    # Add labels to the top of the plot, outside the plot area
+    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
+                xytext=(-65, 0), textcoords='offset points',
+                ha='left', va='center', fontsize=14, color='black',
+                arrowprops=dict(arrowstyle='->', color='black'))
+
+    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
+                xytext=(93, 0), textcoords='offset points',
+                ha='right', va='center', fontsize=14, color='black',
+                arrowprops=dict(arrowstyle='->', color='black'))
+
+    # Create table data
+    # Add table at the bottom of the plot
+    table = ax.table(
+        cellText=config_table.values,
+        colLabels=config_table.columns,
+        cellLoc='center',
+        colWidths=[.2,.4,.4],
+        loc='bottom',
+        bbox=[-0.12, -0.2-(0.1*(len(config_table)+1)), 1.12, 0.1*(len(config_table)+1)]
+        )
+
+    # make first row and first column bold
+    for (row, col), cell in table.get_celld().items():
+        if (row == 0) | (col == 0):
+            cell.set_text_props(fontproperties=FontProperties(weight='bold'))
+
+    table.scale(xscale=2, yscale=1)
+    # adjust position of axes (alternative to subplots_adjust above)
+    pos = ax.get_position()
+    new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
+    ax.set_position(new_pos)
+
+def volcano(
     results: DiffExprResults,
-    top: int = 40,
+    significance_threshold: Number = 0.05,
+    foldchange_threshold: Number = 2,
+    label_top_n: int = 20,
+    label_sortby: str = "log2FoldChange",
     figsize_per_plot: int = 6,
     show: bool = True,
     backend: Literal["insitupy", "decoupler"] = "insitupy"
 ):
+
     """
-    Plot volcano plots for pseudobulk DGE results.
+    Generate volcano plots for differential gene expression (DGE) results.
 
     Parameters
     ----------
-    results : PseudobulkDGEResults
-        Container object holding DGE results.
-    top : int, optional
-        Number of top genes to label in each volcano plot.
+    results : DiffExprResults
+        Container object holding DGE results, including main and neighborhood comparisons.
+    significance_threshold : float, optional
+        P-value threshold for statistical significance. Default is 0.05.
+    foldchange_threshold : float, optional
+        Minimum absolute log2 fold change to consider a gene biologically significant. Default is 2.
+    label_top_n : int, optional
+        Number of top genes to label in each volcano plot. Default is 20.
+    label_sortby : str, optional
+        Column name used to sort genes for labeling. Default is "log2FoldChange".
     figsize_per_plot : int, optional
-        Width (in inches) per subplot.
+        Width (in inches) allocated per subplot. Default is 6.
     show : bool, optional
-        Whether to display the figure immediately.
+        Whether to display the figure immediately. Default is True.
+    backend : {"insitupy", "decoupler"}, optional
+        Plotting backend to use. "insitupy" uses a custom plotting function; "decoupler" uses decoupler's plotting utilities. Default is "insitupy".
+
+    Raises
+    ------
+    ValueError
+        If an unsupported backend is specified.
+
+    Notes
+    -----
+    - The function automatically detects and includes neighborhood comparisons if available.
+    - Titles are generated based on the DGE setup metadata.
+    - Uses matplotlib for plotting.
     """
-    dc = try_import("decoupler", installation_command="pip install decoupler")
+
     # Collect data and titles
     results_data = [results.main]
     dge_setup = results.metadata["dge_setup"]
@@ -268,18 +296,24 @@ def volcano_neighbors(
     for ax, df, title in zip(axs, results_data, titles):
 
         if backend == "decoupler":
-            dc.pl.volcano(df, x="log2FoldChange", y="pvalue", top=top, ax=ax)
+            dc.pl.volcano(
+                df,
+                x="log2FoldChange",
+                y="pvalue",
+                thr_stat=np.log2(foldchange_threshold),
+                thr_sign=significance_threshold,
+                top=int(label_top_n*2), ax=ax)
+
         elif backend == "insitupy":
-            #df["neg_log10_pvals"] = -np.log10(df["pvalue"])
-            #df["gene"] = df.index
-            volcano(
+            single_volcano(
                 data=df,
                 logfoldchanges_column='log2FoldChange',
-                neg_log_pval_column='neg_log10_pvals',
-                fold_change_threshold=2**0.5,
-                label_top_n=int(top/2),
+                pval_column='pvalue',
+                foldchange_threshold=foldchange_threshold,
+                significance_threshold=significance_threshold,
+                label_top_n=label_top_n,
+                label_sortby=label_sortby,
                 ax=ax,
-                #show=False
             )
         else:
             raise ValueError(f"Unknown backend '{backend}'. Choose 'insitupy' or 'decoupler'.")
@@ -289,5 +323,3 @@ def volcano_neighbors(
     plt.tight_layout()
     if show:
         plt.show()
-
-    #return fig, axs
