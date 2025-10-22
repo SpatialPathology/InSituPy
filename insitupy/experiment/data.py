@@ -225,7 +225,7 @@ class InSituExperiment:
         """
         print(
             f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            f"Use `add_metadata_column()` to add new columns."
+            f"Use `add_metadata_column()` or `append_metadata()` to add new information to metadata."
         )
         return self._metadata.copy() # the copy prevents the metadata from being modified
 

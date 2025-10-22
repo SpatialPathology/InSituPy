@@ -9,7 +9,6 @@ from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils.utils import convert_to_list
 
-# OBS_TYPE_COL = "obs_type"
 
 def get_neighborhood(
     exp: InSituExperiment,
@@ -71,6 +70,7 @@ def neighborhoods_pseudobulk(
         # make obs_names unique
         assert pdata.shape[0] == 1, "Pseudobulk AnnData should have only one observation at this point."
         pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}_neighbors"]
+        #pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}"]
 
         # collect pseudobulks
         celltype_pdatas[celltype] = pdata
@@ -89,7 +89,7 @@ def _check_transfer(metadata, columns):
             raise ValueError(f"Column(s) '{', '.join(cols_not_found)}' not found in `.metadata`.")
 
 
-def generate_pseudobulk(
+def pseudobulk(
     exp,
     celltype_col: str,
     cells_layer: Optional[str] = None,
@@ -163,31 +163,31 @@ def generate_pseudobulk(
             # collect data
             nb_pdatas[uid] = pdata_neighbors
 
-            # # concatenate pseudobulk and neighbor pseudobulk
-            # pdata = ad.concat(
-            #     {
-            #     'pdata_neighbors': pdata_neighbors,
-            #     'pdata': pdata
-            #     }
-            # )
-
-            # pdata.obs[OBS_TYPE_COL] = np.where(
-            #     pdata.obs.index.str.contains('neighbors'),
-            #     'neighbors',
-            #     'cell'
-            #     )
-
-
-
     # concatenate all pseudobulks
     pdata_final = ad.concat(pdatas, label="uid")
+    pdata_final.obs["obs_type"] = "cells"
+
+    # Store pseudobulk settings
+    settings = dict(
+        celltype_col=celltype_col,
+        cells_layer=cells_layer,
+        counts_layer=counts_layer,
+        uid_col=uid_col,
+        mode=mode,
+        calculate_neighbors=calculate_neighbors,
+        neighbors_radius=neighbors_radius,
+        metadata_to_transfer=metadata_to_transfer,
+        **kwargs
+    )
+    pdata_final.uns["pseudobulk_settings"] = settings
 
     if not calculate_neighbors:
         return pdata_final
     else:
         nb_pdata_final = ad.concat(nb_pdatas, label="uid")
+        nb_pdata_final.obs["obs_type"] = "neighbors"
+        nb_pdata_final.uns["pseudobulk_settings"] = settings
         return pdata_final, nb_pdata_final
-
 
 def _transfer_metadata(
     pdata,
