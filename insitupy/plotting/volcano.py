@@ -12,7 +12,7 @@ from adjustText import adjust_text
 from matplotlib.font_manager import FontProperties
 
 from insitupy._checks import try_import
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.dataclasses.results import DiffExprResults
 
 
@@ -190,7 +190,6 @@ def single_volcano(
         dpi_save=dpi_save,
         show=show
         )
-    #plt.show()
 
 # deprecated functions
 def plot_volcano(*args, **kwargs):
@@ -238,7 +237,7 @@ def volcano(
     foldchange_threshold: Number = 2,
     label_top_n: int = 20,
     label_sortby: str = "log2FoldChange",
-    figsize_per_plot: int = 6,
+    figsize: Tuple[Number, Number] = (6,6),
     show: bool = True,
     backend: Literal["insitupy", "decoupler"] = "insitupy"
 ):
@@ -253,7 +252,8 @@ def volcano(
     significance_threshold : float, optional
         P-value threshold for statistical significance. Default is 0.05.
     foldchange_threshold : float, optional
-        Minimum absolute log2 fold change to consider a gene biologically significant. Default is 2.
+        Minimum absolute fold change to consider a gene biologically significant.
+        Is log2-transformed for plotting. Default is 2.
     label_top_n : int, optional
         Number of top genes to label in each volcano plot. Default is 20.
     label_sortby : str, optional
@@ -289,7 +289,7 @@ def volcano(
 
     # Create figure
     ncols = len(results_data)
-    fig, axs = plt.subplots(1, ncols, figsize=(figsize_per_plot * ncols, 6))
+    fig, axs = plt.subplots(1, ncols, figsize=(figsize[0] * ncols, figsize[1]))
     if ncols == 1:
         axs = [axs]  # make iterable for consistent loop
 

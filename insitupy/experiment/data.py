@@ -21,7 +21,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.io.data import read_xenium

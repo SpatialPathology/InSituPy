@@ -12,17 +12,17 @@ from matplotlib.font_manager import FontProperties
 from typing import Optional
 
 
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 
 def facs_plot(data,
               gene1: str = 'gene1',
               gene2: str = 'gene2',
               cluster_key: str = 'None',
-              threshold_gene1: Number = 1, 
-              threshold_gene2: Number =1, 
+              threshold_gene1: Number = 1,
+              threshold_gene2: Number =1,
               layer: str = 'main'
               ):
-    
+
     adata=data.cells[layer].matrix
 
     expr1 = adata[:, gene1].X.toarray().flatten()

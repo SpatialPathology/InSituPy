@@ -1,19 +1,22 @@
 from numbers import Number
-from typing import List
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from insitupy.dataclasses.results import DiffExprResults
+from insitupy.plotting.save import save_and_show_figure
 
 
 def dual_foldchange_plot(
     results: DiffExprResults,
-    significance_threshold: Number,
-    fold_change_threshold: Number,
+    significance_threshold: Number = 0.05,
+    foldchange_threshold: Number = 1,
     logfc_col: str = "log2FoldChange",
     pval_col: str = "pvalue",
     patch_colors: List[str] = ["lightgreen", "lightyellow", "lightcoral"],
     adjust_labels: bool = True,
+    figsize: Tuple[Number, Number] = (6,6)
 ):
     """
     Create volcano-style scatter plots comparing log2 fold changes between
@@ -58,46 +61,64 @@ def dual_foldchange_plot(
     df_main = results.main
     df_nb_first = results.nb_condition_a
     df_nb_second = results.nb_condition_b
+    logfc_threshold = np.log2(foldchange_threshold)
 
     # Filter for genes above/below log2FC threshold in main comparison
-    filtered_data_x_up = df_main[df_main[logfc_col] >= fold_change_threshold].copy()
+    filtered_data_x_up = df_main[df_main[logfc_col] >= logfc_threshold].copy()
     filtered_data_y_up = df_nb_first[df_nb_first.index.isin(filtered_data_x_up.index)]
 
-    filtered_data_x_down = df_main[df_main[logfc_col] <= -fold_change_threshold].copy()
+    filtered_data_x_down = df_main[df_main[logfc_col] <= -logfc_threshold].copy()
     filtered_data_y_down = df_nb_second[df_nb_second.index.isin(filtered_data_x_down.index)]
 
+
+    # Check for empty DataFrames
+    if filtered_data_x_up.empty or filtered_data_y_up.empty:
+        print("Warning: No upregulated genes passed the threshold in one or both datasets.")
+
+    if filtered_data_x_down.empty or filtered_data_y_down.empty:
+        print("Warning: No downregulated genes passed the threshold in one or both datasets.")
+
     # Create figure
-    fig, axs = plt.subplots(1, 2, figsize=(7 * 2, 7))
+    fig, axs = plt.subplots(1, 2, figsize=(figsize[0] * 2, figsize[1]))
     xs = [filtered_data_x_down, filtered_data_x_up]
     ys = [filtered_data_y_down, filtered_data_y_up]
-    fcs = [-fold_change_threshold, fold_change_threshold]
+    fcs = [-logfc_threshold, logfc_threshold]
 
     for i, (x, y, fc) in enumerate(zip(xs, ys, fcs)):
-        x_values = x[logfc_col]
-        y_values = y[logfc_col]
-        p_values = x[pval_col]
-        sig = p_values < significance_threshold
-        genes = x.index
+        if len(x) > 0 and len(y) > 0:
+            x_values = x[logfc_col]
+            y_values = y[logfc_col]
+            p_values = x[pval_col]
+            sig = p_values < significance_threshold
+            genes = x.index
 
-        _plot_single_nb_plot(
-            x_values=x_values,
-            y_values=y_values,
-            genes=genes,
-            p_values=p_values,
-            fold_change_threshold=fc,
-            significance_threshold=significance_threshold,
-            sig=sig,
-            patch_colors=patch_colors,
-            ax=axs[i],
-            show_legend=(i == 1),
-            show_ylabel=(i == 0),
-            adjust_labels=adjust_labels
+            _plot_single_nb_plot(
+                x_values=x_values,
+                y_values=y_values,
+                genes=genes,
+                p_values=p_values,
+                fold_change_threshold=fc,
+                significance_threshold=significance_threshold,
+                sig=sig,
+                patch_colors=patch_colors,
+                ax=axs[i],
+                show_legend=(i == 1),
+                show_ylabel=(i == 0),
+                adjust_labels=adjust_labels
+            )
+        else:
+            axs[i].text(0.5, 0.5, "No genes passed the threshold", ha="center", va="center", fontsize=14)
+            axs[i].set_xticks([])
+            axs[i].set_yticks([])
+
+    # save and show figure
+    save_and_show_figure(
+        savepath=savepath,
+        fig=plt.gcf(),
+        save_only=save_only,
+        dpi_save=dpi_save,
+        show=show
         )
-
-    plt.tight_layout()
-    plt.show()
-    return fig, axs
-
 
 def _plot_single_nb_plot(
     x_values,
@@ -120,7 +141,6 @@ def _plot_single_nb_plot(
             from adjustText import adjust_text
         except ImportError:
             raise ImportError("The 'adjustText' module is required for label adjustment. Please install it with `pip install adjusttext` or select adjust_labels=False.")
-
     xmin, xmax = x_values.min(), x_values.max()
     ymin, ymax = y_values.min(), y_values.max()
     ax.set_xlim(xmin - 0.1 * abs(xmin), xmax + 0.1 * abs(xmax))
