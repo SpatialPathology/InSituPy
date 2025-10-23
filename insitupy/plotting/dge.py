@@ -12,7 +12,7 @@ def dual_foldchange_plot(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 1,
-    logfc_col: str = "log2FoldChange",
+    logfc_col: str = "log2foldchange",
     pval_col: str = "pvalue",
     patch_colors: List[str] = ["lightgreen", "lightyellow", "lightcoral"],
     adjust_labels: bool = True,
@@ -31,7 +31,7 @@ def dual_foldchange_plot(
         P-value threshold for significance.
     fold_change_threshold : Number
         Minimum absolute log2 fold change to include in the plot.
-    logfc_col : str, default="log2FoldChange"
+    logfc_col : str, default="log2foldchange"
         Column name for log2 fold change values.
     pval_col : str, default="pvalue"
         Column name for p-values.
@@ -59,8 +59,8 @@ def dual_foldchange_plot(
 
     # Extract required DataFrames
     df_main = results.main
-    df_nb_first = results.nb_condition_a
-    df_nb_second = results.nb_condition_b
+    df_nb_first = results.target_neighborhood
+    df_nb_second = results.ref_neighborhood
     logfc_threshold = np.log2(foldchange_threshold)
 
     # Filter for genes above/below log2FC threshold in main comparison
@@ -182,7 +182,7 @@ def _plot_single_nb_plot(
 
     # Axis labels and legend
     if show_legend:
-        ax.legend(title="pvals (target_vs_reference)", loc="center left", bbox_to_anchor=(1, 0.5))
+        ax.legend(title="pvalue (target_vs_reference)", loc="center left", bbox_to_anchor=(1, 0.5))
     if show_ylabel:
         ax.set_ylabel("Log2-fold change target_vs_neighbors")
     ax.set_xlabel("Log2-fold change target_vs_reference")

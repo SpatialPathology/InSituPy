@@ -12,7 +12,7 @@ from sklearn.neighbors import radius_neighbors_graph
 
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.plotting import single_volcano, volcano_two_sides
+from insitupy.plotting.volcano import single_volcano  # , volcano_two_sides
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
 
@@ -227,8 +227,8 @@ def differential_gene_expression_two_sides(
         data_counts_neighbors = cell_counts_neighbors[target_cell_type_tuple[1]]
         ref_counts_neighbors = cell_counts_neighbors["neighbors"]
 
-        n_upreg_neigh = np.sum((df_neighbors["pvals"] <= significance_threshold) & (df_neighbors["logfoldchanges"] > np.log2(fold_change_threshold)))
-        n_downreg_neigh = np.sum((df_neighbors["pvals"] <= significance_threshold) & (df_neighbors["logfoldchanges"] < -np.log2(fold_change_threshold)))
+        n_upreg_neigh = np.sum((df_neighbors["pvalue"] <= significance_threshold) & (df_neighbors["log2foldchange"] > np.log2(fold_change_threshold)))
+        n_downreg_neigh = np.sum((df_neighbors["pvalue"] <= significance_threshold) & (df_neighbors["log2foldchange"] < -np.log2(fold_change_threshold)))
 
         config_table_neighbors = pd.DataFrame({
             "": ["Cell number", "D [EG number"],
@@ -256,8 +256,8 @@ def differential_gene_expression_two_sides(
         data_counts = cell_counts["DATA"]
         ref_counts = cell_counts["REFERENCE"]
 
-        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > np.log2(fold_change_threshold)))
-        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -np.log2(fold_change_threshold)))
+        n_upreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] > np.log2(fold_change_threshold)))
+        n_downreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] < -np.log2(fold_change_threshold)))
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
@@ -280,7 +280,7 @@ def differential_gene_expression_two_sides(
             savepath = savepath,
             save_only = save_only,
             dpi_save = dpi_save,
-            config_table = config_table,
+            config = config_table,
             adjust_labels=True,
             **volcano_kwargs
             )
@@ -293,17 +293,17 @@ def differential_gene_expression_two_sides(
             savepath = savepath,
             save_only = save_only,
             dpi_save = dpi_save,
-            config_table = config_table,
+            config = config_table,
             adjust_labels=True,
             **volcano_kwargs
             )
 
-        merged=volcano_two_sides(
-            data_x=df,
-            data_y=df_neighbors,
-            fold_change_threshold=fold_change_threshold,
-            title=title,
-            **volcano_kwargs)
+        # merged=volcano_two_sides(
+        #     data_x=df,
+        #     data_y=df_neighbors,
+        #     fold_change_threshold=fold_change_threshold,
+        #     title=title,
+        #     **volcano_kwargs)
 
     if return_results:
         return {

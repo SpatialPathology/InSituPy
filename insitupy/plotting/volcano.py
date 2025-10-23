@@ -12,13 +12,14 @@ from adjustText import adjust_text
 from matplotlib.font_manager import FontProperties
 
 from insitupy._checks import try_import
+from insitupy.dataclasses.results import (DiffExprConfigCollector,
+                                          DiffExprResults)
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.dataclasses.results import DiffExprResults
 
 
 def single_volcano(
     data,
-    logfoldchanges_column: str = 'log2FoldChange',
+    logfoldchanges_column: str = 'log2foldchange',
     pval_column: str = 'pvalue',
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 2,
@@ -32,7 +33,7 @@ def single_volcano(
     label_top_n: Union[int, List[str]] = 20,
     label_sortby: str = "scores",
     figsize: Tuple[int, int] = (8, 6),
-    config_table=None
+    config: Optional[DiffExprConfigCollector] = None
     ):
     """
     Create a volcano plot from the DataFrame and label the top 20 most significant up and down-regulated genes.
@@ -40,7 +41,7 @@ def single_volcano(
 
     Args:
         data (pd.DataFrame): DataFrame containing gene names, log fold changes, and p-values.
-        logfoldchanges_column (str): Column name for log fold changes (default is 'logfoldchanges').
+        logfoldchanges_column (str): Column name for log fold changes (default is 'log2foldchange').
         pval_column (str): Column name for negative log10 p-values (default is 'neg_log10_pvals').
         significance_threshold (float): P-value threshold for significance (default is 0.05).
         foldchange_threshold (float): Fold change threshold for up/down regulation (default is 2).
@@ -105,7 +106,7 @@ def single_volcano(
     ax.axvline(x=-lfc_threshold, color='black', linestyle='--')
 
     # # Calculate mixed score and get top 20 up and down-regulated genes
-    # volcano_data['mixed_score'] = -np.log10(volcano_data['pvals']) * volcano_data[logfoldchanges_column]
+    # volcano_data['mixed_score'] = -np.log10(volcano_data['pvalue']) * volcano_data[logfoldchanges_column]
 
     # determine top up- and down-regulated genes for adding the names
     sig_mask = (data[neg_log_pval_column] > neg_log_sig_thresh)
@@ -179,8 +180,26 @@ def single_volcano(
             max_move=None # this helped with some annotations remaining overlapping
             )
 
-    if config_table is not None:
-        _add_config_table(config_table, ax)
+    # Add labels to the top of the plot, outside the plot area
+    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
+                xytext=(-65, 0), textcoords='offset points',
+                ha='left', va='center', fontsize=14, color='black',
+                arrowprops=dict(arrowstyle='->', color='black'))
+
+    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
+                xytext=(93, 0), textcoords='offset points',
+                ha='right', va='center', fontsize=14, color='black',
+                arrowprops=dict(arrowstyle='->', color='black'))
+
+    if config is not None:
+        n_upreg = np.sum((data["pvalue"] <= significance_threshold) & (data["log2foldchange"] > np.log2(foldchange_threshold)))
+        n_downreg = np.sum((data["pvalue"] <= significance_threshold) & (data["log2foldchange"] < -np.log2(foldchange_threshold)))
+
+        _add_config_table(
+            config,
+            n_upreg, n_downreg,
+            ax
+            )
 
     # save and show figure
     save_and_show_figure(
@@ -197,38 +216,53 @@ def plot_volcano(*args, **kwargs):
     plot_functions_deprecations_warning(name="volcano")
 
 
-def _add_config_table(config_table, ax):
-    # Add labels to the top of the plot, outside the plot area
-    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
-                xytext=(-65, 0), textcoords='offset points',
-                ha='left', va='center', fontsize=14, color='black',
-                arrowprops=dict(arrowstyle='->', color='black'))
-
-    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
-                xytext=(93, 0), textcoords='offset points',
-                ha='right', va='center', fontsize=14, color='black',
-                arrowprops=dict(arrowstyle='->', color='black'))
-
+def _add_config_table(config, n_upreg, n_downreg, ax):
     # Create table data
+    d = config.to_dict()
+    config_table = pd.DataFrame({
+        "Reference": list(d["Reference"].values()) + [n_downreg],
+        "Target": list(d["Target"].values()) + [n_upreg]
+        }, index=list(d["Target"].keys()) + ["# DEGs"]).dropna()
+
+
+    # Check if 'name' is in the index
+    if 'name' in config_table.index:
+        # Reorder so 'name' is first
+        config_table = config_table.loc[['name'] + [i for i in config_table.index if i != 'name']]
+
+    if "metadata" in config_table.index:
+        # drop the metadata (often too big for visualization)
+        config_table = config_table.drop("metadata")
+
+    config_table = config_table.reset_index().rename(columns={'index': ''})
+
+    # Calculate table height
+    n_rows = len(config_table)
+    table_height = 0.075 * (n_rows + 1)
+
     # Add table at the bottom of the plot
     table = ax.table(
         cellText=config_table.values,
         colLabels=config_table.columns,
         cellLoc='center',
-        colWidths=[.2,.4,.4],
+        colWidths=[.3,.4,.4],
         loc='bottom',
-        bbox=[-0.12, -0.2-(0.1*(len(config_table)+1)), 1.12, 0.1*(len(config_table)+1)]
+        bbox=[-0.12, -table_height - 0.2, 1.12, table_height]
         )
 
     # make first row and first column bold
     for (row, col), cell in table.get_celld().items():
+        cell.set_facecolor('lightgrey')
         if (row == 0) | (col == 0):
             cell.set_text_props(fontproperties=FontProperties(weight='bold'))
 
     table.scale(xscale=2, yscale=1)
-    # adjust position of axes (alternative to subplots_adjust above)
+
+    # adjust position of axes (alternative to subplots_adjust)
     pos = ax.get_position()
-    new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
+    new_pos = [pos.x0, pos.y0 - 0.35, pos.width, pos.height*0.7]
+    #new_pos = [pos.x0, pos.y0 - 0.5, pos.width, pos.height*0.85]
+    #new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
     ax.set_position(new_pos)
 
 def volcano(
@@ -236,10 +270,15 @@ def volcano(
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 2,
     label_top_n: int = 20,
-    label_sortby: str = "log2FoldChange",
+    label_sortby: str = "log2foldchange",
     figsize: Tuple[Number, Number] = (6,6),
     show: bool = True,
-    backend: Literal["insitupy", "decoupler"] = "insitupy"
+    backend: Literal["insitupy", "decoupler"] = "insitupy",
+    show_config: bool = False,
+    title: Optional[str] = None,
+    savepath: Union[str, os.PathLike, Path] = None,
+    save_only: bool = False,
+    dpi_save: int = 300,
 ):
 
     """
@@ -257,7 +296,7 @@ def volcano(
     label_top_n : int, optional
         Number of top genes to label in each volcano plot. Default is 20.
     label_sortby : str, optional
-        Column name used to sort genes for labeling. Default is "log2FoldChange".
+        Column name used to sort genes for labeling. Default is "log2foldchange".
     figsize_per_plot : int, optional
         Width (in inches) allocated per subplot. Default is 6.
     show : bool, optional
@@ -279,12 +318,12 @@ def volcano(
 
     # Collect data and titles
     results_data = [results.main]
-    dge_setup = results.metadata["dge_setup"]
-    condition, cond1, cond2 = dge_setup
-    titles = [f"Cells\n{condition}\n{cond1} vs. {cond2}"]
+    #dge_setup = results.metadata["dge_setup"]
+    #condition, cond1, cond2 = dge_setup
+    #titles = [f"Cells\n{condition}\n{cond1} vs. {cond2}"]
 
     if results.has_neighbors():
-        results_data += [results.nb_condition_a, results.nb_condition_b]
+        results_data += [results.target_neighborhood, results.ref_neighborhood]
         titles += ["Neighborhoods (condition A)", "Neighborhoods (condition B)"]
 
     # Create figure
@@ -293,12 +332,13 @@ def volcano(
     if ncols == 1:
         axs = [axs]  # make iterable for consistent loop
 
-    for ax, df, title in zip(axs, results_data, titles):
+    #for ax, df, title in zip(axs, results_data, titles):
+    for ax, df in zip(axs, results_data):
 
         if backend == "decoupler":
             dc.pl.volcano(
                 df,
-                x="log2FoldChange",
+                x="log2foldchange",
                 y="pvalue",
                 thr_stat=np.log2(foldchange_threshold),
                 thr_sign=significance_threshold,
@@ -307,19 +347,33 @@ def volcano(
         elif backend == "insitupy":
             single_volcano(
                 data=df,
-                logfoldchanges_column='log2FoldChange',
+                logfoldchanges_column='log2foldchange',
                 pval_column='pvalue',
                 foldchange_threshold=foldchange_threshold,
                 significance_threshold=significance_threshold,
                 label_top_n=label_top_n,
                 label_sortby=label_sortby,
-                ax=ax,
+                config=results.config if show_config else None,
+                ax=ax
             )
         else:
             raise ValueError(f"Unknown backend '{backend}'. Choose 'insitupy' or 'decoupler'.")
 
-        ax.set_title(title)
+        # ax.set_title(title)
 
-    plt.tight_layout()
-    if show:
-        plt.show()
+    if title is not None:
+        plt.suptitle(title)
+
+    # save and show figure
+    save_and_show_figure(
+        savepath=savepath,
+        fig=fig,
+        save_only=save_only,
+        dpi_save=dpi_save,
+        show=show,
+        tight=True
+        )
+
+    # plt.tight_layout()
+    # if show:
+    #     plt.show()

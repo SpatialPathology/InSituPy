@@ -15,38 +15,44 @@ from anndata import AnnData
 
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.results import DiffExprResults
+from insitupy.dataclasses.results import (DiffExprConfigCollector,
+                                          DiffExprResults)
 from insitupy.experiment.data import InSituExperiment
-from insitupy.plotting import single_volcano
 from insitupy.plotting.dge import dual_foldchange_plot
+from insitupy.plotting.volcano import single_volcano
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils._helpers import suppress_output
 from insitupy.utils.dge import create_deg_dataframe
 
+DGE_COMPARISON_COLUMN = "DGE_COMPARISON_COLUMN"
 
 def differential_gene_expression(
     target: InSituData,
     target_annotation_tuple: Optional[Tuple[str, str]] = None,
     target_cell_type_tuple: Optional[Tuple[str, str]] = None,
     target_region_tuple: Optional[Tuple[str, str]] = None,
+    target_name: Optional[str] = None,
+    target_metadata: Optional[dict] = None,
     ref: Optional[Union[InSituData, List[InSituData]]] = None,
     ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
     ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
     ref_region_tuple: Optional[Tuple[str, str]] = "same",
+    ref_name: Optional[str] = None,
+    ref_metadata: Optional[dict] = None,
     cells_layer: Optional[str] = None,
     significance_threshold: Number = 0.05,
-    fold_change_threshold: Number = 2,
+    foldchange_threshold: Number = 2,
     show_volcano: bool = True,
     return_results: bool = False,
     method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
     exclude_ambiguous_assignments: bool = False,
     force_assignment: bool = False,
-    title: Optional[str] = None,
-    savepath: Union[str, os.PathLike, Path] = None,
-    save_only: bool = False,
-    dpi_save: int = 300,
+    # title: Optional[str] = None,
+    # savepath: Union[str, os.PathLike, Path] = None,
+    # save_only: bool = False,
+    # dpi_save: int = 300,
     verbose: bool = False,
-    **volcano_kwargs
+    # **volcano_kwargs
 ):
     """
     Perform differential gene expression analysis on in situ sequencing data.
@@ -71,12 +77,7 @@ def differential_gene_expression(
         method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data. Defaults to False.
         force_assignment (bool): Whether to force assignment of annotations and regions even if it has been done before already. Defaults to False.
-        title (Optional[str]): Title for the volcano plot. Defaults to None.
-        savepath (Union[str, os.PathLike, Path]): Path to save the plot. Defaults to None.
-        save_only (bool): If True, only save the plot without displaying it. Defaults to False.
-        dpi_save (int): Dots per inch (DPI) for saving the plot. Defaults to 300.
         verbose (bool): Whether to print detailed information during the analysis. Defaults to False.
-        **volcano_kwargs: Additional keyword arguments for the volcano plot.
 
     Returns:
         Union[None, Dict[str, Any]]: If `plot_volcano` is True, returns None. Otherwise, returns a dictionary with the results DataFrame and parameters used for the analysis.
@@ -97,10 +98,9 @@ def differential_gene_expression(
                 method='wilcoxon'
             )
     """
+
     if not (show_volcano | return_results):
         raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
-
-    dge_comparison_column = "DGE_COMPARISON_COLUMN"
 
     # pre-flight checks
     if ref_annotation_tuple is not None:
@@ -216,7 +216,7 @@ def differential_gene_expression(
                 "DATA": adata_data,
                 "REFERENCE": adata_ref
             },
-            label=dge_comparison_column
+            label=DGE_COMPARISON_COLUMN
         )
 
     if not exclude_ambiguous_assignments:
@@ -246,7 +246,7 @@ def differential_gene_expression(
 
     print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}'.")
     sc.tl.rank_genes_groups(adata=adata_combined,
-                            groupby=dge_comparison_column,
+                            groupby=DGE_COMPARISON_COLUMN,
                             groups=["DATA"],
                             reference="REFERENCE",
                             method=method,
@@ -256,14 +256,48 @@ def differential_gene_expression(
     res_dict = create_deg_dataframe(
         adata=adata_combined, groups="DATA")
     df = res_dict["DATA"]
+    df = df.set_index("gene")
+
+    # collect configuration
+    cell_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
+    data_counts = cell_counts["DATA"]
+    ref_counts = cell_counts["REFERENCE"]
+
+    config = DiffExprConfigCollector(
+        type="single-cell",
+        method=method,
+        cells_layer=cells_layer,
+        exclude_ambiguous_assignments=exclude_ambiguous_assignments,
+
+        target_annotation=target_annotation_tuple[1] if isinstance(target_annotation_tuple, tuple) else target_annotation_tuple,
+        target_cell_type=target_cell_type_tuple[1] if isinstance(target_cell_type_tuple, tuple) else target_cell_type_tuple,
+        target_region=target_region_tuple[1] if isinstance(target_region_tuple, tuple) else target_region_tuple,
+        target_cell_number=data_counts,
+        target_name=target_name,
+        target_metadata=target_metadata,
+
+        ref_annotation=orig_ref_annotation_tuple[1] if isinstance(orig_ref_annotation_tuple, tuple) else orig_ref_annotation_tuple,
+        ref_cell_type=orig_ref_cell_type_tuple[1] if isinstance(orig_ref_cell_type_tuple, tuple) else orig_ref_cell_type_tuple,
+        ref_region=ref_region_tuple[1] if isinstance(ref_region_tuple, tuple) else ref_region_tuple,
+        ref_cell_number=ref_counts,
+        ref_name=ref_name,
+        ref_metadata=ref_metadata
+    )
+
+    res = DiffExprResults(
+        main=df,
+        config=config,
+        )
+
+    return res
 
     if show_volcano:
-        cell_counts = adata_combined.obs[dge_comparison_column].value_counts()
+        cell_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
         data_counts = cell_counts["DATA"]
         ref_counts = cell_counts["REFERENCE"]
 
-        n_upreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] > np.log2(fold_change_threshold)))
-        n_downreg = np.sum((df["pvals"] <= significance_threshold) & (df["logfoldchanges"] < -np.log2(fold_change_threshold)))
+        n_upreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] > np.log2(foldchange_threshold)))
+        n_downreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] < -np.log2(foldchange_threshold)))
 
         config_table = pd.DataFrame({
             "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
@@ -279,12 +313,12 @@ def differential_gene_expression(
         single_volcano(
             data=df,
             significance_threshold=significance_threshold,
-            fold_change_threshold=fold_change_threshold,
+            foldchange_threshold=foldchange_threshold,
             title=title,
             savepath = savepath,
             save_only = save_only,
             dpi_save = dpi_save,
-            config_table = config_table,
+            config = config_table,
             adjust_labels=True,
             **volcano_kwargs
             )
@@ -293,6 +327,7 @@ def differential_gene_expression(
             "results": df,
             "params": adata_combined.uns["rank_genes_groups"]["params"]
         }
+
 
 
 def _obs_qc_plot(
@@ -518,7 +553,7 @@ def pseudobulk_dge(
     #     axs[i].set_title(titles[i])
     #     dc.pl.volcano(
     #         d,
-    #         x="log2FoldChange",
+    #         x="log2foldchange",
     #         y="pvalue",
     #         top=40,
     #         ax=axs[i]
@@ -528,14 +563,14 @@ def pseudobulk_dge(
 
     results = DiffExprResults(
         main=results_df,
-        nb_condition_a=results_df_nb_first if pdata_nb is not None else None,
-        nb_condition_b=results_df_nb_second if pdata_nb is not None else None,
-        metadata={
-            "celltype": celltype,
-            "dge_setup": dge_setup,
+        dge_setup=dge_setup,
+        celltype=celltype,
+        pseudobulk_params={
             "min_cells": min_cells,
             "min_counts": min_counts
-        }
+        },
+        target_neighborhood=results_df_nb_first if pdata_nb is not None else None,
+        ref_neighborhood=results_df_nb_second if pdata_nb is not None else None,
     )
 
     return results

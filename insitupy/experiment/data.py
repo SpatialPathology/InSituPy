@@ -21,7 +21,6 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
-from insitupy.plotting.save import save_and_show_figure
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.io.data import read_xenium
@@ -85,7 +84,7 @@ class InSituExperiment:
             and a table of metadata with loaded modalities.
         """
         # extract metadata
-        mdf = self.metadata.copy()
+        mdf = self._metadata.copy()
         num_samples = len(mdf)
 
         # check which modalities are loaded and add information as string to the copied metadata dataframe
@@ -225,7 +224,7 @@ class InSituExperiment:
         """
         print(
             f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            f"Use `add_metadata_column()` or `append_metadata()` to add new information to metadata."
+            f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
         )
         return self._metadata.copy() # the copy prevents the metadata from being modified
 
@@ -404,26 +403,27 @@ class InSituExperiment:
         """
         return deepcopy(self)
 
-    def dge(self,
-            target_id: int,
-            ref_id: Optional[Union[int, List[int], Literal["rest"]]] = None,
-            target_annotation_tuple: Optional[Tuple[str, str]] = None,
-            target_cell_type_tuple: Optional[Tuple[str, str]] = None,
-            target_region_tuple: Optional[Tuple[str, str]] = None,
-            ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-            ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-            ref_region_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-            plot_volcano: bool = True,
-            method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
-            exclude_ambiguous_assignments: bool = False,
-            force_assignment: bool = False,
-            name_col: str = "sample_id",
-            title: Optional[str] = None,
-            savepath: Union[str, os.PathLike, Path] = None,
-            save_only: bool = False,
-            dpi_save: int = 300,
-            **kwargs
-            ):
+    def dge(
+        self,
+        target_id: int,
+        ref_id: Optional[Union[int, List[int], Literal["rest"]]] = None,
+        target_annotation_tuple: Optional[Tuple[str, str]] = None,
+        target_cell_type_tuple: Optional[Tuple[str, str]] = None,
+        target_region_tuple: Optional[Tuple[str, str]] = None,
+        ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
+        ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
+        ref_region_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
+        # plot_volcano: bool = True,
+        method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
+        exclude_ambiguous_assignments: bool = False,
+        force_assignment: bool = False,
+        name_col: Optional[str] = "uid",
+        # title: Optional[str] = None,
+        # savepath: Union[str, os.PathLike, Path] = None,
+        # save_only: bool = False,
+        # dpi_save: int = 300,
+        # **kwargs
+        ):
         """
         Wrapper function for performing differential gene expression analysis within an `InSituExperiment` object.
 
@@ -441,16 +441,10 @@ class InSituExperiment:
             ref_annotation_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple containing the reference annotation key and name, or "rest" to use the rest of the data as reference. Defaults to "same".
             ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data. Defaults to "same".
             ref_region_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to "same".
-            plot_volcano (bool, optional): Whether to generate a volcano plot of the results. Defaults to True.
             method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']], optional): Statistical method to use for differential expression analysis. Defaults to 't-test'.
             exclude_ambiguous_assignments (bool, optional): Whether to exclude ambiguous assignments in the data. Defaults to False.
             force_assignment (bool, optional): Whether to force assignment of annotations and regions. Defaults to False.
             name_col (str, optional): Column name in metadata to use for naming samples. Defaults to "sample_id".
-            title (Optional[str], optional): Title for the volcano plot. If not provided, a title is generated based on the data and reference names. Defaults to None.
-            savepath (Union[str, os.PathLike, Path], optional): Path to save the plot. Defaults to None.
-            save_only (bool): If True, only save the plot without displaying it. Defaults to False.
-            dpi_save (int): Dots per inch (DPI) for saving the plot. Defaults to 300.
-            **kwargs: Additional keyword arguments to pass to the `differential_gene_expression` function.
 
         Returns:
             None
@@ -469,29 +463,35 @@ class InSituExperiment:
 
         # get data and extract information about experiment
         target = self.data[target_id]
-        target_name = self.metadata.loc[target_id, name_col]
+        target_name = self._metadata.loc[target_id, name_col]
+        target_metadata = self._metadata.loc[target_id].to_dict()
 
         if ref_id is not None:
             if ref_id == "rest":
                 ref = [d for i, (m, d) in enumerate(self.iterdata()) if i != target_id]
-                ref_name = [m[name_col] for i, (m, d) in enumerate(self.iterdata()) if i != target_id]
-                ref_name = ", ".join(ref_name)
+                # ref_name = [m[name_col] for i, (m, d) in enumerate(self.iterdata()) if i != target_id]
+                # ref_name = ", ".join(ref_name)
+                ref_name = "rest"
+
+                # collect the ref metadata
+                ref_metadata = self._metadata.loc[[i for i in self._metadata.index if i != target_id]].to_dict(orient="list")
 
             elif isinstance(ref_id, int):
                 ref = self.data[ref_id]
-                ref_name = self.metadata.loc[ref_id, name_col]
+                ref_name = self._metadata.loc[ref_id, name_col]
+                ref_metadata = self._metadata.loc[ref_id].to_dict()
             elif isinstance(ref_id, list):
                 ref = [self.data[i] for i in ref_id]
-                ref_name = [self.metadata.iloc[i][name_col] for i in ref_id]
+                ref_name = [self._metadata.iloc[i][name_col] for i in ref_id]
                 ref_name = ", ".join(ref_name)
+                ref_metadata = self._metadata.loc[ref_id].to_dict(orient="list")
             else:
                 raise ValueError(f"Argument `ref_id` has to be either int, list of int or 'rest'. Instead: {ref_id}")
 
         else:
             ref = None
             ref_name = target_name
-
-        title = f"{target_name} vs. {ref_name}"
+            ref_metadata = None
 
         dge_res = differential_gene_expression(
             target=target,
@@ -499,21 +499,19 @@ class InSituExperiment:
             target_annotation_tuple=target_annotation_tuple,
             target_cell_type_tuple=target_cell_type_tuple,
             target_region_tuple=target_region_tuple,
+            target_name=target_name,
+            target_metadata=target_metadata,
             ref_annotation_tuple=ref_annotation_tuple,
             ref_cell_type_tuple=ref_cell_type_tuple,
             ref_region_tuple=ref_region_tuple,
-            show_volcano=plot_volcano,
+            ref_name=ref_name,
+            ref_metadata=ref_metadata,
             method=method,
             exclude_ambiguous_assignments=exclude_ambiguous_assignments,
             force_assignment=force_assignment,
-            title = title,
-            savepath = savepath,
-            save_only = save_only,
-            dpi_save = dpi_save,
-            **kwargs
         )
-        if not plot_volcano:
-            return dge_res
+
+        return dge_res
 
     def get_n_cells(
         self,
@@ -821,6 +819,8 @@ class InSituExperiment:
             fig (optional): Figure to plot on.
             dpi_save (int, optional): DPI for saving the plot. Defaults to 300.
         """
+        from insitupy.plotting.save import save_and_show_figure
+
         num_datasets = len(self._data)
         n_plots, n_rows, max_cols = get_nrows_maxcols(len(self._data), max_cols)
         fig, axes = plt.subplots(n_rows, max_cols, figsize=(figsize[0]*max_cols, figsize[1]*n_rows))
@@ -829,7 +829,7 @@ class InSituExperiment:
 
         # make sure title_columns is a list
         if title_column is not None:
-            title_columns = self.metadata[title_column].tolist()
+            title_columns = self._metadata[title_column].tolist()
             #title_columns = convert_to_list(title_columns)
         else:
             title_columns = [f"Sample {idx + 1}" for idx in range(len(self))]
@@ -971,7 +971,7 @@ class InSituExperiment:
             else:
                 parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
                 if not np.all(parent_path_identical):
-                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self.metadata['uid'][parent_path_identical].values}")
+                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self._metadata['uid'][parent_path_identical].values}")
                 else:
                     for xd in tqdm(self._data):
                         xd.save(
