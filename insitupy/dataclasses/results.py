@@ -14,7 +14,7 @@ import toml
 class DiffExprConfigCollector:
     # General
     type: Literal["single-cell", "pseudobulk"]
-    method: str
+    method_params: dict
     cells_layer: str
     exclude_ambiguous_assignments: bool
 
@@ -35,7 +35,7 @@ class DiffExprConfigCollector:
     ref_metadata: Dict[str, Any]
 
     # class variables
-    GENERAL_FIELDS = ["type", "method", "cells_layer", "exclude_ambiguous_assignments"]
+    GENERAL_FIELDS = ["type", "method_params", "cells_layer", "exclude_ambiguous_assignments"]
     TARGET_FIELDS = ["target_annotation", "target_cell_type", "target_region",
                      "target_cell_number", "target_name", "target_metadata"]
     REFERENCE_FIELDS = ["ref_annotation", "ref_cell_type", "ref_region",
@@ -45,7 +45,7 @@ class DiffExprConfigCollector:
         # Validate string fields
         for field_name in ["target_annotation", "target_cell_type", "target_region", "target_name",
                            "ref_annotation", "ref_cell_type", "ref_region", "ref_name",
-                           "type", "method", "cells_layer"]:
+                           "type", "cells_layer"]:
             field = getattr(self, field_name)
             if not isinstance(field, str) and field is not None:
                 raise TypeError(f"{field_name} must be a string. Instead got {type(getattr(self, field_name))}.")
@@ -63,7 +63,7 @@ class DiffExprConfigCollector:
                 raise TypeError(f"{field_name} must be a boolean. Instead got {type(getattr(self, field_name))}.")
 
         # Validate dict fields
-        for field_name in ["target_metadata", "ref_metadata"]:
+        for field_name in ["method_params", "target_metadata", "ref_metadata"]:
             field = getattr(self, field_name)
             if not isinstance(field, dict) and field is not None:
                 raise TypeError(f"{field_name} must be a dictionary. Instead got {type(getattr(self, field_name))}.")
@@ -158,23 +158,13 @@ class DiffExprResults:
         self,
         main: pd.DataFrame,
         config: DiffExprConfigCollector,
-        # dge_setup: Tuple[str, str, str],
-        # celltype: str,
-        # pseudobulk_params: Dict[str, Any],
         target_neighborhood: Optional[pd.DataFrame] = None,
         ref_neighborhood: Optional[pd.DataFrame] = None,
-        # further_metadata: Optional[Dict[str, Any]] = None
     ):
         self.main = main
         self.target_neighborhood = target_neighborhood
         self.ref_neighborhood = ref_neighborhood
         self.config = config
-        # self.metadata = {
-        #     "celltype": celltype,
-        #     "dge_setup": dge_setup,
-        #     "pseudobulk": pseudobulk_params,
-        #     "extra": further_metadata or {}
-        # }
 
         # check columns
         required_columns = {"log2foldchange", "pvalue"}
@@ -202,7 +192,7 @@ class DiffExprResults:
 
 
     @classmethod
-    def read(cls, directory: str) -> "DiffExprResults":
+    def read(cls, directory: Union[str, os.PathLike, Path]) -> "DiffExprResults":
         """
         Read saved differential expression results and metadata from a directory.
 
@@ -232,54 +222,57 @@ class DiffExprResults:
         ref_neighborhood = pd.read_csv(ref_nb_path, index_col=0) if os.path.isfile(ref_nb_path) else None
 
         # Load metadata
-        metadata_path = Path(directory) / "metadata.json"
-        metadata = {}
+        metadata_path = Path(directory) / "config.toml"
+        config = {}
         if metadata_path.is_file():
-            with open(metadata_path, "r") as f:
-                metadata = json.load(f)
+            config = DiffExprConfigCollector.read_from_toml(metadata_path)
 
         return cls(
             main=main,
             target_neighborhood=target_neighborhood,
             ref_neighborhood=ref_neighborhood,
-            metadata=metadata
+            config=config
         )
 
 
-    def save(self, path: Union[str, os.PathLike, Path], overwrite: bool = False):
+    def save(
+        self,
+        directory: Union[str, os.PathLike, Path],
+        overwrite: bool = False):
         """
         Save all results and metadata to the specified directory.
 
         Parameters
         ----------
-        path : str
+        directory : str
             Path to the directory where results should be saved.
         overwrite : bool
             If True, overwrite the directory if it already exists.
         """
-        if os.path.exists(path):
+        directory = Path(directory)
+        if directory.exists():
             if not overwrite:
                 raise FileExistsError(
-                    f"Directory '{path}' already exists. "
+                    f"Directory '{directory}' already exists. "
                     "Set `overwrite=True` to overwrite its contents."
                 )
             else:
-                print(f"Warning: Overwriting existing directory '{path}'.")
-                shutil.rmtree(path)
+                print(f"Warning: Overwriting existing directory '{directory}'.")
+                shutil.rmtree(directory)
 
-        os.makedirs(path, exist_ok=True)
+        directory.mkdir(exist_ok=True)
 
         # Save main results
-        self.main.to_csv(os.path.join(path, "main.csv"), index=True)
+        self.main.to_csv(directory / "main.csv", index=True)
 
         # Save neighbor results if available
         if self.target_neighborhood is not None:
-            self.target_neighborhood.to_csv(os.path.join(path, "target_neighborhood.csv"), index=True)
+            self.target_neighborhood.to_csv(directory / "target_neighborhood.csv", index=True)
         if self.ref_neighborhood is not None:
-            self.ref_neighborhood.to_csv(os.path.join(path, "ref_neighborhood.csv"), index=True)
+            self.ref_neighborhood.to_csv(directory / "ref_neighborhood.csv", index=True)
 
         # Save metadata
-        self.config.save_as_toml(os.path.join(path, "metadata.json"))
+        self.config.save_as_toml(directory / "config.toml")
 
     def summary(self) -> str:
         """Return a quick summary of available results."""

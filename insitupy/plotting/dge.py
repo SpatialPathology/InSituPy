@@ -1,5 +1,7 @@
+import os
 from numbers import Number
-from typing import List, Tuple
+from pathlib import Path
+from typing import List, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +18,11 @@ def dual_foldchange_plot(
     pval_col: str = "pvalue",
     patch_colors: List[str] = ["lightgreen", "lightyellow", "lightcoral"],
     adjust_labels: bool = True,
-    figsize: Tuple[Number, Number] = (6,6)
+    figsize: Tuple[Number, Number] = (6,6),
+    savepath: Union[str, os.PathLike, Path] = None,
+    save_only: bool = False,
+    dpi_save: int = 300,
+    show: bool = True,
 ):
     """
     Create volcano-style scatter plots comparing log2 fold changes between
@@ -59,16 +65,16 @@ def dual_foldchange_plot(
 
     # Extract required DataFrames
     df_main = results.main
-    df_nb_first = results.target_neighborhood
-    df_nb_second = results.ref_neighborhood
+    df_nb_target = results.target_neighborhood
+    df_nb_ref = results.ref_neighborhood
     logfc_threshold = np.log2(foldchange_threshold)
 
     # Filter for genes above/below log2FC threshold in main comparison
     filtered_data_x_up = df_main[df_main[logfc_col] >= logfc_threshold].copy()
-    filtered_data_y_up = df_nb_first[df_nb_first.index.isin(filtered_data_x_up.index)]
+    filtered_data_y_up = df_nb_target[df_nb_target.index.isin(filtered_data_x_up.index)]
 
     filtered_data_x_down = df_main[df_main[logfc_col] <= -logfc_threshold].copy()
-    filtered_data_y_down = df_nb_second[df_nb_second.index.isin(filtered_data_x_down.index)]
+    filtered_data_y_down = df_nb_ref[df_nb_ref.index.isin(filtered_data_x_down.index)]
 
 
     # Check for empty DataFrames

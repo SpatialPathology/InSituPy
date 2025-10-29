@@ -459,7 +459,7 @@ class InSituExperiment:
                     method='wilcoxon'
                 )
         """
-        from insitupy.tools.dge import differential_gene_expression
+        from insitupy.tools.dge import dge
 
         # get data and extract information about experiment
         target = self.data[target_id]
@@ -493,7 +493,7 @@ class InSituExperiment:
             ref_name = target_name
             ref_metadata = None
 
-        dge_res = differential_gene_expression(
+        dge_res = dge(
             target=target,
             ref=ref,
             target_annotation_tuple=target_annotation_tuple,
@@ -654,14 +654,12 @@ class InSituExperiment:
         Examples:
             >>> # Select specific keys
             >>> adata = obj.collect_anndatas(
-            ...     cells_layer="raw",
             ...     obs_keys=["cell_type", "batch"],
             ...     var_keys=["gene_name", "highly_variable"]
             ... )
 
             >>> # Select all available keys
             >>> adata = obj.collect_anndatas(
-            ...     cells_layer="processed",
             ...     obs_keys="all",
             ...     var_keys="all",
             ...     make_obs_names_unique=True

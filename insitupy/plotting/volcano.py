@@ -33,7 +33,9 @@ def single_volcano(
     label_top_n: Union[int, List[str]] = 20,
     label_sortby: str = "scores",
     figsize: Tuple[int, int] = (8, 6),
-    config: Optional[DiffExprConfigCollector] = None
+    config: Optional[DiffExprConfigCollector] = None,
+    up_label: str = "Target",
+    down_label: str = "Reference"
     ):
     """
     Create a volcano plot from the DataFrame and label the top 20 most significant up and down-regulated genes.
@@ -65,6 +67,9 @@ def single_volcano(
         label_sortby = logfoldchanges_column
 
     # prepare data
+    data[pval_column] = data[pval_column].clip(lower=1e-300) # make sure that the p-values are not zero
+
+    # transform p values
     neg_log_pval_column = "neg_log10_pvals"
     data[neg_log_pval_column] = -np.log10(data[pval_column])
     neg_log_sig_thresh = -np.log10(significance_threshold)
@@ -181,14 +186,14 @@ def single_volcano(
             )
 
     # Add labels to the top of the plot, outside the plot area
-    ax.annotate('Target', xy=(1, 1.04), xycoords='axes fraction',
-                xytext=(-65, 0), textcoords='offset points',
-                ha='left', va='center', fontsize=14, color='black',
+    ax.annotate(up_label, xy=(1, 1.04), xycoords='axes fraction',
+                xytext=(0.95, 1.04), textcoords='axes fraction',
+                ha='right', va='center', fontsize=14, color='black',
                 arrowprops=dict(arrowstyle='->', color='black'))
 
-    ax.annotate('Reference', xy=(0, 1.04), xycoords='axes fraction',
-                xytext=(93, 0), textcoords='offset points',
-                ha='right', va='center', fontsize=14, color='black',
+    ax.annotate(down_label, xy=(0, 1.04), xycoords='axes fraction',
+                xytext=(0.05, 1.04), textcoords='axes fraction',
+                ha='left', va='center', fontsize=14, color='black',
                 arrowprops=dict(arrowstyle='->', color='black'))
 
     if config is not None:
@@ -265,6 +270,43 @@ def _add_config_table(config, n_upreg, n_downreg, ax):
     #new_pos = [pos.x0, pos.y0 - 0.05, pos.width, pos.height*0.7]
     ax.set_position(new_pos)
 
+def _volcano_helper(
+    df,
+    foldchange_threshold,
+    significance_threshold,
+    label_top_n,
+    backend,
+    ax,
+    label_sortby,
+    config,
+    down_label: str = "Reference"
+):
+    if backend == "decoupler":
+        dc.pl.volcano(
+            df,
+            x="log2foldchange",
+            y="pvalue",
+            thr_stat=np.log2(foldchange_threshold),
+            thr_sign=significance_threshold,
+            top=int(label_top_n*2), ax=ax)
+
+    elif backend == "insitupy":
+        single_volcano(
+            data=df,
+            logfoldchanges_column='log2foldchange',
+            pval_column='pvalue',
+            foldchange_threshold=foldchange_threshold,
+            significance_threshold=significance_threshold,
+            label_top_n=label_top_n,
+            label_sortby=label_sortby,
+            config=config,
+            down_label=down_label,
+            ax=ax
+        )
+    else:
+        raise ValueError(f"Unknown backend '{backend}'. Choose 'insitupy' or 'decoupler'.")
+
+
 def volcano(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,
@@ -316,50 +358,45 @@ def volcano(
     - Uses matplotlib for plotting.
     """
 
-    # Collect data and titles
-    results_data = [results.main]
-    #dge_setup = results.metadata["dge_setup"]
-    #condition, cond1, cond2 = dge_setup
-    #titles = [f"Cells\n{condition}\n{cond1} vs. {cond2}"]
-
-    if results.has_neighbors():
-        results_data += [results.target_neighborhood, results.ref_neighborhood]
-        titles += ["Neighborhoods (condition A)", "Neighborhoods (condition B)"]
-
     # Create figure
-    ncols = len(results_data)
+    if results.has_neighbors():
+        ncols = 3
+    else:
+        ncols = 1
+
+    # create figure
     fig, axs = plt.subplots(1, ncols, figsize=(figsize[0] * ncols, figsize[1]))
     if ncols == 1:
         axs = [axs]  # make iterable for consistent loop
 
-    #for ax, df, title in zip(axs, results_data, titles):
-    for ax, df in zip(axs, results_data):
+    config = results.config if show_config else None
 
-        if backend == "decoupler":
-            dc.pl.volcano(
-                df,
-                x="log2foldchange",
-                y="pvalue",
-                thr_stat=np.log2(foldchange_threshold),
-                thr_sign=significance_threshold,
-                top=int(label_top_n*2), ax=ax)
+    # plot main volcano
+    _volcano_helper(
+        df=results.main,
+        foldchange_threshold=foldchange_threshold,
+        significance_threshold=significance_threshold,
+        label_top_n=label_top_n,
+        backend=backend,
+        label_sortby=label_sortby,
+        config=config,
+        ax=axs[0]
+    )
 
-        elif backend == "insitupy":
-            single_volcano(
-                data=df,
-                logfoldchanges_column='log2foldchange',
-                pval_column='pvalue',
-                foldchange_threshold=foldchange_threshold,
+    if results.has_neighbors():
+        for c, d in enumerate([results.target_neighborhood, results.ref_neighborhood], start=1):
+            # plot main volcano
+            _volcano_helper(
+                df=d,
+                foldchange_threshold=1.2,
                 significance_threshold=significance_threshold,
                 label_top_n=label_top_n,
+                backend=backend,
                 label_sortby=label_sortby,
-                config=results.config if show_config else None,
-                ax=ax
+                config=config,
+                down_label="Neighborhood",
+                ax=axs[c]
             )
-        else:
-            raise ValueError(f"Unknown backend '{backend}'. Choose 'insitupy' or 'decoupler'.")
-
-        # ax.set_title(title)
 
     if title is not None:
         plt.suptitle(title)
@@ -373,7 +410,3 @@ def volcano(
         show=show,
         tight=True
         )
-
-    # plt.tight_layout()
-    # if show:
-    #     plt.show()

@@ -192,7 +192,12 @@ def differential_gene_expression_two_sides(
 
     #defining neighborhood
     coords = target.cells[cells_layer].matrix.obsm["spatial"]
-    A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
+    A = radius_neighbors_graph(
+        coords,
+        radius=radius,
+        mode="connectivity",
+        include_self=False
+        )
 
     target_mask = target.cells[cells_layer].matrix.obs[target_cell_type_tuple[0]] == target_cell_type_tuple[1]
     target_idx = np.where(target_mask)[0]

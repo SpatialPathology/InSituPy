@@ -52,13 +52,17 @@ def neighborhoods_pseudobulk(
     celltype_pdatas = {}
     for celltype in adata.obs[celltype_col].unique():
         # select cells of that cell type
-        mask = adata.obs[celltype_col] == celltype
+        mask = (adata.obs[celltype_col] == celltype).values
 
         # check which of the neighboring cells is neighbor to at least one cell of that type
-        any_mask = A.toarray()[mask].any(axis=0)
+        #any_mask = A[mask].any(axis=0)
+        #any_mask = A[mask].getnnz(axis=0) > 0 # use sparse methods to save memory
+        any_mask = A[mask].astype(bool).sum(axis=0).A1 > 0 # use sparse methods to save memory
 
         # filter for such neighboring cells
         filtered = adata[any_mask]
+
+        # generate pseudobulk for neighboring cells of the current cell type
         pdata = dc.pp.pseudobulk(
             adata=filtered,
             sample_col=sample_col,
