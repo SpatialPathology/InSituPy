@@ -264,7 +264,7 @@ def dge(
     ref_counts = cell_counts["REFERENCE"]
 
     config = DiffExprConfigCollector(
-        type="single-cell",
+        mode="single-cell",
         method_params=method_params,
         cells_layer=cells_layer,
         exclude_ambiguous_assignments=exclude_ambiguous_assignments,

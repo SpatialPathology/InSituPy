@@ -13,29 +13,29 @@ import toml
 @dataclass
 class DiffExprConfigCollector:
     # General
-    type: Literal["single-cell", "pseudobulk"]
+    mode: Literal["single-cell", "pseudobulk"]
     method_params: dict
-    cells_layer: str
-    exclude_ambiguous_assignments: bool
+    cells_layer: Optional[str] = None
+    exclude_ambiguous_assignments: Optional[bool] = None
 
     # Target
-    target_annotation: Optional[str]
-    target_cell_type: Optional[str]
-    target_region: Optional[str]
-    target_cell_number: Optional[int]
-    target_name: Optional[str]
-    target_metadata: Dict[str, Any]
+    target_annotation: Optional[str] = None
+    target_cell_type: Optional[str] = None
+    target_region: Optional[str] = None
+    target_cell_number: Optional[int] = None
+    target_name: Optional[str] = None
+    target_metadata: Dict[str, Any] = None
 
     # Reference
-    ref_annotation: Optional[str]
-    ref_cell_type: Optional[str]
-    ref_region: Optional[str]
-    ref_cell_number: Optional[int]
-    ref_name: Optional[str]
-    ref_metadata: Dict[str, Any]
+    ref_annotation: Optional[str] = None
+    ref_cell_type: Optional[str] = None
+    ref_region: Optional[str] = None
+    ref_cell_number: Optional[int] = None
+    ref_name: Optional[str] = None
+    ref_metadata: Dict[str, Any] = None
 
     # class variables
-    GENERAL_FIELDS = ["type", "method_params", "cells_layer", "exclude_ambiguous_assignments"]
+    GENERAL_FIELDS = ["mode", "method_params", "cells_layer", "exclude_ambiguous_assignments"]
     TARGET_FIELDS = ["target_annotation", "target_cell_type", "target_region",
                      "target_cell_number", "target_name", "target_metadata"]
     REFERENCE_FIELDS = ["ref_annotation", "ref_cell_type", "ref_region",
@@ -45,7 +45,7 @@ class DiffExprConfigCollector:
         # Validate string fields
         for field_name in ["target_annotation", "target_cell_type", "target_region", "target_name",
                            "ref_annotation", "ref_cell_type", "ref_region", "ref_name",
-                           "type", "cells_layer"]:
+                           "mode", "cells_layer"]:
             field = getattr(self, field_name)
             if not isinstance(field, str) and field is not None:
                 raise TypeError(f"{field_name} must be a string. Instead got {type(getattr(self, field_name))}.")
@@ -53,13 +53,14 @@ class DiffExprConfigCollector:
         # Validate integer fields
         for field_name in ["target_cell_number", "ref_cell_number"]:
             field = getattr(self, field_name)
-            if not isinstance(field, Integral) or field < 0:
-                raise ValueError(f"{field_name} must be a non-negative integer. Instead: {field} with type {type(field)}.")
+            if field is not None:
+                if not isinstance(field, Integral) or field < 0:
+                    raise ValueError(f"{field_name} must be a non-negative integer. Instead: {field} with type {type(field)}.")
 
         # Validate boolean fields
         for field_name in ["exclude_ambiguous_assignments"]:
             field = getattr(self, field_name)
-            if not isinstance(field, bool):
+            if not isinstance(field, bool) and field is not None:
                 raise TypeError(f"{field_name} must be a boolean. Instead got {type(getattr(self, field_name))}.")
 
         # Validate dict fields

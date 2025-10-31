@@ -328,6 +328,8 @@ def volcano(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 2,
+    pval_col: str = "padj",
+    logfoldchanges_col='log2foldchange',
     label_top_n: int = 20,
     label_sortby: str = "log2foldchange",
     figsize: Tuple[Number, Number] = (6, 6),
@@ -431,8 +433,8 @@ def volcano(
     # Plot main comparison
     single_volcano(
         data=results.main,
-        logfoldchanges_column='log2foldchange',
-        pval_column='padj',
+        logfoldchanges_column=logfoldchanges_col,
+        pval_column=pval_col,
         foldchange_threshold=foldchange_threshold,
         significance_threshold=significance_threshold,
         genes_to_label=label_top_n,

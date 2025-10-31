@@ -38,7 +38,7 @@ def dual_foldchange_plot(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 1,
-    logfc_col: str = "log2foldchange",
+    logfoldchanges_col: str = "log2foldchange",
     pval_col: str = "padj",
     patch_colors: List[str] = ["lightgreen", "lightcoral"],
     adjust_labels: bool = True,
@@ -174,17 +174,17 @@ def dual_foldchange_plot(
 
     for df, name in [(df_main, "main"), (df_nb_target, "target_neighborhood"),
                      (df_nb_ref, "ref_neighborhood")]:
-        if logfc_col not in df.columns:
-            raise KeyError(f"Column '{logfc_col}' not found in {name} DataFrame")
+        if logfoldchanges_col not in df.columns:
+            raise KeyError(f"Column '{logfoldchanges_col}' not found in {name} DataFrame")
         if pval_col not in df.columns:
             raise KeyError(f"Column '{pval_col}' not found in {name} DataFrame")
 
     logfc_threshold = np.log2(foldchange_threshold)
 
-    filtered_data_x_up = df_main[df_main[logfc_col] >= logfc_threshold].copy()
+    filtered_data_x_up = df_main[df_main[logfoldchanges_col] >= logfc_threshold].copy()
     filtered_data_y_up = df_nb_target[df_nb_target.index.isin(filtered_data_x_up.index)].copy()
 
-    filtered_data_x_down = df_main[df_main[logfc_col] <= -logfc_threshold].copy()
+    filtered_data_x_down = df_main[df_main[logfoldchanges_col] <= -logfc_threshold].copy()
     filtered_data_y_down = df_nb_ref[df_nb_ref.index.isin(filtered_data_x_down.index)].copy()
 
     # determine subplot layout
@@ -208,7 +208,7 @@ def dual_foldchange_plot(
             _plot_single_nb_plot(
                 df_main=x,
                 df_neighbor=y,
-                logfc_col=logfc_col,
+                logfc_col=logfoldchanges_col,
                 pval_col=pval_col,
                 fold_change_threshold=fc,
                 significance_threshold=significance_threshold,
@@ -236,9 +236,9 @@ def dual_foldchange_plot(
     # Add config table to the right panel
     if show_config:
         n_upreg = np.sum((df_main[pval_col] <= significance_threshold) &
-                         (df_main[logfc_col] > logfc_threshold))
+                         (df_main[logfoldchanges_col] > logfc_threshold))
         n_downreg = np.sum((df_main[pval_col] <= significance_threshold) &
-                           (df_main[logfc_col] < -logfc_threshold))
+                           (df_main[logfoldchanges_col] < -logfc_threshold))
         _add_config_table(
             config=results.config,
             ax=ax_config,

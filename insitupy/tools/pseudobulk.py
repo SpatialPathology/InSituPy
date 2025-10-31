@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from insitupy.dataclasses.results import DiffExprResults
+from insitupy.dataclasses.results import (DiffExprConfigCollector,
+                                          DiffExprResults)
 from insitupy.utils._helpers import suppress_output
 
 
@@ -79,7 +80,7 @@ def _preprocess_psbulk_data(adata):
 
     return adata
 
-def _run_deseq2_pseudobulk(adata, dge_setup):
+def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
     try:
         from pydeseq2.dds import DefaultInference, DeseqDataSet
         from pydeseq2.ds import DeseqStats
@@ -108,7 +109,11 @@ def _run_deseq2_pseudobulk(adata, dge_setup):
         # Compute Wald test
         stat_res.summary()
 
-    return stat_res
+    if return_params:
+        params = extract_all_params(ds=stat_res, dds=dds)
+        return stat_res, params
+    else:
+        return stat_res
 
 def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
     # do filtering of pseudobulk samples
@@ -150,7 +155,7 @@ def pseudobulk_dge(
     celltype_col: str,
     celltype: str,
     pdata_nb: Optional[AnnData] = None,
-    plot_qc: bool = False,
+    plot_qc: bool = True,
     min_cells: int = 10,
     min_counts: int = 1000,
     verbose: bool = True
@@ -209,61 +214,114 @@ def pseudobulk_dge(
 
 
     # run DESeq2 for conditions and return results
-    stat_res = _run_deseq2_pseudobulk(pdata_ct, dge_setup=dge_setup)
-    results_df = stat_res.results_df
+    stat_res, params = _run_deseq2_pseudobulk(pdata_ct, dge_setup=dge_setup, return_params=True)
+    results_df = stat_res.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
 
     if pdata_nb is not None:
         # run DESeq2 for neighborhood data and return results
         stat_res_first = _run_deseq2_pseudobulk(pdata_first_condition, dge_setup=["obs_type", "cells", "neighbors"])
         stat_res_second = _run_deseq2_pseudobulk(pdata_second_condition, dge_setup=["obs_type", "cells", "neighbors"])
-        results_df_nb_first = stat_res_first.results_df
-        results_df_nb_second = stat_res_second.results_df
+        results_df_nb_first = stat_res_first.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
+        results_df_nb_second = stat_res_second.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
 
-    # # plot volcano plot
-    # if pdata_nb is not None:
-    #     results_data = [results_df, results_df_nb_first, results_df_nb_second]
-    #     titles = ["Cells", "Neighborhoods (condition A)", "Neighborhoods (condition B)"]
-    # else:
-    #     results_data = [results_df]
-    #     titles = ["Cells"]
-
-    # ncols = len(results_data)
-    # fig, axs = plt.subplots(1, ncols, figsize=(6*ncols, 6))
-    # for i, d in enumerate(results_data):
-    #     axs[i].set_title(titles[i])
-    #     dc.pl.volcano(
-    #         d,
-    #         x="log2foldchange",
-    #         y="pvalue",
-    #         top=40,
-    #         ax=axs[i]
-    #         )
-    # plt.tight_layout()
-    # plt.show()
+    # collect the configurations
+    config = DiffExprConfigCollector(
+        mode="pseudobulk",
+        method_params={
+            "pseudobulk": {
+                "min_cells": min_cells,
+                "min_counts": min_counts
+            }.update(pdata.uns['pseudobulk_settings']),
+            "deseq2": params
+        }
+    )
 
     results = DiffExprResults(
         main=results_df,
-        dge_setup=dge_setup,
-        celltype=celltype,
-        pseudobulk_params={
-            "min_cells": min_cells,
-            "min_counts": min_counts
-        },
+        config=config,
         target_neighborhood=results_df_nb_first if pdata_nb is not None else None,
         ref_neighborhood=results_df_nb_second if pdata_nb is not None else None,
     )
 
     return results
 
-    # if pdata_nb is not None:
-    #     return results_df, results_df_nb_first, results_df_nb_second
-    # else:
-    #     return results_df
 
-    # if pdata_nb is not None:
+def extract_deseqstats_params(ds):
+    """Extract parameters from DeseqStats object.
 
-    #     volcano_nb(
-    #         results_df_normal=results_df,
-    #         results_df_nb_first=results_df_nb_first,
-    #         significance_threshold=0.05,
-    #         fold_change_threshold=0.5)
+    Parameters
+    ----------
+    ds : DeseqStats
+        Fitted DeseqStats object
+
+    Returns
+    -------
+    dict
+        Dictionary containing DeseqStats parameters
+    """
+    params = {
+        'contrast': ds.contrast,
+        'alpha': ds.alpha,
+        'cooks_filter': ds.cooks_filter,
+        'shrunk_LFCs': ds.shrunk_LFCs,
+    }
+    return params
+
+
+def extract_deseqdataset_params(dds):
+    """Extract parameters from DeseqDataSet object.
+
+    Parameters
+    ----------
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing DeseqDataSet parameters
+    """
+    params = {
+        'design': str(dds.design),
+        'refit_cooks': dds.refit_cooks,
+    }
+    return params
+
+
+def extract_uns_params(dds):
+    """Extract parameters from .uns attribute in DeseqDataSet object.
+
+    Parameters
+    ----------
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing parameters from .uns
+    """
+    params = dict(dds.uns)
+    return params
+
+
+def extract_all_params(ds, dds):
+    """Extract all parameters from DeseqStats and DeseqDataSet objects.
+
+    Parameters
+    ----------
+    ds : DeseqStats
+        Fitted DeseqStats object
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing all extracted parameters
+    """
+    all_params = {}
+    all_params.update(extract_deseqstats_params(ds))
+    all_params.update(extract_deseqdataset_params(dds))
+    all_params.update(extract_uns_params(dds))
+    return all_params
