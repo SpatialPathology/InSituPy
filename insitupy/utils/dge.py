@@ -46,12 +46,12 @@ def create_deg_dataframe(
         volcano_data = pd.DataFrame({
             'gene': results['names'][group],
             'log2foldchange': results['logfoldchanges'][group],
-            'pvalue': results['pvals'][group],
+            'padj': results['pvals'][group],
             'scores': results['scores'][group],
         })
         # Replace zero p-values with a small value to avoid log10(0)
-        volcano_data['pvalue'] = volcano_data['pvalue'].replace(0, 1e-300)
-        volcano_data['neg_log10_pvals'] = -np.log10(volcano_data['pvalue'])
+        volcano_data['padj'] = volcano_data['padj'].replace(0, 1e-300)
+        volcano_data['neg_log10_pvals'] = -np.log10(volcano_data['padj'])
         volcano_data_dict[group] = volcano_data
 
     return volcano_data_dict

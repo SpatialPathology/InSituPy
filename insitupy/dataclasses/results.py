@@ -167,7 +167,7 @@ class DiffExprResults:
         self.config = config
 
         # check columns
-        required_columns = {"log2foldchange", "pvalue"}
+        required_columns = {"log2foldchange", "padj"}
         self._validate_df(self.main, "main", required_columns)
         if self.target_neighborhood is not None:
             self._validate_df(self.target_neighborhood, "target_neighborhood", required_columns)

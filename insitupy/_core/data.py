@@ -618,10 +618,13 @@ class InSituData:
             region_name = region_tuple[1]
             region_df = self._regions[region_key]
 
-            # extract geometry
-            print(region_name)
-            shape = region_df[region_df["name"] == region_name]["geometry"].item()
-            #use_shape = True
+            if region_name in region_df["name"].unique():
+                # extract geometry
+                print(region_name)
+                shape = region_df[region_df["name"] == region_name]["geometry"].item()
+                #use_shape = True
+            else:
+                raise ValueError(f"Region name '{region_name}' not found in regions with key '{region_key}'.")
 
             # extract x and y limits from the geometry
             minx, miny, maxx, maxy = shape.bounds # (minx, miny, maxx, maxy)
