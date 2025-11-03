@@ -33,20 +33,11 @@ def dge(
     ref_metadata: Optional[dict] = None,
     cells_layer: Optional[str] = None,
     consider_neighbors: bool = False,
-    # significance_threshold: Number = 0.05,
-    # foldchange_threshold: Number = 2,
-    # show_volcano: bool = True,
-    # return_results: bool = False,
     method: Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']] = 't-test',
     exclude_ambiguous_assignments: bool = False,
     force_assignment: bool = False,
-    # title: Optional[str] = None,
-    # savepath: Union[str, os.PathLike, Path] = None,
-    # save_only: bool = False,
-    # dpi_save: int = 300,
     verbose: bool = False,
-    # **volcano_kwargs
-):
+    ) -> DiffExprResults:
     """
     Perform differential gene expression analysis on in situ sequencing data.
 
