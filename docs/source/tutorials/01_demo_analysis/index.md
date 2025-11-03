@@ -6,7 +6,7 @@ This section provides a comprehensive guide to analyzing individual spatial tran
 
 ## Tutorial Organization
 
-The tutorials are organized into three stages: **Setup & Preparation**, **Core Analysis Workflow**, and **Advanced Analysis**. We recommend starting with the core workflow (tutorials 01-03) before exploring optional advanced topics. The individual tutorials build on each other, making it necessary to run them sequentially starting with the tutorial on "Automated Image Registration".
+The tutorials are organized into two stages: **Setup & Preparation** and **Core Analysis Workflow**. The individual tutorials build on each other, making it necessary to run them sequentially starting with the tutorial on "Automated Image Registration".
 
 ### Setup & Preparation
 
@@ -31,13 +31,6 @@ Follow these tutorials to learn how to download demo datasets and register histo
 
 Follow these tutorials sequentially to learn the essential analysis steps:
 ```{eval-rst}
-.. card:: 01: Load & Explore Data
-    :link: 01_InSituPy_demo_load_explore
-    :link-type: doc
-    :link-alt: Load and explore spatial data
-
-    Load your first spatial transcriptomics dataset, explore its structure, and understand the `InSituData` object.
-
 .. card:: 02: Quality Control & Preprocessing
     :link: 02_InSituPy_demo_analyze
     :link-type: doc
@@ -45,12 +38,6 @@ Follow these tutorials sequentially to learn the essential analysis steps:
 
     Perform quality control filtering, normalization, feature selection, dimensionality reduction (PCA, UMAP), and clustering.
 
-```
-
-### Advanced Analysis
-
-These tutorials cover specialized analyses and can be explored in any order:
-```{eval-rst}
 .. card:: Working with Annotations & Regions
     :link: 03_InSituPy_demo_annotations
     :link-type: doc
