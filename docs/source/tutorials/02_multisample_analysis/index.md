@@ -2,6 +2,9 @@
 
 This set of tutorials introduces the analysis of multiple samples using **InSituPy**'s `InSituExperiment` class.
 
+<center><img src="../../_static/img/insituexperiment_overview.svg" width="800"/></center>
+
+
 ```{eval-rst}
 .. card:: Introduction to the `InSituExperiment` class
     :link: InSituPy_InSituExperiment
