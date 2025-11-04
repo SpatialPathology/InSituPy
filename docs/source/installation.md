@@ -1,6 +1,6 @@
 # Installation
 
-## Prerequisites
+Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
 **Create and activate a conda environment:**
 
@@ -9,48 +9,21 @@
    conda activate insitupy
    ```
 
-## Method 1: From PyPi
+
+**Install from PyPi:**
 
    ```bash
    pip install insitupy-spatial
    ```
 
-## Method 2: Installation from Cloned Repository
+## Optional: Install with GUI support (napari viewer):
 
-1. **Clone the repository to your local machine:**
-
-   ```bash
-   git clone https://github.com/SpatialPathology/InSituPy.git
-   ```
-
-2. **Navigate to the cloned repository and select the right branch:**
+If you want to use the graphical interface features powered by [napari](https://napari.org/dev/index.html), install with the gui extra:
 
    ```bash
-   cd InSituPy
-
-   # Optionally: switch to dev branch
-   git checkout dev
+   pip install insitupy-spatial[gui]
    ```
-
-3. **Install the required packages using `pip` within the conda environment:**
-
-   ```bash
-   # basic installation
-   pip install .
-
-   # for developmental purposes add the -e flag
-   pip install -e .
-   ```
-
-## Method 3: Direct Installation from GitHub
-
-1. **Install directly from GitHub:**
-
-   ```bash
-   # for installation without napari use
-   pip install git+https://github.com/SpatialPathology/InSituPy.git
-   ```
-
-Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
 To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
+
+For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
