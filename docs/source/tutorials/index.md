@@ -5,6 +5,7 @@ InSituPy is built around two core classes: **`InSituData`** for analyzing indivi
 <center><img src="../_static/img/insitupy_data_structure.svg" width="800"/></center>
 <br>
 To help you get started with **InSituPy**, you can find a collection of different tutorials here. These are divided into the following five topics:
+<br>
 
 ```{eval-rst}
 .. card:: Single-sample analysis

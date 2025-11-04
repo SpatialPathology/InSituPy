@@ -14,10 +14,10 @@ from insitupy import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.plotting.save import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
@@ -266,7 +266,7 @@ def calc_cellular_composition(
         exp = InSituExperiment()
         exp.add(data, metadata={groupby: data.sample_id})
 
-    all_data_names = exp.metadata[groupby].values
+    all_data_names = exp._metadata[groupby].values
 
     if not len(all_data_names) == len(np.unique(all_data_names)):
         raise ValueError(f"Values in {groupby} were found to be not unique. Please choose a column with unique values in `.metadata`.")
@@ -348,6 +348,8 @@ def calc_cellular_composition(
             # collect data
             compositions_dict[data_name] = compositions
 
+    if len(compositions_dict) == 0:
+        raise ValueError(f"No compositions were collected. Please check whether the `geom_key` '{geom_key}' exists in the selected modality '{modality}' for any dataset.")
 
     # concatenate results
     compositions_df = pd.concat(compositions_dict, axis=1)

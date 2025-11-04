@@ -38,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["napari[all]>=0.5.6"]
+gui = ["napari[all] (>=0.5.6,<0.6.3)"] # starting from 0.6.3 there are some issues with adding annotations in napari
 
 [tool.poetry]
 packages =[
