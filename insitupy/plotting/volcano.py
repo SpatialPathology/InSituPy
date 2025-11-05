@@ -23,7 +23,9 @@ DEFAULT_TITLE_FONTSIZE = 16
 AXIS_MARGIN_FACTOR = 1.1
 COLOR_UPREGULATED = 'maroon'
 COLOR_DOWNREGULATED = 'royalblue'
-COLOR_NOT_SIGNIFICANT = 'black'
+COLOR_NOT_SIGNIFICANT = 'lightgrey'
+COLOR_NOT_WANTED = "grey"
+COLOR_BLACK = "black"
 MIN_PVALUE = 1e-300
 
 
@@ -45,7 +47,9 @@ def single_volcano(
     figsize: Tuple[int, int] = (8, 6),
     config: Optional[DiffExprConfigCollector] = None,
     up_label: Optional[str] = "Target",
-    down_label: Optional[str] = "Reference"
+    down_label: Optional[str] = "Reference",
+    gene_style: str = None,
+    is_wanted_flag: bool=False,
 ) -> None:
     """
     Create a volcano plot with labeled top differentially expressed genes.
@@ -166,20 +170,42 @@ def single_volcano(
     lfc_threshold = np.log2(foldchange_threshold)
 
     # Determine colors based on significance and fold change
-    is_significant = data[neg_log_pval_column] > neg_log_sig_thresh
+    is_significant = ((data[neg_log_pval_column] > neg_log_sig_thresh) &(abs(data[logfoldchanges_column]) > lfc_threshold))
+
     is_upregulated = data[logfoldchanges_column] > lfc_threshold
     is_downregulated = data[logfoldchanges_column] < -lfc_threshold
 
-    colors = np.where(
-        is_significant & is_upregulated,
-        COLOR_UPREGULATED,
-        np.where(
-            is_significant & is_downregulated,
-            COLOR_DOWNREGULATED,
-            COLOR_NOT_SIGNIFICANT
-        )
+    # Check if genes are in the list to label
+    is_wanted = (
+        is_wanted_flag
+        and isinstance(genes_to_label, list)
+        and data.index.isin(genes_to_label)
     )
 
+    if is_wanted_flag:
+        colors = np.where(
+            is_significant & is_upregulated & is_wanted,
+            COLOR_UPREGULATED,
+            np.where(
+                is_significant & is_downregulated & is_wanted,
+                COLOR_DOWNREGULATED,
+                np.where(
+                    is_significant,
+                    COLOR_NOT_WANTED,
+                    COLOR_NOT_SIGNIFICANT
+                )
+            )
+        )
+    else:
+        colors = np.where(
+            is_significant & is_upregulated,
+            COLOR_UPREGULATED,
+            np.where(
+                is_significant & is_downregulated,
+                COLOR_DOWNREGULATED,
+                COLOR_NOT_SIGNIFICANT
+            )
+        )
     # Create axes if not provided
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=figsize)
@@ -201,9 +227,9 @@ def single_volcano(
     ax.set_ylabel('$\\mathregular{-Log_{10}}$ adjusted p-value', fontsize=DEFAULT_AXIS_FONTSIZE)
 
     # Add threshold lines
-    ax.axhline(y=neg_log_sig_thresh, color=COLOR_NOT_SIGNIFICANT, linestyle='--')
-    ax.axvline(x=lfc_threshold, color=COLOR_NOT_SIGNIFICANT, linestyle='--')
-    ax.axvline(x=-lfc_threshold, color=COLOR_NOT_SIGNIFICANT, linestyle='--')
+    ax.axhline(y=neg_log_sig_thresh, color=COLOR_BLACK, linestyle='--')
+    ax.axvline(x=lfc_threshold, color=COLOR_BLACK, linestyle='--')
+    ax.axvline(x=-lfc_threshold, color=COLOR_BLACK, linestyle='--')
 
     # Identify significant genes
     sig_mask = data[neg_log_pval_column] > neg_log_sig_thresh
@@ -263,7 +289,8 @@ def single_volcano(
                 gene,
                 (row[logfoldchanges_column], row[neg_log_pval_column]),
                 fontsize=DEFAULT_LABEL_FONTSIZE,
-                alpha=0.75
+                alpha=0.9,
+                fontstyle='italic'
             )
         )
 
@@ -287,8 +314,8 @@ def single_volcano(
             ha='right',
             va='center',
             fontsize=DEFAULT_LABEL_FONTSIZE,
-            color=COLOR_NOT_SIGNIFICANT,
-            arrowprops=dict(arrowstyle='->', color=COLOR_NOT_SIGNIFICANT)
+            color=COLOR_BLACK,
+            arrowprops=dict(arrowstyle='->', color=COLOR_BLACK)
         )
 
     if down_label is not None:
@@ -301,8 +328,8 @@ def single_volcano(
             ha='left',
             va='center',
             fontsize=DEFAULT_LABEL_FONTSIZE,
-            color=COLOR_NOT_SIGNIFICANT,
-            arrowprops=dict(arrowstyle='->', color=COLOR_NOT_SIGNIFICANT)
+            color=COLOR_BLACK,
+            arrowprops=dict(arrowstyle='->', color=COLOR_BLACK)
         )
 
     # Add configuration table if provided
