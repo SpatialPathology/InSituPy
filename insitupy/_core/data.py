@@ -620,7 +620,6 @@ class InSituData:
 
             if region_name in region_df["name"].unique():
                 # extract geometry
-                print(region_name)
                 shape = region_df[region_df["name"] == region_name]["geometry"].item()
                 #use_shape = True
             else:
