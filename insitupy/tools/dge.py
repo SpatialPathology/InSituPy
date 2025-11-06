@@ -289,6 +289,8 @@ def dge(
             celltype_tuple=ref_cell_type_tuple,
             test=method,
         )
+    else:
+        nb_results_target = nb_results_ref = None
 
 
     res = DiffExprResults(

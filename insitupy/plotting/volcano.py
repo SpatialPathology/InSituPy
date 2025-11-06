@@ -1,3 +1,4 @@
+import logging
 import os
 from numbers import Number
 from pathlib import Path
@@ -14,6 +15,8 @@ from insitupy.dataclasses.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
+
+logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_ALPHA = 0.5
@@ -45,7 +48,8 @@ def single_volcano(
     figsize: Tuple[int, int] = (8, 6),
     config: Optional[DiffExprConfigCollector] = None,
     up_label: Optional[str] = "Target",
-    down_label: Optional[str] = "Reference"
+    down_label: Optional[str] = "Reference",
+    xlim: Optional[Tuple[Number, Number]] = None,
 ) -> None:
     """
     Create a volcano plot with labeled top differentially expressed genes.
@@ -250,6 +254,16 @@ def single_volcano(
             else neg_log_sig_thresh * AXIS_MARGIN_FACTOR
         )
 
+    if xlim is not None:
+        if (xmin / AXIS_MARGIN_FACTOR) < xlim[0]:
+            logger.warning("Provided xlim lower bound excludes some significant genes.")
+
+            #warn("Provided xlim lower bound excludes some significant genes.", UserWarning)
+        if (xmax / AXIS_MARGIN_FACTOR) > xlim[1]:
+            logger.warning("Provided xlim upper bound excludes some significant genes.",)
+
+        xmin, xmax = xlim
+
     # Set axis limits
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(0, ymax)
@@ -258,13 +272,17 @@ def single_volcano(
     top_genes = pd.concat([top_up_genes, top_down_genes])
     texts = []
     for gene, row in top_genes.iterrows():
-        texts.append(
-            ax.annotate(
-                gene,
-                (row[logfoldchanges_column], row[neg_log_pval_column]),
-                fontsize=DEFAULT_LABEL_FONTSIZE,
-                alpha=0.75
-            )
+        x = row[logfoldchanges_column]
+        y = row[neg_log_pval_column]
+
+        if x >=xmin and x <= xmax:
+            texts.append(
+                ax.annotate(
+                    gene,
+                    (x, y),
+                    fontsize=DEFAULT_LABEL_FONTSIZE,
+                    alpha=0.75
+                )
         )
 
     # Adjust text positions to avoid overlap
@@ -338,7 +356,8 @@ def volcano(
     title: Optional[str] = None,
     savepath: Union[str, os.PathLike, Path, None] = None,
     save_only: bool = False,
-    dpi_save: int = 300
+    dpi_save: int = 300,
+    xlim: Optional[Tuple[Number, Number]] = None,
 ) -> None:
     """
     Generate multi-panel volcano plots for differential expression results.
@@ -442,7 +461,8 @@ def volcano(
         config=config,
         down_label="Reference",
         up_label="Target",
-        ax=axs[0]
+        ax=axs[0],
+        xlim=xlim
     )
 
     axs[0].set_title("Target vs. Reference", pad=30, fontsize=18)

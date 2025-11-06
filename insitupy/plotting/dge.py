@@ -543,7 +543,7 @@ def _plot_single_nb_plot(
                        label=f'low'),
                     Line2D([0], [0], marker='o', color='w',
                            markerfacecolor=COLOR_NOT_SIGNIFICANT, markersize=5,
-                           label='no')
+                           label='none')
                 ])
             else:
                 legend_elements.extend([

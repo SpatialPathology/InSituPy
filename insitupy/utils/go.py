@@ -454,15 +454,23 @@ class StringDB:
 
 
 
-def get_up_down_genes(dge_results,
-                      pval_threshold: Number = 0.05,
-                      logfold_threshold: Number = 1
-                      ):
-    pval_mask = dge_results['pvalue'] < pval_threshold
-    lfc_mask_up = dge_results['log2foldchange'] > logfold_threshold
-    lfc_mask_down = dge_results['log2foldchange'] < -logfold_threshold
+def get_up_down_genes(
+    dge_results,
+    pval_threshold: Number = 0.05,
+    logfold_threshold: Number = 1,
+    pval_col: str = 'padj',
+    logfold_col: str = 'log2foldchange',
+    gene_col: str = None # assumes genes to be in index
+    ):
+    pval_mask = dge_results[pval_col] < pval_threshold
+    lfc_mask_up = dge_results[logfold_col] > logfold_threshold
+    lfc_mask_down = dge_results[logfold_col] < -logfold_threshold
 
-    genes_up = dge_results[lfc_mask_up & pval_mask]['gene'].tolist()
-    genes_down = dge_results[lfc_mask_down & pval_mask]['gene'].tolist()
+    if gene_col is None:
+        genes_up = dge_results[lfc_mask_up & pval_mask].index.tolist()
+        genes_down = dge_results[lfc_mask_down & pval_mask].index.tolist()
+    else:
+        genes_up = dge_results[lfc_mask_up & pval_mask]['gene'].tolist()
+        genes_down = dge_results[lfc_mask_down & pval_mask]['gene'].tolist()
 
     return genes_up, genes_down

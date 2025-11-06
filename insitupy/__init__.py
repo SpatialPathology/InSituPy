@@ -48,3 +48,14 @@ __all__ = [
     "tl",
     "utils"
 ]
+
+# configure warnings
+import logging
+
+logger = logging.getLogger('insitupy')
+logger.setLevel(logging.WARNING)
+logger.propagate = False
+
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+logger.addHandler(handler)
