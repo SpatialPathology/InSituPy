@@ -451,6 +451,9 @@ class InSituData:
         # iterate through annotation keys
         for key in keys:
             print(f"Assigning key '{key}'...")
+            if key not in geom_attr.keys():
+                raise KeyError(f"Key '{key}' not found in {geometry_type}.")
+
             # extract pandas dataframe of current key
             geom_df = geom_attr[key]
 

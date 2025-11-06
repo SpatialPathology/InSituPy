@@ -137,7 +137,7 @@ def dge(
     orig_ref_cell_type_tuple = ref_cell_type_tuple
 
     if ref is None:
-        ref = target.copy()
+        ref = target#.copy()
         ref_celldata = _get_cell_layer(cells=ref.cells, cells_layer=cells_layer)
 
         # TODO: Implement behavior for "rest"

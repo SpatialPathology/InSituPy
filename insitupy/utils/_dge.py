@@ -98,6 +98,9 @@ def _select_data_for_dge(
 
     ### CELL TYPES
     if cell_type_tuple is not None:
+        if cell_type_tuple[0] not in adata_selected.obs.columns:
+            raise ValueError(f".obs column '{cell_type_tuple[0]}' not found in the AnnData object.")
+
         # create mask for filtering
         if isinstance(cell_type_tuple[1], str):
             cell_type_mask = adata_selected.obs[cell_type_tuple[0]] == cell_type_tuple[1]
