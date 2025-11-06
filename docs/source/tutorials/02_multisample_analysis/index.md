@@ -13,11 +13,11 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 
     Notebook introducing the concepts behind the `InSituExperiment` class to analyze multiple samples.
 
-.. card:: Split datasets
-    :link: InSituPy_extract_individual_images
+.. card:: Split datasets per sample
+    :link: InSituPy_split_datasets
     :link-type: doc
 
-    Sometimes data from multiple datasets can be present in one dataset. This notebook shows how to split those datasets.
+    Sometimes data from multiple samples can be present in one dataset. This notebook shows how to extract the data from each individual sample.
 
 .. card:: Generate pseudobulk data
     :link: InSituPy_Pseudobulk
