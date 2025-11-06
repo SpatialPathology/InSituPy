@@ -1,7 +1,6 @@
 from .dge import dual_foldchange_plot
 from .expression_along_axis import (cell_abundance_along_axis,
                                     cell_expression_along_axis)
-from .facs import facs_plot
 from .overview import overview, plot_overview
 from .plots import (cellular_composition, colorlegend,
                     plot_cellular_composition, plot_colorlegend)
