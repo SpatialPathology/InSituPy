@@ -33,7 +33,8 @@ dependencies = [
     "imagecodecs>=2024.12.30",
     "rasterio>=1.4.3",
     "requests",
-    "tornado>=6.5.0" # security patch
+    "tornado>=6.5.0", # security patch
+    "decoupler (>=2.1.1,<3.0.0)"
 ]
 
 [project.optional-dependencies]

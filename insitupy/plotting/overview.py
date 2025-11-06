@@ -8,7 +8,7 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils._checks import is_integer_counts

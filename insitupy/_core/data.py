@@ -451,6 +451,9 @@ class InSituData:
         # iterate through annotation keys
         for key in keys:
             print(f"Assigning key '{key}'...")
+            if key not in geom_attr.keys():
+                raise KeyError(f"Key '{key}' not found in {geometry_type}.")
+
             # extract pandas dataframe of current key
             geom_df = geom_attr[key]
 
@@ -618,10 +621,12 @@ class InSituData:
             region_name = region_tuple[1]
             region_df = self._regions[region_key]
 
-            # extract geometry
-            print(region_name)
-            shape = region_df[region_df["name"] == region_name]["geometry"].item()
-            #use_shape = True
+            if region_name in region_df["name"].unique():
+                # extract geometry
+                shape = region_df[region_df["name"] == region_name]["geometry"].item()
+                #use_shape = True
+            else:
+                raise ValueError(f"Region name '{region_name}' not found in regions with key '{region_key}'.")
 
             # extract x and y limits from the geometry
             minx, miny, maxx, maxy = shape.bounds # (minx, miny, maxx, maxy)
@@ -962,7 +967,12 @@ class InSituData:
         """
         path = Path(path) # make sure the path is a pathlib path
 
-        assert (path / ISPY_METADATA_FILE).exists(), "No insitupy metadata file found."
+        if not path.exists() or not path.is_dir():
+            raise FileNotFoundError(f"Path does not exist or is not a directory: {str(path)}")
+
+        if not (path / ISPY_METADATA_FILE).exists():
+            raise FileNotFoundError(f"No InSituPy metadata file found in the specified directory: {str(path)}")
+
         # read InSituData metadata
         insitupy_metadata_file = path / ISPY_METADATA_FILE
         metadata = read_json(insitupy_metadata_file)

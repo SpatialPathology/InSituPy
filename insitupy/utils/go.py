@@ -66,7 +66,7 @@ class GOEnrichment():
             key_added (str, optional): The key under which to save the results. Defaults to None.
             uns_key_added (str, optional): The key under which to save the results in the results dictionary. Defaults to 'gprofiler'.
             return_df (bool, optional): Whether to return the results as a DataFrame. Defaults to True.
-            sortby (str, optional): The column to sort the results by. Defaults to 'pvals_adj'.
+            sortby (str, optional): The column to sort the results by. Defaults to 'pvalue_adj'.
             **kwargs (Any): Additional arguments to pass to the gprofiler function.
 
         Returns:
@@ -130,7 +130,7 @@ class GOEnrichment():
     def stringdb(self, target_genes: Union[dict, list] = None, top_n: Optional[int] = None,
                  organism: str = None, key_added: str = 'result',
                  uns_key_added: str = 'stringdb', return_df: bool = True,
-                 sortby: str = 'pvals_adj', **kwargs: Any):
+                 sortby: str = 'pvalue_adj', **kwargs: Any):
         """
         Performs GO term enrichment analysis using the stringdb web resource.
 
@@ -141,7 +141,7 @@ class GOEnrichment():
             key_added (str, optional): The key under which to save the results. Defaults to None.
             uns_key_added (str, optional): The key under which to save the results in the results dictionary. Defaults to 'stringdb'.
             return_df (bool, optional): Whether to return the results as a DataFrame. Defaults to True.
-            sortby (str, optional): The column to sort the results by. Defaults to 'pvals_adj'.
+            sortby (str, optional): The column to sort the results by. Defaults to 'pvalue_adj'.
             **kwargs (Any): Additional arguments to pass to the stringdb function.
 
         Returns:
@@ -209,7 +209,7 @@ class GOEnrichment():
                 no_plot: bool = True,
                 uns_key_added: str = 'enrichr',
                 return_df: bool = True,
-                sortby: str = 'pvals_adj',
+                sortby: str = 'pvalue_adj',
                 **kwargs: Any):
         """
         Performs GO term enrichment analysis using the enrichr web resource.
@@ -224,7 +224,7 @@ class GOEnrichment():
             no_plot (bool, optional): Whether to suppress plot generation. Defaults to True.
             uns_key_added (str, optional): The key under which to save the results in the results dictionary. Defaults to 'enrichr'.
             return_df (bool, optional): Whether to return the results as a DataFrame. Defaults to True.
-            sortby (str, optional): The column to sort the results by. Defaults to 'pvals_adj'.
+            sortby (str, optional): The column to sort the results by. Defaults to 'pvalue_adj'.
             **kwargs (Any): Additional arguments to pass to the enrichr function.
 
         Returns:
@@ -433,7 +433,7 @@ class StringDB:
             return self.result
 
     def stringdb_network_from_adata(self, adata: AnnData = None, key: str = None, top_n: Optional[int] = None, organism: str = None, output_format: str = "image",
-        key_added: str = None, sortby: str = 'pvals_adj', ascending: bool = True,
+        key_added: str = None, sortby: str = 'pvalue_adj', ascending: bool = True,
         **kwargs: Any):
 
         deg, groups, key_added = GOEnrichment().prepare_enrichment(adata=adata, key=key, key_added=key_added,
@@ -454,15 +454,23 @@ class StringDB:
 
 
 
-def get_up_down_genes(dge_results,
-                      pval_threshold: Number = 0.05,
-                      logfold_threshold: Number = 1
-                      ):
-    pval_mask = dge_results['pvals'] < pval_threshold
-    lfc_mask_up = dge_results['logfoldchanges'] > logfold_threshold
-    lfc_mask_down = dge_results['logfoldchanges'] < -logfold_threshold
+def get_up_down_genes(
+    dge_results,
+    pval_threshold: Number = 0.05,
+    logfold_threshold: Number = 1,
+    pval_col: str = 'padj',
+    logfold_col: str = 'log2foldchange',
+    gene_col: str = None # assumes genes to be in index
+    ):
+    pval_mask = dge_results[pval_col] < pval_threshold
+    lfc_mask_up = dge_results[logfold_col] > logfold_threshold
+    lfc_mask_down = dge_results[logfold_col] < -logfold_threshold
 
-    genes_up = dge_results[lfc_mask_up & pval_mask]['gene'].tolist()
-    genes_down = dge_results[lfc_mask_down & pval_mask]['gene'].tolist()
+    if gene_col is None:
+        genes_up = dge_results[lfc_mask_up & pval_mask].index.tolist()
+        genes_down = dge_results[lfc_mask_down & pval_mask].index.tolist()
+    else:
+        genes_up = dge_results[lfc_mask_up & pval_mask]['gene'].tolist()
+        genes_down = dge_results[lfc_mask_down & pval_mask]['gene'].tolist()
 
     return genes_up, genes_down

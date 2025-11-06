@@ -106,6 +106,7 @@ def _select_anndata_elements(
     obs_keys=None,
     var_keys=None,
     obsm_keys=None,
+    varm_keys=None,
     uns_keys=None,
     layer_keys=None,
     inplace=False
@@ -118,6 +119,7 @@ def _select_anndata_elements(
         obs_keys (List[str], optional): List of keys to keep in adata.obs. Defaults to None.
         var_keys (List[str], optional): List of keys to keep in adata.var. Defaults to None.
         obsm_keys (List[str], optional): List of keys to keep in adata.obsm. Defaults to None.
+        varm_keys (List[str], optional): List of keys to keep in adata.varm. Defaults to None.
         uns_keys (List[str], optional): List of keys to keep in adata.uns. Defaults to None.
         layer_keys (List[str], optional): List of keys to keep in adata.layers. Defaults to None.
         inplace (bool, optional): Whether to modify the AnnData object in place or return a new modified object. Defaults to False.
@@ -128,6 +130,7 @@ def _select_anndata_elements(
     if not inplace:
         adata = adata.copy()
 
+    # .obs
     if obs_keys is None:
         adata.obs = adata.obs[[]]
     elif obs_keys == 'all':
@@ -136,6 +139,7 @@ def _select_anndata_elements(
         obs_keys = convert_to_list(obs_keys)
         adata.obs = adata.obs[obs_keys]
 
+    # .var
     if var_keys is None:
         adata.var = adata.var[[]]
     elif var_keys == 'all':
@@ -144,6 +148,7 @@ def _select_anndata_elements(
         var_keys = convert_to_list(var_keys)
         adata.var = adata.var[var_keys]
 
+    # .obsm
     if obsm_keys is None:
         keys_to_remove = list(adata.obsm.keys())
         for key in keys_to_remove:
@@ -156,6 +161,20 @@ def _select_anndata_elements(
         for key in keys_to_remove:
             del adata.obsm[key]
 
+    # .varm
+    if varm_keys is None:
+        keys_to_remove = list(adata.varm.keys())
+        for key in keys_to_remove:
+            del adata.varm[key]
+    elif varm_keys == 'all':
+        pass  # Keep all keys
+    else:
+        varm_keys = convert_to_list(varm_keys)
+        keys_to_remove = set(adata.varm.keys()) - set(varm_keys)
+        for key in keys_to_remove:
+            del adata.varm[key]
+
+    # .uns
     if uns_keys is None:
         keys_to_remove = list(adata.uns.keys())
         for key in keys_to_remove:
@@ -168,6 +187,7 @@ def _select_anndata_elements(
         for key in keys_to_remove:
             del adata.uns[key]
 
+    # .layers
     if layer_keys is None:
         keys_to_remove = list(adata.layers.keys())
         for key in keys_to_remove:

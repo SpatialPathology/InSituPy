@@ -25,14 +25,11 @@ def _select_data_for_dge(
     cell_type_tuple: Optional[Tuple[str, str]] = None,
     region_tuple: Optional[Tuple[str, str]] = None,
     force_assignment: bool = False,
+    return_all_celltypes: bool = False,
     verbose: bool = False
     ) -> AnnData:
 
-    # extract anndata object
-    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-    adata = celldata.matrix.copy()
-
-    ### REGIONS
+    # check assignments
     if region_tuple is not None:
         # assign region
         _check_assignment(data=data,
@@ -43,17 +40,6 @@ def _select_data_for_dge(
                           verbose=verbose
                           )
 
-        # select only one region
-        s = adata.obsm["regions"][region_tuple[0]]
-        region_mask = s.apply(_check_string_in_assignment, string_to_check=region_tuple[1])
-        if not np.any(region_mask):
-            raise ValueError(f"Region '{region_tuple[1]}' not found in key '{region_tuple[0]}'.")
-
-        if verbose:
-            print(f"Restrict analysis to region '{region_tuple[1]}' from key '{region_tuple[0]}'.", flush=True)
-        adata = adata[region_mask].copy()
-
-    ### ANNOTATIONS
     if annotation_tuple is not None:
         # check if the annotations need to be assigned first
         _check_assignment(data=data,
@@ -64,8 +50,28 @@ def _select_data_for_dge(
                           verbose=verbose
                           )
 
+    # extract anndata object
+    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+    adata_selected = celldata.matrix.copy()
+
+    ### REGIONS
+    if region_tuple is not None:
+        # select only one region
+        s = adata_selected.obsm["regions"][region_tuple[0]]
+        region_mask = s.apply(_check_string_in_assignment, string_to_check=region_tuple[1])
+        if not np.any(region_mask):
+            raise ValueError(f"Region '{region_tuple[1]}' not found in key '{region_tuple[0]}'.")
+
+        if verbose:
+            print(f"Restrict analysis to region '{region_tuple[1]}' from key '{region_tuple[0]}'.", flush=True)
+        #adata_selected = adata_selected[region_mask].copy()
+    else:
+        region_mask = np.ones(len(adata_selected), dtype=bool)
+
+    ### ANNOTATIONS
+    if annotation_tuple is not None:
         # create mask for filtering
-        s = adata.obsm["annotations"][annotation_tuple[0]]
+        s = adata_selected.obsm["annotations"][annotation_tuple[0]]
         if isinstance(annotation_tuple[1], str):
             annot_mask = s.apply(_check_string_in_assignment, string_to_check=annotation_tuple[1])
         elif isinstance(annotation_tuple[1], list):
@@ -76,18 +82,30 @@ def _select_data_for_dge(
         if not np.any(annot_mask):
             raise ValueError(f"annotation_name '{annotation_tuple[1]}' not found under annotation_key '{annotation_tuple[0]}'.")
 
-        # do filtering
         if verbose:
             print(f"Restrict analysis to annotation '{annotation_tuple[1]}' from key '{annotation_tuple[0]}'.", flush=True)
-        adata = adata[annot_mask].copy()
+
+        # do filtering
+        #adata_selected = adata_selected[annot_mask].copy()
+    else:
+        annot_mask = np.ones(len(adata_selected), dtype=bool)
+
+    # do filtering
+    adata_selected = adata_selected[region_mask & annot_mask].copy()
+
+    if return_all_celltypes:
+        adata_all_celltypes = adata_selected.copy()
 
     ### CELL TYPES
     if cell_type_tuple is not None:
+        if cell_type_tuple[0] not in adata_selected.obs.columns:
+            raise ValueError(f".obs column '{cell_type_tuple[0]}' not found in the AnnData object.")
+
         # create mask for filtering
         if isinstance(cell_type_tuple[1], str):
-            cell_type_mask = adata.obs[cell_type_tuple[0]] == cell_type_tuple[1]
+            cell_type_mask = adata_selected.obs[cell_type_tuple[0]] == cell_type_tuple[1]
         elif isinstance(cell_type_tuple[1], list):
-            cell_type_mask = adata.obs[cell_type_tuple[0]].isin(cell_type_tuple[1])
+            cell_type_mask = adata_selected.obs[cell_type_tuple[0]].isin(cell_type_tuple[1])
         else:
             raise ValueError(f'Unknown type for second element of `cell_type_tuple`: {type(cell_type_tuple[1])}. Must be list or str.')
 
@@ -96,9 +114,12 @@ def _select_data_for_dge(
 
         if verbose:
             print(f"Restrict analysis to cell type '{cell_type_tuple[1]}' from .obs column '{cell_type_tuple[0]}'.", flush=True)
-        adata = adata[cell_type_mask].copy()
+        adata_selected = adata_selected[cell_type_mask].copy()
 
-    return adata
+    if return_all_celltypes:
+        return adata_selected, adata_all_celltypes
+    else:
+        return adata_selected
 
 
 def _substitution_func(

@@ -16,12 +16,12 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy._io.plots import save_and_show_figure
 from insitupy._mixins import _UpdatablePlottingConfig
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
 from insitupy.experiment.data import InSituExperiment
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils._colors import (_add_colorlegend_to_axis,
                                     _extract_color_values, _rgb2hex_robust,
@@ -805,6 +805,9 @@ class _ColorConfigMultiPlot:
                 adata=ad, key=key, raw=data_config.raw, layer=data_config.layer
             )
 
+            if color_values is None:
+                raise ValueError(f"Key '{key}' not found in the data.")
+
             if is_categorical:
                 color_entry["is_categorical"] = True
                 # check if colors were saved in uns
@@ -849,12 +852,16 @@ class _ColorConfigMultiPlot:
                     adata=ad, key=key, raw=data_config.raw, layer=data_config.layer
                 )
 
-                if is_categorical:
-                    value_list.append(np.unique(color_values))
-                else:
-                    value_list.append(np.max(color_values))
+                if color_values is not None:
+                    if is_categorical:
+                        value_list.append(np.unique(color_values))
+                    else:
+                        value_list.append(np.max(color_values))
 
                 categorical_list.append(is_categorical)
+
+            if len(value_list) == 0:
+                raise ValueError(f"Key '{key}' not found in any of the datasets.")
 
             if np.all(categorical_list):
                 # all values are categorical - concatenate all values
@@ -987,7 +994,7 @@ def _get_data(
     # extract the InSituData object
     try:
         xd = data.data[idx]
-        meta = data.metadata.iloc[idx]
+        meta = data._metadata.iloc[idx]
     except AttributeError:
         xd = data
         meta = None

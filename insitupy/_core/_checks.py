@@ -38,9 +38,11 @@ def _is_experiment(obj):
     from insitupy._core.data import InSituData
     from insitupy.experiment.data import InSituExperiment
 
-    if isinstance(obj, InSituData):
+    # if isinstance(obj, InSituData):
+    if obj.__class__ is InSituData:
         return False
-    elif isinstance(obj, InSituExperiment):
+    elif obj.__class__ is InSituExperiment:
+    # elif isinstance(obj, InSituExperiment):
         return True
     else:
         raise ValueError(f"Object is neither InSituData or InSituExperiment. Instead: {type(obj)}")

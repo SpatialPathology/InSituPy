@@ -13,7 +13,7 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 ```{eval-rst}
 .. note::
-   This repository is under very active development and it cannot be guaranteed that releases contain changes that might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!
+   !!!Warning: This repository is under very active development and it cannot be ruled out that changes might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!
 ```
 
 ## Features
@@ -32,9 +32,35 @@ Additional features include:
 - **Annotation:** Annotate _Xenium In Situ_ data in the napari viewer or import annotations from external tools like [QuPath](https://qupath.github.io/).
 - **Multi-sample analysis:** Perform analysis on an experiment-level, i.e. with multiple samples at once.
 
+## Getting started
+
+```{eval-rst}
+.. card:: Installation
+    :link: installation
+    :link-type: doc
+    :link-alt: Installation
+
+    Learn how to install **InSituPy**.
+
+.. card:: Tutorials
+    :link: tutorials/index
+    :link-type: doc
+    :link-alt: Tutorials
+
+    Tutorials to help you get started with **InSituPy**.
+
+.. card:: API
+    :link: api
+    :link-type: doc
+    :link-alt: API
+
+    Application Programming Interface.
+
+```
+
 ## Contributing
 
-Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues) or submit a pull request.
+Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues) or submit a pull request. To engage in discussions and start working collectively on InSituPy, feel free to post in our [Zulip chat](https://insitupy.zulipchat.com).
 
 ```{toctree}
 :hidden: false

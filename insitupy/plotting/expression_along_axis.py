@@ -18,7 +18,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, _init_mpl_fontsize
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import check_raw, has_valid_labels
 from insitupy.utils._regression import smooth_fit
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
@@ -100,6 +100,14 @@ def cell_expression_along_axis(
         xlim=xlim,
     )
 
+    # Check if data is empty after selection
+    if data_for_one_celltype.empty:
+        available_cell_types = adata.obs[cell_type_column].unique()
+        raise ValueError(
+            f"No data remaining after filtering for cell_type='{cell_type}'. "
+            f"Available cell types: {list(available_cell_types)}"
+        )
+
     # create xlabel string
     if xlabel is None:
         xlabel_str = " ".join(convert_to_list(axis))
@@ -165,9 +173,14 @@ def cell_expression_along_axis(
         expr_values = data_for_one_gene[gene].values
 
         # drop NaNs
-        not_nan = ~np.isnan(expr_values)
+        not_nan = ~pd.isna(axis_values)
         axis_values = axis_values[not_nan]
         expr_values = expr_values[not_nan]
+
+        # Check if we have enough data after dropping NaNs
+        if len(axis_values) == 0:
+            print(f"Warning: No valid data for gene '{gene}' after removing NaNs.")
+            continue
 
         axes[row, col].scatter(
             x=axis_values,
@@ -176,7 +189,7 @@ def cell_expression_along_axis(
             )
 
         if fit_reg:
-            if len(axis_values) > 1:
+            if len(axis_values) > 9:
                 try:
                     # perform loess regression for the second half of the plot
                     res = smooth_fit(
@@ -188,7 +201,7 @@ def cell_expression_along_axis(
                     print(f"A ValueError occurred during loess regression: {e}")
                     res = None
             else:
-                print(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
+                print(f"Less than 10 data points left for gene {gene} after filtering. Skipped LOESS regression.")
                 res = None
 
             if res is not None:
@@ -252,7 +265,7 @@ def _select_data(
     min_expression: Number = None,
     sort: bool = True,
     minmax_scale: bool = True,
-    verbose: bool = True
+    verbose: bool = False
 ):
     # make sure genes is a list
     genes = convert_to_list(genes)
@@ -388,6 +401,11 @@ def _bin_qc_plot(
 
         not_nan = ~np.isnan(expr)
 
+        # Check if we have enough data after dropping NaNs
+        if not_nan.sum() < 2:
+            print(f"Warning: Insufficient data for gene '{gene}' in QC plot.")
+            continue
+
         try:
             # perform loess regression for the second half of the plot
             res = smooth_fit(
@@ -499,6 +517,13 @@ def cell_abundance_along_axis(
     xlim_mask = (data[axis] > xlim[0]) & (data[axis] <= xlim[1])
     data = data[xlim_mask].copy()
 
+    # Check if data is empty after filtering
+    if data.empty:
+        raise ValueError(
+            f"No data remaining after applying xlim={xlim}. "
+            f"Check your xlim parameter."
+        )
+
     # get color palette
     color_key = f"{groupby}_colors"
     if color_key in adata.uns:
@@ -542,4 +567,3 @@ def cell_abundance_along_axis(
                          dpi_save=dpi_save,
                          tight=True
                          )
-
