@@ -123,7 +123,20 @@ def write_zarr(image, file,
         # check whether to save the image as pyramid or not
         if save_pyramid:
             for i, im in enumerate(image_data):
+                
+                #shape=im.shape
+                #chunks=[]
+                #for dim in shape:
+                    #best=512
+                    #for i in range(512, dim//2 + 1):
+                        #if dim % i == 0:
+                           # best = i
+                    #chunks.append(best)
+                #print(tuple(chunks))     
+                #im.rechunk((512, 512))
+                #print("rechunked")  
                 im.to_zarr(dirstore, component=str(i))
+                print("to_zarr finished")  
         else:
             # save image data in zipstore without pyramid
             image_data.to_zarr(dirstore)
