@@ -17,11 +17,11 @@ from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED
-from insitupy._mixins import DeepCopyMixin
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._io.files import (check_overwrite_and_remove_if_true,
                                 write_dict_to_json)
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
+from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._segmentations import _read_proseg
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
@@ -241,7 +241,7 @@ class ShapesData(DeepCopyMixin):
                 annot_df = pd.concat([annot_df, new_df], ignore_index=False)
 
                 # remove all duplicated shapes - leaving only the newly added
-                dup_mask = annot_df.index.duplicated()
+                dup_mask = annot_df.index.duplicated(keep="last")
                 annot_df = annot_df[~dup_mask] # filter out duplicates
                 new_n = len(annot_df)
 
@@ -250,7 +250,6 @@ class ShapesData(DeepCopyMixin):
                 existing_str = "existing "
 
             if new_geometries_added:
-                add = True
                 if self._assert_uniqueness:
                     # check if the shapes data for this key is unique (same number of names than indices)
                     is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
@@ -263,31 +262,29 @@ class ShapesData(DeepCopyMixin):
                     is_not_polygon = np.array([not isinstance(p, Polygon) for p in annot_df.geometry])
                     if np.any(is_not_polygon):
                         annot_df = annot_df.loc[~is_not_polygon]
-                        warnings.warn(
-                            f"Some {self._shape_name} were not shapely.Polygon objects and skipped.",
-                            stacklevel=2
-                            )
+                        show_warning(f"Some {self._shape_name} were not shapely.Polygon objects and skipped.")
 
-                # check that the dataframe is not empty
-                if len(annot_df) == 0:
-                    add = False
+            # check that the dataframe is not empty
+            if len(annot_df) > 0:
+                # add dataframe to AnnotationData object
+                self._data[key] = annot_df
 
-                if add:
-                    # add dataframe to AnnotationData object
-                    self._data[key] = annot_df
+                # add new entry to metadata
+                self._metadata[key] = {}
 
-                    # add new entry to metadata
-                    self._metadata[key] = {}
+                # update metadata
+                self._update_metadata(keys=key, analyzed=False)
 
-                    # update metadata
-                    self._update_metadata(keys=key, analyzed=False)
-
-                    if verbose:
-                        # report
-                        if in_napari:
-                            show_info(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
-                        else:
-                            print(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                if verbose:
+                    # report
+                    if in_napari:
+                        _show_func = show_info
+                    else:
+                        _show_func = print
+                    if new_geometries_added:
+                        _show_func(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
+                    else:
+                        _show_func(f"Updated {self._shape_name} to {existing_str}key '{key}'")
 
     def crop(self,
              shape,
