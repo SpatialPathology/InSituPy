@@ -21,6 +21,17 @@ from insitupy._io.geo import parse_geopandas
 from insitupy.dataclasses.dataclasses import CellData
 
 
+def _handle_image_names(im_path):
+    im_path = Path(im_path)
+    if im_path.name.startswith("ch"):
+        ch, ch_name = im_path.name.split(".")[0].split("_", maxsplit=1)
+
+    elif im_path.name.startswith("morphology_"):
+        _, _, ch = im_path.name.split(".")[0].split("_")
+        ch_name = f"cellseg_{ch}"
+
+    return ch, ch_name
+
 def read_xenium(
     path: Union[str, os.PathLike, Path],
     nuclei_type: Literal["focus", "mip", ""] = "mip",
@@ -118,20 +129,19 @@ def read_xenium(
     # get path of image files
     img_files = [data.metadata["method_params"]["images"][k] for k in img_keys]
 
-    if load_cell_segmentation_images:
-        # get cell segmentation images if available
-        if "morphology_focus/" in data.metadata["method_params"]["images"][nuclei_file_key]:
-            seg_files = ["morphology_focus/morphology_focus_0001.ome.tif",
-                            "morphology_focus/morphology_focus_0002.ome.tif",
-                            "morphology_focus/morphology_focus_0003.ome.tif"
-                            ]
-            seg_names = ["cellseg1", "cellseg2", "cellseg3"]
+    # get cell segmentation images if available
+    image_dir = path / "morphology_focus/"
+    if image_dir.is_dir():
+        for im_path in image_dir.glob("*.ome.tif"):
+            ch, ch_name = _handle_image_names(im_path)
 
-            # check which segmentation files exist and append to image list
-            seg_file_exists_list = [(data.path / f).is_file() for f in seg_files]
-            #print(seg_file_exists_list)
-            img_files += [f for f, exists in zip(seg_files, seg_file_exists_list) if exists]
-            img_names += [n for n, exists in zip(seg_names, seg_file_exists_list) if exists]
+            if not load_cell_segmentation_images and ch_name.startswith("cellseg"):
+                continue
+            if ch_name == "dapi":
+                continue
+
+            img_names.append(ch_name)
+            img_files.append(im_path)
 
     # create imageData object
     img_paths = [data.path / elem for elem in img_files]
