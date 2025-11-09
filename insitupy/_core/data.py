@@ -1570,7 +1570,7 @@ class InSituData:
                         if img_name in ["nuclei", "nucleus"] or "DAPI" in img_name:
                             cmap = "blue"
                         else:
-                            cmap = grayscale_colormap[n_grayscales]
+                            cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
                             n_grayscales += 1
                         blending = "additive"  # set blending mode
 

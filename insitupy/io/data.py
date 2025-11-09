@@ -20,6 +20,7 @@ from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
 from insitupy.dataclasses.dataclasses import CellData
 
+CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
 def _handle_image_names(im_path):
     im_path = Path(im_path)
@@ -35,7 +36,8 @@ def _handle_image_names(im_path):
 def read_xenium(
     path: Union[str, os.PathLike, Path],
     nuclei_type: Literal["focus", "mip", ""] = "mip",
-    load_cell_segmentation_images: bool = True,
+    load_cell_segmentation_images: bool = False,
+    load_background_images: bool = False,
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
     restructure_transcripts: bool = False
@@ -135,7 +137,9 @@ def read_xenium(
         for im_path in image_dir.glob("*.ome.tif"):
             ch, ch_name = _handle_image_names(im_path)
 
-            if not load_cell_segmentation_images and ch_name.startswith("cellseg"):
+            if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
+                continue
+            if not load_background_images and ch_name.endswith("_background"):
                 continue
             if ch_name == "dapi":
                 continue
