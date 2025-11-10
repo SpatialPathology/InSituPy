@@ -45,12 +45,13 @@ def _obs_qc_plot(
     plt.show()
 
 def _feature_qc_plot(
-    pdata_ct
+    pdata_ct,
+    condition_str
 ):
     fig, axs = plt.subplots(1,2, figsize=(8*2, 6))
     dc.pl.filter_by_expr(
         adata=pdata_ct,
-        group="condition",
+        group=condition_str,
         min_count=10,
         min_total_count=15,
         large_n=10,
@@ -125,14 +126,15 @@ def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
         print(f"Filtered pseudobulk samples: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
 
 def _verbose_filter_features(
-    pdata,
+    pdata: AnnData,
+    condition_str: str,
     verbose: bool = True
     ):
     before = pdata.shape[1]
     # do filtering of features
     dc.pp.filter_by_expr(
         adata=pdata,
-        group="condition",
+        group=condition_str,
         min_count=10,
         min_total_count=15,
         large_n=10,
@@ -160,6 +162,41 @@ def pseudobulk_dge(
     min_counts: int = 1000,
     verbose: bool = True
     ):
+    """Perform pseudobulk differential gene expression analysis.
+
+    Args:
+        pdata: AnnData object containing pseudobulk data with observations and expression counts.
+        dge_setup: Tuple of (condition_column_name, target_condition, reference_condition)
+            specifying the column name for conditions and the two conditions to compare.
+        celltype_col: Column name in pdata.obs containing cell type annotations.
+        celltype: Specific cell type to analyze.
+        pdata_nb: Optional AnnData object containing neighborhood data for comparison.
+        plot_qc: Whether to generate QC plots for sample and feature filtering.
+        min_cells: Minimum number of cells required per pseudobulk sample.
+        min_counts: Minimum total counts required per pseudobulk sample.
+        verbose: Whether to print filtering information.
+
+    Returns:
+        DiffExprResults: Object containing main differential expression results, configuration,
+            and optional neighborhood comparison results.
+
+    Raises:
+        ValueError: If dge_setup parameters are not found in pdata.obs columns or values.
+    """
+    # Validate dge_setup parameters
+    condition_col, target_cond, ref_cond = dge_setup
+
+    if condition_col not in pdata.obs.columns:
+        raise ValueError(f"Condition column '{condition_col}' not found in pdata.obs")
+
+    available_conditions = pdata.obs[condition_col].unique()
+    if target_cond not in available_conditions:
+        raise ValueError(f"Target condition '{target_cond}' not found in pdata.obs['{condition_col}']. "
+                        f"Available: {list(available_conditions)}")
+
+    if ref_cond not in available_conditions:
+        raise ValueError(f"Reference condition '{ref_cond}' not found in pdata.obs['{condition_col}']. "
+                        f"Available: {list(available_conditions)}")
 
     if plot_qc:
         # plot QC
@@ -185,9 +222,12 @@ def pseudobulk_dge(
     if plot_qc:
         # plot feature QC
         print("Feature filtering QC:", flush=True)
-        _feature_qc_plot(pdata_ct)
+        _feature_qc_plot(pdata_ct, condition_str=dge_setup[0])
 
-    _verbose_filter_features(pdata=pdata_ct, verbose=verbose)
+    _verbose_filter_features(
+        pdata=pdata_ct,
+        condition_str=dge_setup[0],
+        verbose=verbose)
 
     if pdata_nb is not None:
         pdata_ct_nb = pdata_ct_nb[:, pdata_ct_nb.var_names.isin(pdata_ct.var_names)].copy()
