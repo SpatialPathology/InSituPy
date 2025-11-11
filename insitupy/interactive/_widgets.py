@@ -360,7 +360,7 @@ if WITH_NAPARI:
                 choices = ["Regions"]
 
             for c in choices:
-                if len(getattr(data, c.lower()).metadata.keys()) == 0:
+                if len(getattr(data, c.lower()).keys()) == 0:
                     choices.remove(c)
 
             if len(choices) == 0:
@@ -371,7 +371,7 @@ if WITH_NAPARI:
                 geom = getattr(data, choices[0].lower())
 
                 # extract annotations keys
-                annot_keys = list(geom.metadata.keys())
+                annot_keys = list(geom.keys())
                 try:
                     first_annot_key = list(annot_keys)[0] # for dropdown menu
                 except IndexError:

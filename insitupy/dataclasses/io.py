@@ -208,9 +208,10 @@ def read_shapesdata(
         scale_factor = 1
 
     # read metadata and retrieve keys and files from it
-    metadata = read_json(path / "metadata.json")
-    keys = metadata.keys()
-    files = [path / f"{k}.geojson" for k in keys]
+    # metadata = read_json(path / "metadata.json")
+    # keys = metadata.keys()
+    # files = [path / f"{k}.geojson" for k in keys]
+    files_dict = {f.stem: f for f in path.glob("*.geojson") if f.stem != "metadata"}
 
     # check which type of ShapesData is read here
     if mode == "annotations":
@@ -223,16 +224,18 @@ def read_shapesdata(
         ValueError(f"Unknown `mode`: {mode}")
 
     # make sure files and keys are a list
-    files = convert_to_list(files)
-    keys = convert_to_list(keys)
+    # files = convert_to_list(files)
+    # keys = convert_to_list(keys)
 
-    for k, f in zip(keys, files):
-        data.add_data(data=f, key=k,
-                      scale_factor=scale_factor
-                      )
+    # for k, f in zip(keys, files):
+    for k, f in files_dict.items():
+        data.add_data(
+            data=f, key=k,
+            scale_factor=scale_factor
+            )
 
     # overwrite metadata
-    data.metadata = metadata
+    # data.metadata = metadata
     return data
 
 def read_multicelldata(

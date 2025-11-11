@@ -10,6 +10,8 @@ try:
     from spatialdata import read_zarr
 except ImportError:
     raise ImportError("Please install spatialdata with `pip install spatialdata`.")
+else:
+    from spatialdata.transformations import get_transformation
 
 from insitupy._constants import MODALITIES_COLOR_DICT
 from insitupy._textformat import textformat as tf
@@ -21,18 +23,31 @@ from insitupy._textformat import textformat as tf
 class StructuredImageData:
     def __init__(self):
         self._data: Dict[str, object] = {}
+        self._metadata: Dict[str, object] = {}
 
     def __getitem__(self, key):
-        return self._data.get(key)
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
+        dt = self._data.get(key) # get datatree
+        dask_array_list = [dt[group].ds['image'].data for group in dt.groups if group != "/"]
+        return dask_array_list
 
     def __repr__(self):
         if len(self._data) == 0:
             return "empty"
         return "\n".join([f"{tf.Bold}{k}{tf.ResetAll}\t{tuple(dict(v.scale0.dims).values())}" for k, v in self._data.items()])
 
+    @property
+    def is_empty(self):
+        return len(self._data) == 0
+
+    @property
+    def metadata(self):
+        return self._metadata
+
+    def add_image(self, key, value, scale_obj):
+        self._data[key] = value
+        pixel_size = scale_obj.scale[scale_obj.axes.index('x')]
+        axes = "".join(scale_obj.axes).upper()
+        self._metadata[key] = {'pixel_size': pixel_size, 'axes': axes}
 
 class StructuredBoundariesData:
     def __init__(self):
@@ -103,6 +118,13 @@ class StructuredMultiCellData:
         return repr_str
 
     @property
+    def is_empty(self):
+        return len(self._layers) == 0
+
+    def keys(self):
+        return self._layers.keys()
+
+    @property
     def main_key(self):
         return self._main_key
 
@@ -151,6 +173,23 @@ class StructuredShapesData:
             return "empty"
         return f"{self._shape_name} with keys: {list(self._data.keys())}"
 
+    @property
+    def is_empty(self):
+        return len(self._data) == 0
+
+    @property
+    def metadata(self):
+        """Compute metadata on-demand from current data state."""
+        meta = {}
+        for key, df in self._data.items():
+            meta[key] = {
+                f"n_{self._shape_name}": len(df),
+                "classes": sorted(df['name'].unique().tolist()) if 'name' in df.columns else ["unnamed"],
+            }
+        return meta
+
+    def keys(self):
+        return self._data.keys()
 
 class StructuredAnnotationsData(StructuredShapesData):
     def __init__(self):
@@ -167,7 +206,10 @@ class StructuredRegionsData(StructuredShapesData):
 # --------------------
 
 class StructuredSpatialData:
-    def __init__(self, path: Optional[Union[str, Path]] = None):
+    def __init__(
+        self,
+        path: Optional[Union[str, Path]] = None
+        ):
         self._path = Path(path) if path else None
         self._sdata = None
 
@@ -226,7 +268,9 @@ class StructuredSpatialData:
         for elem_type, key, elem in self._sdata.gen_elements():
             parts = key.split(".")
             if parts[0] == "IMAGES":
-                self._images[parts[1]] = elem
+                # self._images[parts[1]] = elem
+                scale_obj = get_transformation(elem)
+                self._images.add_image(parts[1], elem, scale_obj=scale_obj)
             elif parts[0] == "CELLS":
                 cell_key = parts[1]
                 if cell_key not in self._cells._layers:

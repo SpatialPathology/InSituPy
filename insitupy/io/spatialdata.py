@@ -3,9 +3,9 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 
+import logging
 from collections import defaultdict
 from typing import List, Literal, Optional, Union
-from warnings import warn
 
 import dask.dataframe as dd
 import numpy as np
@@ -21,6 +21,8 @@ from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
 from insitupy._core.data import InSituData
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 
 def _generate_key(
@@ -52,7 +54,7 @@ def _generate_key(
                 raise ValueError(f"Name '{elem}' does not meet the naming requirements of SpatialData. {e}")
 
             if "." in elem or "-" in elem:
-                warn(f"Replacing '.' and '-' in '{elem}' with '_' to meet naming requirements.")
+                logger.warning(f"Replacing '.' and '-' in '{elem}' with '_' to meet naming requirements.")
                 elem = elem.replace(".", "_").replace("-", "_")
 
             locator_checked.append(elem)
@@ -328,26 +330,102 @@ def _merge_dicts_with_warning(*dicts):
         merged.update(d)
     return merged
 
-def _check_case_insensitive_conflicts(keys):
-    keys = convert_to_list(keys)
-    grouped = defaultdict(list)
+def check_and_fix_case_insensitive_conflicts(sdata: SpatialData, inplace: bool = False):
+    """
+    Check for case-insensitive key conflicts in a SpatialData object and optionally fix them.
 
-    for key in keys:
+    When keys differ only in capitalization (e.g., 'ANNOTATIONS.Demo' and 'ANNOTATIONS.demo'),
+    this can cause conflicts when writing to disk on case-insensitive filesystems.
+
+    Args:
+        sdata: SpatialData object to check
+        inplace: If True, modify the SpatialData object in place. If False, return a modified copy.
+
+    Returns:
+        tuple: (modified_sdata, rename_map)
+            - modified_sdata: SpatialData object with renamed keys (original if inplace=True)
+            - rename_map: Dictionary mapping old keys to new keys (empty if no conflicts)
+
+    Example:
+        >>> sdata_fixed, renames = check_and_fix_case_insensitive_conflicts(sdata, inplace=False)
+        >>> print(renames)
+        {'ANNOTATIONS.demo': 'ANNOTATIONS.demo_v2'}
+    """
+    # Collect all keys from all element types
+    all_keys = []
+    for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
+        if hasattr(sdata, attr):
+            element_dict = getattr(sdata, attr)
+            if element_dict is not None:
+                all_keys.extend(element_dict.keys())
+
+    # Group keys by their lowercase version
+    grouped = defaultdict(list)
+    for key in all_keys:
         grouped[key.lower()].append(key)
 
-    conflicts = {k: v for k, v in grouped.items() if len(set(v)) > 1}
+    # Find conflicts (where multiple keys map to same lowercase)
+    conflicts = {k: v for k, v in grouped.items() if len(v) > 1}
 
-    if conflicts:
-        message_lines = ["Case-insensitive key conflicts detected:"]
-        for lower_key, variants in conflicts.items():
-            message_lines.append(f"  - '{lower_key}': {variants}")
-        message_lines.append(
-            "\nThese conflicts can lead to problems when saving the SpatialData object, "
-            "as some tools treat keys in a case-insensitive manner."
-        )
-        warn("\n".join(message_lines), category=UserWarning)
+    if not conflicts:
+        logger.info("No case-insensitive conflicts found.")
+        return sdata, {}
+
+    # Generate rename map
+    rename_map = {}
+    all_existing_keys = set(all_keys)  # Track all keys including future renames
+
+    for lower_key, variants in conflicts.items():
+        # Keep first variant unchanged, rename the rest
+        for i, key in enumerate(variants[1:], start=2):
+            new_key = key
+            suffix_num = 2
+
+            # Find a unique suffix that doesn't conflict
+            while new_key in all_existing_keys or new_key.lower() in [k.lower() for k in all_existing_keys if k != key]:
+                new_key = f"{key}_v{suffix_num}"
+                suffix_num += 1
+
+            rename_map[key] = new_key
+            all_existing_keys.add(new_key)
+            all_existing_keys.discard(key)
+
+    if not rename_map:
+        return sdata, {}
+
+    # Log warning with conflicts and renames
+    message_lines = ["Case-insensitive key conflicts detected and automatically fixed:"]
+    for old_key, new_key in rename_map.items():
+        message_lines.append(f"  '{old_key}' -> '{new_key}'")
+    logger.warning("\n".join(message_lines))
+
+    # Apply renames
+    if not inplace:
+        # Create a new SpatialData dict
+        new_elements = {}
+        for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
+            if hasattr(sdata, attr):
+                element_dict = getattr(sdata, attr)
+                if element_dict is not None:
+                    for key, value in element_dict.items():
+                        new_key = rename_map.get(key, key)
+                        new_elements[new_key] = value
+
+        sdata = SpatialData.from_elements_dict(new_elements)
     else:
-        print("No case-insensitive conflicts found.")
+        # Modify in place (more complex, need to handle each element type)
+        for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
+            if hasattr(sdata, attr):
+                element_dict = getattr(sdata, attr)
+                if element_dict is not None:
+                    # Create new dict with renamed keys
+                    items_to_rename = [(k, v) for k, v in element_dict.items() if k in rename_map]
+                    for old_key, value in items_to_rename:
+                        new_key = rename_map[old_key]
+                        del element_dict[old_key]
+                        element_dict[new_key] = value
+
+    return sdata, rename_map
 
 def convert_to_spatialdata_dict(data, levels: int = 5):
 
@@ -372,9 +450,6 @@ def convert_to_spatialdata_dict(data, levels: int = 5):
     labels = _transform_cell_boundaries(data)
     merged_dict = _merge_dicts_with_warning(transcripts, tables, cell_shapes, annotations, regions, images, labels)
 
-    # check whether there are keys in the dictionary that could later lead to problems saving the data
-    _check_case_insensitive_conflicts(merged_dict.keys())
-
     return merged_dict
 
 def convert_to_spatialdata(data, levels: int = 5):
@@ -385,6 +460,9 @@ def convert_to_spatialdata(data, levels: int = 5):
     This function integrates various data elements such as images, labels, transcripts, and annotations
     into a SpatialData object. It requires the spatialdata framework to be installed.
 
+    The function automatically checks for and fixes case-insensitive key conflicts that could cause
+    issues when writing to disk.
+
     Returns:
         SpatialData: A SpatialData object containing the integrated data elements.
 
@@ -392,6 +470,10 @@ def convert_to_spatialdata(data, levels: int = 5):
 
     sd_dict = convert_to_spatialdata_dict(data, levels=levels)
     sdata = SpatialData.from_elements_dict(sd_dict)
+
+    # Check and fix case-insensitive conflicts
+    sdata, rename_map = check_and_fix_case_insensitive_conflicts(sdata, inplace=True)
+
     return sdata
 
 def load_from_spatialdata(spatialdata_path, pixel_size):
@@ -601,7 +683,7 @@ def load_from_spatialdata(spatialdata_path, pixel_size):
                 continue
             cell_key = locs[0]
             elem = tbl_group[elem_name]
-            elem_store = os.path.join(root.store.path, elem.path)
+            elem_store = os.path.join(f.store.path, elem.path)
             matrix_adata = read_zarr(elem_store)
             bd = cell_boundaries.get(cell_key, BoundariesData(None, None))
             cells_map[cell_key] = CellData(matrix_adata, bd)
@@ -645,134 +727,3 @@ def load_from_spatialdata(spatialdata_path, pixel_size):
             xd.transcripts = transcripts_df
 
     return xd
-
-
-# def load_from_spatialdata(spatialdata_path, pixel_size):
-
-#     import os
-#     from pathlib import Path
-
-#     import numpy as np
-#     import pandas as pd
-#     import zarr
-#     from anndata import read_zarr
-#     from dask.array import transpose
-#     from dask.dataframe import read_parquet
-#     from ome_zarr.io import ZarrLocation
-#     from ome_zarr.reader import Label, Multiscales, Reader
-
-#     from insitupy.dataclasses import BoundariesData, CellData, ImageData
-
-#     def read_helper_images_labels(f_elem_store, type):
-#         nodes = []
-#         image_loc = ZarrLocation(f_elem_store)
-#         if image_loc.exists():
-#             image_reader = Reader(image_loc)()
-#             image_nodes = list(image_reader)
-#             if len(image_nodes):
-#                 for node in image_nodes:
-#                     if np.any([isinstance(spec, Multiscales) for spec in node.specs]) and (
-#                         type == "image"
-#                         and np.all([not isinstance(spec, Label) for spec in node.specs])
-#                         or type == "labels"
-#                         and np.any([isinstance(spec, Label) for spec in node.specs])
-#                     ):
-#                         nodes.append(node)
-#         assert len(nodes) == 1
-#         node = nodes[0]
-#         datasets = node.load(Multiscales).datasets
-#         multiscales = node.load(Multiscales).zarr.root_attrs["multiscales"]
-#         axes = [i["name"] for i in node.metadata["axes"]]
-#         assert len(multiscales) == 1
-#         if len(datasets) >= 1:
-#             multiscale_image = []
-#             for _, d in enumerate(datasets):
-#                 data = node.load(Multiscales).array(resolution=d, version=None)
-#                 if data.shape[0] == 1:
-#                     data = data.reshape(data.shape[1:])
-#                     axes = axes[1:]
-#                 elif data.shape[0] == 3:
-#                     data = transpose(data, (1, 2, 0))
-#                 multiscale_image.append(data)
-#             return multiscale_image, axes
-
-#     xd = InSituData(Path("./data1"), {"metadata_file": "meta.txt", "xenium":{"pixel_size": pixel_size}}, "", "", "")
-#     path = Path(spatialdata_path)
-#     f = zarr.open(path, mode="r")
-#     bd = BoundariesData(None, None)
-
-
-#     if "labels" in f:
-#         group = f["labels"]
-#         boundaries_dict = {}
-#         for name in group:
-#             if Path(name).name.startswith("."):
-#                 continue
-#             f_elem = group[name]
-#             f_elem_store = os.path.join(f.store.path, f_elem.path)
-#             image, axes = read_helper_images_labels(f_elem_store, "labels")
-#             boundaries_dict[name] = image[0]
-#         bd.add_boundaries(boundaries_dict, pixel_size=pixel_size)
-
-#     if "tables" in f:
-#         group = f["tables"]
-#         i = 0
-#         for name in group:
-#             f_elem = group[name]
-#             f_elem_store = os.path.join(f.store.path, f_elem.path)
-#             cdata = CellData(read_zarr(f_elem_store), bd)
-#             if len(group) == 1 or i == 0:
-#                 setattr(xd, "cells", cdata)
-#             else:
-#                 xd.add_alt(cdata, key_to_add=name)
-#             i += 1
-
-#     if "points" in f:
-#         group = f["points"]
-#         for name in group:
-#             if name == "transcripts":
-#                 f_elem = group[name]
-#                 f_elem_store = os.path.join(f.store.path, f_elem.path)
-#                 points = read_parquet(f_elem_store)
-#                 pdf = points.compute()
-
-#                 # Rename columns to match the new structure
-#                 pdf = pdf.rename(columns={
-#                     'x': 'x',
-#                     'y': 'y',
-#                     'z': 'z',
-#                     'feature_name': 'gene',
-#                     'qv': 'qv',
-#                     'overlaps_nucleus': 'overlaps_nucleus',
-#                     'cell_id': 'xenium',
-#                     'transcript_id': 'transcript_id'
-#                 })
-
-#                 # Reorder columns to match the new structure
-#                 pdf = pdf[['x', 'y', 'z', 'gene', 'qv', 'overlaps_nucleus', 'xenium', 'transcript_id']]
-
-#                 # Set 'transcript_id' as the index
-#                 pdf = pdf.set_index('transcript_id')
-
-#                 # Set the MultiIndex for columns
-#                 pdf.columns = pd.MultiIndex.from_tuples([
-#                     ('coordinates', 'x'),
-#                     ('coordinates', 'y'),
-#                     ('coordinates', 'z'),
-#                     ('properties', 'gene'),
-#                     ('properties', 'qv'),
-#                     ('properties', 'overlaps_nucleus'),
-#                     ('cell_id', 'xenium')
-#                 ])
-#                 setattr(xd, "transcripts", pdf)
-#     if "images" in f:
-#         group = f["images"]
-#         setattr(xd, "images", ImageData())
-#         for name in group:
-#             if Path(name).name.startswith("."):
-#                 continue
-#             f_elem = group[name]
-#             f_elem_store = os.path.join(f.store.path, f_elem.path)
-#             image, axes = read_helper_images_labels(f_elem_store, "image")
-#             xd.images.add_image(image[0], name=name, axes=axes, pixel_size=pixel_size, ome_meta={'PhysicalSizeX': pixel_size})
-#     return xd

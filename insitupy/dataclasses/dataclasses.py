@@ -35,11 +35,12 @@ from insitupy.utils.utils import convert_to_list, decode_robust_series
 if WITH_NAPARI:
     from napari.utils.notifications import show_info, show_warning
 
+
+
 class ShapesData(DeepCopyMixin):
     '''
     Object to store annotations.
     '''
-    # default_skip_multipolygons = False
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -48,12 +49,10 @@ class ShapesData(DeepCopyMixin):
                  polygons_only: bool = False,
                  forbidden_names: Optional[List[str]] = None,
                  shape_name: Optional[str] = None,
-                 #repr_color = tf.Cyan
                  ) -> None:
         self._shape_name = shape_name if shape_name is not None else "shapes"
 
         # add hidden variables
-        self._metadata = {} # dictionary for metadata
         self._data = {}
         self._assert_uniqueness = assert_uniqueness
         self._polygons_only = polygons_only
@@ -77,16 +76,12 @@ class ShapesData(DeepCopyMixin):
                                   )
 
     def __repr__(self):
-        if len(self._metadata) > 0:
+        if len(self._data) > 0:
             repr_strings = []
-            for l, m in self._metadata.items():
-                # add ' to classes
-                # classes = [f"'{elem}'" for elem in m["classes"]]
-                # lc = len(classes)
-
+            for l, m in self.metadata.items():
                 # get metadata
-                n = len(self._data[l]) # get number of entries
-                classes = sorted(self._data[l]["name"].unique())
+                n = m[f"n_{self._shape_name}"]
+                classes = m["classes"]
                 classes_str = [f"'{elem}'" for elem in classes]
                 lc = len(classes)
 
@@ -97,7 +92,7 @@ class ShapesData(DeepCopyMixin):
                     f'{"classes" if lc>1 else "class"} '
                 )
                 if lc < 10:
-                    r += f'({", ".join(classes_str)}) {m["analyzed"]}'
+                    r += f'({", ".join(classes_str)})'
                 repr_strings.append(r)
 
             s = "\n".join(repr_strings)
@@ -114,17 +109,18 @@ class ShapesData(DeepCopyMixin):
 
     @property
     def metadata(self):
-        return self._metadata
+        """Compute metadata on-demand from current data state."""
+        meta = {}
+        for key, df in self._data.items():
+            meta[key] = {
+                f"n_{self._shape_name}": len(df),
+                "classes": sorted(df['name'].unique().tolist()) if 'name' in df.columns else ["unnamed"],
+            }
+        return meta
 
     @property
     def is_empty(self):
         return len(self._data) == 0
-
-    @metadata.setter
-    def metadata(self, value: dict):
-        if not isinstance(value, dict):
-            raise ValueError(f'The metadata attribute must be a dictionary.')
-        self._metadata = value
 
     def _check_uniqueness(self,
                           dataframe: Optional[gpd.GeoDataFrame] = None,
@@ -151,34 +147,6 @@ class ShapesData(DeepCopyMixin):
             if verbose:
                 print(f"Names of {self._shape_name} for key '{key}' are unique.")
             return True
-
-    def _update_metadata(self,
-                         keys: Union[str, Literal["all"]] = "all",
-                         analyzed: bool = False,
-                         verbose: bool = False
-                         ):
-
-        if keys == "all":
-            keys = list(self._metadata.keys())
-
-        keys = convert_to_list(keys)
-        keys_to_remove = []
-        for key in keys:
-            if self[key] is None:
-                self._metadata.pop(key)
-                if verbose:
-                    print(f'Removed {key}', flush=True)
-            else:
-                annot_df = self[key]
-                # record metadata information
-                self._metadata[key][f"n_{self._shape_name}"] = len(annot_df)  # number of annotations
-
-                try:
-                    self._metadata[key]["classes"] = annot_df['name'].unique().tolist()  # annotation classes
-                except KeyError:
-                    self._metadata[key]["classes"] = ["unnamed"]
-
-                self._metadata[key]["analyzed"] = tf.Tick if analyzed else ""  # whether this annotation has been used in the annotate() function
 
     def add_data(self,
                  data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
@@ -222,15 +190,12 @@ class ShapesData(DeepCopyMixin):
                     layer_types.append("Shapes")
             new_df["layer_type"] = layer_types
 
-            # # convert pixel coordinates to metric units
-            # new_df["geometry"] = new_df.geometry.scale(origin=(0,0), xfact=pixel_size, yfact=pixel_size)
-
             if key not in self._data.keys():
                 # if key does not exist yet, the new df is the whole annotation dataframe
                 annot_df = new_df
 
                 # collect additional variables for reporting
-                new_geometries_added = True # dataframe will be added later
+                new_geometries_added = True
                 existing_str = ""
                 old_n = 0
                 new_n = len(annot_df)
@@ -242,7 +207,7 @@ class ShapesData(DeepCopyMixin):
 
                 # remove all duplicated shapes - leaving only the newly added
                 dup_mask = annot_df.index.duplicated(keep="last")
-                annot_df = annot_df[~dup_mask] # filter out duplicates
+                annot_df = annot_df[~dup_mask]
                 new_n = len(annot_df)
 
                 # collect additional variables for reporting
@@ -251,11 +216,11 @@ class ShapesData(DeepCopyMixin):
 
             if new_geometries_added:
                 if self._assert_uniqueness:
-                    # check if the shapes data for this key is unique (same number of names than indices)
+                    # check if the shapes data for this key is unique
                     is_unique = self._check_uniqueness(dataframe=annot_df, key=key, verbose=False)
 
                     if not is_unique:
-                        add = False
+                        return
 
                 if self._polygons_only:
                     # check if any of the shapes are not shapely Polygons
@@ -266,14 +231,8 @@ class ShapesData(DeepCopyMixin):
 
             # check that the dataframe is not empty
             if len(annot_df) > 0:
-                # add dataframe to AnnotationData object
+                # add dataframe to ShapesData object
                 self._data[key] = annot_df
-
-                # add new entry to metadata
-                self._metadata[key] = {}
-
-                # update metadata
-                self._update_metadata(keys=key, analyzed=False)
 
                 if verbose:
                     # report
@@ -309,9 +268,9 @@ class ShapesData(DeepCopyMixin):
                 if verbose:
                     warnings.warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
-        new_metadata = {}
-        for i, n in enumerate(_self._metadata.keys()):
-            shapesdf = _self[n]
+        keys_to_remove = []
+        for key in list(_self._data.keys()):
+            shapesdf = _self[key]
 
             # select annotations that intersect with the selected area
             mask = [shape.intersects(elem) for elem in shapesdf["geometry"]]
@@ -323,21 +282,14 @@ class ShapesData(DeepCopyMixin):
             # check if there are annotations left or if it has to be deleted
             if len(shapesdf) > 0:
                 # add new dataframe back to annotations object
-                _self._data[n] = shapesdf
-
-                # update metadata
-                new_metadata[n] = {}
-                new_metadata[n][f"n_{_self._shape_name}"] = len(shapesdf)
-                new_metadata[n]["classes"] = shapesdf.name.unique().tolist()
-                new_metadata[n]["analyzed"] = _self._metadata[n]["analyzed"]  # analyzed information is just copied
-
+                _self._data[key] = shapesdf
             else:
-                # delete annotations
-                del _self._data[n]
+                # mark for deletion
+                keys_to_remove.append(key)
 
-        _self._metadata = new_metadata
-
-        _self._update_metadata()
+        # delete empty keys
+        for key in keys_to_remove:
+            del _self._data[key]
 
         if not inplace:
             return _self
@@ -353,16 +305,12 @@ class ShapesData(DeepCopyMixin):
         if classes_to_remove == "all":
             try:
                 del self._data[key_to_remove]
-                self.metadata.pop(key_to_remove, None)
             except KeyError:
                 print(f"Key '{key_to_remove}' not found in ShapesData object. Nothing to remove.")
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
             geom_df = self[key_to_remove]
             self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
-            self.metadata[key_to_remove]['classes'] = [c for c in self.metadata[key_to_remove]['classes'] if c not in classes_to_remove]
-
-        self._update_metadata()
 
     def save(self,
              path: Union[str, os.PathLike, Path],
@@ -376,25 +324,16 @@ class ShapesData(DeepCopyMixin):
         # create directory
         path.mkdir(parents=True, exist_ok=True)
 
-        # # create path for matrix
-        # annot_path = (path / self.shape_name)
-        # annot_path.mkdir(parents=True, exist_ok=True) # create directory
-
-        # if metadata is not None:
-        #     metadata["annotations"] = {}
-        for n in self._metadata.keys():
-            df = self[n]
-            # annot_file = annot_path / f"{n}.parquet"
-            # annot_df.to_parquet(annot_file)
-            shapes_file = path / f"{n}.geojson"
+        # save each shape layer as geojson
+        for key in self.keys():
+            df = self[key]
+            shapes_file = path / f"{key}.geojson"
             write_qupath_geojson(dataframe=df, file=shapes_file)
 
-            # if metadata is not None:
-            #     metadata["annotations"][n] = Path(relpath(annot_file, path)).as_posix()
+        # # save metadata
+        # shape_meta_path = path / f"metadata.json"
+        # write_dict_to_json(dictionary=self.metadata, file=shape_meta_path)
 
-        # save AnnotationData metadata
-        shape_meta_path = path / f"metadata.json"
-        write_dict_to_json(dictionary=self._metadata, file=shape_meta_path)
 
 class AnnotationsData(ShapesData):
     def __init__(self,
@@ -413,6 +352,7 @@ class AnnotationsData(ShapesData):
             forbidden_names=FORBIDDEN_ANNOTATION_NAMES,
             shape_name="annotations",
             )
+
 
 class RegionsData(ShapesData):
     def __init__(self,
@@ -1239,18 +1179,15 @@ class ImageData(DeepCopyMixin):
     Object to read and load images.
     '''
     def __init__(self,
-                 #path: Union[str, os.PathLike, Path] = None,
                  img_files: List[str] = None,
                  img_names: List[str] = None,
                  pixel_size: float = None,
                  ):
-        # # add path to object
-        # self.path = path
 
         # iterate through files and load them
         self._names = []
         self._metadata = {}
-        self._data = dict()
+        self._data = {}
 
         if img_files is not None:
             # convert arguments to lists

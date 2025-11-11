@@ -179,7 +179,7 @@ if WITH_NAPARI:
                 masks = []
                 boundaries = self.data.cells[self.data_name].boundaries
 
-                for n in boundaries.metadata.keys():
+                for n in boundaries._data.keys():
                     b = boundaries[n]
                     if b is not None:
                         if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
@@ -189,7 +189,7 @@ if WITH_NAPARI:
 
         def _get_pixel_size(self):
             if not self.data.images.is_empty:
-                first_key = list(self.data.images.metadata.keys())[0]
+                first_key = list(self.data.images._data.keys())[0]
                 return self.data.images.metadata[first_key]["pixel_size"]
             return None
 
