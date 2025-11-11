@@ -76,6 +76,8 @@ class DiffExprConfigCollector:
         for section, values in config.items():
             lines.append(f"  {section}:")
             for key, value in values.items():
+                if isinstance(value, dict):
+                    value = f"Dictionary with following keys: {value.keys()}"
                 lines.append(f"    {key}: {value}")
         lines.append(")")
         return "\n".join(lines)

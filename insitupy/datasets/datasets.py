@@ -429,7 +429,7 @@ def human_lymph_node(
     # if necessary download data
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -451,7 +451,7 @@ def xenium_test_dataset_v2_mm(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 
@@ -469,7 +469,7 @@ def xenium_test_dataset_v2_nucex(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 
@@ -487,7 +487,7 @@ def xenium_test_dataset_v3_mm(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 
@@ -505,7 +505,7 @@ def xenium_test_dataset_v3_nucex(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 
@@ -523,7 +523,7 @@ def xenium_test_dataset_v4_nucex(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 # xenium onboard analysis 4.0.0
@@ -540,7 +540,7 @@ def xenium_test_dataset_v4_mm(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
 
 
@@ -558,5 +558,5 @@ def xenium_test_dataset_v4_protein(
 
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
     return data
