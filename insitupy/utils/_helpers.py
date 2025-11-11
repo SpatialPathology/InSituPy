@@ -5,7 +5,9 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 from shapely import MultiPolygon, Polygon
-
+import contextlib
+import os
+import sys
 
 def _get_expression_values(adata, X, key_type, key):
     # get expression values
@@ -100,3 +102,19 @@ def sort_paths_by_datetime(paths):
         return datetime.strptime(full_dt_str, "%y%m%d%H%M%S%f")
 
     return sorted(paths, key=extract_datetime, reverse=True)
+
+
+
+
+@contextlib.contextmanager
+def suppress_output():
+    with open(os.devnull, 'w') as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        try:
+            sys.stdout = devnull
+            sys.stderr = devnull
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr

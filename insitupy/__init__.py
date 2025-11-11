@@ -1,6 +1,6 @@
 __author__ = "Johannes Wirth"
 __email__ = "j.wirth@tum.de"
-__version__ = "0.9.2"
+__version__ = "0.10.1"
 
 # check if napari is available
 try:
@@ -47,3 +47,14 @@ __all__ = [
     "tl",
     "utils"
 ]
+
+# configure warnings
+import logging
+
+logger = logging.getLogger('insitupy')
+logger.setLevel(logging.WARNING)
+logger.propagate = False
+
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+logger.addHandler(handler)

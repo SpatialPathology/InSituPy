@@ -1,437 +1,367 @@
-"""
-Functions in this module were adapted from the decoupler package v1.9.0 (https://github.com/scverse/decoupler):
-Badia-i-Mompel P., Vélez Santiago J., Braunger J., Geiss C., Dimitrov D., Müller-Dott S.,
-Taus P., Dugourd A., Holland C.H., Ramirez Flores R.O. and Saez-Rodriguez J. 2022.
-decoupleR: Ensemble of computational methods to infer biological activities from omics data.
-Bioinformatics Advances. https://doi.org/10.1093/bioadv/vbac016
+from typing import Optional, Tuple
 
-"""
-
-
-from typing import Literal, Optional
-
+import anndata as ad
+import decoupler as dc
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
+import scanpy as sc
 from anndata import AnnData
-from scipy.sparse import csr_matrix, issparse, vstack
 
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.experiment.data import InSituExperiment
+from insitupy.dataclasses.results import (DiffExprConfigCollector,
+                                          DiffExprResults)
+from insitupy.utils._helpers import suppress_output
 
 
-def psbulk_profile(profile, mode='sum'):
-    if mode == 'sum':
-        profile = np.sum(profile, axis=0)
-    elif mode == 'mean':
-        profile = np.mean(profile, axis=0)
-    elif mode == 'median':
-        profile = np.median(profile, axis=0)
-    elif callable(mode):
-        profile = np.apply_along_axis(mode, 0, profile)
+def _obs_qc_plot(
+    pdata,
+    pdata_nb,
+    celltype_col,
+    condition_str
+):
+    if pdata_nb is not None:
+        data_list = [pdata, pdata_nb]
+        data_names = ["Pseudobulk of cells", "Pseudobulk of neighborhood"]
     else:
-        raise ValueError("""mode={0} can be 'sum', 'mean', 'median' or a callable function.""".format(mode))
-    return profile
+        data_list = [pdata]
+        data_names = ["Pseudobulk of cells"]
 
-def extract_psbulk_inputs(
-    exp: InSituExperiment,
-    cells_layer: str,
-    layer: str
+    groups = [celltype_col, condition_str]
+    ncols = len(groups)
+    nrows = len(data_list)
+    fig, axs = plt.subplots(ncols=ncols, nrows=nrows, figsize=(6*ncols, 4*nrows))
+
+    for r, d in enumerate(data_list):
+        for c, g in enumerate(groups):
+            dc.pl.filter_samples(
+                adata=d,
+                groupby=g,
+                min_cells=10,
+                min_counts=1000,
+                ax=axs[r,c]
+            )
+
+            axs[r,c].set_title(f"{data_names[r]}")
+
+    plt.tight_layout()
+    plt.show()
+
+def _feature_qc_plot(
+    pdata_ct,
+    condition_str
+):
+    fig, axs = plt.subplots(1,2, figsize=(8*2, 6))
+    dc.pl.filter_by_expr(
+        adata=pdata_ct,
+        group=condition_str,
+        min_count=10,
+        min_total_count=15,
+        large_n=10,
+        min_prop=0.7,
+        ax=axs[0]
+    )
+    dc.pl.filter_by_prop(
+        adata=pdata_ct,
+        min_prop=0.1,
+        min_smpls=2,
+        ax=axs[1]
+    )
+    plt.show()
+
+def _preprocess_psbulk_data(adata):
+    # Store raw counts in layers
+    adata.layers["counts"] = adata.X.copy()
+
+    # Normalize, scale and compute pca
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    sc.pp.scale(adata, max_value=10)
+    sc.tl.pca(adata)
+
+    # Return raw counts to X
+    dc.pp.swap_layer(adata=adata, key="counts", inplace=True)
+
+    return adata
+
+def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
+    try:
+        from pydeseq2.dds import DefaultInference, DeseqDataSet
+        from pydeseq2.ds import DeseqStats
+    except ImportError:
+        raise ImportError(
+            "The package `pydeseq2` is not installed but is required for pseudobulk differential gene expression analysis.\n"
+            "Please install it via `pip install pydeseq2`."
+        )
+
+    with suppress_output():
+        # Build DESeq2 object
+        inference = DefaultInference(n_cpus=8)
+        dds = DeseqDataSet(
+            adata=adata,
+            design=f"~{dge_setup[0]}",
+            refit_cooks=True,
+            inference=inference,
+        )
+
+        # Compute LFCs
+        dds.deseq2()
+
+        # Extract contrast between conditions
+        stat_res = DeseqStats(dds, contrast=dge_setup, inference=inference)
+
+        # Compute Wald test
+        stat_res.summary()
+
+    if return_params:
+        params = extract_all_params(ds=stat_res, dds=dds)
+        return stat_res, params
+    else:
+        return stat_res
+
+def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
+    # do filtering of pseudobulk samples
+    before = pdata.shape[0]
+    dc.pp.filter_samples(pdata, min_cells=min_cells, min_counts=min_counts)
+    after = pdata.shape[0]
+
+    if verbose:
+        print(f"Filtered pseudobulk samples: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
+
+def _verbose_filter_features(
+    pdata: AnnData,
+    condition_str: str,
+    verbose: bool = True
     ):
+    before = pdata.shape[1]
+    # do filtering of features
+    dc.pp.filter_by_expr(
+        adata=pdata,
+        group=condition_str,
+        min_count=10,
+        min_total_count=15,
+        large_n=10,
+        min_prop=0.7,
+    )
+    dc.pp.filter_by_prop(
+        adata=pdata,
+        min_prop=0.1,
+        min_smpls=2,
+    )
+    after = pdata.shape[1]
 
-    obs_columns_list = []
-    for _, data in exp.iterdata():
-        celldata = _get_cell_layer(
-            cells=data.cells,
-            cells_layer=cells_layer
-        )
-        obs_columns_list.append(set(celldata.matrix.obs.columns))
+    if verbose:
+        print(f"Filtered features: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
 
-    common_obs_columns = sorted(set.intersection(*obs_columns_list))
 
-    obs = pd.DataFrame()
-    #obs = {}
-
-    # for c in common_obs_columns:
-    #     column_dict={}
-    #     for metadata, data in exp.iterdata():
-    #         celldata = _get_cell_layer(
-    #             cells=data.cells,
-    #             cells_layer=cells_layer
-    #     )
-    #         column_dict[metadata["uid"]] = celldata.matrix.obs[c].copy()
-
-    #     column=pd.concat([
-    #         s.reset_index(drop=True) for s in column_dict.values()],
-    #                      axis=0)
-    #     obs[c]=column
-
-    obs_per_data = {}
-    for metadata, data in exp.iterdata():
-        celldata = _get_cell_layer(
-            cells=data.cells,
-            cells_layer=cells_layer
-        )
-
-        obs_per_data[metadata["uid"]] = celldata.matrix.obs[common_obs_columns]
-
-    obs = pd.concat(obs_per_data).reset_index(level=0, names="batch")
-
-    var_names = []
-    for _, data in exp.iterdata():
-        celldata = _get_cell_layer(
-                    cells=data.cells,
-                    cells_layer=cells_layer
-                )
-        var_names.append(set(celldata.matrix.var_names))
-
-    common_var_names = sorted(set.intersection(*var_names))
-
-    var = pd.DataFrame({"genes": common_var_names})
-
-        # Extract count matrix X
-    X_list=[]
-    for metadata, data in exp.iterdata():
-            celldata = _get_cell_layer(
-                        cells=data.cells,
-                        cells_layer=cells_layer
-                    )
-            ad = celldata.matrix
-            ad = ad[:, ad.var_names.isin(common_var_names)]
-            if layer is not None:
-                X_list.append(ad.layers[layer])
-            else:
-                X_list.append(ad.X)
-    X = vstack(X_list)
-
-    # Sort genes
-    msk = np.argsort(var["genes"])
-
-    X = X[:, msk]
-    var = var.iloc[msk]
-    var.set_index('genes', inplace=True)
-
-    if issparse(X) and not isinstance(X, csr_matrix):
-        X = csr_matrix(X)
-
-    return X, obs, var
-
-def format_psbulk_inputs(sample_col, groups_col, obs):
-    # Use one column if the same
-    if sample_col == groups_col:
-        groups_col = None
-
-    if groups_col is None:
-        # Filter extra columns in obs
-        cols = obs.groupby(sample_col, observed=True).nunique(dropna=False).eq(1).all(0)
-        cols = np.hstack([sample_col, cols[cols].index])
-        obs = obs.loc[:, cols]
-
-        # Get unique samples
-        smples = np.unique(obs[sample_col].values)
-        groups = None
-
-        # Get number of samples and features
-        n_rows = len(smples)
-    else:
-        # Check if extra grouping is needed
-        if type(groups_col) is list:
-            obs = obs.copy()
-            joined_cols = '_'.join(groups_col)
-            obs[joined_cols] = obs[groups_col[0]].str.cat(obs[groups_col[1:]].astype('U'), sep='_')
-            groups_col = joined_cols
-
-        # Filter extra columns in obs
-        cols = obs.groupby([sample_col, groups_col], observed=True).nunique(dropna=False).eq(1).all(0)
-        cols = np.hstack([sample_col, groups_col, cols[cols].index])
-        obs = obs.loc[:, cols]
-
-        # Get unique samples and groups
-        smples = np.unique(obs[sample_col].values)
-        groups = np.unique(obs[groups_col].values)
-
-        # Get number of samples and features
-        n_rows = len(smples) * len(groups)
-
-    return obs, groups_col, smples, groups, n_rows
-def psbulk_profile(profile, mode='sum'):
-    if mode == 'sum':
-        profile = np.sum(profile, axis=0)
-    elif mode == 'mean':
-        profile = np.mean(profile, axis=0)
-    elif mode == 'median':
-        profile = np.median(profile, axis=0)
-    elif callable(mode):
-        profile = np.apply_along_axis(mode, 0, profile)
-    else:
-        raise ValueError("""mode={0} can be 'sum', 'mean', 'median' or a callable function.""".format(mode))
-    return profile
-
-def compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                   new_obs, min_cells, min_counts, mode, dtype):
-
-    # Init empty variables
-    psbulk = np.zeros((n_rows, n_cols))
-    props = np.zeros((n_rows, n_cols))
-    ncells = np.zeros(n_rows)
-    counts = np.zeros(n_rows)
-
-    # Iterate for each group and sample
-    i = 0
-    if groups_col is None:
-        for smp in smples:
-            # Write new meta-data
-            tmp = obs[obs[sample_col] == smp].drop_duplicates().values
-            new_obs.loc[smp, :] = tmp
-
-            # Get cells from specific sample
-            profile = X[(obs[sample_col] == smp).values]
-            if isinstance(X, csr_matrix):
-                profile = profile.toarray()
-
-            # Skip if few cells or not enough counts
-            ncell = profile.shape[0]
-            count = np.sum(profile)
-            ncells[i] = ncell
-            counts[i] = count
-            if ncell < min_cells or np.abs(count) < min_counts:
-                i += 1
-                continue
-
-            # Get prop of non zeros
-            prop = np.sum(profile != 0, axis=0) / profile.shape[0]
-
-            # Pseudo-bulk
-            profile = psbulk_profile(profile, mode=mode)
-
-            # Append
-            props[i] = prop
-            psbulk[i] = profile
-            i += 1
-    else:
-        for grp in groups:
-            for smp in smples:
-                # Write new meta-data
-                index = smp + '-' + grp
-                tmp = obs[(obs[sample_col] == smp) & (obs[groups_col] == grp)].drop_duplicates().values
-                if tmp.shape[0] == 0:
-                    tmp = np.full(tmp.shape[1], np.nan)
-                new_obs.loc[index, :] = tmp
-
-                # Get cells from specific sample and group
-                profile = X[((obs[sample_col] == smp) & (obs[groups_col] == grp)).values]
-                if isinstance(X, csr_matrix):
-                    profile = profile.toarray()
-
-                # Skip if few cells or not enough counts
-                ncell = profile.shape[0]
-                count = np.sum(profile)
-                ncells[i] = ncell
-                counts[i] = count
-                if ncell < min_cells or np.abs(count) < min_counts:
-                    i += 1
-                    continue
-
-                # Get prop of non zeros
-                prop = np.sum(profile != 0, axis=0) / profile.shape[0]
-
-                # Pseudo-bulk
-                profile = psbulk_profile(profile, mode=mode)
-
-                # Append
-                props[i] = prop
-                psbulk[i] = profile
-                i += 1
-
-    return psbulk, ncells, counts, props
-
-def filter_by_prop(adata, min_prop=0.2, min_smpls=2):
-    """
-    Determine which genes are expressed in a sufficient proportion of cells across samples.
-
-    This function selects genes that are sufficiently expressed across cells in each sample and that this condition is
-    met across a minimum number of samples.
-
-    Parameters
-    ----------
-    adata : AnnData
-        AnnData obtained after running ``decoupler.get_pseudobulk``. It requires ``.layer['psbulk_props']``.
-    min_prop : float
-        Minimum proportion of cells that express a gene in a sample.
-    min_smpls : int
-        Minimum number of samples with bigger or equal proportion of cells with expression than ``min_prop``.
-
-    Returns
-    -------
-    genes : ndarray
-        List of genes to be kept.
-    """
-
-    # Define limits
-    min_prop = np.clip(min_prop, 0, 1)
-    min_smpls = np.clip(min_smpls, 0, adata.shape[0])
-
-    if isinstance(adata, AnnData):
-        layer_keys = adata.layers.keys()
-        if 'psbulk_props' in list(layer_keys):
-            var_names = adata.var_names.values.astype('U')
-            props = adata.layers['psbulk_props']
-            if isinstance(props, pd.DataFrame):
-                props = props.values
-
-            # Compute n_smpl
-            nsmpls = np.sum(props >= min_prop, axis=0)
-
-            # Set features to 0
-            msk = nsmpls >= min_smpls
-            genes = var_names[msk]
-            return genes
-    raise ValueError("""adata must be an AnnData object that contains the layer 'psbulk_props'. Please check the function
-                     decoupler.get_pseudobulk.""")
-
-def swap_layer(adata, layer_key, X_layer_key='X', inplace=False):
-    """
-    Swaps an ``adata.X`` for a given layer.
-
-    Swaps an AnnData ``X`` matrix with a given layer. Generates a new object by default.
-
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix.
-    layer_key : str
-        ``.layers`` key to place in ``.X``.
-    X_layer_key : str, None
-        ``.layers`` key where to move and store the original ``.X``. If None, the original ``.X`` is discarded.
-    inplace : bool
-        If ``False``, return a copy. Otherwise, do operation inplace and return ``None``.
-
-    Returns
-    -------
-    layer : AnnData, None
-        If ``inplace=False``, new AnnData object.
-    """
-
-    cdata = None
-    if inplace:
-        if X_layer_key is not None:
-            adata.layers[X_layer_key] = adata.X
-        adata.X = adata.layers[layer_key]
-    else:
-        cdata = adata.copy()
-        if X_layer_key is not None:
-            cdata.layers[X_layer_key] = cdata.X
-        cdata.X = cdata.layers[layer_key]
-
-    return cdata
-def check_X(X, mode='sum', skip_checks=False):
-    if isinstance(X, csr_matrix):
-        is_finite = np.all(np.isfinite(X.data))
-    else:
-        is_finite = np.all(np.isfinite(X))
-    if not is_finite:
-        raise ValueError('Data contains non finite values (nan or inf), please set them to 0 or remove them.')
-    skip_checks = type(mode) is dict or callable(mode) or skip_checks
-    if not skip_checks:
-        if isinstance(X, csr_matrix):
-            is_positive = np.all(X.data >= 0)
-        else:
-            is_positive = np.all(X >= 0)
-        if not is_positive:
-            raise ValueError("""Data contains negative values. Check the parameters use_raw and layers to
-            determine if you are selecting the correct matrix. To override this, set skip_checks=True.
-            """)
-        if mode == 'sum':
-            if isinstance(X, csr_matrix):
-                is_integer = float(np.sum(X.data)).is_integer()
-            else:
-                is_integer = float(np.sum(X)).is_integer()
-            if not is_integer:
-                raise ValueError("""Data contains float (decimal) values. Check the parameters use_raw and layers to
-                determine if you are selecting the correct data, which should be positive integer counts when mode='sum'.
-                To override this, set skip_checks=True.
-                """)
-def generate_pseudobulk(
-    exp,
-    sample_col: str,
-    groups_col: str,
-    cells_layer: Optional[str] = None,
-    counts_layer: str = "counts",
-    # use_raw: bool = False,
-    mode: Literal["sum", "mean", "median"] = "sum",
+def pseudobulk_dge(
+    pdata,
+    dge_setup: Tuple[str, str, str],
+    celltype_col: str,
+    celltype: str,
+    pdata_nb: Optional[AnnData] = None,
+    plot_qc: bool = True,
     min_cells: int = 10,
     min_counts: int = 1000,
-    dtype = np.float32,
-    skip_checks: bool = False,
-    min_prop=None,
-    min_smpls=None,
-    remove_empty=True
+    verbose: bool = True
     ):
+    """Perform pseudobulk differential gene expression analysis.
 
-    min_cells, min_counts = np.clip(min_cells, 1, None), np.clip(min_counts, 1, None)
+    Args:
+        pdata: AnnData object containing pseudobulk data with observations and expression counts.
+        dge_setup: Tuple of (condition_column_name, target_condition, reference_condition)
+            specifying the column name for conditions and the two conditions to compare.
+        celltype_col: Column name in pdata.obs containing cell type annotations.
+        celltype: Specific cell type to analyze.
+        pdata_nb: Optional AnnData object containing neighborhood data for comparison.
+        plot_qc: Whether to generate QC plots for sample and feature filtering.
+        min_cells: Minimum number of cells required per pseudobulk sample.
+        min_counts: Minimum total counts required per pseudobulk sample.
+        verbose: Whether to print filtering information.
 
-    X, obs, var = extract_psbulk_inputs(
-        exp=exp,
-        cells_layer=cells_layer,
-        layer=counts_layer
+    Returns:
+        DiffExprResults: Object containing main differential expression results, configuration,
+            and optional neighborhood comparison results.
+
+    Raises:
+        ValueError: If dge_setup parameters are not found in pdata.obs columns or values.
+    """
+    # Validate dge_setup parameters
+    condition_col, target_cond, ref_cond = dge_setup
+
+    if condition_col not in pdata.obs.columns:
+        raise ValueError(f"Condition column '{condition_col}' not found in pdata.obs")
+
+    available_conditions = pdata.obs[condition_col].unique()
+    if target_cond not in available_conditions:
+        raise ValueError(f"Target condition '{target_cond}' not found in pdata.obs['{condition_col}']. "
+                        f"Available: {list(available_conditions)}")
+
+    if ref_cond not in available_conditions:
+        raise ValueError(f"Reference condition '{ref_cond}' not found in pdata.obs['{condition_col}']. "
+                        f"Available: {list(available_conditions)}")
+
+    if plot_qc:
+        # plot QC
+        print("Sample filtering QC:", flush=True)
+        _obs_qc_plot(
+            pdata=pdata, pdata_nb=pdata_nb,
+            celltype_col=celltype_col,
+            condition_str=dge_setup[0]
         )
 
-    check_X(X, mode=mode, skip_checks=skip_checks)
+    # do filtering of pseudobulk samples
+    _verbose_filter_samples(pdata, min_cells, min_counts, verbose)
 
-    obs, groups_col, smples, groups, n_rows = format_psbulk_inputs(
-        sample_col, groups_col, obs
-        )
+    if pdata_nb is not None:
+        _verbose_filter_samples(pdata_nb, min_cells, min_counts, verbose)
 
-    n_cols = X.shape[1]
-    new_obs = pd.DataFrame(columns=obs.columns)
+    # select cell type
+    pdata_ct = pdata[pdata.obs[celltype_col] == celltype, :].copy()
 
-    if type(mode) is dict:
-        psbulks = []
-        for l_name in mode:
-            func = mode[l_name]
-            if not callable(func):
-                raise ValueError("""mode requieres a dictionary of layer names and callable functions. The layer {0} does not
-                contain one.""".format(l_name))
-            else:
-                # Compute psbulk
-                psbulk, ncells, counts, props = compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                                                               new_obs, min_cells, min_counts, func, dtype)
-                psbulks.append(psbulk)
-        layers = {k: v for k, v in zip(mode.keys(), psbulks)}
-        layers['psbulk_props'] = props
-    elif type(mode) is str or callable(mode):
-        # Compute psbulk
-        psbulk, ncells, counts, props = compute_psbulk(n_rows, n_cols, X, sample_col, groups_col, smples, groups, obs,
-                                                       new_obs, min_cells, min_counts, mode, dtype)
-        layers = {'psbulk_props': props}
+    if pdata_nb is not None:
+        pdata_ct_nb = pdata_nb[pdata_nb.obs[celltype_col] == celltype, :].copy()
 
-    # Add QC metrics
-    new_obs['psbulk_cells'] = ncells
-    new_obs['psbulk_counts'] = counts
+    if plot_qc:
+        # plot feature QC
+        print("Feature filtering QC:", flush=True)
+        _feature_qc_plot(pdata_ct, condition_str=dge_setup[0])
 
-    # Create new AnnData
-    psbulk = AnnData(psbulk.astype(dtype), obs=new_obs, var=var, layers=layers)
+    _verbose_filter_features(
+        pdata=pdata_ct,
+        condition_str=dge_setup[0],
+        verbose=verbose)
 
-    # Remove empty samples and features
-    if remove_empty:
-        msk = psbulk.X == 0
-        psbulk = psbulk[~np.all(msk, axis=1), ~np.all(msk, axis=0)].copy()
+    if pdata_nb is not None:
+        pdata_ct_nb = pdata_ct_nb[:, pdata_ct_nb.var_names.isin(pdata_ct.var_names)].copy()
 
-    # Place first element of mode dict as X
-    if type(mode) is dict:
-        swap_layer(psbulk, layer_key=list(mode.keys())[0], X_layer_key=None, inplace=True)
+    # do preprocessing
+    pdata_ct = _preprocess_psbulk_data(pdata_ct)
 
-    # Filter by genes if not None.
-    if min_prop is not None and min_smpls is not None:
-        if groups_col is None:
-            genes = filter_by_prop(psbulk, min_prop=min_prop, min_smpls=min_smpls)
-        else:
-            genes = []
-            for group in groups:
-                g = filter_by_prop(psbulk[psbulk.obs[groups_col] == group], min_prop=min_prop, min_smpls=min_smpls)
-                genes.extend(g)
-            genes = np.unique(genes)
-        psbulk = psbulk[:, genes]
+    if pdata_nb is not None:
+        pdata_ct_nb = _preprocess_psbulk_data(pdata_ct_nb)
 
-    return psbulk
+    # prepare data for differential gene expression analysis
+    pdata_ct.obs["obs_type"] = "cells"
+
+    if pdata_nb is not None:
+        pdata_first_condition = ad.concat({
+            "cells": pdata_ct[pdata_ct.obs[dge_setup[0]] == dge_setup[1]],
+            "neighbors": pdata_ct_nb[pdata_ct_nb.obs[dge_setup[0]] == dge_setup[1]],
+        }, label="obs_type")
+
+        pdata_second_condition = ad.concat({
+            "cells": pdata_ct[pdata_ct.obs[dge_setup[0]] == dge_setup[2]],
+            "neighbors": pdata_ct_nb[pdata_ct_nb.obs[dge_setup[0]] == dge_setup[2]],
+        }, label="obs_type")
+
+
+    # run DESeq2 for conditions and return results
+    stat_res, params = _run_deseq2_pseudobulk(pdata_ct, dge_setup=dge_setup, return_params=True)
+    results_df = stat_res.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
+
+    if pdata_nb is not None:
+        # run DESeq2 for neighborhood data and return results
+        stat_res_first = _run_deseq2_pseudobulk(pdata_first_condition, dge_setup=["obs_type", "cells", "neighbors"])
+        stat_res_second = _run_deseq2_pseudobulk(pdata_second_condition, dge_setup=["obs_type", "cells", "neighbors"])
+        results_df_nb_first = stat_res_first.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
+        results_df_nb_second = stat_res_second.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
+
+    # collect the configurations
+    config = DiffExprConfigCollector(
+        mode="pseudobulk",
+        method_params={
+            "pseudobulk": {
+                "min_cells": min_cells,
+                "min_counts": min_counts
+            }.update(pdata.uns['pseudobulk_settings']),
+            "deseq2": params
+        }
+    )
+
+    results = DiffExprResults(
+        main=results_df,
+        config=config,
+        target_neighborhood=results_df_nb_first if pdata_nb is not None else None,
+        ref_neighborhood=results_df_nb_second if pdata_nb is not None else None,
+    )
+
+    return results
+
+
+def extract_deseqstats_params(ds):
+    """Extract parameters from DeseqStats object.
+
+    Parameters
+    ----------
+    ds : DeseqStats
+        Fitted DeseqStats object
+
+    Returns
+    -------
+    dict
+        Dictionary containing DeseqStats parameters
+    """
+    params = {
+        'contrast': ds.contrast,
+        'alpha': ds.alpha,
+        'cooks_filter': ds.cooks_filter,
+        'shrunk_LFCs': ds.shrunk_LFCs,
+    }
+    return params
+
+
+def extract_deseqdataset_params(dds):
+    """Extract parameters from DeseqDataSet object.
+
+    Parameters
+    ----------
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing DeseqDataSet parameters
+    """
+    params = {
+        'design': str(dds.design),
+        'refit_cooks': dds.refit_cooks,
+    }
+    return params
+
+
+def extract_uns_params(dds):
+    """Extract parameters from .uns attribute in DeseqDataSet object.
+
+    Parameters
+    ----------
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing parameters from .uns
+    """
+    params = dict(dds.uns)
+    return params
+
+
+def extract_all_params(ds, dds):
+    """Extract all parameters from DeseqStats and DeseqDataSet objects.
+
+    Parameters
+    ----------
+    ds : DeseqStats
+        Fitted DeseqStats object
+    dds : DeseqDataSet
+        Fitted DeseqDataSet object
+
+    Returns
+    -------
+    dict
+        Dictionary containing all extracted parameters
+    """
+    all_params = {}
+    all_params.update(extract_deseqstats_params(ds))
+    all_params.update(extract_deseqdataset_params(dds))
+    all_params.update(extract_uns_params(dds))
+    return all_params

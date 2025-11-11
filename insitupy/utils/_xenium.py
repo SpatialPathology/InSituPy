@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from insitupy._io.plots import save_and_show_figure
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils.utils import get_nrows_maxcols
 
 from .._io.files import read_json

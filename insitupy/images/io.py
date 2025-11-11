@@ -70,7 +70,7 @@ def read_image(
         img = read_ome_tiff(path=path, levels=None)
         # read ome metadata
         with TiffFile(path) as tif:
-            axes = tif.series[0].axes # get axes
+            axes = tif.pages[0].axes # get axes (important to get it from pages instead of series!)
             ome_meta = tif.ome_metadata # read OME metadata
             ome_meta = xmltodict.parse(ome_meta, attr_prefix="")["OME"] # convert XML to dict
 

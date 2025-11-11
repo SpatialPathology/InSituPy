@@ -175,3 +175,14 @@ class InvalidXeniumDirectory(Exception):
         else:
             self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file."
         super().__init__(self.message)
+
+
+class MissingPackageError(ImportError):
+    def __init__(self, package_name: str, installation_command: Optional[str]):
+        if installation_command is None:
+            installation_command = f"pip install {package_name}"
+
+        super().__init__(
+            f"The package `{package_name}` is not installed but is required.\n"
+            f"Please install it with `{installation_command}`"
+        )

@@ -429,7 +429,7 @@ def human_lymph_node(
     # if necessary download data
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
-    print('For this dataset no image is available')
+    print('For this dataset no additional images are available.')
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -437,31 +437,126 @@ def human_lymph_node(
     return data
 
 
+# xenium onboard analysis 2.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Breast_2fov/Xenium_V1_human_Breast_2fov_outs.zip
+# Human breast, multimodal cell segmentation
+def xenium_test_dataset_v2_mm(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Breast_2fov/Xenium_V1_human_Breast_2fov_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v2_mm"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v2_mm"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "4632914eca973a1d532231ea646e10cc"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
+
+
+# xenium onboard analysis 2.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Lung_2fov/Xenium_V1_human_Lung_2fov_outs.zip
+# Human lung, nuclear expansion
+def xenium_test_dataset_v2_nucex(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Lung_2fov/Xenium_V1_human_Lung_2fov_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v2_nucex"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v2_nucex"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "bf9c5e6762681b81eab0a19d3d590381"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
+
+
+# xenium onboard analysis 3.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny_outs.zip
+# Mouse ileum, multimodal cell segmentation
+def xenium_test_dataset_v3_mm(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v3_mm"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v3_mm"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "be9d917eaac2ade708c111132f0f379d"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
+
+
 # xenium onboard analysis 3.0.0
 # data from https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip
 # Mouse ileum, nuclear expansion
-def xenium_test_dataset(
+def xenium_test_dataset_v3_nucex(
         overwrite: bool = False
 ) -> InSituData:
-    # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip"
-
-    # set up paths
-    named_data_dir = DEMODIR / "xenium_test_dataset"
-    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset"
-    image_dir = named_data_dir / "unregistered_images"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v3_nucex"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v3_nucex"
     zip_file = named_data_dir / Path(data_url).name
-
-
-    # check if file exists and has correct md5sum
     expected_md5sum = "0a7469a005576f2932e4f804dd9bc563"
 
-    # check if data exists (zipped or unzipped), if yes check md5sum
-    # if necessary download data
     data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
-
-    # load data into InSituData object
     data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
 
-    print('For this dataset no image is available')
+
+# xenium onboard analysis 4.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Human_Ovary_tiny/Xenium_V1_Human_Ovary_tiny_outs.zip
+# Human ovary, nuclear expansion
+def xenium_test_dataset_v4_nucex(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Human_Ovary_tiny/Xenium_V1_Human_Ovary_tiny_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v4_nucex"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_nucex"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "a1de61c57b468450ba1fbcdcc1d7c811"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
+
+# xenium onboard analysis 4.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip
+# Human kidney, Xenium In Situ Gene and Protein Expression with Cell Segmentation Staining
+def xenium_test_dataset_v4_mm(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_MultiCellSeg_Human_Ovary_tiny/Xenium_V1_MultiCellSeg_Human_Ovary_tiny_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v4_mm"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_protein"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "c0af4c72bed2c7fb4eb6d9f1fdf3b2e1"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
+    return data
+
+
+# xenium onboard analysis 4.0.0
+# data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip
+# Human kidney, Xenium In Situ Gene and Protein Expression with Cell Segmentation Staining
+def xenium_test_dataset_v4_protein(
+        overwrite: bool = False
+) -> InSituData:
+    data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip"
+    named_data_dir = DEMODIR / "xenium_test_dataset_v4_protein"
+    data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_protein"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "50c04dea5e751e1c7508ff24528242e8"
+
+    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    data = read_xenium(data_dir)
+    print('For this dataset no additional images are available.')
     return data

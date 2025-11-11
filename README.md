@@ -11,18 +11,21 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 *!!!Warning: This repository is under very active development and it cannot be ruled out that changes might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!*
 
+### `0.10.0`
+
+* Restructure DGE analysis on single-cell level and implement pseudobulk DGE analysis
+  * Aligned logic between single-cell level and pseudobulk level
+  * Introduces `DiffExprResults` class to structure DGE analysis results (plus read/write)
+  * DGE analysis divided into two parts: `tl.dge` and `pl.volcano`
+  * Implement `pl.dual_fold_change` for contamination-aware DGE analysis
+  * renamed `calculate_pseudobulk` to `pp.pseudobulk`
+* Restructuring of documentation
+
 For the latest developments check out the [releases](https://github.com/SpatialPathology/InSituPy/releases).
 
-### Big improvements in `0.9.0`
+### Comming soon: Interface to SpatialData
 
-This version contains multiple bigger changes:
-- Implementation of `generate_pseudobulk` function
-- Working with multiple open napari viewers in parallel
-- Sync and save buttons in napari viewer
-- Implementation of readers for multiplex-IF data exported from QuPath. For scripts to work with QuPath and InSituPy see [this repository](https://github.com/SpatialPathology/InSituPy-QuPath)
-- Changed syntax of the `plotting` submodule: The prefix `"plot_"` was removed from all functions. E.g. `plot_spatial` can be now called with `.pl.spatial`.
-- Completely revised code in `.pl.spatial` introducing different configuration objects to format the plots.
-- Improved documentation
+A interface to convert data from and to [SpatialData](https://github.com/scverse/spatialdata) is currently implemented and will be released soon. If you are interested in this, feel free to contact us to get early access.
 
 ## Getting started
 
@@ -90,7 +93,7 @@ We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https:/
 
 ## Contributing
 
-Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues) or submit a pull request.
+Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues), submit a pull request or contact us via our [zulip chat](https://insitupy.zulipchat.com).
 
 ## Citation
 
