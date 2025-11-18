@@ -13,7 +13,7 @@ except ImportError:
 else:
     from spatialdata.transformations import get_transformation
 
-from insitupy._constants import MODALITIES_COLOR_DICT
+from insitupy._constants import MODALITIES_COLOR_DICT, SAMPLE_STR
 from insitupy._textformat import textformat as tf
 
 # --------------------
@@ -266,7 +266,10 @@ class StructuredSpatialData:
         self._sdata = read_zarr(path)
 
         for elem_type, key, elem in self._sdata.gen_elements():
-            parts = key.split(".")
+            if key.startswith(SAMPLE_STR):
+                raise ValueError("Multi-sample data is not supported in `StructuredSpatialData`. Use `InSituExperiment` instead.")
+
+            parts = modality_part.split(".")
             if parts[0] == "IMAGES":
                 # self._images[parts[1]] = elem
                 scale_obj = get_transformation(elem)

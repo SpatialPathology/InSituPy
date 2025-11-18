@@ -24,7 +24,6 @@ from . import tools as tl
 from . import utils
 from ._constants import CACHE
 from ._core.data import InSituData
-from ._core.structured import StructuredSpatialData
 from .experiment.data import InSituExperiment
 
 __all__ = [

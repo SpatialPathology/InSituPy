@@ -2,23 +2,25 @@ try:
     from spatialdata import SpatialData
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
+else:
+    from spatialdata._core.validation import check_valid_name
+    from spatialdata.models import (Image2DModel, Labels2DModel, PointsModel,
+                                    ShapesModel, TableModel)
+    from spatialdata.transformations.transformations import Scale
 
 import logging
 from collections import defaultdict
 from typing import List, Literal, Optional, Union
 
-import dask.dataframe as dd
 import numpy as np
 from anndata import AnnData
-from spatialdata._core.validation import check_valid_name
-from spatialdata.models import (Image2DModel, Labels2DModel, PointsModel,
-                                ShapesModel, TableModel)
-from spatialdata.transformations.transformations import Identity, Scale
 from xarray import DataArray
 
 from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
                                  MODALITIES, SAMPLE_STR)
+from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
+from insitupy.experiment.data import InSituExperiment
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
 
@@ -30,6 +32,7 @@ def _generate_key(
     modality: Literal[MODALITIES],
     locator: Optional[Union[str, tuple, List]]
     ):
+    # from spatialdata._core.validation import check_valid_name
     if not modality.lower() in MODALITIES:
         raise ValueError(f"Modality '{modality}' not recognized. Choose from {MODALITIES}.")
 
@@ -73,7 +76,7 @@ def _transform_anndata(
     cells_key: str,
     cell_area_key: Optional[str] = "cell_area"
     ):
-
+    # from spatialdata.models import ShapesModel
     adata = adata.copy()
     region_str = "region"
     attrs = {}
@@ -117,9 +120,12 @@ def _transform_anndata(
 
 def _transform_images(
     xd: InSituData,
-    levels: int = 5,
+    n_pyramids: int = 5,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import Image2DModel
+    # from spatialdata.transformations.transformations import Scale
+
     images = {}
     if xd.images is not None:
         for name in xd.images.names:
@@ -147,7 +153,7 @@ def _transform_images(
                 images[dict_key] = Image2DModel.parse(
                     array,
                     rgb=True,
-                    scale_factors=[2 for _ in range(levels)],
+                    scale_factors=[2 for _ in range(n_pyramids)],
                     transformations=transformations,
                     chunks=(3, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                     )
@@ -166,7 +172,7 @@ def _transform_images(
                     )
                 images[dict_key] = Image2DModel.parse(
                     array,
-                    scale_factors=[2 for _ in range(levels)],
+                    scale_factors=[2 for _ in range(n_pyramids)],
                     transformations=transformations,
                     chunks=(1, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                     )
@@ -176,16 +182,15 @@ def _transform_transcripts(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import PointsModel
     points = {}
     if xd.transcripts is not None:
         df = xd.transcripts
-        #scale = Scale([1, 1, 1], axes=("x", "y", "z"))
         parsed_points = PointsModel.parse(
             df,
             coordinates={"x": "x_location", "y": "y_location", "z": "z_location"},
             feature_key="feature_name",
             instance_key="cell_id",
-            #transformations={"global": scale},
             sort=True
             )
 
@@ -203,6 +208,7 @@ def _transform_matrix(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import TableModel
     tables, cell_shapes = {}, {}
     #if xd.cells is not None and xd.cells.matrix is not None:
     if xd.cells is not None:
@@ -243,9 +249,12 @@ def _transform_matrix(
 
 def _transform_cell_boundaries(
     xd: InSituData,
-    n_levels: int = 5,
+    n_pyramids: int = 5,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import Labels2DModel
+    # from spatialdata.transformations.transformations import Scale
+
     cell_boundaries = {}
     #if xd.cells is not None and xd.cells.boundaries is not None:
     if xd.cells is not None:
@@ -272,7 +281,7 @@ def _transform_cell_boundaries(
 
                     cell_boundaries[dict_key] = Labels2DModel.parse(
                         array,
-                        scale_factors=[2 for _ in range(n_levels)],
+                        scale_factors=[2 for _ in range(n_pyramids)],
                         transformations=transformations,
                         chunks=(DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                         )
@@ -282,6 +291,7 @@ def _transform_annotations(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import ShapesModel
     shapes = {}
     if xd.annotations is not None:
         for key in xd.annotations.metadata.keys():
@@ -304,6 +314,7 @@ def _transform_regions(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    # from spatialdata.models import ShapesModel
     shapes = {}
     if xd.annotations is not None:
         for key in xd.regions.metadata.keys():
@@ -427,7 +438,10 @@ def check_and_fix_case_insensitive_conflicts(sdata: SpatialData, inplace: bool =
 
     return sdata, rename_map
 
-def convert_to_spatialdata_dict(data, levels: int = 5):
+def convert_to_spatialdata_dict(
+    data: Union[InSituData, InSituExperiment],
+    n_pyramids: int = 5,
+    ):
 
     """
     Converts an InSituData object to a dictionary for SpatialData object.
@@ -441,18 +455,38 @@ def convert_to_spatialdata_dict(data, levels: int = 5):
     Returns:
         Dict: a dictionary with all modalities saved in SpatialData format.
     """
-    # create SpatialData dictionary
-    transcripts = _transform_transcripts(data)
-    tables, cell_shapes = _transform_matrix(data)
-    annotations = _transform_annotations(data)
-    regions = _transform_regions(data)
-    images = _transform_images(data, levels)
-    labels = _transform_cell_boundaries(data)
-    merged_dict = _merge_dicts_with_warning(transcripts, tables, cell_shapes, annotations, regions, images, labels)
+    is_experiment = _is_experiment(data)
+    if is_experiment:
+        iterator = data.iterdata()
+    else:
+        iterator = iter([(None, data)])
+
+    merged_dict = {}
+    for meta, d in iterator:
+        if meta is None:
+            sample_id = None
+        else:
+            sample_id = meta["uid"]
+        # create SpatialData dictionary
+        transcripts = _transform_transcripts(d, sample_id=sample_id)
+        tables, cell_shapes = _transform_matrix(d, sample_id=sample_id)
+        annotations = _transform_annotations(d, sample_id=sample_id)
+        regions = _transform_regions(d, sample_id=sample_id)
+        images = _transform_images(d, n_pyramids=n_pyramids, sample_id=sample_id)
+        labels = _transform_cell_boundaries(d, sample_id=sample_id)
+        md = _merge_dicts_with_warning(
+            transcripts, tables, cell_shapes, annotations, regions, images, labels
+            )
+
+        # collect resulting dictionary
+        merged_dict = _merge_dicts_with_warning(merged_dict, md)
 
     return merged_dict
 
-def convert_to_spatialdata(data, levels: int = 5):
+def convert_to_spatialdata(
+    data: Union[InSituData, InSituExperiment],
+    n_pyramids: int = 5
+    ):
 
     """
     Converts an InSituData object to a SpatialData object.
@@ -467,8 +501,14 @@ def convert_to_spatialdata(data, levels: int = 5):
         SpatialData: A SpatialData object containing the integrated data elements.
 
     """
+    # is_experiment = _is_experiment(data)
 
-    sd_dict = convert_to_spatialdata_dict(data, levels=levels)
+    # if is_experiment:
+
+    sd_dict = convert_to_spatialdata_dict(
+        data,
+        n_pyramids=n_pyramids
+        )
     sdata = SpatialData.from_elements_dict(sd_dict)
 
     # Check and fix case-insensitive conflicts

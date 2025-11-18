@@ -26,7 +26,6 @@ from tqdm import tqdm
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
                                  LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._core.structured import StructuredSpatialData
 from insitupy._exceptions import (InSituDataMissingObject,
                                   InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
@@ -404,6 +403,8 @@ class InSituData:
     def transcripts(self, value: dd.DataFrame):
         if isinstance(value, dd.DataFrame):
             self._transcripts = value
+        elif isinstance(value, pd.DataFrame):
+            self._transcripts = dd.from_pandas(value, npartitions=8)
         else:
             raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
@@ -1424,7 +1425,7 @@ class InSituData:
 ################################
 if WITH_NAPARI:
     def _add_images_to_viewer(
-        data: Union[InSituData, StructuredSpatialData],
+        data: Union[InSituData, "StructuredSpatialData"],
         viewer: napari.Viewer,
         grayscale_colormap: List[str] = FLUO_CMAP,
         ):
@@ -1558,7 +1559,7 @@ if WITH_NAPARI:
                     )
 
     def _add_cells_to_viewer(
-        data: Union[InSituData, StructuredSpatialData],
+        data: Union[InSituData, "StructuredSpatialData"],
         viewer: napari.viewer,
         keys: str,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
@@ -1615,7 +1616,7 @@ if WITH_NAPARI:
                 viewer.add_layer(Layer.create(*layer))
 
     def _add_widgets_to_viewer(
-        data: Union[InSituData, StructuredSpatialData],
+        data: Union[InSituData, "StructuredSpatialData"],
         viewer: napari.Viewer,
         widgets_max_width: int = 500
         ):
@@ -1753,7 +1754,7 @@ if WITH_NAPARI:
 
 
     def _show(
-        data: Union[InSituData, StructuredSpatialData],
+        data: Union[InSituData, "StructuredSpatialData"],
         keys: Optional[str] = None,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
         cells_layer: Optional[str] = None,
