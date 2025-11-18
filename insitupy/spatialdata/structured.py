@@ -269,7 +269,7 @@ class StructuredSpatialData:
             if key.startswith(SAMPLE_STR):
                 raise ValueError("Multi-sample data is not supported in `StructuredSpatialData`. Use `InSituExperiment` instead.")
 
-            parts = modality_part.split(".")
+            parts = key.split(".")
             if parts[0] == "IMAGES":
                 # self._images[parts[1]] = elem
                 scale_obj = get_transformation(elem)
