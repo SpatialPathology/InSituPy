@@ -1,7 +1,7 @@
 
 import gc
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
 
 import dask.array as da
@@ -10,6 +10,7 @@ import numpy as np
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import colors
+from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
@@ -111,7 +112,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     spot_size: float = 10
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
-    palette: str = DEFAULT_CATEGORICAL_CMAP
+    palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
     spot_type: str = "o"
     background_color: str = "white"
     cmap_center: Optional[float] = None

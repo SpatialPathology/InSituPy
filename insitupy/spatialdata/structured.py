@@ -1,5 +1,6 @@
+import os
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Literal, Optional, Union
 from warnings import warn
 
 import numpy as np
@@ -14,11 +15,14 @@ else:
     from spatialdata.transformations import get_transformation
 
 from insitupy._constants import MODALITIES_COLOR_DICT, SAMPLE_STR
+from insitupy._core._napari import _show
 from insitupy._textformat import textformat as tf
+from insitupy.spatialdata._sdio import _silent_read_zarr
 
 # --------------------
 # Wrapper dataclasses
 # --------------------
+
 
 class StructuredImageData:
     def __init__(self):
@@ -208,7 +212,7 @@ class StructuredRegionsData(StructuredShapesData):
 class StructuredSpatialData:
     def __init__(
         self,
-        path: Optional[Union[str, Path]] = None
+        path: Optional[Union[str, os.PathLike, Path]] = None
         ):
         self._path = Path(path) if path else None
         self._sdata = None
@@ -220,8 +224,8 @@ class StructuredSpatialData:
         self._regions = StructuredRegionsData()
         self._transcripts: Optional[pd.DataFrame] = None
 
-        if path is not None:
-            self.read(path)
+        # if path is not None:
+        #     self.read(path)
 
     def __repr__(self):
         repr_str = f"{tf.Bold+tf.Red}StructuredSpatialData{tf.ResetAll}\n"
@@ -261,11 +265,13 @@ class StructuredSpatialData:
     def transcripts(self): return self._transcripts
 
     # Load from SpatialData
-    def read(self, path: Union[str, Path]):
-        self._path = Path(path)
-        self._sdata = read_zarr(path)
+    @classmethod
+    def read(cls, path: Union[str, Path]):
+        path = Path(path)
+        sdata = _silent_read_zarr(path)
+        data = cls(path)
 
-        for elem_type, key, elem in self._sdata.gen_elements():
+        for elem_type, key, elem in sdata.gen_elements():
             if key.startswith(SAMPLE_STR):
                 raise ValueError("Multi-sample data is not supported in `StructuredSpatialData`. Use `InSituExperiment` instead.")
 
@@ -273,22 +279,46 @@ class StructuredSpatialData:
             if parts[0] == "IMAGES":
                 # self._images[parts[1]] = elem
                 scale_obj = get_transformation(elem)
-                self._images.add_image(parts[1], elem, scale_obj=scale_obj)
+                data._images.add_image(parts[1], elem, scale_obj=scale_obj)
             elif parts[0] == "CELLS":
                 cell_key = parts[1]
-                if cell_key not in self._cells._layers:
-                    self._cells[cell_key] = StructuredCellData()
+                if cell_key not in data._cells._layers:
+                    data._cells[cell_key] = StructuredCellData()
                 if parts[2] == "matrix":
-                    self._cells[cell_key].matrix = elem
+                    data._cells[cell_key].matrix = elem
                 elif parts[2] == "boundaries":
-                    self._cells[cell_key].boundaries[parts[3]] = elem
+                    data._cells[cell_key].boundaries[parts[3]] = elem
             elif parts[0] == "ANNOTATIONS":
-                self._annotations[parts[1]] = elem
+                data._annotations[parts[1]] = elem
             elif parts[0] == "REGIONS":
-                self._regions[parts[1]] = elem
+                data._regions[parts[1]] = elem
             elif parts[0] == "TRANSCRIPTS":
-                self._transcripts = elem
+                data._transcripts = elem
             else:
                 warn(f"Unrecognized element: {key}")
 
-        return self
+        return data
+
+    def show(self,
+        keys: Optional[str] = None,
+        key_type: Literal["genes", "obs", "obsm"] = "genes",
+        cells_layer: Optional[str] = None,
+        point_size: int = 8,
+        scalebar: bool = True,
+        unit: str = "µm",
+        return_viewer: bool = False,
+        widgets_max_width: int = 500,
+        verbose: bool = False
+        ):
+        _show(
+            data=self,
+            keys=keys,
+            key_type=key_type,
+            cells_layer=cells_layer,
+            point_size=point_size,
+            scalebar=scalebar,
+            unit=unit,
+            return_viewer=return_viewer,
+            widgets_max_width=widgets_max_width,
+            verbose=verbose
+        )

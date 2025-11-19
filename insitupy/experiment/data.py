@@ -1,6 +1,7 @@
 import json
 import os
 import warnings
+from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -17,7 +18,7 @@ from matplotlib.figure import Figure
 from tqdm import tqdm
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_ABBR)
+                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
@@ -28,6 +29,19 @@ from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+# Import for SpatialData mode
+try:
+    import spatialdata
+
+    # from spatialdata import read_zarr
+    SPATIALDATA_AVAILABLE = True
+except ImportError:
+    SPATIALDATA_AVAILABLE = False
+    # read_zarr = None
+    _silent_read_zarr = None
+else:
+    from insitupy.spatialdata._sdio import _silent_read_zarr
 
 
 class InSituExperiment:
@@ -44,12 +58,19 @@ class InSituExperiment:
     represented as an :class:`~insitupy._core.data.InSituData` object, and maintains associated metadata in a
     `pandas.DataFrame`.
 
+    Supports two modes:
+    1. InSituPy mode (default): Stores InSituData objects
+    2. SpatialData mode: Stores StructuredSpatialData objects from SpatialData zarr stores
+
     Examples:
         >>> # Create an InSituExperiment object
         >>> experiment = InSituExperiment()
 
         >>> # Add a dataset
         >>> experiment.add(data="path/to/dataset", mode="insitupy", metadata={"experiment": "test"})
+
+        >>> # Read from SpatialData
+        >>> exp = InSituExperiment.read_spatialdata("path/to/data.zarr")
 
         >>> # Perform differential gene expression analysis
         >>> experiment.dge(target_id=0, ref_id=1, target_annotation_tuple=("cell_type", "neuron"))
@@ -65,15 +86,19 @@ class InSituExperiment:
     """
 
     from ._deprecated import collect_anndatas, import_obs, plot_overview
-    def __init__(self):
+
+    def __init__(self, data_type: Literal["insitupy", "spatialdata"] = "insitupy"):
         """
         Initialize an InSituExperiment object.
 
+        Args:
+            data_type: The type of data to store. Either "insitupy" (default) or "spatialdata".
         """
         self._metadata = pd.DataFrame(columns=['uid', 'slide_id', 'sample_id'])
-        self._data = []
+        self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
+        self._data_type = data_type
 
     def __repr__(self):
         """
@@ -87,17 +112,23 @@ class InSituExperiment:
         mdf = self._metadata.copy()
         num_samples = len(mdf)
 
+        # Add data type indicator
+        mode_str = f" ({tf.Bold}{self._data_type}{tf.ResetAll} mode)"
+
         # check which modalities are loaded and add information as string to the copied metadata dataframe
         loaded_list = []
         for _, data in self.iterdata():
-            loaded_modalities = data.get_loaded_modalities()
+            if self._data_type == "insitupy":
+                loaded_modalities = data.get_loaded_modalities()
+            else:  # spatialdata mode
+                loaded_modalities = self._get_loaded_modalities_spatialdata(data)
             loaded_string = "".join(["+" if m in loaded_modalities else "-" for m in MODALITIES])
             loaded_list.append(loaded_string)
         mdf.insert(1, MODALITIES_ABBR, loaded_list)
 
         # generate string summary
         sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        return (f"{tf.Bold}InSituExperiment{tf.ResetAll} with {num_samples} samples:\n"
+        return (f"{tf.Bold}InSituExperiment{tf.ResetAll}{mode_str} with {num_samples} samples:\n"
                 f"{sample_summary}")
 
     def __getitem__(self, key):
@@ -131,13 +162,13 @@ class InSituExperiment:
 
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
-            new_experiment = InSituExperiment()
+            new_experiment = InSituExperiment(data_type=self._data_type)
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
 
         # Handle slices, list of ints, ndarray, or Series of ints
         else:
-            new_experiment = InSituExperiment()
+            new_experiment = InSituExperiment(data_type=self._data_type)
             new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
@@ -152,6 +183,11 @@ class InSituExperiment:
             int: The number of datasets.
         """
         return len(self._data)
+
+    @property
+    def data_type(self):
+        """The type of data stored in this experiment ('insitupy' or 'spatialdata')."""
+        return self._data_type
 
     @property
     def cells(self):
@@ -201,10 +237,10 @@ class InSituExperiment:
     @property
     def data(self):
         """
-        List of datasets as :class:`~insitupy._core.data.InSituData` objects.
+        List of datasets as :class:`~insitupy._core.data.InSituData` or StructuredSpatialData objects.
 
         Returns:
-            list: A list of :class:`~insitupy._core.data.InSituData` objects.
+            list: A list of data objects.
         """
         return self._data
 
@@ -255,6 +291,13 @@ class InSituExperiment:
             ValueError: If the mode is invalid.
             AssertionError: If the loaded dataset is not an InSituData object.
         """
+        # Check if we're in spatialdata mode
+        if self._data_type == "spatialdata":
+            raise ValueError(
+                "Cannot add individual datasets in SpatialData mode. "
+                "Use InSituExperiment.read_spatialdata() to load SpatialData experiments."
+            )
+
         # Check if the dataset is of the correct type
         try:
             data = Path(data)
@@ -268,15 +311,8 @@ class InSituExperiment:
             else:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
-
-
-
         # checks whether dataset is an instance of InSituData or any subclass of it, and avoids issues with direct object identity comparison
         assert dataset.__class__ is InSituData, f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
-        # assert isinstance(dataset, InSituData), f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
-
-        # # set a unique ID
-        # dataset._set_uid()
 
         # Add the dataset to the data collection
         self._data.append(dataset)
@@ -288,7 +324,6 @@ class InSituExperiment:
             'sample_id': dataset.sample_id
         }
 
-        #if metadata is not None:
         # add information from metadata argument
         new_metadata.update(metadata)
 
@@ -304,6 +339,7 @@ class InSituExperiment:
         column_name: str,
         values: Union[List, str, pd.Series, np.ndarray]
         ):
+        """Add a metadata column."""
         self._metadata[column_name] = values
 
     def append_metadata(self,
@@ -366,7 +402,6 @@ class InSituExperiment:
             if len(new_metadata) != len(old_metadata):
                 raise ValueError("Length of new metadata does not match the existing metadata.")
             warnings.warn("No 'by' column provided. Metadata will be paired by order.")
-            #updated_metadata = pd.concat([updated_metadata.reset_index(drop=True), new_metadata.reset_index(drop=True)], axis=1)
             updated_metadata = pd.merge(left=old_metadata, right=new_metadata,
                                         left_index=True, right_index=True, how="left")
         else:
@@ -414,16 +449,10 @@ class InSituExperiment:
         ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
         ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
         ref_region_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        # plot_volcano: bool = True,
         method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
         exclude_ambiguous_assignments: bool = False,
         force_assignment: bool = False,
         name_col: Optional[str] = "uid",
-        # title: Optional[str] = None,
-        # savepath: Union[str, os.PathLike, Path] = None,
-        # save_only: bool = False,
-        # dpi_save: int = 300,
-        # **kwargs
         ):
         """
         Wrapper function for performing differential gene expression analysis within an `InSituExperiment` object.
@@ -435,31 +464,23 @@ class InSituExperiment:
 
         Args:
             target_id (int): Index for the target dataset in the `InSituExperiment` object.
-            ref_id (Optional[Union[int, List[int], Literal["rest"]]]): Index or list of indices for the reference dataset in the `InSituExperiment` object.
+            ref_id (Optional[Union[int, List[int], Literal["rest"]]]): Index or list of indices for the reference dataset.
             target_annotation_tuple (Optional[Tuple[str, str]]): Tuple containing the annotation key and name for the primary data.
             target_cell_type_tuple (Optional[Tuple[str, str]]): Tuple specifying an observation key and value to filter the primary data.
-            target_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the primary data.
-            ref_annotation_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple containing the reference annotation key and name, or "rest" to use the rest of the data as reference. Defaults to "same".
-            ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data. Defaults to "same".
-            ref_region_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to "same".
-            method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']], optional): Statistical method to use for differential expression analysis. Defaults to 't-test'.
-            exclude_ambiguous_assignments (bool, optional): Whether to exclude ambiguous assignments in the data. Defaults to False.
+            target_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis.
+            ref_annotation_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Reference annotation. Defaults to "same".
+            ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Reference cell type. Defaults to "same".
+            ref_region_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Reference region. Defaults to "same".
+            method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']], optional): Statistical method. Defaults to 't-test'.
+            exclude_ambiguous_assignments (bool, optional): Whether to exclude ambiguous assignments. Defaults to False.
             force_assignment (bool, optional): Whether to force assignment of annotations and regions. Defaults to False.
-            name_col (str, optional): Column name in metadata to use for naming samples. Defaults to "sample_id".
+            name_col (str, optional): Column name in metadata to use for naming samples. Defaults to "uid".
 
         Returns:
-            None
-
-        Example:
-            >>> analysis.dge(
-                    target_id=1,
-                    ref_id=2,
-                    target_annotation_tuple=("cell_type", "neuron"),
-                    ref_annotation_tuple=("cell_type", "astrocyte"),
-                    plot_volcano=True,
-                    method='wilcoxon'
-                )
+            DGE results object
         """
+        self._check_mode_compatibility("dge")
+
         from insitupy.tools.dge import dge
 
         # get data and extract information about experiment
@@ -470,11 +491,7 @@ class InSituExperiment:
         if ref_id is not None:
             if ref_id == "rest":
                 ref = [d for i, (m, d) in enumerate(self.iterdata()) if i != target_id]
-                # ref_name = [m[name_col] for i, (m, d) in enumerate(self.iterdata()) if i != target_id]
-                # ref_name = ", ".join(ref_name)
                 ref_name = "rest"
-
-                # collect the ref metadata
                 ref_metadata = self._metadata.loc[[i for i in self._metadata.index if i != target_id]].to_dict(orient="list")
 
             elif isinstance(ref_id, int):
@@ -527,6 +544,8 @@ class InSituExperiment:
         Returns:
             int: The total number of cells.
         """
+        self._check_mode_compatibility("get_n_cells")
+
         n_cells = 0
         for _, d in self.iterdata():
             if not d.cells.is_empty:
@@ -562,71 +581,18 @@ class InSituExperiment:
                 unique identifiers for matching datasets.
             uid_column_adata: Column name in `adata.obs` containing unique
                 identifiers for matching datasets.
-            obs_columns_to_transfer: List of column names in `adata.obs` to transfer
-                to the InSituData objects. If None, no `.obs` columns are transferred.
-            obsm_keys_to_transfer: List of keys in `adata.obsm` to transfer to the
-                InSituData objects. If None, no `.obsm` keys are transferred.
+            obs_columns_to_transfer: List of column names in `adata.obs` to transfer.
+            obsm_keys_to_transfer: List of keys in `adata.obsm` to transfer.
             cells_layer: The layer in `InSituData.cells` to which data should be added.
-                If None, uses the default layer (typically the base layer).
-            overwrite: If True, overwrites existing columns/keys with the same names.
-                If False, raises an error when attempting to overwrite existing data.
-                Defaults to False.
-            strip_uid_prefix: If True, strips the "{index}-" prefix from obs_names
-                that was added by `to_anndata(make_obs_names_unique=True)` before
-                matching cells. Defaults to True.
-            fill_missing: If True, allows partial matches where not all cells from
-                InSituData are present in the adata subset. Missing cells will be
-                filled with NaN for both obs columns and obsm arrays.
-                Defaults to True.
+            overwrite: If True, overwrites existing columns/keys. Defaults to False.
+            strip_uid_prefix: If True, strips the "{index}-" prefix from obs_names. Defaults to True.
+            fill_missing: If True, allows partial matches with NaN filling. Defaults to True.
 
         Returns:
             InSituExperiment: Returns self to allow method chaining.
-
-        Raises:
-            ValueError: If both `obs_columns_to_transfer` and `obsm_keys_to_transfer` are None.
-            ValueError: If `uid_column` is not found in InSituExperiment metadata.
-            ValueError: If `uid_column_adata` is not found in `adata.obs`.
-            ValueError: If a column/key already exists and `overwrite=False`.
-            ValueError: If cell names cannot be matched and `fill_missing=False`.
-
-        Warnings:
-            UserWarning: If no matching data is found in `adata` for a dataset's UID.
-            UserWarning: If some cells are missing from adata subset and `fill_missing=True`.
-
-        Examples:
-            >>> # Transfer cell type annotations from integrated analysis
-            >>> exp.import_from_anndata(
-            ...     adata=integrated_adata,
-            ...     uid_column="uid",
-            ...     uid_column_adata="sample_id",
-            ...     obs_columns_to_transfer=["cell_type", "leiden_clusters"],
-            ...     overwrite=False
-            ... )
-
-            >>> # Transfer UMAP coordinates back to experiment (allow partial matches)
-            >>> exp.import_from_anndata(
-            ...     adata=adata_with_umap,
-            ...     uid_column="sample_id",
-            ...     uid_column_adata="sample",
-            ...     obsm_keys_to_transfer=["X_umap", "X_pca"],
-            ...     cells_layer="normalized",
-            ...     overwrite=True,
-            ...     fill_missing=True
-            ... )
-
-            >>> # Method chaining example
-            >>> exp.import_from_anndata(...).sync_colors(keys=["cell_type"])
-
-        Notes:
-            - The function uses pandas index-based assignment for `.obs` columns,
-            automatically handling cell order and partial matches.
-            - For `.obsm` arrays, cells are matched by index and reordered/filled as needed.
-            - If `make_obs_names_unique=True` was used in `to_anndata()`, set
-            `strip_uid_prefix=True` (default) to properly match cell names.
-            - When `fill_missing=True`, missing cells get NaN values.
-            - NaN values in obsm arrays will be handled appropriately by most
-            visualization and analysis tools (typically by skipping those cells).
         """
+        self._check_mode_compatibility("import_from_anndata")
+
         # Validate inputs
         if obs_columns_to_transfer is None and obsm_keys_to_transfer is None:
             raise ValueError(
@@ -662,14 +628,10 @@ class InSituExperiment:
                 continue
 
             # Handle cell name matching
-            # If make_obs_names_unique was used in to_anndata, obs_names have format "{index}-{original_name}"
-            # We need to strip the prefix to match with the original cell names
             if strip_uid_prefix:
-                # Check if obs_names have the expected prefix pattern
                 if len(subset.obs_names) > 0:
                     sample_name = str(subset.obs_names[0])
                     if '-' in sample_name:
-                        # Strip the "{index}-" prefix from obs_names
                         subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
                                                     for name in subset.obs_names])
 
@@ -681,22 +643,20 @@ class InSituExperiment:
             if n_matching == 0:
                 raise ValueError(
                     f"No matching cell names found for dataset '{current_uid}'. "
-                    f"Ensure cell names match between adata and InSituData. "
-                    f"If you used `make_obs_names_unique=True` in `to_anndata()`, "
-                    f"ensure `strip_uid_prefix=True` (default)."
+                    f"Ensure cell names match between adata and InSituData."
                 )
 
             if n_matching < n_total:
                 if not fill_missing:
                     raise ValueError(
                         f"Cell name mismatch for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells from InSituData found in adata subset. "
-                        f"Set `fill_missing=True` to allow partial matches with NaN filling."
+                        f"Only {n_matching}/{n_total} cells found. "
+                        f"Set `fill_missing=True` to allow partial matches."
                     )
                 else:
                     warnings.warn(
                         f"Partial match for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells found in adata subset. "
+                        f"Only {n_matching}/{n_total} cells found. "
                         f"Missing cells will be filled with NaN."
                     )
 
@@ -705,11 +665,9 @@ class InSituExperiment:
                 for col in obs_columns_to_transfer:
                     if col in celldata.matrix.obs.columns and not overwrite:
                         raise ValueError(
-                            f"Column '{col}' already exists in obs for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite existing data."
+                            f"Column '{col}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
                         )
-
-                    # Use pandas index-based assignment - automatically handles order and missing values
                     celldata.matrix.obs[col] = subset.obs[col]
 
             # Transfer obsm keys
@@ -717,39 +675,27 @@ class InSituExperiment:
                 for key in obsm_keys_to_transfer:
                     if key in celldata.matrix.obsm.keys() and not overwrite:
                         raise ValueError(
-                            f"Key '{key}' already exists in obsm for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite existing data."
+                            f"Key '{key}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
                         )
 
-                    # For obsm, we need to manually handle the index matching
-                    # Create an empty array filled with NaN (not zeros!)
+                    # Create empty array with NaN
                     n_cells_target = len(celldata.matrix)
                     n_features = subset.obsm[key].shape[1]
                     target_array = np.full((n_cells_target, n_features), np.nan)
 
-                    # Create a mapping from cell names to indices in subset
+                    # Fill with matching values
                     subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
-
-                    # Fill the target array with values from subset where cell names match
                     for target_idx, cell_name in enumerate(celldata.matrix.obs_names):
                         if cell_name in subset_index_map:
                             subset_idx = subset_index_map[cell_name]
                             target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
 
-                    # Check if we have any missing values
-                    if np.isnan(target_array).any():
-                        if not fill_missing:
-                            raise ValueError(
-                                f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
-                                f"Some cells are missing from adata subset. "
-                                f"Set `fill_missing=True` to allow missing values (filled with NaN)."
-                            )
-                        else:
-                            n_missing = np.isnan(target_array).any(axis=1).sum()
-                            warnings.warn(
-                                f"Key '{key}' for dataset '{current_uid}' contains {n_missing} "
-                                f"cells with missing values (NaN). These cells were not present in the adata subset."
-                            )
+                    if np.isnan(target_array).any() and not fill_missing:
+                        raise ValueError(
+                            f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
+                            f"Missing values. Set `fill_missing=True`."
+                        )
 
                     celldata.matrix.obsm[key] = target_array
 
@@ -761,7 +707,7 @@ class InSituExperiment:
         Iterate over the metadata rows and corresponding data.
 
         Yields:
-            tuple: A tuple containing the index, metadata row as a Series, and the corresponding data.
+            tuple: A tuple containing the metadata row as a Series and the corresponding data.
         """
         for idx, row in self._metadata.iterrows():
             yield row, self._data[idx]
@@ -782,63 +728,21 @@ class InSituExperiment:
         """
         Concatenate all datasets into a single AnnData object.
 
-        This function iterates through all datasets in the experiment, extracts cell data
-        from the specified layer, optionally filters specific keys, and concatenates them
-        into a single AnnData object with samples labeled by metadata.
-
         Args:
-            cells_layer: The layer name to extract cell data from. If None, uses the
-                default layer (typically the base layer without transformations).
-            label_col: Column name in metadata to use as labels for concatenation.
-                This will be added as a categorical variable in the concatenated AnnData's
-                `.obs` with the name specified by this parameter. Defaults to "uid".
-            obs_keys: Keys to select from the observations (obs) dataframe. Can be:
-                - A list of specific column names
-                - A single column name as string
-                - "all" to select all available columns
-                - None (no filtering, keeps all columns)
-            var_keys: Keys to select from the variables (var) dataframe.
-                Same format options as `obs_keys`.
-            obsm_keys: Keys to select from the obsm (observation matrices) dictionary.
-                Same format options as `obs_keys`.
-            varm_keys: Keys to select from the varm (var matrices) dictionary.
-                Same format options as `obs_keys`.
-            uns_keys: Keys to select from the uns (unstructured) dictionary.
-                Same format options as `obs_keys`.
-            layer_keys: Keys to select from the layers dictionary.
-                Same format options as `obs_keys`.
-            make_obs_names_unique: If True, prepends a dataset index to observation names
-                (e.g., "0-CELL_001", "1-CELL_001") to ensure uniqueness across datasets.
-                Defaults to False.
+            cells_layer: The layer name to extract cell data from.
+            label_col: Column name in metadata to use as labels. Defaults to "uid".
+            obs_keys: Keys to select from obs dataframe.
+            var_keys: Keys to select from var dataframe.
+            obsm_keys: Keys to select from obsm dictionary.
+            varm_keys: Keys to select from varm dictionary.
+            uns_keys: Keys to select from uns dictionary.
+            layer_keys: Keys to select from layers dictionary.
+            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
 
         Returns:
-            AnnData: A concatenated AnnData object containing data from all datasets.
-                - Concatenation is performed along the observation (cell) axis
-                - Variables (genes) are matched using inner join (only common genes kept)
-                - The `label_col` metadata is added as a new column in `.obs`
-
-        Raises:
-            ValueError: If `label_col` is not found in metadata columns.
-            ValueError: If invalid type provided for any `*_keys` parameters.
-            KeyError: If specified keys are not found in the respective AnnData components.
-
-        Examples:
-            >>> # Concatenate with specific metadata columns
-            >>> adata = exp.to_anndata(
-            ...     cells_layer="normalized",
-            ...     obs_keys=["cell_type", "batch"],
-            ...     var_keys=["highly_variable"]
-            ... )
-
-            >>> # Concatenate all data with unique cell names
-            >>> adata = exp.to_anndata(
-            ...     obs_keys="all",
-            ...     make_obs_names_unique=True
-            ... )
-
-            >>> # Access sample labels in result
-            >>> print(adata.obs['uid'])  # If label_col='uid'
+            AnnData: A concatenated AnnData object.
         """
+        self._check_mode_compatibility("to_anndata")
 
         # Validate label_col exists in metadata
         if label_col not in self._metadata.columns:
@@ -847,41 +751,11 @@ class InSituExperiment:
                 f"Available columns: {list(self._metadata.columns)}"
             )
 
-        def _process_keys(keys: Optional[Union[List[str], str]], available_keys: List[str]) -> Optional[List[str]]:
-            """Process key selection, handling 'all' case and validation."""
-            if keys is None:
-                return None
-            elif keys == "all":
-                return available_keys
-            elif isinstance(keys, str):
-                return [keys]
-            elif isinstance(keys, list):
-                return keys
-            else:
-                raise ValueError(f"Invalid type for keys: {type(keys)}. Expected str, list, or 'all'.")
-
         adatas: Dict[Any, anndata.AnnData] = {}
 
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             adata = celldata.matrix
-
-            # # Process keys - handle "all" case by getting available keys from adata
-            # processed_obs_keys = _process_keys(obs_keys, list(adata.obs.columns)) if obs_keys is not None else None
-            # processed_var_keys = _process_keys(var_keys, list(adata.var.columns)) if var_keys is not None else None
-            # processed_obsm_keys = _process_keys(obsm_keys, list(adata.obsm.keys())) if obsm_keys is not None else None
-            # processed_uns_keys = _process_keys(uns_keys, list(adata.uns.keys())) if uns_keys is not None else None
-            # processed_layer_keys = _process_keys(layer_keys, list(adata.layers.keys())) if layer_keys is not None else None
-
-            # # Filter adata
-            # adata = _select_anndata_elements(
-            #     adata=adata,
-            #     obs_keys=processed_obs_keys,
-            #     var_keys=processed_var_keys,
-            #     obsm_keys=processed_obsm_keys,
-            #     uns_keys=processed_uns_keys,
-            #     layer_keys=processed_layer_keys
-            # )
 
             # Filter adata
             adata = _select_anndata_elements(
@@ -908,8 +782,6 @@ class InSituExperiment:
         )
 
 
-
-
     def load_all(self,
                  skip: Optional[str] = None,
                  ):
@@ -919,6 +791,8 @@ class InSituExperiment:
         Args:
             skip (Optional[str], optional): A modality to skip during loading. Defaults to None.
         """
+        self._check_mode_compatibility("load_all")
+
         for xd in tqdm(self._data):
             for f in LOAD_FUNCS:
                 if skip is None or skip not in f:
@@ -929,18 +803,24 @@ class InSituExperiment:
                         print(err)
 
     def load_annotations(self):
+        """Load annotations for all datasets."""
+        self._check_mode_compatibility("load_annotations")
         for xd in tqdm(self._data):
             xd.load_annotations()
 
     def load_cells(self):
+        """Load cells for all datasets."""
+        self._check_mode_compatibility("load_cells")
         for xd in tqdm(self._data):
             xd.load_cells()
 
     def load_images(self,
-                    names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
+                    names: Union[Literal["all", "nuclei"], str] = "all",
                     nuclei_type: Literal["focus", "mip", ""] = "mip",
                     load_cell_segmentation_images: bool = True
                     ):
+        """Load images for all datasets."""
+        self._check_mode_compatibility("load_images")
 
         for xd in tqdm(self._data):
             xd.load_images(names=names,
@@ -948,37 +828,18 @@ class InSituExperiment:
                            load_cell_segmentation_images=load_cell_segmentation_images)
 
     def load_regions(self):
+        """Load regions for all datasets."""
+        self._check_mode_compatibility("load_regions")
         for xd in tqdm(self._data):
             xd.load_regions()
 
     def load_transcripts(self,
                         transcript_filename: str = "transcripts.parquet"
                         ):
+        """Load transcripts for all datasets."""
+        self._check_mode_compatibility("load_transcripts")
         for xd in tqdm(self._data):
             xd.load_transcripts()
-
-    # def make_obs_names_unique(self,
-    #                           cells_layer: Optional[str],
-    #                           force: bool = False):
-
-    #     if not _all_obs_names_unique(exp=self, cells_layer=cells_layer) or force:
-    #         print(f"Make `obs_names` unique.")
-    #         for meta, data in self.iterdata():
-    #             celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-
-    #             # generate new, unique names
-    #             new_names = f'{meta["uid"]}-' + celldata.matrix.obs_names
-    #             new_names = new_names.astype(str)
-    #             return new_names
-
-    #             if not len(new_names) == len(np.unique(new_names)):
-    #                 raise ValueError("New names are not unique.")
-
-    #             # add new names to matrix and boundaries
-    #             celldata.matrix.obs_names = new_names
-    #             celldata.boundaries._cell_names = da.from_array(new_names.astype(str))
-    #     else:
-    #         print(f"The `obs_names` in samples within the InSituExperiment are already unique. Skipped execution. To force the execution set `force=True`.")
 
     def plot_embedding(
         self,
@@ -996,20 +857,9 @@ class InSituExperiment:
         dpi_save: int = 300,
         **kwargs
         ):
-        """Create a plot with embeddings of all datasets as subplots using scanpy's sc.pl.embedding function.
+        """Create a plot with embeddings of all datasets as subplots."""
+        self._check_mode_compatibility("plot_embedding")
 
-        Args:
-            color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
-            title_column (str, optional): Name of column in `self.metadata` to infer titles of subplots from. Defaults to None.
-            max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
-            **kwargs: Additional keyword arguments to pass to sc.pl.umap.
-            figsize (tuple, optional): Figure size. Defaults to (8, 6).
-            savepath (optional): Path to save the plot.
-            save_only (bool, optional): Whether to only save the plot without showing. Defaults to False.
-            show (bool, optional): Whether to show the plot. Defaults to True.
-            fig (optional): Figure to plot on.
-            dpi_save (int, optional): DPI for saving the plot. Defaults to 300.
-        """
         from insitupy.plotting.save import save_and_show_figure
 
         num_datasets = len(self._data)
@@ -1021,7 +871,6 @@ class InSituExperiment:
         # make sure title_columns is a list
         if title_column is not None:
             title_columns = self._metadata[title_column].tolist()
-            #title_columns = convert_to_list(title_columns)
         else:
             title_columns = [f"Sample {idx + 1}" for idx in range(len(self))]
 
@@ -1047,15 +896,7 @@ class InSituExperiment:
                          pad=10
                          )
 
-            # if title_column:
-            #     title = " - ".join(str(metadata_row[col]) for col in title_columns if col in metadata_row)
-            #     ax.set_title(title, fontdict={"fontsize": title_size})
-            # else:
-            #     ax.set_title(f"Dataset {idx + 1}", fontdict={"fontsize": title_size})
-
-        remove_empty_subplots(
-            axes, n_plots, n_rows, max_cols
-        )
+        remove_empty_subplots(axes, n_plots, n_rows, max_cols)
         if show:
             save_and_show_figure(savepath=savepath, fig=fig, save_only=save_only, dpi_save=dpi_save, tight=True)
         else:
@@ -1077,21 +918,7 @@ class InSituExperiment:
         dpi_save: int = 300,
         **kwargs
     ):
-        """Create a plot with UMAPs of all datasets as subplots using scanpy's pl.umap function.
-
-        Args:
-            cells_layer (str, optional): The layer in `xd.cells` to access. Defaults to None.
-            color (str, optional): Keys for annotations of observations/cells or variables/genes to color the plot. Defaults to None.
-            title_column (str, optional): List of column names from metadata to use for subplot titles. Defaults to None.
-            max_cols (int, optional): Maximum number of columns for subplots. Defaults to 4.
-            figsize (tuple, optional): Figure size. Defaults to (8, 6).
-            savepath (optional): Path to save the plot.
-            save_only (bool, optional): Whether to only save the plot without showing. Defaults to False.
-            show (bool, optional): Whether to show the plot. Defaults to True.
-            fig (optional): Figure to plot on.
-            dpi_save (int, optional): DPI for saving the plot. Defaults to 300.
-            **kwargs: Additional keyword arguments to pass to sc.pl.umap.
-        """
+        """Create a plot with UMAPs of all datasets as subplots."""
         return self.plot_embedding(
             basis='X_umap',
             cells_layer=cells_layer,
@@ -1142,6 +969,8 @@ class InSituExperiment:
 
 
     def remove_history(self):
+        """Remove history from all datasets."""
+        self._check_mode_compatibility("remove_history")
         for xd in tqdm(self._data):
             xd.remove_history(verbose=False)
 
@@ -1152,6 +981,9 @@ class InSituExperiment:
              metadata_only: bool = False,
              **kwargs
              ):
+        """Save the experiment."""
+        self._check_mode_compatibility("save")
+
         if metadata_only and not overwrite_metadata:
             raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
 
@@ -1185,11 +1017,9 @@ class InSituExperiment:
         path: Union[str, os.PathLike, Path],
         overwrite: bool = False,
         verbose: bool = False, **kwargs):
-        """Save all datasets to a specified folder.
+        """Save all datasets to a specified folder."""
+        self._check_mode_compatibility("saveas")
 
-        Args:
-            path (Union[str, os.PathLike, Path]): The path to the folder where datasets will be saved.
-        """
         # Create the main directory if it doesn't exist
         path = Path(path)
 
@@ -1221,19 +1051,31 @@ class InSituExperiment:
 
         Args:
             index (int): The index of the dataset to display.
-            return_viewer (bool, optional): If True, returns the viewer object of the dataset. Defaults to True.
-
-        Returns:
-            Viewer: The viewer object of the dataset if return_viewer is True.
+            verbose (bool, optional): If True, show verbose output. Defaults to False.
         """
         dataset = self.data[index]
         dataset.show(verbose=verbose)
 
     def show_modality(self, modality, uid_column: str = "sample_id"):
+        """Show a modality for all datasets."""
         repr_string = ""
         for meta, data in self.iterdata():
             repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
-            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+
+            if self._data_type == "insitupy":
+                repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+            else:
+                # For spatialdata mode, get modality directly
+                if modality == "cells":
+                    repr_string += f"{tf.SPACER}   " + data._cells.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+                elif modality == "images":
+                    repr_string += f"{tf.SPACER}   " + data._images.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+                elif modality == "transcripts":
+                    repr_string += f"{tf.SPACER}   " + str(data._transcripts) + "\n"
+                elif modality == "annotations":
+                    repr_string += f"{tf.SPACER}   " + data._annotations.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+                elif modality == "regions":
+                    repr_string += f"{tf.SPACER}   " + data._regions.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
 
         print(repr_string)
 
@@ -1251,10 +1093,12 @@ class InSituExperiment:
         Args:
             keys (Union[str, List[str]]): The metadata keys to synchronize colors for.
             cells_layer (Optional[str], optional): The layer to access. Defaults to None.
-            palette (ListedColormap, optional): The color palette to use. Defaults to DEFAULT_CATEGORICAL_CMAP.
+            palette (ListedColormap, optional): The color palette to use.
             overwrite (bool, optional): Whether to overwrite existing color dictionaries. Defaults to False.
             verbose (bool, optional): Whether to print status messages. Defaults to True.
         """
+        self._check_mode_compatibility("sync_colors")
+
         # Make sure obs_cols is a list
         keys = convert_to_list(keys)
 
@@ -1314,8 +1158,16 @@ class InSituExperiment:
         else:
             keys = [None] * len(objs)
 
+        # Check that all objects have the same data type
+        data_types = [obj._data_type for obj in objs]
+        if len(set(data_types)) > 1:
+            raise ValueError(
+                f"Cannot concatenate InSituExperiment objects with different data types: {set(data_types)}"
+            )
+        data_type = data_types[0]
+
         # Initialize a new InSituExperiment object
-        new_experiment = cls()
+        new_experiment = cls(data_type=data_type)
 
         # Concatenate data and metadata
         new_data = []
@@ -1336,8 +1188,9 @@ class InSituExperiment:
         # Disconnect object from save path
         new_experiment._path = None
 
-        # check if observation names are unique
-        new_experiment._check_obs_uniqueness()
+        # check if observation names are unique (only for insitupy mode)
+        if data_type == "insitupy":
+            new_experiment._check_obs_uniqueness()
 
         return new_experiment
 
@@ -1352,21 +1205,6 @@ class InSituExperiment:
         Args:
             config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
             mode (Literal["insitupy", "xenium"], optional): The mode to use for loading the datasets. Defaults to "insitupy".
-
-        The configuration file should be either a CSV or Excel file (.csv, .xlsx, .xls) and must contain the following columns:
-
-        - **directory**: This column is mandatory and should contain the paths to the directories where the datasets are stored. Each path should be a valid directory path.
-        - **Other columns**: These columns can contain any additional metadata you want to associate with each dataset. The metadata will be extracted from these columns and stored in the InSituExperiment object.
-
-        Example of a valid configuration file:
-            +---------------------+------------------+------------+------------+
-            | directory           | experiment_name  | patient    | treatment  |
-            +---------------------+------------------+------------+------------+
-            | /path/to/dataset1   | Experiment 1     | Patient A  | Drug A     |
-            +---------------------+------------------+------------+------------+
-            | /path/to/dataset2   | Experiment 2     | Patient B  | Drug B     |
-            +---------------------+------------------+------------+------------+
-
         """
         config_path = Path(config_path)
 
@@ -1386,10 +1224,9 @@ class InSituExperiment:
         current_path = Path.cwd()
 
         # Initialize a new InSituExperiment object
-        experiment = cls()
+        experiment = cls(data_type="insitupy")
 
         # Iterate over each row in the configuration file
-        # for _, row in tqdm(config.iterrows()):
         for i in tqdm(range(len(config))):
             row = config.iloc[i, :]
             dataset_path = Path(row['directory'])
@@ -1433,19 +1270,11 @@ class InSituExperiment:
         Args:
             data (InSituData): The input data containing regions to extract.
             region_key (str): The key identifying the region of interest in `data.regions`.
-            region_names (Optional[Union[List[str], str]]): A list of region names or a single region name to include
-            in the experiment. If None, all regions under the specified `region_key` are included.
+            region_names (Optional[Union[List[str], str]]): Region names to include.
 
         Returns:
-            InSituExperiment: An instance of `InSituExperiment` containing the cropped data and metadata
-            for the specified regions.
-
-        Notes:
-            - The `region_names` parameter is converted to a list if a single string is provided.
-            - The method iterates over the sorted list of region names in the `region_key` dataframe,
-                crops the data for each region, and adds it to the experiment along with its metadata.
+            InSituExperiment: An instance containing the cropped data and metadata for the specified regions.
         """
-
         # Retrieve the regions dataframe
         region_df = data.regions[region_key]
 
@@ -1457,7 +1286,7 @@ class InSituExperiment:
             region_names = convert_to_list(region_names)
 
         # Initialize a new InSituExperiment object
-        experiment = cls()
+        experiment = cls(data_type="insitupy")
 
         for n in sorted(region_df["name"].tolist()):
             if n in region_names:
@@ -1473,14 +1302,259 @@ class InSituExperiment:
         return experiment
 
     @classmethod
-    def read(cls, path: Union[str, os.PathLike, Path]):
-        """Read an InSituExperiment object from a specified folder.
+    def read(cls,
+             path: Union[str, os.PathLike, Path],
+             mode: Literal["insitupy", "spatialdata"] = "insitupy") -> "InSituExperiment":
+        """
+        Read an InSituExperiment object from a specified folder.
 
         Args:
-            path (Union[str, os.PathLike, Path]): The path to the folder where datasets are saved.
+            path: Path to the experiment directory or SpatialData zarr store
+            mode: Read mode - either "insitupy" (default) or "spatialdata"
 
         Returns:
-            InSituExperiment: :class:`~insitupy.experiment.data.InSituExperiment` object.
+            InSituExperiment object in the specified mode
+        """
+        if mode == "spatialdata":
+            return cls._read_spatialdata(path)
+        elif mode == "insitupy":
+            return cls._read_insitupy(path)
+        else:
+            raise ValueError(f"Unknown mode: {mode}. Use 'insitupy' or 'spatialdata'")
+
+    # ==================== SPATIALDATA MODE METHODS ====================
+
+    @classmethod
+    def _read_spatialdata(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+        """
+        Read an InSituExperiment from a SpatialData zarr store.
+
+        This method reads a SpatialData zarr directory and creates an InSituExperiment
+        containing StructuredSpatialData objects. It handles both single-sample and
+        multi-sample SpatialData stores.
+
+        Args:
+            path: Path to the SpatialData .zarr directory
+
+        Returns:
+            InSituExperiment in SpatialData mode
+
+        Raises:
+            ImportError: If spatialdata is not installed
+            FileNotFoundError: If the path does not exist
+        """
+        if not SPATIALDATA_AVAILABLE:
+            raise ImportError(
+                "SpatialData mode requires the spatialdata package. "
+                "Install it with: pip install spatialdata"
+            )
+
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"SpatialData path not found: {path}")
+
+        # Initialize experiment in spatialdata mode
+        experiment = cls(data_type="spatialdata")
+        experiment._path = path
+
+        # Read the SpatialData zarr store
+        print(f"Reading SpatialData from {path}...")
+        # sdata = read_zarr(path)
+        sdata = _silent_read_zarr(path)
+
+        # Extract samples from the SpatialData object
+        samples = cls._extract_samples_from_spatialdata(sdata)
+
+        print(f"Found {len(samples)} sample(s)")
+
+        # Create StructuredSpatialData for each sample
+        for sample_id, sample_elements in tqdm(samples.items(), desc="Loading samples"):
+            # Import here to avoid circular imports
+            from insitupy.spatialdata import StructuredSpatialData
+
+            struct_data = StructuredSpatialData()
+            struct_data._path = path
+
+            # Populate the StructuredSpatialData from elements
+            cls._populate_structured_data(struct_data, sample_elements, sample_id)
+
+            # Add to experiment
+            experiment._data.append(struct_data)
+
+            # Create metadata entry
+            metadata_entry = {
+                'uid': sample_id if sample_id != 'single' else str(uuid4()).split("-")[0],
+                'slide_id': sample_id if sample_id != 'single' else 'unknown',
+                'sample_id': sample_id if sample_id != 'single' else 'unknown',
+            }
+            experiment._metadata = pd.concat([
+                experiment._metadata,
+                pd.DataFrame([metadata_entry])
+            ], ignore_index=True)
+
+        # Try to load colors if they exist
+        colors_path = path / "colors.json"
+        if colors_path.exists():
+            try:
+                with open(colors_path, 'r') as f:
+                    experiment._colors = json.load(f)
+            except Exception as e:
+                warnings.warn(f"Could not load colors.json: {e}")
+
+        return experiment
+
+    @staticmethod
+    def _extract_samples_from_spatialdata(sdata) -> Dict[str, Dict]:
+        """
+        Group SpatialData elements by sample ID.
+
+        Elements with keys like 'sample.<id>..MODALITY.name' are grouped by sample_id.
+        Elements without sample prefix are treated as a single sample.
+
+        Args:
+            sdata: SpatialData object
+
+        Returns:
+            Dictionary mapping sample_id to dictionary of elements
+        """
+        samples = defaultdict(dict)
+        has_multi_sample = False
+
+        for elem_type, key, elem in sdata.gen_elements():
+            if key.startswith(SAMPLE_STR):
+                # Multi-sample format: 'sample.<id>..MODALITY...'
+                parts = key.split('.')
+                sample_id = parts[1]  # Extract sample ID
+                samples[sample_id][key] = (elem_type, elem)
+                has_multi_sample = True
+            else:
+                # Single-sample format or element without sample prefix
+                samples['single'][key] = (elem_type, elem)
+
+        # If we have multi-sample data, remove the 'single' key
+        if has_multi_sample and 'single' in samples:
+            if len(samples['single']) > 0:
+                warnings.warn(
+                    "Found both multi-sample (with 'sample.' prefix) and single-sample elements. "
+                    "Single-sample elements will be ignored."
+                )
+            del samples['single']
+
+        return dict(samples)
+
+    @staticmethod
+    def _populate_structured_data(struct_data, sample_elements: Dict, sample_id: str):
+        """
+        Populate a StructuredSpatialData object from a dictionary of elements.
+
+        Args:
+            struct_data: StructuredSpatialData object to populate
+            sample_elements: Dictionary mapping element keys to (elem_type, elem) tuples
+            sample_id: ID of the sample (used for filtering)
+        """
+        for key, (elem_type, elem) in sample_elements.items():
+            # Parse the key to determine where to place the element
+            # Remove sample prefix if present
+            if key.startswith(SAMPLE_STR):
+                # Format: 'sample.<id>..MODALITY.locators...'
+                parts = key.split('.')
+                # Remove 'sample', '<id>', and empty string
+                parts = [p for p in parts[3:] if p]
+            else:
+                # Format: 'MODALITY.locators...'
+                parts = key.split('.')
+
+            if len(parts) == 0:
+                warnings.warn(f"Could not parse key: {key}")
+                continue
+
+            modality = parts[0]
+
+            # Route to appropriate structure based on modality
+            if modality == "IMAGES":
+                if len(parts) >= 2:
+                    image_name = parts[1]
+                    # Get transformation for pixel size
+                    try:
+                        from spatialdata.transformations import \
+                            get_transformation
+                        scale_obj = get_transformation(elem)
+                        struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
+                    except Exception as e:
+                        warnings.warn(f"Could not add image {image_name}: {e}")
+
+            elif modality == "CELLS":
+                if len(parts) >= 2:
+                    cell_key = parts[1]
+
+                    # Initialize CellData if not exists
+                    if cell_key not in struct_data._cells._layers:
+                        from insitupy.spatialdata.structured import \
+                            StructuredCellData
+                        struct_data._cells[cell_key] = StructuredCellData()
+
+                    if len(parts) >= 3:
+                        if parts[2] == "matrix":
+                            struct_data._cells[cell_key].matrix = elem
+                        elif parts[2] == "boundaries" and len(parts) >= 4:
+                            boundary_name = parts[3]
+                            struct_data._cells[cell_key].boundaries[boundary_name] = elem
+                        elif parts[2] in ["circles", "circles_sized"]:
+                            # Skip circles representations (derived from matrix)
+                            pass
+
+            elif modality == "TRANSCRIPTS":
+                struct_data._transcripts = elem
+
+            elif modality == "ANNOTATIONS":
+                if len(parts) >= 2:
+                    annotation_name = parts[1]
+                    struct_data._annotations[annotation_name] = elem
+
+            elif modality == "REGIONS":
+                if len(parts) >= 2:
+                    region_name = parts[1]
+                    struct_data._regions[region_name] = elem
+
+            else:
+                warnings.warn(f"Unknown modality in key: {key}")
+
+    @staticmethod
+    def _get_loaded_modalities_spatialdata(data) -> List[str]:
+        """
+        Get list of loaded modalities from a StructuredSpatialData object.
+
+        Args:
+            data: StructuredSpatialData object
+
+        Returns:
+            List of modality names that have data
+        """
+        loaded = []
+
+        if not data._images.is_empty:
+            loaded.append("images")
+        if not data._cells.is_empty:
+            loaded.append("cells")
+        if data._transcripts is not None:
+            loaded.append("transcripts")
+        if not data._annotations.is_empty:
+            loaded.append("annotations")
+        if not data._regions.is_empty:
+            loaded.append("regions")
+
+        return loaded
+
+    @classmethod
+    def _read_insitupy(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+        """
+        Read an InSituExperiment in InSituPy format (original implementation).
+
+        Args:
+            path: Path to the InSituExperiment directory
+
+        Returns:
+            InSituExperiment in insitupy mode
         """
         path = Path(path)
 
@@ -1503,13 +1577,24 @@ class InSituExperiment:
             data.append(dataset)
 
         # Create a new InSituExperiment object
-        experiment = cls()
+        experiment = cls(data_type="insitupy")
         experiment._metadata = metadata
         experiment._data = data
         experiment._path = path
         experiment._colors = colors
 
         return experiment
+
+    def _check_mode_compatibility(self, method_name: str):
+        """
+        Check if the current mode is compatible with a method.
+        Raises NotImplementedError for spatialdata mode (for now).
+        """
+        if self._data_type == "spatialdata":
+            raise NotImplementedError(
+                f"Method '{method_name}' is not yet implemented for SpatialData mode. "
+                f"This will be added in a future update."
+            )
 
     def _check_obs_uniqueness(
         self,
@@ -1542,6 +1627,7 @@ class InSituExperiment:
         cells_layer: Optional[str] = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
         ) -> Dict:
+        """Create a color dictionary for categorical data."""
         cols = []
         for _, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
