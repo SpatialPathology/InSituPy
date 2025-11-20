@@ -1,11 +1,14 @@
 import warnings
-from typing import List, Literal, Union
+from typing import Callable, List, Literal, Optional, Tuple, Union
 
+import dask.array as da
 import numpy as np
 import pandas as pd
 from scipy.linalg import LinAlgError
 from scipy.stats import gaussian_kde
+from skimage.measure import regionprops_table
 from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 def _calc_kernel_density(
@@ -171,3 +174,154 @@ def cohens_d(a, b, paired=False, correct_small_sample_size=True):
         d = np.mean(diff) / np.std(diff)
 
     return d
+
+
+
+
+def intensity_median(region_mask, intensity_image):
+    """Calculate median intensity for a region."""
+    return np.median(intensity_image[region_mask])
+
+
+def quantify_fluorescence(
+    image_dask: da.Array,
+    mask_dask: da.Array,
+    method: Union[Literal["mean", "median"], str, Callable] = "median",
+    downsample_factor: Optional[int] = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Memory-efficient quantification for greyscale images.
+
+    Uses lazy loading with dask to minimize memory usage. The image is only
+    loaded into memory once after downsampling (if specified).
+
+    Parameters
+    ----------
+    image_dask : dask array
+        Greyscale fluorescence image, shape (Y, X)
+    mask_dask : dask array
+        Segmentation mask with cell IDs, shape (Y, X)
+    method : {"mean", "median"} or str or callable, optional
+        Quantification method. Built-in options: "mean", "median" (default).
+        Other strings are passed to regionprops_table (e.g., "intensity_max", "intensity_min").
+        For custom functions, provide a callable with signature
+        func(region_mask, intensity_image) -> float.
+    downsample_factor : int, optional
+        Factor by which to downsample image and mask before quantification.
+        For example, downsample_factor=2 will reduce dimensions by half.
+        Uses mean for image downsampling and nearest neighbor for mask.
+        This reduces memory usage proportionally to the square of the factor
+        (e.g., factor=2 uses ~4x less RAM, factor=4 uses ~16x less RAM).
+        Default is None (no downsampling).
+
+    Returns
+    -------
+    measurements : np.ndarray
+        Measurements array, shape (n_cells,)
+    cell_idx : np.ndarray
+        Array of cell IDs
+
+    Notes
+    -----
+    Memory usage: Loads full mask and full image once after downsampling.
+    For multi-channel images, process each channel separately by calling this
+    function multiple times with image_dask[channel_idx].
+
+    Examples
+    --------
+    >>> # Default usage with median intensity
+    >>> measurements, cell_ids = quantify_fluorescence(image_zarr, mask_zarr)
+    >>>
+    >>> # Use mean instead of median
+    >>> measurements, cell_ids = quantify_fluorescence(
+    ...     image_zarr, mask_zarr, method="mean"
+    ... )
+    >>>
+    >>> # With 4x downsampling for very large images
+    >>> measurements, cell_ids = quantify_fluorescence(
+    ...     image_zarr, mask_zarr, downsample_factor=4
+    ... )
+    >>>
+    >>> # Custom function example
+    >>> def intensity_p90(region_mask, intensity_image):
+    ...     return np.percentile(intensity_image[region_mask], 90)
+    >>>
+    >>> measurements, cell_ids = quantify_fluorescence(
+    ...     image_zarr, mask_zarr, method=intensity_p90
+    ... )
+    >>>
+    >>> # For multi-channel images, process each channel separately
+    >>> for c in range(n_channels):
+    ...     measurements, cell_ids = quantify_fluorescence(
+    ...         image_zarr[c], mask_zarr
+    ...     )
+    """
+    if method == "median":
+        method = intensity_median
+    elif method == "mean":
+        method = "intensity_mean"
+    # Check image dimensions
+    if image_dask.ndim != 2:
+        raise ValueError(
+            f"Image must be 2D greyscale with shape (Y, X), got shape {image_dask.shape} "
+            f"with {image_dask.ndim} dimensions. For multi-channel images, select a single "
+            f"channel first: image_dask[channel_idx]"
+        )
+
+    # Check mask dimensions
+    if mask_dask.ndim != 2:
+        raise ValueError(
+            f"Mask must be 2D with shape (Y, X), got shape {mask_dask.shape} "
+            f"with {mask_dask.ndim} dimensions"
+        )
+
+    # Apply downsampling if requested (lazy operations on dask arrays)
+    if downsample_factor is not None and downsample_factor > 1:
+        # Downsample mask using nearest neighbor (to preserve cell IDs)
+        mask_dask = mask_dask[::downsample_factor, ::downsample_factor]
+
+        # Downsample image using coarsen with mean
+        image_dask = da.coarsen(
+            np.mean,
+            image_dask,
+            {0: downsample_factor, 1: downsample_factor},
+            trim_excess=True
+        )
+
+    # Load mask and image
+    mask = mask_dask.compute()
+    image = image_dask.compute()
+
+    # Ensure mask and image have matching shapes
+    min_y = min(mask.shape[0], image.shape[0])
+    min_x = min(mask.shape[1], image.shape[1])
+    mask_cropped = mask[:min_y, :min_x]
+    image_cropped = image[:min_y, :min_x]
+
+    image_3d = image_cropped[:, :, np.newaxis]
+
+    # Compute regionprops
+    if isinstance(method, str):
+        props = regionprops_table(
+            mask_cropped,
+            intensity_image=image_3d,
+            properties=["label", method]
+        )
+    elif callable(method):
+        props = regionprops_table(
+            mask_cropped,
+            intensity_image=image_3d,
+            extra_properties=(method,)
+        )
+    else:
+        raise ValueError("method must be 'mean', 'median', or a callable")
+
+    # Extract cell IDs
+    cell_idx = props.pop("label")
+
+    # Get measurement
+    func_name = method if isinstance(method, str) else method.__name__
+    measurement_key = [k for k in props.keys() if k.startswith(func_name)][0]
+    measurements = props[measurement_key]
+
+    return np.array(measurements), np.array(cell_idx)

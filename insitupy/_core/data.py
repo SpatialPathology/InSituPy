@@ -24,7 +24,7 @@ from tqdm import tqdm
 from insitupy import WITH_NAPARI, __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._core._napari import *
+from insitupy._core._napari import _show
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
@@ -1158,8 +1158,46 @@ class InSituData:
             # save to the respective directory
             self.saveas(path=path)
 
+    def quantify_signal(
+        self,
+        image_name: str,
+        cells_layer: Optional[str] = None,
+        cells_compartment: Literal["cells", "nuclei"] = "cells",
+        method: Literal["mean", "median"] = "median",
+        downsample_factor: Optional[int] = None,
+        add_to_obs: bool = True
+    ):
+        from insitupy.utils._calc import quantify_fluorescence
+        img = self.images[image_name]
+        if isinstance(img, list):
+            img = img[0]
+        cellsdata = _get_cell_layer(self.cells, cells_layer=cells_layer)
+        mask = cellsdata.boundaries[cells_compartment]
+        if isinstance(mask, list):
+            mask = mask[0]
 
+        measurements, cell_ids = quantify_fluorescence(
+            image_dask=img,
+            mask_dask=mask,
+            method=method,
+            downsample_factor=downsample_factor
+        )
 
+        name_mapping = dict(zip(
+            cellsdata.boundaries.seg_mask_value.compute(),
+            cellsdata.boundaries.cell_names.compute()))
+
+        res_series = pd.Series(
+            measurements,
+            index=list(map(name_mapping.get, cell_ids))
+        )
+
+        if add_to_obs:
+            obs_col = f"{image_name}_signal_{method}"
+            cellsdata.matrix.obs[obs_col] = res_series
+            print(f"Added quantification results to `.cells['{cells_layer}'].matrix.obs['{obs_col}']`.", flush=True)
+        else:
+            return res_series
 
 
 
