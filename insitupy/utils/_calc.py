@@ -175,20 +175,17 @@ def cohens_d(a, b, paired=False, correct_small_sample_size=True):
 
     return d
 
-
-
-
 def intensity_median(region_mask, intensity_image):
     """Calculate median intensity for a region."""
     return np.median(intensity_image[region_mask])
-
 
 def quantify_fluorescence(
     image_dask: da.Array,
     mask_dask: da.Array,
     method: Union[Literal["mean", "median"], str, Callable] = "median",
-    downsample_factor: Optional[int] = None
-) -> Tuple[np.ndarray, np.ndarray]:
+    downsample_factor: Optional[int] = None,
+    return_area: bool = False
+) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """
     Memory-efficient quantification for greyscale images.
 
@@ -213,6 +210,9 @@ def quantify_fluorescence(
         This reduces memory usage proportionally to the square of the factor
         (e.g., factor=2 uses ~4x less RAM, factor=4 uses ~16x less RAM).
         Default is None (no downsampling).
+    return_area : bool, optional
+        If True, also return the area (number of pixels) for each cell.
+        Default is False.
 
     Returns
     -------
@@ -220,6 +220,9 @@ def quantify_fluorescence(
         Measurements array, shape (n_cells,)
     cell_idx : np.ndarray
         Array of cell IDs
+    areas : np.ndarray, optional
+        Array of cell areas in pixels, shape (n_cells,).
+        Only returned if return_area=True.
 
     Notes
     -----
@@ -235,6 +238,11 @@ def quantify_fluorescence(
     >>> # Use mean instead of median
     >>> measurements, cell_ids = quantify_fluorescence(
     ...     image_zarr, mask_zarr, method="mean"
+    ... )
+    >>>
+    >>> # With area information
+    >>> measurements, cell_ids, areas = quantify_fluorescence(
+    ...     image_zarr, mask_zarr, return_area=True
     ... )
     >>>
     >>> # With 4x downsampling for very large images
@@ -301,16 +309,22 @@ def quantify_fluorescence(
     image_3d = image_cropped[:, :, np.newaxis]
 
     # Compute regionprops
+    properties = ["label"]
+    if return_area:
+        properties.append("area")
+
     if isinstance(method, str):
+        properties.append(method)
         props = regionprops_table(
             mask_cropped,
             intensity_image=image_3d,
-            properties=["label", method]
+            properties=properties
         )
     elif callable(method):
         props = regionprops_table(
             mask_cropped,
             intensity_image=image_3d,
+            properties=properties,
             extra_properties=(method,)
         )
     else:
@@ -319,9 +333,165 @@ def quantify_fluorescence(
     # Extract cell IDs
     cell_idx = props.pop("label")
 
+    # Extract areas if requested
+    if return_area:
+        areas = props.pop("area")
+
     # Get measurement
     func_name = method if isinstance(method, str) else method.__name__
     measurement_key = [k for k in props.keys() if k.startswith(func_name)][0]
     measurements = props[measurement_key]
 
-    return np.array(measurements), np.array(cell_idx)
+    if return_area:
+        return np.array(measurements), np.array(cell_idx), np.array(areas)
+    else:
+        return np.array(measurements), np.array(cell_idx)
+
+
+
+
+def create_tiles(
+    dask_array: da.Array,
+    tile_size: int = 2000,
+    overlap: int = 100
+) -> List[Tuple[da.Array, Tuple[slice, slice], Tuple[slice, slice]]]:
+    """
+    Split a 2D dask array into overlapping tiles.
+
+    Parameters
+    ----------
+    dask_array : dask array
+        2D array to split, shape (Y, X)
+    tile_size : int, optional
+        Maximum size of each tile dimension in pixels (default: 2000)
+    overlap : int, optional
+        Overlap between adjacent tiles in pixels (default: 100)
+
+    Returns
+    -------
+    tiles : list of tuples
+        Each tuple contains:
+        - tile: dask array slice
+        - global_slice: (slice_y, slice_x) position in original array
+        - inner_slice: (slice_y, slice_x) position excluding overlap for stitching
+
+    Examples
+    --------
+    >>> tiles = create_tiles(image_dask, tile_size=2000, overlap=100)
+    >>> for tile, global_pos, inner_pos in tiles:
+    ...     # Process tile
+    ...     result = process(tile.compute())
+    """
+    if dask_array.ndim != 2:
+        raise ValueError(
+            f"Array must be 2D with shape (Y, X), got shape {dask_array.shape}"
+        )
+
+    height, width = dask_array.shape
+    step = tile_size - overlap
+
+    tiles = []
+
+    for y_start in range(0, height, step):
+        for x_start in range(0, width, step):
+            # Calculate tile boundaries with overlap
+            y_end = min(y_start + tile_size, height)
+            x_end = min(x_start + tile_size, width)
+
+            # Create slices for extracting tile
+            global_slice = (slice(y_start, y_end), slice(x_start, x_end))
+
+            # Calculate inner region (excluding overlap) for stitching
+            inner_y_start = overlap if y_start > 0 else 0
+            inner_x_start = overlap if x_start > 0 else 0
+            inner_y_end = y_end - y_start
+            inner_x_end = x_end - x_start
+
+            # Adjust inner boundaries for last tiles
+            if y_end < height:
+                inner_y_end -= overlap
+            if x_end < width:
+                inner_x_end -= overlap
+
+            inner_slice = (
+                slice(inner_y_start, inner_y_end),
+                slice(inner_x_start, inner_x_end)
+            )
+
+            # Extract tile (lazy operation)
+            tile = dask_array[global_slice]
+
+            tiles.append((tile, global_slice, inner_slice))
+
+    return tiles
+
+from typing import List, Tuple
+
+import numpy as np
+
+
+def consolidate_tile_measurements(
+    quant_results: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Consolidate measurements from overlapping tiles.
+
+    For each cell ID, selects the measurement from the tile where that cell
+    has maximum area. This ensures measurements are taken from tiles where
+    cells are complete rather than split at tile boundaries.
+
+    Parameters
+    ----------
+    quant_results : list of tuples
+        List of (measurements, cell_ids, areas) tuples from quantify_fluorescence
+        with return_area=True
+
+    Returns
+    -------
+    measurements : np.ndarray
+        Consolidated measurements, one per unique cell
+    cell_ids : np.ndarray
+        Corresponding cell IDs
+
+    Examples
+    --------
+    >>> quant_results = []
+    >>> for img_tile, mask_tile in zip(img_tiles, mask_tiles):
+    ...     result = quantify_fluorescence(
+    ...         img_tile[0], mask_tile[0], return_area=True
+    ...     )
+    ...     quant_results.append(result)
+    >>> measurements, cell_ids = consolidate_tile_measurements(quant_results)
+    """
+    # Collect all data
+    all_measurements = []
+    all_cell_ids = []
+    all_areas = []
+
+    for measurements, cell_ids, areas in quant_results:
+        all_measurements.append(measurements)
+        all_cell_ids.append(cell_ids)
+        all_areas.append(areas)
+
+    # Concatenate
+    all_measurements = np.concatenate(all_measurements)
+    all_cell_ids = np.concatenate(all_cell_ids)
+    all_areas = np.concatenate(all_areas)
+
+    # Find unique cell IDs
+    unique_cell_ids = np.unique(all_cell_ids)
+
+    # For each cell, find the measurement with maximum area
+    final_measurements = np.zeros(len(unique_cell_ids))
+
+    for i, cell_id in enumerate(unique_cell_ids):
+        # Find all occurrences of this cell
+        mask = all_cell_ids == cell_id
+        cell_measurements = all_measurements[mask]
+        cell_areas = all_areas[mask]
+
+        # Select measurement from tile with maximum area
+        max_area_idx = np.argmax(cell_areas)
+        final_measurements[i] = cell_measurements[max_area_idx]
+
+    return final_measurements, unique_cell_ids

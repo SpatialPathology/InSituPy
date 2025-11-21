@@ -1165,10 +1165,13 @@ class InSituData:
         cells_compartment: Literal["cells", "nuclei"] = "cells",
         method: Literal["mean", "median"] = "median",
         downsample_factor: Optional[int] = None,
+        tile_size: Optional[int] = None,
         add_to_obs: bool = True
     ):
-        from insitupy.utils._calc import quantify_fluorescence
+        from insitupy.utils._calc import (consolidate_tile_measurements,
+                                          create_tiles, quantify_fluorescence)
         img = self.images[image_name]
+        pixel_size = self.images.metadata[image_name]["pixel_size"]
         if isinstance(img, list):
             img = img[0]
         cellsdata = _get_cell_layer(self.cells, cells_layer=cells_layer)
@@ -1176,12 +1179,35 @@ class InSituData:
         if isinstance(mask, list):
             mask = mask[0]
 
-        measurements, cell_ids = quantify_fluorescence(
-            image_dask=img,
-            mask_dask=mask,
-            method=method,
-            downsample_factor=downsample_factor
-        )
+        if tile_size is None:
+            measurements, cell_ids = quantify_fluorescence(
+                image_dask=img,
+                mask_dask=mask,
+                method=method,
+                downsample_factor=downsample_factor
+            )
+        else:
+
+            # Tiled approach
+            overlap = int(100 / pixel_size)
+            print(f"Quantification using tiled approach with overlap {overlap}...", flush=True)
+            img_tiles = create_tiles(img, tile_size=tile_size, overlap=overlap)
+            mask_tiles = create_tiles(mask, tile_size=tile_size, overlap=overlap)
+
+            quant_results = []
+            for i in tqdm(range(len(img_tiles)), desc="Processing tiles"):
+                img_tile = img_tiles[i][0]
+                mask_tile = mask_tiles[i][0]
+                quant_results.append(quantify_fluorescence(
+                    image_dask=img_tile,
+                    mask_dask=mask_tile,
+                    method=method,
+                    return_area=True
+                ))
+
+            # extract measurements from tiled results
+            print("Collecting results...", flush=True)
+            measurements, cell_ids = consolidate_tile_measurements(quant_results)
 
         name_mapping = dict(zip(
             cellsdata.boundaries.seg_mask_value.compute(),
@@ -1193,7 +1219,7 @@ class InSituData:
         )
 
         if add_to_obs:
-            obs_col = f"{image_name}_signal_{method}"
+            obs_col = f"{image_name}_signal_{cells_compartment}_{method}"
             cellsdata.matrix.obs[obs_col] = res_series
             print(f"Added quantification results to `.cells['{cells_layer}'].matrix.obs['{obs_col}']`.", flush=True)
         else:

@@ -1219,6 +1219,9 @@ class ImageData(DeepCopyMixin):
     def __getitem__(self, key):
         return self._data.get(key)
 
+    def keys(self):
+        return self._data.keys()
+
     @property
     def metadata(self):
         return self._metadata
