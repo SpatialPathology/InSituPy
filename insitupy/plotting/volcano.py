@@ -16,10 +16,10 @@ from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
 
 # Constants
-DEFAULT_ALPHA = 0.5
-DEFAULT_LABEL_FONTSIZE = 14
-DEFAULT_AXIS_FONTSIZE = 14
-DEFAULT_TITLE_FONTSIZE = 16
+DEFAULT_ALPHA = 0.7
+DEFAULT_LABEL_FONTSIZE = 12
+DEFAULT_AXIS_FONTSIZE = 16
+DEFAULT_TITLE_FONTSIZE = 18
 AXIS_MARGIN_FACTOR = 1.1
 COLOR_UPREGULATED = 'maroon'
 COLOR_DOWNREGULATED = 'royalblue'
@@ -50,6 +50,7 @@ def single_volcano(
     down_label: Optional[str] = "Reference",
     gene_style: str = None,
     is_wanted_flag: bool=False,
+    show_middle_flag: bool=True,
 ) -> None:
     """
     Create a volcano plot with labeled top differentially expressed genes.
@@ -168,6 +169,8 @@ def single_volcano(
     data[neg_log_pval_column] = -np.log10(data[pval_column])
     neg_log_sig_thresh = -np.log10(significance_threshold)
     lfc_threshold = np.log2(foldchange_threshold)
+    top_genes=None
+
 
     # Determine colors based on significance and fold change
     is_significant = ((data[neg_log_pval_column] > neg_log_sig_thresh) &(abs(data[logfoldchanges_column]) > lfc_threshold))
@@ -182,7 +185,7 @@ def single_volcano(
         and data.index.isin(genes_to_label)
     )
 
-    if is_wanted_flag:
+    if is_wanted_flag and show_middle_flag:
         colors = np.where(
             is_significant & is_upregulated & is_wanted,
             COLOR_UPREGULATED,
@@ -192,10 +195,28 @@ def single_volcano(
                 np.where(
                     is_significant,
                     COLOR_NOT_WANTED,
-                    COLOR_NOT_SIGNIFICANT
+                        np.where(
+                        is_wanted,
+                        COLOR_NOT_WANTED,
+                        COLOR_NOT_SIGNIFICANT
+                    )
                 )
             )
         )
+    elif is_wanted_flag:
+        colors = np.where(
+            is_significant & is_upregulated & is_wanted,
+            COLOR_UPREGULATED,
+            np.where(
+                is_significant & is_downregulated & is_wanted,
+                COLOR_DOWNREGULATED,
+                np.where(
+                    is_significant,
+                        COLOR_NOT_WANTED,
+                        COLOR_NOT_SIGNIFICANT
+                    )
+                )
+            )
     else:
         colors = np.where(
             is_significant & is_upregulated,
@@ -212,13 +233,47 @@ def single_volcano(
     else:
         show = False  # Don't show if ax is provided
 
-    # Create scatter plot
+    # --- Build a robust wanted mask aligned to data.index ---
+    import pandas as pd
+    if is_wanted_flag and isinstance(genes_to_label, list) and len(genes_to_label) > 0:
+        if show_middle_flag:
+            wanted_mask = pd.Series(data.index.isin(genes_to_label), index=data.index)
+        else:
+            wanted_mask = pd.Series(data.index.isin(genes_to_label), index=data.index) & is_significant
+            
+    else:
+        wanted_mask = pd.Series(False, index=data.index)
+
+    # Convert to numpy indexers for plotting
+    wanted_idx = wanted_mask.to_numpy()
+    non_wanted_idx = ~wanted_idx
+
+    # --- First pass: non-wanted in the background ---
     ax.scatter(
-        data[logfoldchanges_column],
-        data[neg_log_pval_column],
+        data[logfoldchanges_column].to_numpy()[non_wanted_idx],
+        data[neg_log_pval_column].to_numpy()[non_wanted_idx],
         alpha=DEFAULT_ALPHA,
-        color=colors
+        color=np.asarray(colors)[non_wanted_idx],
+        s=8,
+        zorder=1,
+        rasterized=True,  # optional for large plots; improves PDF performance
     )
+
+    # --- Second pass: wanted genes on top ---
+    # You can customize visual emphasis here (size, alpha, edgecolor, etc.)
+    ax.scatter(
+        data[logfoldchanges_column].to_numpy()[wanted_idx],
+        data[neg_log_pval_column].to_numpy()[wanted_idx],
+        alpha=min(1.0, DEFAULT_ALPHA * 1.2) if "DEFAULT_ALPHA" in globals() else 0.9,
+        color=np.asarray(colors)[wanted_idx],     # keep your assigned colors
+        edgecolor="black",
+        linewidths=0.5,
+        s=30,
+        zorder=3,
+        rasterized=False,
+    )
+
+
 
     # Add title and labels
     if title is not None:
@@ -244,8 +299,12 @@ def single_volcano(
         top_up_genes = up_data.nlargest(genes_to_label, label_sortby) if not up_data.empty else pd.DataFrame()
         top_down_genes = down_data.nsmallest(genes_to_label, label_sortby) if not down_data.empty else pd.DataFrame()
     elif isinstance(genes_to_label, list):
-        top_up_genes = up_data[up_data.index.isin(genes_to_label)] if not up_data.empty else pd.DataFrame()
-        top_down_genes = down_data[down_data.index.isin(genes_to_label)] if not down_data.empty else pd.DataFrame()
+        #top_up_genes = up_data[up_data.index.isin(genes_to_label)] if not up_data.empty else pd.DataFrame()
+        #top_down_genes = down_data[down_data.index.isin(genes_to_label)] if not down_data.empty else pd.DataFrame()
+        if show_middle_flag:
+            top_genes = data[data.index.isin(genes_to_label)]
+        else:
+            top_genes = data[data.index.isin(genes_to_label) & is_significant]
     else:
         raise TypeError(f"label_top_n must be int or list, got {type(genes_to_label)}")
 
@@ -277,11 +336,18 @@ def single_volcano(
         )
 
     # Set axis limits
+    xmin=-7
+    xmax=7
     ax.set_xlim(xmin, xmax)
-    ax.set_ylim(0, ymax)
+    
+    start = int(np.floor(min(xmin, -1)))
+    stop  = int(np.ceil(max(xmax,  1)))
+    ax.set_xticks(np.arange(start, stop + 1, 1))
+
 
     # Annotate top genes
-    top_genes = pd.concat([top_up_genes, top_down_genes])
+    if top_genes is None:
+        top_genes = pd.concat([top_up_genes, top_down_genes])
     texts = []
     for gene, row in top_genes.iterrows():
         texts.append(
