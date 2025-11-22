@@ -430,7 +430,7 @@ from typing import List, Tuple
 import numpy as np
 
 
-def consolidate_tile_measurements(
+def summarize_tile_measurements(
     quant_results: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
@@ -461,7 +461,7 @@ def consolidate_tile_measurements(
     ...         img_tile[0], mask_tile[0], return_area=True
     ...     )
     ...     quant_results.append(result)
-    >>> measurements, cell_ids = consolidate_tile_measurements(quant_results)
+    >>> measurements, cell_ids = summarize_tile_measurements(quant_results)
     """
     # Collect all data
     all_measurements = []

@@ -1168,8 +1168,8 @@ class InSituData:
         tile_size: Optional[int] = None,
         add_to_obs: bool = True
     ):
-        from insitupy.utils._calc import (consolidate_tile_measurements,
-                                          create_tiles, quantify_fluorescence)
+        from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
+                                          summarize_tile_measurements)
         img = self.images[image_name]
         pixel_size = self.images.metadata[image_name]["pixel_size"]
         if isinstance(img, list):
@@ -1207,7 +1207,7 @@ class InSituData:
 
             # extract measurements from tiled results
             print("Collecting results...", flush=True)
-            measurements, cell_ids = consolidate_tile_measurements(quant_results)
+            measurements, cell_ids = summarize_tile_measurements(quant_results)
 
         name_mapping = dict(zip(
             cellsdata.boundaries.seg_mask_value.compute(),
