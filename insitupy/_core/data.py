@@ -21,10 +21,9 @@ from parse import *
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
-from insitupy import WITH_NAPARI, __version__
+from insitupy import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._core._napari import _show
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
@@ -1321,6 +1320,14 @@ class InSituData:
         widgets_max_width: int = 500,
         verbose: bool = False
         ):
+        # check whether napari is installed
+        try:
+            import napari
+
+            from insitupy._core._napari import _show
+        except ImportError:
+            raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
+
         _show(
             data=self,
             keys=keys,

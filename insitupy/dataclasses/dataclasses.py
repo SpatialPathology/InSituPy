@@ -16,7 +16,8 @@ from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED
+from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
+                                 FORBIDDEN_ANNOTATION_NAMES, RED)
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._io.files import (check_overwrite_and_remove_if_true,
                                 write_dict_to_json)
@@ -597,56 +598,62 @@ class BoundariesData(DeepCopyMixin):
         if suffix not in ["zarr", "zarr.zip"]:
             raise InvalidFileTypeError(allowed_types=[".zarr", ".zarr.zip"], received_type=suffix)
 
-        with zarr.ZipStore(bound_file, mode='w') if suffix == "zarr.zip" else zarr.DirectoryStore(bound_file) as dirstore:
-            # for conditional 'with' see also: https://stackoverflow.com/questions/27803059/conditional-with-statement-in-python
-            for n, meta in self._metadata.items():
-                bound_data = self[n]
+        # with zarr.ZipStore(bound_file, mode='w') if suffix == "zarr.zip" else zarr.DirectoryStore(bound_file) as dirstore:
 
-                # determine scale factor
-                scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
+        if suffix == "zarr.zip":
+            dirstore = zarr.storage.ZipStore(bound_file, mode="w")
+        else:
+            dirstore = zarr.storage.LocalStore(bound_file)
 
-                if bound_data is not None:
-                    if scale_factor is not None:
-                        if isinstance(bound_data, list):
-                            bound_data = bound_data[0]
-                        bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
-                        bound_data = da.from_array(bound_data) # convert to dask array
-                        meta['pixel_size'] = max_resolution # update metadata
+        # for conditional 'with' see also: https://stackoverflow.com/questions/27803059/conditional-with-statement-in-python
+        for n, meta in self._metadata.items():
+            bound_data = self[n]
 
-                    # check data
+            # determine scale factor
+            scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
+
+            if bound_data is not None:
+                if scale_factor is not None:
                     if isinstance(bound_data, list):
-                        if not save_as_pyramid:
-                            bound_data = bound_data[0]
-                    else:
-                        if save_as_pyramid:
-                            # create pyramid
-                            bound_data = create_img_pyramid(img=bound_data, nsubres=6)
+                        bound_data = bound_data[0]
+                    bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
+                    bound_data = da.from_array(bound_data) # convert to dask array
+                    meta['pixel_size'] = max_resolution # update metadata
+
+                # check data
+                if isinstance(bound_data, list):
+                    if not save_as_pyramid:
+                        bound_data = bound_data[0]
+                else:
+                    if save_as_pyramid:
+                        # create pyramid
+                        bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
 
 
-                    #if isinstance(bound_data, dask.array.core.Array):
-                    if isinstance(bound_data, list):
-                        for i, b in enumerate(bound_data):
-                            comp = f"masks/{n}/{i}"
-                            b = b.rechunk((1024, 1024))
-                            b.to_zarr(dirstore, component=comp)
-                    else:
-                        bound_data.to_zarr(dirstore, component=f"masks/{n}")
+                #if isinstance(bound_data, dask.array.core.Array):
+                if isinstance(bound_data, list):
+                    for i, b in enumerate(bound_data):
+                        comp = f"masks/{n}/{i}"
+                        b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
+                        b.to_zarr(dirstore, component=comp)
+                else:
+                    bound_data.to_zarr(dirstore, component=f"masks/{n}")
 
-                    # add boundaries metadata to zarr.zip
-                    store = zarr.open(dirstore, mode="a")
-                    store[f"masks/{n}"].attrs.put(meta)
+                # add boundaries metadata to zarr.zip
+                store = zarr.open(dirstore, mode="a")
+                store[f"masks/{n}"].attrs.put(meta)
 
-                # save keys in insitupy metadata
-                #metadata["boundaries"]["keys"].append(n)
+            # save keys in insitupy metadata
+            #metadata["boundaries"]["keys"].append(n)
 
-            # save paths in insitupy metadata
-            #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
+        # save paths in insitupy metadata
+        #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
 
-            #self._cell_ids.to_zarr(dirstore, component="cell_id")
-            self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
+        #self._cell_ids.to_zarr(dirstore, component="cell_id")
+        self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
 
-            if self._seg_mask_value is not None:
-                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
+        if self._seg_mask_value is not None:
+            self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
 
         # # add version to metadata
         # metadata_to_save = self.metadata.copy()
@@ -1055,6 +1062,9 @@ class MultiCellData(DeepCopyMixin):
                      cd: CellData,
                      key: str,
                      is_main: bool = False):
+        if not isinstance(cd, CellData):
+            raise ValueError(f"cd must be of type CellData. Instead: {type(cd)}.")
+
         if key in self._layers.keys():
             print(f"Overwriting {key}.")
         self._layers[key] = cd
@@ -1240,7 +1250,7 @@ class ImageData(DeepCopyMixin):
         name: str,
         axes: Optional[str] = None, # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
         pixel_size: Optional[Number] = None,
-        ome_meta: Optional[dict] = None,
+        ome_meta: Optional[dict] = {},
         is_rgb: Optional[bool] = None,
         overwrite: bool = False,
         verbose: bool = True
@@ -1280,10 +1290,9 @@ class ImageData(DeepCopyMixin):
                 image = Path(image)
                 image = image.resolve() # resolve relative path
                 filename = image.name
-                img, ome_meta, axes = read_image(image)
-
+                img, ome_meta, axes, pixel_size = read_image(image) # returns image pyramid as list of dask arrays if possible
             else:
-                raise ValueError(f"`image` is neither a dask array nor an existing path.")
+                raise ValueError(f"`image` is neither a dask array nor an existing path. Instead: {type(image)}")
 
             # set attribute and add names to object
             self._data[name] = img
@@ -1304,11 +1313,16 @@ class ImageData(DeepCopyMixin):
             self._metadata[name]["axes"] = axes
             self._metadata[name]["OME"] = ome_meta
 
-            # add universal pixel size to metadata
-            try:
-                self._metadata[name]['pixel_size'] = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
-            except KeyError:
-                self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
+            # if len(ome_meta) > 0:
+            #     # add universal pixel size to metadata
+            #     try:
+            #         self._metadata[name]['pixel_size'] = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
+            #     except KeyError:
+            #         self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
+            # else:
+            #     self._metadata[name]['pixel_size'] = pixel_size
+
+            self._metadata[name]['pixel_size'] = pixel_size
 
             # check whether the image is RGB or not
             if is_rgb is None:
@@ -1526,4 +1540,5 @@ class ImageData(DeepCopyMixin):
 
         if return_savepaths:
             return savepaths
+
 

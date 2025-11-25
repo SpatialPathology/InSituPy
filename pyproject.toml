@@ -6,7 +6,7 @@ license = {text = "BSD-3-Clause"}
 authors = [
     {name = "Johannes Wirth", email = "jwrth <j.wirth@tum.de>"}
 ]
-requires-python = ">=3.10.0,<3.11.0"
+requires-python = ">=3.10.0"
 readme = "README.md"
 dependencies = [
     "scanpy[leiden] (>=1.10.3,<2.0.0)",
@@ -18,7 +18,7 @@ dependencies = [
     "opencv-python>=4.8.0.76",
     "scikit-image (>=0.21.0,<1.0.0)",
     "geopandas>=1.0.1",
-    "fiona>=1.10.1",
+    # "fiona>=1.10.1",
     "openpyxl (>=3.1.2,<4.0.0)",
     "pytest>=7.4.2",
     "xmltodict>=0.13.0",

@@ -13,47 +13,59 @@ from parse import *
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy import __version__
-
-from .._exceptions import InvalidFileTypeError
-from ..images.utils import create_img_pyramid
-from ..utils.utils import convert_to_list
+from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
+from insitupy._exceptions import InvalidFileTypeError
+from insitupy.images.utils import create_img_pyramid
+from insitupy.utils.utils import convert_to_list
 
 
 def read_zarr(path):
     # load image from .zarr.zip
     #zipped = True if suffix == "zarr.zip" else False
     zipped = zipfile.is_zipfile(path)
-    with zarr.ZipStore(path, mode="r") if zipped else zarr.DirectoryStore(path) as dirstore:
+    # with zarr.ZipStore(path, mode="r") if zipped else zarr.DirectoryStore(path) as dirstore:
+    if zipped:
+        dirstore = zarr.storage.ZipStore(path, mode="r")
+    else:
+        dirstore = zarr.storage.LocalStore(path)
 
-        # get components of zip store
-        components = dirstore.listdir()
+    # get components of zip store
+    # components = dirstore.listdir()
 
-        if ".zarray" in components:
-            # the store is an array which can be opened
-            if zipped:
-                img = da.from_zarr(dirstore).persist()
-            else:
-                img = da.from_zarr(dirstore)
+    # open zarr group
+    root = zarr.open_group(store=dirstore, mode='r')
+    components = sorted(root.keys())
+
+    if ".zarray" in components:
+        # the store is an array which can be opened
+        if zipped:
+            img = da.from_zarr(dirstore).persist()
         else:
-            subres = [elem for elem in components if not elem.startswith(".")]
-            img = []
-            for s in subres:
-                if zipped:
-                    img.append(
-                        da.from_zarr(dirstore, component=s).persist()
-                                )
-                else:
-                    img.append(
-                        da.from_zarr(dirstore, component=s)
-                                )
+            img = da.from_zarr(dirstore)
+    else:
+        subres = [elem for elem in components if not elem.startswith(".")]
+        img = []
+        for s in subres:
+            if zipped:
+                img.append(
+                    da.from_zarr(dirstore, component=s).persist()
+                            )
+            else:
+                img.append(
+                    da.from_zarr(dirstore, component=s)
+                            )
 
-        # retrieve OME metadata
-        store = zarr.open(dirstore)
-        meta = store.attrs.asdict()
-        ome_meta = meta["OME"]
-        axes = meta["axes"]
+    # retrieve OME metadata
+    store = zarr.open(dirstore)
+    meta = store.attrs.asdict()
+    ome_meta = meta["OME"]
+    axes = meta["axes"]
+    pixel_size = meta["pixel_size"]
 
-    return img, ome_meta, axes
+    if len(img) == 0:
+        raise ValueError(f"No image data read from zarr file: {path}")
+
+    return img, ome_meta, axes, pixel_size
 
 
 def read_image(
@@ -63,7 +75,7 @@ def read_image(
     suffix = path.name.split(".", maxsplit=1)[-1]
 
     if "zarr" in suffix:
-        img, ome_meta, axes = read_zarr(path)
+        img, ome_meta, axes, pixel_size = read_zarr(path)
 
     elif suffix in ["ome.tif", "ome.tiff"]:
         # load image from .ome.tiff
@@ -73,6 +85,11 @@ def read_image(
             axes = tif.pages[0].axes # get axes (important to get it from pages instead of series!)
             ome_meta = tif.ome_metadata # read OME metadata
             ome_meta = xmltodict.parse(ome_meta, attr_prefix="")["OME"] # convert XML to dict
+
+            try:
+                pixel_size = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
+            except KeyError:
+                pixel_size = float(ome_meta['PhysicalSizeX'])
 
         if axes == "CYX":
             if isinstance(img, list):
@@ -89,7 +106,7 @@ def read_image(
             received_type=suffix
             )
 
-    return img, ome_meta, axes
+    return img, ome_meta, axes, pixel_size
 
 def write_zarr(image, file,
                img_metadata: dict,
@@ -124,24 +141,31 @@ def write_zarr(image, file,
     else:
         if save_pyramid:
             # create img pyramid
-            image_data = create_img_pyramid(img=image, nsubres=6, axes=axes)
+            image_data = create_img_pyramid(img=image, axes=axes, nsubres=6, scale_steps=2)
         else:
             image_data = image
 
-    with zarr.ZipStore(file, mode="w") if zipped else zarr.DirectoryStore(file) as dirstore:
-        # check whether to save the image as pyramid or not
-        if save_pyramid:
-            for i, im in enumerate(image_data):
-                im.to_zarr(dirstore, component=str(i))
-        else:
-            # save image data in zipstore without pyramid
-            image_data.to_zarr(dirstore)
+    # with zarr.ZipStore(file, mode="w") if zipped else zarr.DirectoryStore(file) as dirstore:
+    if zipped:
+        dirstore = zarr.storage.ZipStore(file, mode="w")
+    else:
+        dirstore = zarr.storage.LocalStore(file)
 
-        # open zarr store save metadata in zarr store
-        store = zarr.open(dirstore, mode="a")
-        store.attrs.put(img_metadata)
-        # for k,v in img_metadata.items():
-        #     store.attrs[k] = v
+    # check whether to save the image as pyramid or not
+    if save_pyramid:
+        for i, im in enumerate(image_data):
+            chunksize = (1, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X) if len(im.shape) == 3 else (DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
+            im = im.rechunk(chunksize)
+            im.to_zarr(dirstore, component=str(i))
+    else:
+        # save image data in zipstore without pyramid
+        image_data.to_zarr(dirstore)
+
+    # open zarr store save metadata in zarr store
+    store = zarr.open(dirstore, mode="a")
+    store.attrs.put(img_metadata)
+    # for k,v in img_metadata.items():
+    #     store.attrs[k] = v
 
 def write_ome_tiff(
     image: Union[np.ndarray, da.core.Array, List[da.core.Array]],

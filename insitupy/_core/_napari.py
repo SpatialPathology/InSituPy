@@ -71,7 +71,20 @@ if WITH_NAPARI:
             axes = ImageAxes(axes_str)
             is_rgb = axes.is_rgb
 
-            if not is_rgb and axes.C is not None:
+            if axes.C is not None:
+                if shape[axes.C] == 1:
+                    # only one channel available -> select this channel
+                    if not isinstance(img, list):
+                        img = da.take(img, indices=0, axis=axes.C)
+                    else:
+                        img = [da.take(elem, indices=0, axis=axes.C) for elem in img]
+                    multichannel = False
+                else:
+                    multichannel = True
+            else:
+                multichannel = False
+
+            if not is_rgb and multichannel:
                 if not isinstance(img, list):
                     n_channels = img.shape[axes.C]
                 else:
@@ -375,12 +388,6 @@ if WITH_NAPARI:
         widgets_max_width: int = 500,
         verbose: bool = False
         ):
-
-        # check whether napari is installed
-        try:
-            import napari
-        except ImportError:
-            raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
 
         # initialize a config class manager with new ID
         uid_viewer = config_manager.add_config(data=data)

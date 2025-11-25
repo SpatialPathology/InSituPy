@@ -15,7 +15,6 @@ else:
     from spatialdata.transformations import get_transformation
 
 from insitupy._constants import MODALITIES_COLOR_DICT, SAMPLE_STR
-from insitupy._core._napari import _show
 from insitupy._textformat import textformat as tf
 from insitupy.spatialdata._sdio import _silent_read_zarr
 
@@ -310,6 +309,14 @@ class StructuredSpatialData:
         widgets_max_width: int = 500,
         verbose: bool = False
         ):
+        # check whether napari is installed
+        try:
+            import napari
+
+            from insitupy._core._napari import _show
+        except ImportError:
+            raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
+
         _show(
             data=self,
             keys=keys,

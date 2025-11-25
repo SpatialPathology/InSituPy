@@ -11,8 +11,6 @@ try:
     from spatialdata import read_zarr
 except ImportError:
     raise ImportError("Please install spatialdata with `pip install spatialdata`.")
-else:
-    from spatialdata.transformations import get_transformation
 
 import logging
 import warnings

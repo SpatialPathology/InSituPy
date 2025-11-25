@@ -10,8 +10,9 @@ from numpy.typing import NDArray
 from scipy.ndimage import zoom
 from skimage.color import hed2rgb, rgb2hed
 
-from .._exceptions import InvalidDataTypeError
-from .axes import ImageAxes, get_height_and_width
+from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
+from insitupy._exceptions import InvalidDataTypeError
+from insitupy.images.axes import ImageAxes, get_height_and_width
 
 
 def _efficiently_resize_array(array, scale_factor):
@@ -226,38 +227,79 @@ def deconvolve_he(
     return ihc_h, ihc_e, ihc_d
 
 def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
+                       axes: str, # e.g. 'YXS'. - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
                        nsubres: int = 6,
                        scale_steps: int = 2,
-                       axes: str = "YXS" # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
                        ):
+    """
+    Create image pyramid by downsampling with slicing.
+    Handles different axis configurations (YX, YXS, CYX, etc.)
+    """
+    if not len(axes) == len(img.shape):
+        raise ValueError("Length of `axes` string must match number of dimensions of `img`.")
+    # Parse axes to find Y and X positions
+    image_axes = ImageAxes(pattern=axes)
+    y_axis = image_axes.Y
+    x_axis = image_axes.X
+
     # create subresolution pyramid from mask
     img_pyramid = [img]
 
     for n in range(nsubres):
-        # create subresolution by scaling factor 2
-        img = img[::scale_steps, ::scale_steps]
-        #img = resize_image(img, scale_factor=1/scale_steps, axes=axes, interpolation=cv2.INTER_LINEAR)
+        # Create slice tuple for all dimensions
+        slices = [slice(None)] * img.ndim
+        slices[y_axis] = slice(None, None, scale_steps)
+        slices[x_axis] = slice(None, None, scale_steps)
 
-        # # check dtype of image
-        # if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
-        #     warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
-
-        #     if img.dtype == np.dtype('int8'):
-        #         img = img.astype('uint8')
-        #     else:
-        #         img = img.astype('uint16')
+        # Apply downsampling only to Y and X axes
+        img = img[tuple(slices)]
 
         try:
             # rechunk to prevent dask errors
+            #img = img.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
             img = img.rechunk()
         except AttributeError:
-            # in case of numpy arrays a Attribute error is thrown
+            # in case of numpy arrays an AttributeError is thrown
             pass
 
         # collect subresolution
         img_pyramid.append(img)
 
     return img_pyramid
+
+# def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
+#                        nsubres: int = 6,
+#                        scale_steps: int = 2,
+#                        axes: str = "YXS" # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
+#                        ):
+#     # create subresolution pyramid from mask
+#     img_pyramid = [img]
+
+#     for n in range(nsubres):
+#         # create subresolution by scaling factor 2
+#         img = img[::scale_steps, ::scale_steps]
+#         # img = resize_image(img, scale_factor=1/scale_steps, axes=axes, interpolation=cv2.INTER_LINEAR)
+
+#         # # check dtype of image
+#         # if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
+#         #     warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
+
+#         #     if img.dtype == np.dtype('int8'):
+#         #         img = img.astype('uint8')
+#         #     else:
+#         #         img = img.astype('uint16')
+
+#         try:
+#             # rechunk to prevent dask errors
+#             img = img.rechunk()
+#         except AttributeError:
+#             # in case of numpy arrays a Attribute error is thrown
+#             pass
+
+#         # collect subresolution
+#         img_pyramid.append(img)
+
+#     return img_pyramid
 
 def crop_dask_array_or_pyramid(
     data: Union[da.core.Array, List[da.core.Array]],

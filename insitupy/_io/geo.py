@@ -1,3 +1,4 @@
+import ast
 import os
 import warnings
 from pathlib import Path
@@ -48,6 +49,13 @@ def parse_geopandas(
         # empty data object
         return None
 
+def _read_file_helper(file, engine):
+    dataframe = geopandas.read_file(file, engine=engine)
+    if engine == "pyogrio":
+        # convert string representations of dicts to actual dicts
+        dataframe['classification'] = dataframe['classification'].apply(ast.literal_eval)
+    return dataframe
+
 def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     """
     Reads a QuPath-compatible GeoJSON file and transforms it into a flat DataFrame.
@@ -59,7 +67,7 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     pandas.DataFrame: A DataFrame with flattened columns including "name" and "color" extracted from the "classification" column.
     """
     # Read the GeoJSON file into a GeoDataFrame
-    dataframe = geopandas.read_file(file, engine="fiona")
+    dataframe = _read_file_helper(file=file, engine="pyogrio")
 
     # annotation geojsons contain a classification column where each entry is a dict with name and color of the annotation
     if "classification" in dataframe.columns:

@@ -120,7 +120,6 @@ def read_xenium(
     # For <v2.0 the function still tries to retrieve the "mip" image but in case this is not found
     # it will retrieve the "focus" image
     if nuclei_type == "mip" and nuclei_file_key not in data.metadata["method_params"]["images"].keys():
-
         nuclei_type = "focus"
         nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
@@ -441,5 +440,92 @@ def read_qupath(
         key="data",
         scale_factor=pixel_size
     )
+
+    return data
+
+
+def read_xenium_from_spatialdata(
+    path: Union[str, os.PathLike, Path],
+    load_cell_segmentation_images: bool = False,
+    load_background_images: bool = False,
+    verbose: bool = True,
+) -> InSituData:
+    """
+    Reads Xenium In Situ data using spatialdata-io and converts to InSituData.
+
+    Args:
+        path: Path to the Xenium data bundle.
+        load_cell_segmentation_images: Whether to load cell segmentation images.
+        load_background_images: Whether to load background images.
+        verbose: Whether to print progress messages.
+
+    Returns:
+        InSituData: An object containing the processed Xenium experiment data.
+    """
+    from spatialdata_io import xenium
+
+    path = Path(path)
+
+    # Read using spatialdata-io
+    if verbose:
+        print("Reading Xenium data with spatialdata-io...", flush=True)
+
+    sdata = xenium(path)
+
+    # Extract metadata
+    slide_id = sdata.attrs.get("slide_id", "unknown")
+    sample_id = sdata.attrs.get("region_name", "unknown")
+
+    # Initialize InSituData
+    data = InSituData(
+        path=path,
+        metadata=None,
+        slide_id=slide_id,
+        sample_id=sample_id,
+        method_name="Xenium",
+        method_params=sdata.attrs,
+    )
+
+    # LOAD CELLS
+    if verbose:
+        print("Converting cell data...", flush=True)
+
+    # Get expression matrix from spatialdata (typically in sdata.table)
+    if sdata.table is not None:
+        matrix = sdata.table.to_df()
+    else:
+        matrix = None
+
+    # Get cell boundaries from shapes
+    boundaries = None
+    if "cell_boundaries" in sdata.shapes:
+        boundaries = sdata.shapes["cell_boundaries"]
+    elif len(sdata.shapes) > 0:
+        # Take first available shape
+        boundaries = list(sdata.shapes.values())[0]
+
+    if matrix is not None or boundaries is not None:
+        cd = CellData(matrix=matrix, boundaries=boundaries)
+        data.cells.add_celldata(cd=cd, key="main", is_main=True)
+
+    # LOAD IMAGES
+    if verbose:
+        print("Converting images...", flush=True)
+
+    for img_name, img_data in sdata.images.items():
+        # Filter based on user preferences
+        if not load_cell_segmentation_images and ("cellseg" in img_name.lower() or img_name in CELLSEG_NAMES):
+            continue
+        if not load_background_images and img_name.endswith("_background"):
+            continue
+
+        data.images.add_image(img_data, img_name, overwrite=False, verbose=verbose)
+
+    # LOAD TRANSCRIPTS
+    if verbose:
+        print("Converting transcripts...", flush=True)
+
+    if "transcripts" in sdata.points:
+        data.transcripts = sdata.points["transcripts"].to_dask_dataframe()
 
     return data
