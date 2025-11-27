@@ -32,8 +32,9 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
-                                              MultiCellData, RegionsData)
+from insitupy.dataclasses.dataclasses import (AnnotationsData, FeatureData,
+                                              ImageData, MultiCellData,
+                                              RegionsData)
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      _save_images, _save_regions,
                                      _save_transcripts, read_multicelldata,
@@ -176,6 +177,7 @@ class InSituData:
         # modalities
         self._images = ImageData()
         self._cells = MultiCellData()
+        self._features = FeatureData()
         self._annotations = AnnotationsData()
         self._regions = RegionsData()
         self._transcripts = None
@@ -336,6 +338,23 @@ class InSituData:
     def cells(self):
         self._cells = MultiCellData()
         print("Cleared all data from 'cells'.")
+
+    @property
+    def features(self):
+        """Return feature data of the InSituData object.
+        Returns:
+            insitupy._core.dataclasses.FeatureData: Cell data.
+        """
+        return self._features
+
+    @features.setter
+    def features(self, value):
+        raise AttributeError("Cannot modify 'features' attribute after initialization.")
+
+    @features.deleter
+    def features(self):
+        self._features = FeatureData()
+        print("Cleared all data from 'features'.")
 
     @property
     def annotations(self):

@@ -1,3 +1,4 @@
+import logging
 import os
 import warnings
 from copy import deepcopy
@@ -32,6 +33,8 @@ from insitupy.images.utils import (_efficiently_resize_array,
                                    crop_dask_array_or_pyramid, resize_image)
 from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy.utils.utils import convert_to_list, decode_robust_series
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
     from napari.utils.notifications import show_info, show_warning
@@ -1542,3 +1545,271 @@ class ImageData(DeepCopyMixin):
             return savepaths
 
 
+class FeatureData(DeepCopyMixin):
+    """
+    Object to store spatial features (e.g., functional tissue units, niches)
+    with their associated transcriptomic data.
+
+    Features are stored as GeoDataFrames with polygon geometries, and their
+    transcriptomic readouts are stored as AnnData objects. This provides
+    flexibility for defining various spatial units beyond cells.
+    """
+
+    def __init__(
+        self,
+        shapes: Optional[gpd.GeoDataFrame] = None,
+        data: Optional[AnnData] = None,
+        pixel_size: Optional[Number] = None,
+        feature_type: str = "feature"
+    ):
+        """
+        Initialize FeatureData object.
+
+        Args:
+            features: GeoDataFrame containing polygon geometries for features.
+                Should have columns: 'geometry', 'name' (feature identifier),
+                and optionally 'color', 'type', etc.
+            data: AnnData object with transcriptomic readouts. obs_names should
+                match feature names in the GeoDataFrame.
+            pixel_size: Pixel size in physical units (e.g., µm).
+            feature_type: Description of feature type (e.g., 'niche', 'functional_unit').
+        """
+        self._shapes = shapes.copy() if shapes is not None else gpd.GeoDataFrame()
+        self._data = data.copy()
+        self._pixel_size = pixel_size
+        self._feature_type = feature_type
+
+        # Validate consistency if both features and data are provided
+        if not self._shapes.empty and self._data is not None:
+            self._validate_consistency()
+
+            # rename feature index to match data.obs_names
+            self._shapes.index = self._data.obs_names
+
+    def __repr__(self):
+        n_features = len(self._shapes)
+        has_data = self._data is not None
+
+        if n_features > 0:
+            feature_types = self._shapes['name'].nunique() if 'name' in self._shapes.columns else 1
+            repr_str = (
+                f"{tf.Bold}FeatureData{tf.ResetAll} ({self._feature_type})\n"
+                f"{tf.SPACER}{n_features} features, {feature_types} unique types\n"
+            )
+
+            if has_data:
+                repr_str += (
+                    f"{tf.SPACER}AnnData object: {self._data.n_obs} obs × "
+                    f"{self._data.n_vars} vars\n"
+                )
+
+            if self._pixel_size is not None:
+                repr_str += f"{tf.SPACER}Pixel size: {self._pixel_size} µm"
+        else:
+            repr_str = "Empty FeatureData object"
+
+        return repr_str
+
+    def __len__(self):
+        return len(self._shapes)
+
+    def __getitem__(self, key):
+        """Subset FeatureData by feature indices or names."""
+        new_obj = self.copy()
+
+        if isinstance(key, (int, slice, list, np.ndarray, pd.Series)):
+            new_obj._shapes = new_obj._shapes.iloc[key].copy()
+        elif isinstance(key, str):
+            # Assume string key is a feature name
+            new_obj._shapes = new_obj._shapes[
+                new_obj._shapes['name'] == key
+            ].copy()
+        else:
+            raise TypeError(f"Invalid key type: {type(key)}")
+
+        # Sync data if present
+        if new_obj._data is not None:
+            feature_names = new_obj._shapes.index.tolist()
+            new_obj._data = new_obj._data[feature_names, :].copy()
+
+        return new_obj
+
+    @property
+    def shapes(self) -> gpd.GeoDataFrame:
+        """GeoDataFrame containing geometries of `.shapes`."""
+        return self._shapes
+
+    @shapes.setter
+    def shapes(self, value: gpd.GeoDataFrame):
+        if not isinstance(value, gpd.GeoDataFrame):
+            raise TypeError(f"`.shapes` must be GeoDataFrame, not {type(value)}")
+        self._shapes = value
+
+    @property
+    def data(self) -> Optional[AnnData]:
+        """AnnData object with transcriptomic readouts."""
+        return self._data
+
+    @data.setter
+    def data(self, value: Optional[AnnData]):
+        if value is not None and not isinstance(value, AnnData):
+            raise TypeError(f"data must be AnnData object, not {type(value)}")
+        self._data = value
+
+    @property
+    def pixel_size(self) -> Optional[Number]:
+        """Pixel size in physical units."""
+        return self._pixel_size
+
+    @pixel_size.setter
+    def pixel_size(self, value: Optional[Number]):
+        self._pixel_size = value
+
+    @property
+    def feature_type(self) -> str:
+        """Type of features stored."""
+        return self._feature_type
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self._shapes) == 0
+
+    def _validate_consistency(self):
+        """Validate that shapes and data indices match."""
+        if self._data is None:
+            return
+
+        feature_names = self._shapes.index
+        data_names = self._data.obs_names
+
+        if len(feature_names) != len(data_names):
+            raise ValueError(
+                f"Number of shapes ({len(feature_names)}) does not match "
+                f"number of data obs ({len(data_names)})."
+            )
+
+        if not np.all(feature_names == data_names):
+            logger.warning(
+                f"Indices in `.shapes` do not match `.data.obs_names`. Shapes will be renamed according to the `obs_names`. "
+                f"For this to be valid, please make sure that the order of elements in `.shapes` and `.data` matches."
+            )
+
+    def crop(
+        self,
+        xlim: Optional[Tuple[Number, Number]] = None,
+        ylim: Optional[Tuple[Number, Number]] = None,
+        shape: Optional[Union[Polygon, MultiPolygon]] = None,
+        inplace: bool = False,
+        verbose: bool = True
+    ):
+        """
+        Crop features to a specified region.
+
+        Args:
+            xlim: X-axis limits (min, max).
+            ylim: Y-axis limits (min, max).
+            shape: Polygon/MultiPolygon to crop to. Takes precedence over xlim/ylim.
+            inplace: Modify object in place.
+            verbose: Print status messages.
+
+        Returns:
+            Cropped FeatureData if not inplace, else None.
+        """
+        _self = self if inplace else self.copy()
+
+        # Create crop shape
+        if shape is None:
+            if xlim is None or ylim is None:
+                raise ValueError("Must provide either shape or both xlim and ylim.")
+            shape = Polygon([
+                (xlim[0], ylim[0]), (xlim[1], ylim[0]),
+                (xlim[1], ylim[1]), (xlim[0], ylim[1])
+            ])
+        else:
+            if xlim is not None and ylim is not None and verbose:
+                warnings.warn("Both shape and xlim/ylim provided. Using shape.")
+            xlim = shape.bounds[0], shape.bounds[2]
+            ylim = shape.bounds[1], shape.bounds[3]
+
+        # Filter features that intersect
+        mask = _self._shapes.geometry.intersects(shape)
+        _self._shapes = _self._shapes[mask].copy()
+
+        # Translate to origin
+        _self._shapes["geometry"] = _self._shapes["geometry"].apply(
+            affinity.translate, xoff=-xlim[0], yoff=-ylim[0]
+        )
+
+        # Crop data if present
+        if _self._data is not None:
+            feature_names = _self._shapes.index.tolist()
+            _self._data = _self._data[feature_names, :].copy()
+
+        if verbose:
+            print(f"Cropped to {len(_self._shapes)} features.")
+
+        if not inplace:
+            return _self
+
+    def sync(self, verbose: bool = False):
+        """
+        Synchronize features and data to have matching indices.
+        Keeps only features present in both.
+        """
+        if self._data is None:
+            if verbose:
+                print("No data to sync.")
+            return
+
+        feature_names = set(self._shapes.index)
+        data_names = set(self._data.obs_names)
+        common_names = feature_names & data_names
+
+        # Filter features
+        self._shapes = self._shapes.loc[list(common_names)]
+
+        # Filter data
+        self._data = self._data[list(common_names), :].copy()
+
+        if verbose:
+            print(f"Synced to {len(common_names)} common features.")
+
+    def save(
+        self,
+        path: Union[str, os.PathLike, Path],
+        overwrite: bool = False
+    ):
+        """
+        Save FeatureData to directory.
+
+        Args:
+            path: Output directory path.
+            overwrite: If True, overwrite existing files.
+        """
+        path = Path(path)
+
+        # Check overwrite
+        check_overwrite_and_remove_if_true(path, overwrite=overwrite)
+
+        # Create directory
+        path.mkdir(parents=True, exist_ok=True)
+
+        # Save features as geojson
+        if not self._shapes.empty:
+            features_file = path / "features.geojson"
+            write_qupath_geojson(dataframe=self._shapes, file=features_file)
+
+        # Save data as h5ad
+        if self._data is not None:
+            data_file = path / "data.h5ad"
+            self._data.write(data_file)
+
+        # Save metadata
+        metadata = {
+            "version": __version__,
+            "pixel_size": self._pixel_size,
+            "feature_type": self._feature_type,
+            "n_features": len(self._shapes),
+            "has_data": self._data is not None
+        }
+        write_dict_to_json(dictionary=metadata, file=path / ".featuredata")

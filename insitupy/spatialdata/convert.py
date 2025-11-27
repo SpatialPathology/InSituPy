@@ -210,7 +210,9 @@ def convert_from_spatialdata(
     # Table parameters
     table_key: str = 'table',
     # Cell parameters
-    cells_key: str = 'cells_circles',
+    cells_key: Optional[str] = None,
+    # Features parameters
+    features_key: Optional[str] = None,
     # Boundaries parameters
     cell_boundaries_key: Optional[str] = None,
     nucleus_boundaries_key: Optional[str] = None,
@@ -294,33 +296,34 @@ def convert_from_spatialdata(
         _add_images_to_insitudata(data, sdata, image_keys, ps, verbose)
 
     # LOAD CELLS (matrix + boundaries)
-    if table_key in sdata:
-        if verbose:
-            print("Adding cell data...", flush=True)
+    if table_key is not None:
+        if table_key in sdata:
+            if verbose:
+                print("Adding cell data...", flush=True)
 
-        matrix = sdata[table_key]
-        cell_names = np.array(matrix.obs_names)
+            matrix = sdata[table_key]
+            cell_names = np.array(matrix.obs_names)
 
-        if spatial_key in matrix.obsm:
-            logger.warning(f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using centroids from `'{cells_key}'`.")
+            if spatial_key in matrix.obsm:
+                logger.warning(f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using centroids from `'{cells_key}'`.")
 
-        matrix.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
+            matrix.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
 
-        # Prepare boundaries if keys provided
-        boundaries = None
-        if cell_boundaries_key or nucleus_boundaries_key:
-            boundaries = _create_boundaries_from_spatialdata(
-                sdata,
-                cell_names,
-                cell_boundaries_key,
-                nucleus_boundaries_key,
-                ps
-            )
+            # Prepare boundaries if keys provided
+            boundaries = None
+            if cell_boundaries_key or nucleus_boundaries_key:
+                boundaries = _create_boundaries_from_spatialdata(
+                    sdata,
+                    cell_names,
+                    cell_boundaries_key,
+                    nucleus_boundaries_key,
+                    ps
+                )
 
-        cd = CellData(matrix=matrix, boundaries=boundaries)
-        data.cells.add_celldata(cd=cd, key="main", is_main=True)
-    elif verbose:
-        print(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
+            cd = CellData(matrix=matrix, boundaries=boundaries)
+            data.cells.add_celldata(cd=cd, key="main", is_main=True)
+        elif verbose:
+            logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
 
     # LOAD TRANSCRIPTS
     if transcripts_key and transcripts_key in sdata:
