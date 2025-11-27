@@ -22,5 +22,5 @@
 
 #     raise AttributeError(f"module 'insitupy.spatialdata' has no attribute '{name}'")
 
-from .spatialdata import convert_to_spatialdata
+from .convert import convert_to_spatialdata
 from .structured import StructuredSpatialData

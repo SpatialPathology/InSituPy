@@ -560,3 +560,99 @@ def xenium_test_dataset_v4_protein(
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
+
+
+# visium analysis version 2.0.0
+# data from https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
+def visium_human_breast_cancer(
+        overwrite: bool = False
+) -> InSituData:
+
+    # URLs for download
+    h5_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_filtered_feature_bc_matrix.h5"
+    spatial_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_spatial.tar.gz"
+
+    # set up paths
+    named_data_dir = DEMODIR / "visium_hbreastcancer"
+    data_dir = named_data_dir / "CytAssist_FFPE_Human_Breast_Cancer"
+    h5_file = data_dir / "filtered_feature_bc_matrix.h5"
+    spatial_tar = named_data_dir / "CytAssist_FFPE_Human_Breast_Cancer_spatial.tar.gz"
+    spatial_dir = data_dir / "spatial"
+
+    # expected md5sums
+    expected_h5_md5sum = "1e3557642aa5a7a5efe9fd07b841109f"
+    expected_spatial_md5sum = "26febcbd3d43122e5371a6df2f35e073"
+
+    # create data directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # check and download h5 file
+    download_h5 = False
+    if h5_file.exists():
+        print("H5 file exists. Checking md5sum...")
+        if md5sum(h5_file) == expected_h5_md5sum:
+            if not overwrite:
+                print(f"The h5 file md5sum matches. Download is skipped. To force download set `overwrite=True`.")
+            else:
+                print(f"The h5 file exists but is overwritten because of `overwrite=True`.")
+                download_h5 = True
+        else:
+            print(f"The h5 file md5sum doesn't match. File is downloaded.")
+            download_h5 = True
+    else:
+        download_h5 = True
+
+    if download_h5:
+        download_url(h5_url, out_dir=data_dir, file_name="filtered_feature_bc_matrix", overwrite=True)
+
+    # check and download spatial data
+    download_spatial = False
+    if spatial_dir.exists():
+        if not overwrite:
+            print(f"Spatial directory exists. Download is skipped. To force download set `overwrite=True`.")
+        else:
+            print(f"Spatial directory exists but is overwritten because of `overwrite=True`.")
+            download_spatial = True
+    else:
+        if spatial_tar.exists():
+            print("Spatial tar file exists. Checking md5sum...")
+            if md5sum(spatial_tar) == expected_spatial_md5sum:
+                if not overwrite:
+                    print(f"The spatial tar md5sum matches. Unpacking...")
+                    # unpack and move spatial folder
+                    shutil.unpack_archive(spatial_tar, named_data_dir)
+                    # move spatial folder to data_dir
+                    shutil.move(named_data_dir / "spatial", spatial_dir)
+                    # remove tar file
+                    os.remove(spatial_tar)
+                else:
+                    download_spatial = True
+            else:
+                print(f"The spatial tar md5sum doesn't match. File is downloaded.")
+                download_spatial = True
+        else:
+            download_spatial = True
+
+    if download_spatial:
+        download_url(spatial_url, out_dir=named_data_dir, overwrite=True)
+        # unpack spatial data
+        shutil.unpack_archive(spatial_tar, named_data_dir)
+        # move spatial folder to data_dir
+        if (named_data_dir / "spatial").exists():
+            if spatial_dir.exists():
+                shutil.rmtree(spatial_dir)
+            shutil.move(named_data_dir / "spatial", spatial_dir)
+        # remove tar file
+        os.remove(spatial_tar)
+
+    print(f"Visium data structure is ready at {data_dir}")
+    print("Dataset contains:")
+    print(f"- filtered_feature_bc_matrix.h5")
+    print(f"- spatial/ directory")
+
+    # # load data into InSituData object
+    # # Note: You'll need to implement read_visium if not already available
+    # from insitupy.io.data import read_visium
+    # data = read_visium(data_dir)
+
+    # return data

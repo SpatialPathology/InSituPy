@@ -41,7 +41,7 @@ except ImportError:
     # read_zarr = None
     _silent_read_zarr = None
 else:
-    from insitupy.spatialdata._sdio import _silent_read_zarr
+    from insitupy.spatialdata._io import _silent_read_zarr
 
 
 class InSituExperiment:

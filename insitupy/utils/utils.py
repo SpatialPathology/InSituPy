@@ -286,8 +286,10 @@ def _crop_transcripts(
                 warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
         try:
-            points = gpd.points_from_xy(x=transcript_df.loc[:, ("coordinates", "x")].values,
-                                        y=transcript_df.loc[:, ("coordinates", "y")].values)
+            points = gpd.points_from_xy(
+                x=transcript_df.loc[:, ("coordinates", "x")].values,
+                y=transcript_df.loc[:, ("coordinates", "y")].values
+                )
             warn("Filtering transcripts based on a shape may take longer if transcripts are stored as pandas dataframe instead of dask dataframe.")
             grouped_df = True
         except KeyError:
@@ -300,8 +302,10 @@ def _crop_transcripts(
                 print("Load transcript dataframe into memory...")
                 transcript_df = transcript_df.compute()
                 # generate points without dask_geopandas
-                points = gpd.points_from_xy(x=transcript_df.loc[:, "x_location"].values,
-                                            y=transcript_df.loc[:, "y_location"].values)
+                points = gpd.points_from_xy(
+                    x=transcript_df.loc[:, "x_location"].values,
+                    y=transcript_df.loc[:, "y_location"].values
+                    )
             else:
                 # generate points with dask_geopandas
                 points = dask_gpd.points_from_xy(df=transcript_df, x="x_location", y="y_location")

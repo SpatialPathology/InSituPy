@@ -1,12 +1,3 @@
-import os
-from pathlib import Path
-from typing import Dict, Optional, Union
-from warnings import warn
-
-import numpy as np
-import pandas as pd
-from anndata import AnnData
-
 try:
     from spatialdata import read_zarr
 except ImportError:
@@ -14,9 +5,6 @@ except ImportError:
 
 import logging
 import warnings
-
-from insitupy._constants import MODALITIES_COLOR_DICT, SAMPLE_STR
-from insitupy._textformat import textformat as tf
 
 # --------------------
 # Wrapper dataclasses

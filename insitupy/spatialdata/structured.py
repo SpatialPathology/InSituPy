@@ -16,7 +16,7 @@ else:
 
 from insitupy._constants import MODALITIES_COLOR_DICT, SAMPLE_STR
 from insitupy._textformat import textformat as tf
-from insitupy.spatialdata._sdio import _silent_read_zarr
+from insitupy.spatialdata._io import _silent_read_zarr
 
 # --------------------
 # Wrapper dataclasses

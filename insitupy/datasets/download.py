@@ -15,7 +15,7 @@ def download_url(
     ) -> None:
     """
     Downloads a file from the specified URL and saves it to the given output directory.
-    
+
     Code adapted from: https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
 
     Args:
@@ -35,27 +35,38 @@ def download_url(
     # create output directory if necessary
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # check which file name to use
-    suffix = f".{Path(url).name.split('.', maxsplit=1)[-1]}" # get suffix (robustly against multiple dots like .ome.tif)
     if file_name is None:
-        file_name = Path(url).stem
-    
-    # create path for output file
-    outfile = out_dir / (file_name + suffix)
-    
+        # Use the full filename from URL
+        outfile = out_dir / Path(url).name
+    else:
+        # If file_name already has an extension, use it as-is
+        # Otherwise, get suffix from URL
+        if '.' in file_name:
+            outfile = out_dir / file_name
+        else:
+            # Get suffix from URL (handle multiple dots like .ome.tif or .tar.gz)
+            url_name = Path(url).name
+            # Find the first dot to separate name from extension(s)
+            if '.' in url_name:
+                suffix = url_name[url_name.index('.'):]  # Everything after first dot
+            else:
+                suffix = ''
+            outfile = out_dir / (file_name + suffix)
+
     if outfile.exists():
         if not overwrite:
             print(f"File {outfile} exists already. Download is skipped. To force download set `overwrite=True`.")
             return
         else:
             pass
-        
-    
+
+
     # request content from URL
     resp = requests.get(url, stream=True)
     total = int(resp.headers.get('content-length', 0))
-    
+
     # write to file
     with open(str(outfile), 'wb') as file, tqdm(
         desc=str(outfile),
@@ -67,4 +78,3 @@ def download_url(
         for data in resp.iter_content(chunk_size=chunk_size):
             size = file.write(data)
             bar.update(size)
-            
