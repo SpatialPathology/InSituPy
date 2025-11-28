@@ -7,6 +7,7 @@ from typing import Dict, Literal, Optional, Union
 import dask.dataframe as dd
 import pandas as pd
 from parse import *
+from shapely import affinity
 
 from insitupy import __version__
 from insitupy._core.data import InSituData
@@ -38,12 +39,14 @@ def _handle_image_names(im_path):
 
 def read_xenium(
     path: Union[str, os.PathLike, Path],
-    nuclei_type: Literal["focus", "mip", ""] = "mip",
+    nuclei_type: Literal["focus", "mip", ""] = "focus",
     load_cell_segmentation_images: bool = False,
     load_background_images: bool = False,
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
     restructure_transcripts: bool = False,
+    slide_id: str = "slide_id",
+    sample_id: str = "sample_id",
     backend: Literal["insitupy", "spatialdata"] = "insitupy",
     ) -> InSituData:
     """
@@ -52,7 +55,7 @@ def read_xenium(
 
     Args:
         path (Union[str, os.PathLike, Path]): Path to the Xenium data bundle.
-        nuclei_type (Literal["focus", "mip", ""], optional): Type of nuclei image to load. Defaults to "mip".
+        nuclei_type (Literal["focus", "mip", ""], optional): Type of nuclei image to load. Defaults to "focus".
             If "mip" is unavailable, "focus" will be used as a fallback.
         load_cell_segmentation_images (bool, optional): Whether to load cell segmentation images. Defaults to False.
         load_background_images (bool, optional): Whether to load background images. Defaults to False.
@@ -61,6 +64,8 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
+        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id". Only used with spatialdata backend.
+        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id". Only used with spatialdata backend.
         backend (Literal["insitupy", "spatialdata"], optional): Backend to use for loading data. Defaults to "insitupy".
             - "insitupy": Uses the native InSituPy loader.
             - "spatialdata": Uses spatialdata-io to load the data and converts to InSituData format.
@@ -83,6 +88,15 @@ def read_xenium(
     """
     path = Path(path) # make sure the path is a pathlib path
 
+    metadata_filename: str = "experiment.xenium"
+
+    if not (path / metadata_filename).exists():
+        raise InvalidXeniumDirectory(directory=path)
+
+    # read metadata
+    xenium_metadata = read_json(path / metadata_filename)
+    pixel_size = xenium_metadata["pixel_size"]
+
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
 
@@ -92,32 +106,27 @@ def read_xenium(
         from insitupy.spatialdata.convert import convert_from_spatialdata
 
         if verbose:
-            logger.info("Reading Xenium data with spatialdata-io...")
+            logger.info("Reading Xenium data with spatialdata-io backend...")
         sdata = xenium(path)
         data = convert_from_spatialdata(
             sdata=sdata,
-            image_keys={
-                "nuclei": "morphology_mip",
-                "mip": "morphology_focus"
+            image_data={
+                "nuclei": ("morphology_mip", pixel_size),
+                "mip": ("morphology_focus", pixel_size)
             },
             cells_key="cell_circles",
             table_key="table",
-            cell_boundaries_key="cell_labels",
-            nucleus_boundaries_key="nucleus_labels",
+            cell_boundaries_data=("cell_labels", pixel_size),
+            nucleus_boundaries_data=("nucleus_labels", pixel_size),
             transcripts_key="transcripts",
-            slide_id="slide_test",
-            sample_id="sample_test",
+            slide_id=slide_id,
+            sample_id=sample_id,
             method_name="Xenium"
             )
 
     elif backend == "insitupy":
-        metadata_filename: str = "experiment.xenium"
-
-        if not (path / metadata_filename).exists():
-            raise InvalidXeniumDirectory(directory=path)
-
-        # read metadata
-        xenium_metadata = read_json(path / metadata_filename)
+        if verbose:
+            logger.info("Reading Xenium data with InSituPy backend...")
 
         # get slide id and sample id from metadata
         slide_id = xenium_metadata["slide_id"]
@@ -135,8 +144,6 @@ def read_xenium(
         # LOAD CELLS
         if verbose:
             print("Loading cells...", flush=True)
-
-        pixel_size = xenium_metadata["pixel_size"]
 
         # read celldata
         matrix = _read_matrix_from_xenium(path=data.path)
@@ -214,9 +221,11 @@ def read_xenium(
 
 def read_visium(
     path: Union[str, os.PathLike, Path],
-    # dataset_id: Optional[str] = None,
-    library_id: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    slide_id: str = "slide_id",
+    sample_id: str = "sample_id",
     verbose: bool = True,
+    fullres_pixel_size: Optional[Number] = None, # microns per pixel
     **kwargs,
 ) -> InSituData:
     """
@@ -225,9 +234,11 @@ def read_visium(
 
     Args:
         path (Union[str, os.PathLike, Path]): Path to the Visium data bundle.
-        dataset_id (Optional[str], optional): Dataset ID for the Visium data. If None, will be inferred from metadata.
-        library_id (Optional[str], optional): Library ID for the Visium data. If None, will be inferred from available data.
+        dataset_id (Optional[str], optional): Dataset ID for the Visium data. Defaults to "visium".
+        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id".
+        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id".
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
+        **kwargs: Additional keyword arguments passed to spatialdata-io's visium loader.
 
     Returns:
         InSituData: An object containing the processed Visium experiment data, including metadata, cells, and images.
@@ -239,14 +250,16 @@ def read_visium(
     Notes:
         - This function uses spatialdata-io to load Visium data and converts it to InSituData format.
         - The function loads spatial coordinates, gene expression counts, and optional histology images.
-        - Spot positions are stored as cell boundaries in the InSituData object.
+        - Spot positions are stored as features in the InSituData object.
     """
     from spatialdata_io import visium
 
     from insitupy.spatialdata.convert import convert_from_spatialdata
 
     path = Path(path)
-    dataset_id = "visium"
+
+    if dataset_id is None:
+        dataset_id = "visium"
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
@@ -254,29 +267,49 @@ def read_visium(
     if verbose:
         logger.info("Reading Visium data with spatialdata-io...")
 
+    if fullres_pixel_size is None:
+        logger.warning(f"No `fullres_pixel_size` provided. Setting to 1.0 by default. "
+                       f"For downstream analysis setting the correct pixel size might be important. "
+                       f"If possible, try to find out the resolution of the fullres image")
+        fullres_pixel_size = 1.0 # microns per pixel
+
+    sf_file = path / "spatial" / "scalefactors_json.json"
+    scale_factors = read_json(sf_file)
+    hires_pixel_size = fullres_pixel_size / scale_factors["tissue_hires_scalef"]
+    lowres_pixel_size = fullres_pixel_size / scale_factors["tissue_lowres_scalef"]
+
     # Load Visium data using spatialdata-io
     sdata = visium(
         path=path,
-        # dataset_id=dataset_id,
-        library_id=library_id,
+        dataset_id=dataset_id,
         **kwargs
     )
+
+    if fullres_pixel_size != 1.0:
+        # convert spot geometries to microns
+        sdata[dataset_id]['geometry'] = sdata[dataset_id]['geometry'].apply(
+            lambda geom: affinity.scale(
+                geom,
+                xfact=fullres_pixel_size, yfact=fullres_pixel_size,
+                origin=(0, 0)
+                )
+            )
 
     # Convert to InSituData format
     data = convert_from_spatialdata(
         sdata=sdata,
-        image_keys={
-            "hires": f"{dataset_id}_hires_image",
-            "lowres": f"{dataset_id}_lowres_image"
+        image_data={
+            "hires": (f"{dataset_id}_hires_image", hires_pixel_size),
+            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size)
         },
         features_key=dataset_id,
         cells_key=None,  # No cells available in Visium data
         table_key="table",
-        cell_boundaries_key=None,  # Visium uses spots, not boundaries
-        nucleus_boundaries_key=None,
+        cell_boundaries_data=None,  # Visium uses spots, not boundaries
+        nucleus_boundaries_data=None,
         transcripts_key=None,  # Visium doesn't have single-molecule transcripts
-        slide_id=dataset_id if dataset_id else "visium_slide",
-        sample_id=library_id if library_id else "visium_sample",
+        slide_id=slide_id,
+        sample_id=sample_id,
         method_name="Visium",
     )
 

@@ -1010,17 +1010,14 @@ class InSituData:
                 if meta_file.exists():
                     with open(meta_file, 'r') as f:
                         meta_dict = json.load(f)
-                    pixel_size = meta_dict.get("pixel_size")
                     feature_type = meta_dict.get("feature_type", "feature")
                 else:
-                    pixel_size = None
                     feature_type = "feature"
 
                 # Create FeatureData object and assign
                 self._features = FeatureData(
                     shapes=shapes,
                     data=data,
-                    pixel_size=pixel_size,
                     feature_type=feature_type
                 )
         else:

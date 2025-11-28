@@ -1555,30 +1555,31 @@ class FeatureData(DeepCopyMixin):
     Features are stored as GeoDataFrames with polygon geometries, and their
     omics readouts are stored as AnnData objects. This provides
     flexibility for defining various spatial units beyond cells.
+
+    Note: All coordinates in the geometries are assumed to be given as physical
+    coordinates (usually µm).
     """
 
     def __init__(
         self,
-        shapes: Optional[gpd.GeoDataFrame] = None,
-        data: Optional[AnnData] = None,
-        pixel_size: Optional[Number] = None,
+        shapes: Optional[gpd.GeoDataFrame],
+        data: Optional[AnnData],
         feature_type: str = "feature"
     ):
         """
         Initialize FeatureData object.
 
         Args:
-            features: GeoDataFrame containing polygon geometries for features.
+            shapes: GeoDataFrame containing polygon geometries for features.
                 Should have columns: 'geometry', 'name' (feature identifier),
                 and optionally 'color', 'type', etc.
+                All coordinates are assumed to be in physical units (usually µm).
             data: AnnData object with omics readouts. obs_names should
                 match feature names in the GeoDataFrame.
-            pixel_size: Pixel size in physical units (e.g., µm).
             feature_type: Description of feature type (e.g., 'niche', 'functional_unit').
         """
         self._shapes = shapes.copy() if shapes is not None else gpd.GeoDataFrame()
         self._data = data.copy()
-        self._pixel_size = pixel_size
         self._feature_type = feature_type
 
         # Validate consistency if both features and data are provided
@@ -1656,15 +1657,6 @@ class FeatureData(DeepCopyMixin):
         if value is not None and not isinstance(value, AnnData):
             raise TypeError(f"data must be AnnData object, not {type(value)}")
         self._data = value
-
-    @property
-    def pixel_size(self) -> Optional[Number]:
-        """Pixel size in physical units."""
-        return self._pixel_size
-
-    @pixel_size.setter
-    def pixel_size(self, value: Optional[Number]):
-        self._pixel_size = value
 
     @property
     def feature_type(self) -> str:
@@ -1775,6 +1767,87 @@ class FeatureData(DeepCopyMixin):
         if verbose:
             print(f"Synced to {len(common_names)} common features.")
 
+    def transform(
+        self,
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        inplace: bool = False,
+        verbose: bool = False
+    ):
+        """
+        Apply an affine transformation to all geometries in the FeatureData object.
+
+        Args:
+            transformation_matrix: Either a 2x3 or 3x3 numpy array representing the affine
+                transformation matrix, or a path to a CSV/Excel file containing the matrix.
+                The matrix should be in the form:
+                [[a, b, xoff],
+                 [d, e, yoff]]
+                or
+                [[a, b, xoff],
+                 [d, e, yoff],
+                 [0, 0, 1]]
+            inplace: If True, modify the object in place. Otherwise, return a transformed copy.
+            verbose: If True, print status messages.
+
+        Returns:
+            FeatureData: Transformed FeatureData object if inplace=False, else None.
+
+        Raises:
+            ValueError: If the transformation matrix has invalid dimensions or format.
+            FileNotFoundError: If the provided path does not exist.
+        """
+        _self = self if inplace else self.copy()
+
+        # Load transformation matrix if it's a file path
+        if isinstance(transformation_matrix, (str, os.PathLike, Path)):
+            transformation_matrix = Path(transformation_matrix)
+            if not transformation_matrix.exists():
+                raise FileNotFoundError(f"Transformation matrix file not found: {transformation_matrix}")
+
+            # Read file based on extension
+            if transformation_matrix.suffix.lower() in ['.csv', '.txt']:
+                matrix = pd.read_csv(transformation_matrix, header=None).values
+            elif transformation_matrix.suffix.lower() in ['.xlsx', '.xls']:
+                matrix = pd.read_excel(transformation_matrix, header=None).values
+            else:
+                raise ValueError(f"Unsupported file format: {transformation_matrix.suffix}. Use .csv, .txt, .xlsx, or .xls")
+        else:
+            matrix = np.array(transformation_matrix)
+
+        # Validate matrix dimensions
+        if matrix.shape not in [(2, 3), (3, 3)]:
+            raise ValueError(
+                f"Transformation matrix must be 2x3 or 3x3, got shape {matrix.shape}. "
+                f"Expected format:\n"
+                f"[[a, b, xoff],\n"
+                f" [d, e, yoff]] or with [0, 0, 1] as third row."
+            )
+
+        # Extract transformation parameters
+        if matrix.shape == (3, 3):
+            # Validate that the third row is [0, 0, 1]
+            if not np.allclose(matrix[2, :], [0, 0, 1]):
+                raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
+            matrix = matrix[:2, :]
+
+        # Apply transformation to geometries using shapely's affine_transform
+        # Matrix format for shapely: [a, b, d, e, xoff, yoff]
+        a, b, xoff = matrix[0, :]
+        d, e, yoff = matrix[1, :]
+
+        if verbose:
+            print(f"Applying transformation: a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
+
+        _self._shapes["geometry"] = _self._shapes["geometry"].apply(
+            lambda geom: affinity.affine_transform(geom, [a, b, d, e, xoff, yoff])
+        )
+
+        if verbose:
+            print(f"Transformed {len(_self._shapes)} features.")
+
+        if not inplace:
+            return _self
+
     def save(
         self,
         path: Union[str, os.PathLike, Path],
@@ -1808,7 +1881,6 @@ class FeatureData(DeepCopyMixin):
         # Save metadata
         metadata = {
             "version": __version__,
-            "pixel_size": self._pixel_size,
             "feature_type": self._feature_type,
             "n_features": len(self._shapes),
             "has_data": self._data is not None

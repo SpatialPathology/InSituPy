@@ -10,7 +10,8 @@ else:
     from spatialdata.transformations.transformations import Scale
 
 import logging
-from typing import Dict, List, Literal, Optional, Union
+from numbers import Number
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -404,21 +405,23 @@ def _extract_pixel_size_from_spatialdata(
 def _add_images_to_insitudata(
     data: InSituData,
     sdata: SpatialData,
-    image_keys: Union[str, List[str], Dict[str, str]],
-    pixel_size: Optional[float],
+    image_data: Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]],
+    # pixel_size: Optional[float],
     verbose: bool
 ):
     """Add images to InSituData."""
 
     # Normalize to dict format
-    if isinstance(image_keys, str):
-        image_dict = {image_keys: image_keys}
-    elif isinstance(image_keys, list):
-        image_dict = {name: name for name in image_keys}
+    if isinstance(image_data, tuple):
+        image_dict = {image_data[0]: image_data}
+    elif isinstance(image_data, list):
+        image_dict = {t[0]: t for t in image_data}
     else:
-        image_dict = image_keys
+        image_dict = image_data
 
-    for name, key in image_dict.items():
+    for name, image_tuple in image_dict.items():
+        key = image_tuple[0]
+        pixel_size = image_tuple[1]
         if key not in sdata:
             if verbose:
                 print(f"Warning: Image key '{key}' not found in SpatialData", flush=True)
@@ -452,11 +455,15 @@ def _add_images_to_insitudata(
 def _create_boundaries_from_spatialdata(
     sdata: SpatialData,
     cell_names: np.ndarray,
-    cell_boundaries_key: Optional[str],
-    nucleus_boundaries_key: Optional[str],
-    pixel_size: Optional[float]
-) -> BoundariesData:
+    cell_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (cell_boundaries_key, pixel_size)
+    nucleus_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (nucleus_boundaries_key, pixel_size)
+    ) -> BoundariesData:
     """Create BoundariesData from SpatialData labels."""
+
+    if cell_boundaries_data[1] != nucleus_boundaries_data[1]:
+        raise ValueError("Pixel sizes for cell boundaries and nucleus boundaries must be the same.")
+    else:
+        pixel_size = cell_boundaries_data[1]
 
     # Generate seg_mask_value
     logger.warning("For the segmentation mask values of the boundaries, it is assumed that the order of the cells matches the ascending values of the segmentation mask.")
@@ -469,11 +476,13 @@ def _create_boundaries_from_spatialdata(
 
     # Add cell boundaries if provided
     cell_bounds = None
+    cell_boundaries_key = cell_boundaries_data[0]
     if cell_boundaries_key and cell_boundaries_key in sdata:
         cell_bounds = sdata[cell_boundaries_key].scale0['image'].data
 
     # Add nucleus boundaries if provided
     nuc_bounds = None
+    nucleus_boundaries_key = nucleus_boundaries_data[0]
     if nucleus_boundaries_key and nucleus_boundaries_key in sdata:
         nuc_bounds = sdata[nucleus_boundaries_key].scale0['image'].data
 
@@ -485,3 +494,95 @@ def _create_boundaries_from_spatialdata(
         )
 
     return boundaries
+
+def _validate_image_data_format(
+    image_data: Optional[Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]]]
+) -> None:
+    """
+    Validate the format of image_data parameter.
+
+    Args:
+        image_data: Image data in one of the supported formats:
+            - Single tuple: (image_key, pixel_size)
+            - List of tuples: [(image_key, pixel_size), ...]
+            - Dictionary: {name: (image_key, pixel_size), ...}
+
+    Raises:
+        ValueError: If the format structure is invalid.
+        TypeError: If element types are incorrect.
+    """
+    if image_data is None:
+        return
+
+    if isinstance(image_data, tuple):
+        # Single tuple: (image_key, pixel_size)
+        if len(image_data) != 2:
+            raise ValueError(f"image_data tuple must have 2 elements (image_key, pixel_size), got {len(image_data)}")
+        if not isinstance(image_data[0], str):
+            raise TypeError(f"image_key must be a string, got {type(image_data[0])}")
+        if not isinstance(image_data[1], Number):
+            raise TypeError(f"pixel_size must be a number, got {type(image_data[1])}")
+    elif isinstance(image_data, list):
+        # List of tuples
+        if not all(isinstance(item, tuple) and len(item) == 2 for item in image_data):
+            raise ValueError("image_data list must contain tuples of format (image_key, pixel_size)")
+        for i, item in enumerate(image_data):
+            if not isinstance(item[0], str):
+                raise TypeError(f"image_key at index {i} must be a string, got {type(item[0])}")
+            if not isinstance(item[1], Number):
+                raise TypeError(f"pixel_size at index {i} must be a number, got {type(item[1])}")
+    elif isinstance(image_data, dict):
+        # Dictionary: {name: (image_key, pixel_size)}
+        for name, value in image_data.items():
+            if not isinstance(value, tuple) or len(value) != 2:
+                raise ValueError(f"image_data['{name}'] must be a tuple of format (image_key, pixel_size)")
+            if not isinstance(value[0], str):
+                raise TypeError(f"image_key for '{name}' must be a string, got {type(value[0])}")
+            if not isinstance(value[1], Number):
+                raise TypeError(f"pixel_size for '{name}' must be a number, got {type(value[1])}")
+    else:
+        raise TypeError(
+            f"image_data must be a tuple, list of tuples, or dict, got {type(image_data)}. "
+            f"Expected format: (image_key, pixel_size), [(image_key, pixel_size), ...], "
+            f"or {{name: (image_key, pixel_size), ...}}"
+        )
+
+def _validate_boundaries_data_format(
+    boundaries_data: Optional[Tuple[str, Number]],
+    param_name: str = "boundaries_data"
+) -> None:
+    """
+    Validate the format of cell_boundaries_data or nucleus_boundaries_data parameter.
+
+    Args:
+        boundaries_data: Boundaries data as a tuple (boundaries_key, pixel_size)
+        param_name: Name of the parameter being validated (for error messages)
+
+    Raises:
+        ValueError: If the format structure is invalid.
+        TypeError: If element types are incorrect.
+    """
+    if boundaries_data is None:
+        return
+
+    if not isinstance(boundaries_data, tuple):
+        raise TypeError(
+            f"{param_name} must be a tuple, got {type(boundaries_data)}. "
+            f"Expected format: (boundaries_key, pixel_size)"
+        )
+
+    if len(boundaries_data) != 2:
+        raise ValueError(
+            f"{param_name} tuple must have 2 elements (boundaries_key, pixel_size), "
+            f"got {len(boundaries_data)}"
+        )
+
+    if not isinstance(boundaries_data[0], str):
+        raise TypeError(
+            f"boundaries_key in {param_name} must be a string, got {type(boundaries_data[0])}"
+        )
+
+    if not isinstance(boundaries_data[1], Number):
+        raise TypeError(
+            f"pixel_size in {param_name} must be a number, got {type(boundaries_data[1])}"
+        )

@@ -30,19 +30,6 @@ from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
-# Import for SpatialData mode
-try:
-    import spatialdata
-
-    # from spatialdata import read_zarr
-    SPATIALDATA_AVAILABLE = True
-except ImportError:
-    SPATIALDATA_AVAILABLE = False
-    # read_zarr = None
-    _silent_read_zarr = None
-else:
-    from insitupy.spatialdata._io import _silent_read_zarr
-
 
 class InSituExperiment:
     """
@@ -1343,11 +1330,17 @@ class InSituExperiment:
             ImportError: If spatialdata is not installed
             FileNotFoundError: If the path does not exist
         """
-        if not SPATIALDATA_AVAILABLE:
+        # Import for SpatialData mode
+        try:
+            import spatialdata
+
+        except ImportError:
             raise ImportError(
-                "SpatialData mode requires the spatialdata package. "
+                "This function requires the spatialdata package. "
                 "Install it with: pip install spatialdata"
             )
+        else:
+            from insitupy.spatialdata._io import _silent_read_zarr
 
         path = Path(path)
         if not path.exists():

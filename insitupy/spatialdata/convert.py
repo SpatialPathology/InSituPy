@@ -7,7 +7,8 @@ else:
 
 import logging
 from collections import defaultdict
-from typing import Dict, List, Optional, Union
+from numbers import Number
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -20,7 +21,8 @@ from insitupy.spatialdata._convert import (
     _transform_annotations_for_spatialdata,
     _transform_cell_boundaries_for_spatialdata,
     _transform_images_for_spatialdata, _transform_matrix_for_spatialdata,
-    _transform_regions_for_spatialdata, _transform_transcripts_for_spatialdata)
+    _transform_regions_for_spatialdata, _transform_transcripts_for_spatialdata,
+    _validate_boundaries_data_format, _validate_image_data_format)
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +208,7 @@ def convert_to_spatialdata(
 def convert_from_spatialdata(
     sdata: SpatialData,
     # Image parameters
-    image_keys: Optional[Union[str, List[str], Dict[str, str]]] = None,
+    image_data: Optional[Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]]] = None, # tuple contains (image_key, pixel_size)
     # Table parameters
     table_key: str = 'table',
     # Cell parameters
@@ -214,8 +216,8 @@ def convert_from_spatialdata(
     # Features parameters
     features_key: Optional[str] = None,
     # Boundaries parameters
-    cell_boundaries_key: Optional[str] = None,
-    nucleus_boundaries_key: Optional[str] = None,
+    cell_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (cell_boundaries_key, pixel_size)
+    nucleus_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (nucleus_boundaries_key, pixel_size)
     # Transcripts parameters
     transcripts_key: Optional[str] = "transcripts",
     # Metadata
@@ -243,13 +245,13 @@ def convert_from_spatialdata(
         method_params=sdata.attrs,
     )
 
-    # Determine pixel size
-    if cells_key:
-        element_to_extract_from = cells_key
-    elif features_key:
-        element_to_extract_from = features_key
-    else:
-        raise ValueError("Either 'cells_key' or 'features_key' must be provided to extract pixel size.")
+    # # Determine pixel size
+    # if cells_key:
+    #     element_to_extract_from = cells_key
+    # elif features_key:
+    #     element_to_extract_from = features_key
+    # else:
+    #     raise ValueError("Either 'cells_key' or 'features_key' must be provided to extract pixel size.")
 
     if 'global' in sdata.coordinate_systems:
         logger.info("Using 'global' coordinate system for pixel size extraction.")
@@ -263,21 +265,28 @@ def convert_from_spatialdata(
     else:
         raise ValueError("Cannot determine coordinate system for pixel size extraction.")
 
-    pixel_size = _extract_pixel_size_from_spatialdata(
-        sdata=sdata,
-        # pixel_size,
-        element_to_extract_from=element_to_extract_from,
-        coordinate_system=cs,
-        verbose=verbose
-        )
+    # pixel_size = _extract_pixel_size_from_spatialdata(
+    #     sdata=sdata,
+    #     # pixel_size,
+    #     element_to_extract_from=element_to_extract_from,
+    #     coordinate_system=cs,
+    #     verbose=verbose
+    #     )
 
     # LOAD IMAGES
-    if image_keys:
+    if image_data:
+        # Validate image_data format
+        _validate_image_data_format(image_data)
+
         if verbose:
             print("Adding images...", flush=True)
-        _add_images_to_insitudata(data, sdata, image_keys, pixel_size, verbose)
+        _add_images_to_insitudata(data, sdata, image_data, verbose)
 
     if cells_key:
+        # Validate boundaries data formats
+        _validate_boundaries_data_format(cell_boundaries_data, param_name="cell_boundaries_data")
+        _validate_boundaries_data_format(nucleus_boundaries_data, param_name="nucleus_boundaries_data")
+
         # LOAD CELLS (matrix + boundaries)
         if table_key is not None:
             if table_key in sdata:
@@ -293,13 +302,13 @@ def convert_from_spatialdata(
 
             # Prepare boundaries if keys provided
             boundaries = None
-            if cell_boundaries_key or nucleus_boundaries_key:
+            if cell_boundaries_data or nucleus_boundaries_data:
                 boundaries = _create_boundaries_from_spatialdata(
                     sdata,
                     cell_names,
-                    cell_boundaries_key,
-                    nucleus_boundaries_key,
-                    pixel_size
+                    cell_boundaries_data,
+                    nucleus_boundaries_data,
+                    # pixel_size
                 )
 
             cd = CellData(matrix=matrix, boundaries=boundaries)
@@ -312,7 +321,7 @@ def convert_from_spatialdata(
             FeatureData(
                 shapes=sdata.shapes[features_key],
                 data=sdata[table_key],
-                pixel_size=pixel_size
+                # pixel_size=pixel_size
                 )
             )
 
