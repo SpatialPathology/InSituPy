@@ -351,6 +351,34 @@ def _save_transcripts(transcripts, path, metadata):
     metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
 
 
+def _save_features(features, path, metadata):
+    # create file path
+    features_path = path / "features"
+    features_path.mkdir(parents=True, exist_ok=True) # create directory
+    
+    # save shapes as parquet
+    shapes_file = features_path / "shapes.parquet"
+    features.shapes.to_parquet(shapes_file)
+    
+    # save data as h5ad if present
+    if features.data is not None:
+        data_file = features_path / "data.h5ad"
+        features.data.write_h5ad(data_file)
+    
+    # save metadata
+    meta_dict = {
+        "pixel_size": features.pixel_size,
+        "feature_type": features.feature_type
+    }
+    meta_file = features_path / "metadata.json"
+    import json
+    with open(meta_file, 'w') as f:
+        json.dump(meta_dict, f)
+
+    #if metadata is not None:
+    metadata["data"]["features"] = Path(relpath(features_path, path)).as_posix()
+
+
 def _save_annotations(annotations, path, metadata):
     uid = _generate_time_based_uid()
     annot_path = path / "annotations" / uid

@@ -13,7 +13,7 @@ import numpy as np
 
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses import CellData
+from insitupy.dataclasses import CellData, FeatureData
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata, _create_boundaries_from_spatialdata,
     _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,
@@ -231,44 +231,6 @@ def convert_from_spatialdata(
     """
     Convert a SpatialData object to an InSituData object.
 
-    Parameters
-    ----------
-    sdata : SpatialData
-        Input SpatialData object
-    image_keys : str, list of str, or dict, optional
-        Images to add. Can be:
-        - Single string: adds one image with that key as name
-        - List of strings: adds multiple images using keys as names
-        - Dict {name: key}: adds images with custom names
-        If None, no images are added
-    table_key : str, default "table"
-        Key for the expression matrix table in sdata
-    cell_boundaries_key : str, optional
-        Key for cell boundaries/labels in sdata
-    nucleus_boundaries_key : str, optional
-        Key for nucleus boundaries/labels in sdata
-    transcripts_key : str, optional
-        Key for transcripts in sdata. If None, transcripts are not added
-    pixel_size : float, optional
-        Explicit pixel size. If None, will try to extract from transformation
-    pixel_size_from_element : str, optional
-        Element name to extract pixel size from via transformation.
-        If None and pixel_size is None, uses first available element
-    slide_id : str, optional
-        Slide identifier
-    sample_id : str, optional
-        Sample identifier
-    metadata : dict, optional
-        Additional metadata
-    method_name : str, default ""
-        Name of the method used
-    verbose : bool, default True
-        Print progress messages
-
-    Returns
-    -------
-    InSituData
-        Converted InSituData object
     """
 
     # Initialize InSituData
@@ -282,25 +244,45 @@ def convert_from_spatialdata(
     )
 
     # Determine pixel size
-    ps = _extract_pixel_size_from_spatialdata(
+    if cells_key:
+        element_to_extract_from = cells_key
+    elif features_key:
+        element_to_extract_from = features_key
+    else:
+        raise ValueError("Either 'cells_key' or 'features_key' must be provided to extract pixel size.")
+
+    if 'global' in sdata.coordinate_systems:
+        logger.info("Using 'global' coordinate system for pixel size extraction.")
+        cs = 'global'
+    elif features_key in sdata.coordinate_systems:
+        logger.info(f"Using '{features_key}' coordinate system for pixel size extraction.")
+        cs = features_key
+    elif cells_key in sdata.coordinate_systems:
+        logger.info(f"Using '{cells_key}' coordinate system for pixel size extraction.")
+        cs = cells_key
+    else:
+        raise ValueError("Cannot determine coordinate system for pixel size extraction.")
+
+    pixel_size = _extract_pixel_size_from_spatialdata(
         sdata=sdata,
         # pixel_size,
-        element_to_extract_from=cells_key,
+        element_to_extract_from=element_to_extract_from,
+        coordinate_system=cs,
         verbose=verbose
         )
 
     # LOAD IMAGES
-    if image_keys is not None:
+    if image_keys:
         if verbose:
             print("Adding images...", flush=True)
-        _add_images_to_insitudata(data, sdata, image_keys, ps, verbose)
+        _add_images_to_insitudata(data, sdata, image_keys, pixel_size, verbose)
 
-    # LOAD CELLS (matrix + boundaries)
-    if table_key is not None:
-        if table_key in sdata:
-            if verbose:
-                print("Adding cell data...", flush=True)
-
+    if cells_key:
+        # LOAD CELLS (matrix + boundaries)
+        if table_key is not None:
+            if table_key in sdata:
+                if verbose:
+                    print("Adding cell data...", flush=True)
             matrix = sdata[table_key]
             cell_names = np.array(matrix.obs_names)
 
@@ -317,13 +299,22 @@ def convert_from_spatialdata(
                     cell_names,
                     cell_boundaries_key,
                     nucleus_boundaries_key,
-                    ps
+                    pixel_size
                 )
 
             cd = CellData(matrix=matrix, boundaries=boundaries)
             data.cells.add_celldata(cd=cd, key="main", is_main=True)
         elif verbose:
             logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
+
+    if features_key:
+        data.add_features(
+            FeatureData(
+                shapes=sdata.shapes[features_key],
+                data=sdata[table_key],
+                pixel_size=pixel_size
+                )
+            )
 
     # LOAD TRANSCRIPTS
     if transcripts_key and transcripts_key in sdata:

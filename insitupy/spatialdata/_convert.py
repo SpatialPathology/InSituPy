@@ -347,18 +347,24 @@ def _merge_dicts_with_warning(*dicts):
 def _extract_pixel_size_from_spatialdata(
     sdata: SpatialData,
     # pixel_size: Optional[float],
-    element_to_extract_from: Optional[str],
-    verbose: bool
+    element_to_extract_from: str,
+    coordinate_system: Optional[str] = None,
+    verbose: bool = True
 ) -> Optional[float]:
     """Extract pixel size from SpatialData or use provided value."""
 
     # if pixel_size is not None:
     #     return pixel_size
+    if element_to_extract_from is None:
+        raise ValueError("Element to extract pixel size from must be specified.")
 
     # Try to extract from specified element
-    if element_to_extract_from and element_to_extract_from in sdata:
+    if element_to_extract_from in sdata:
         try:
-            transform = get_transformation(sdata[element_to_extract_from])
+            transform = get_transformation(
+                element=sdata[element_to_extract_from],
+                to_coordinate_system=coordinate_system
+                )
 
             if isinstance(transform, Scale):
                 ps = 1 / transform.scale[0].item()
@@ -375,20 +381,24 @@ def _extract_pixel_size_from_spatialdata(
             if verbose:
                 print(f"Warning: Could not extract pixel size from '{element_to_extract_from}': {e}", flush=True)
 
-    # Try to extract from any available element
-    for key in sdata.keys():
-        try:
-            transform = get_transformation(sdata[key])
-            ps = 1 / transform.scale[0].item()
-            if verbose:
-                print(f"Extracted pixel size {ps} from '{key}'", flush=True)
-            return ps
-        except:
-            continue
+    else:
+        raise ValueError(f"Element '{element_to_extract_from}' not found in SpatialData for pixel size extraction")
 
-    if verbose:
-        print("Warning: Could not extract pixel size from any element", flush=True)
-    return None
+    # # Try to extract from any available element
+    # for elem_type, key, elem in sdata.gen_elements():
+    # # for key in sdata.keys():
+    #     try:
+    #         transform = get_transformation(sdata[key])
+    #         ps = 1 / transform.scale[0].item()
+    #         if verbose:
+    #             print(f"Extracted pixel size {ps} from '{key}'", flush=True)
+    #         return ps
+    #     except:
+    #         continue
+
+    # if verbose:
+    #     print("Warning: Could not extract pixel size from any element", flush=True)
+    # return None
 
 
 def _add_images_to_insitudata(
@@ -415,8 +425,19 @@ def _add_images_to_insitudata(
             continue
 
         img_data = sdata[key]
-        da_img = img_data.scale0['image'].data
-        axes = "".join(dict(img_data.scale0.dims).keys()).upper()
+        try:
+            data_array = img_data.scale0['image']
+        except AttributeError:
+            data_array = img_data
+
+        da_img = data_array.data
+        # try:
+        #     da_img = img_data.scale0['image'].data
+        # except AttributeError:
+        #     # assume no scales are provided
+        #     da_img = img_data.data
+
+        axes = "".join(data_array.dims).upper()
 
         data.images.add_image(
             image=da_img,

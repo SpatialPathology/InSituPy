@@ -48,13 +48,15 @@ __all__ = [
     "utils"
 ]
 
-# configure warnings
+# configure logging
 import logging
 
 logger = logging.getLogger('insitupy')
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)
 logger.propagate = False
 
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-logger.addHandler(handler)
+# Only add handler if one doesn't exist yet
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    logger.addHandler(handler)

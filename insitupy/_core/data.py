@@ -36,9 +36,9 @@ from insitupy.dataclasses.dataclasses import (AnnotationsData, FeatureData,
                                               ImageData, MultiCellData,
                                               RegionsData)
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
-                                     _save_images, _save_regions,
-                                     _save_transcripts, read_multicelldata,
-                                     read_shapesdata)
+                                     _save_features, _save_images,
+                                     _save_regions, _save_transcripts,
+                                     read_multicelldata, read_shapesdata)
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
@@ -177,7 +177,7 @@ class InSituData:
         # modalities
         self._images = ImageData()
         self._cells = MultiCellData()
-        self._features = FeatureData()
+        self._features = None
         self._annotations = AnnotationsData()
         self._regions = RegionsData()
         self._transcripts = None
@@ -201,7 +201,7 @@ class InSituData:
         # check if all modalities are empty
         empty_checks = [elem.is_empty for elem in [
             self._images, self._cells, self._annotations, self._regions
-            ]] + [self._transcripts is None] # transcripts doe not have is_empty property since they are a dataframe
+            ]] + [self._transcripts is None, self._features is None] # transcripts and features do not have is_empty property since they are dataframes
         all_empty = np.all(empty_checks)
 
         repr = (
@@ -235,6 +235,12 @@ class InSituData:
                 cells_repr = self._cells.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
+                )
+
+            if self._features is not None:
+                features_repr = self._features.__repr__()
+                repr = (
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['features']+tf.Bold} features{tf.ResetAll}\n{tf.SPACER}   " + features_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if self._transcripts is not None:
@@ -355,6 +361,21 @@ class InSituData:
     def features(self):
         self._features = FeatureData()
         print("Cleared all data from 'features'.")
+
+    def add_features(self, data: FeatureData):
+        """
+        Add feature data to the InSituData object.
+
+        Args:
+            data (FeatureData): The feature data to add.
+
+        Raises:
+            TypeError: If data is not of type FeatureData.
+        """
+        if not isinstance(data, FeatureData):
+            raise TypeError(f"Data must be of type FeatureData, but got {type(data).__name__} instead.")
+
+        self._features = data
 
     @property
     def annotations(self):
@@ -956,6 +977,55 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
+    def load_features(self,
+                     verbose: bool = False
+                     ):
+        # read features
+        if verbose:
+            print("Loading features...", flush=True)
+
+        if self.from_insitudata:
+            # extract available paths
+            features_path = Path(self.path) / "features"
+
+            if not features_path.exists():
+                if verbose:
+                    warn(ModalityNotFoundWarning("features"), stacklevel=2)
+            else:
+                import json
+
+                import geopandas as gpd
+                from anndata import read_h5ad
+
+                # Load shapes
+                shapes_file = features_path / "shapes.parquet"
+                shapes = gpd.read_parquet(shapes_file)
+
+                # Load data if present
+                data_file = features_path / "data.h5ad"
+                data = read_h5ad(data_file) if data_file.exists() else None
+
+                # Load metadata
+                meta_file = features_path / "metadata.json"
+                if meta_file.exists():
+                    with open(meta_file, 'r') as f:
+                        meta_dict = json.load(f)
+                    pixel_size = meta_dict.get("pixel_size")
+                    feature_type = meta_dict.get("feature_type", "feature")
+                else:
+                    pixel_size = None
+                    feature_type = "feature"
+
+                # Create FeatureData object and assign
+                self._features = FeatureData(
+                    shapes=shapes,
+                    data=data,
+                    pixel_size=pixel_size,
+                    feature_type=feature_type
+                )
+        else:
+            NoProjectLoadWarning()
+
     @classmethod
     def read(cls, path: Union[str, os.PathLike, Path]):
         """Read an InSituData object from a specified folder.
@@ -1060,6 +1130,15 @@ class InSituData:
             transcripts = self._transcripts
             _save_transcripts(
                 transcripts=transcripts,
+                path=path,
+                metadata=self._metadata
+                )
+
+        # save features
+        if self._features is not None:
+            features = self._features
+            _save_features(
+                features=features,
                 path=path,
                 metadata=self._metadata
                 )

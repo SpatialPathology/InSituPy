@@ -1219,11 +1219,13 @@ class ImageData(DeepCopyMixin):
 
     def __repr__(self):
         if len(self._data) > 0:
-            repr_strings = [f"{tf.Bold}{n}:{tf.ResetAll}\t{metadata['shape']}" for n,metadata in self._metadata.items()]
+            # Calculate the maximum length of the key names for alignment
+            max_key_len = max(len(n) for n in self._metadata.keys())
+            pad = 3
+            repr_strings = [f"{tf.Bold}'{n}':{tf.ResetAll}{' ' * (max_key_len - len(n) + pad)}{metadata['shape']}" for n,metadata in self._metadata.items()]
             s = "\n".join(repr_strings)
         else:
             s = "empty"
-        #repr = f"{tf.Blue+tf.Bold}images{tf.ResetAll}\n{s}"
         return s
 
     def __len__(self):
@@ -1548,10 +1550,10 @@ class ImageData(DeepCopyMixin):
 class FeatureData(DeepCopyMixin):
     """
     Object to store spatial features (e.g., functional tissue units, niches)
-    with their associated transcriptomic data.
+    with their associated omics data.
 
     Features are stored as GeoDataFrames with polygon geometries, and their
-    transcriptomic readouts are stored as AnnData objects. This provides
+    omics readouts are stored as AnnData objects. This provides
     flexibility for defining various spatial units beyond cells.
     """
 
@@ -1569,7 +1571,7 @@ class FeatureData(DeepCopyMixin):
             features: GeoDataFrame containing polygon geometries for features.
                 Should have columns: 'geometry', 'name' (feature identifier),
                 and optionally 'color', 'type', etc.
-            data: AnnData object with transcriptomic readouts. obs_names should
+            data: AnnData object with omics readouts. obs_names should
                 match feature names in the GeoDataFrame.
             pixel_size: Pixel size in physical units (e.g., µm).
             feature_type: Description of feature type (e.g., 'niche', 'functional_unit').
@@ -1591,20 +1593,19 @@ class FeatureData(DeepCopyMixin):
         has_data = self._data is not None
 
         if n_features > 0:
-            feature_types = self._shapes['name'].nunique() if 'name' in self._shapes.columns else 1
             repr_str = (
-                f"{tf.Bold}FeatureData{tf.ResetAll} ({self._feature_type})\n"
-                f"{tf.SPACER}{n_features} features, {feature_types} unique types\n"
+                f"{tf.Bold}FeatureData{tf.ResetAll} (Type: '{self._feature_type}')\n"
             )
 
             if has_data:
                 repr_str += (
-                    f"{tf.SPACER}AnnData object: {self._data.n_obs} obs × "
+                    f"{tf.SPACER}.data: {self._data.n_obs} obs × "
                     f"{self._data.n_vars} vars\n"
+                    f"{tf.SPACER}.shapes: {n_features} geometries"
                 )
 
-            if self._pixel_size is not None:
-                repr_str += f"{tf.SPACER}Pixel size: {self._pixel_size} µm"
+            # if self._pixel_size is not None:
+            #     repr_str += f"{tf.SPACER}Pixel size: {self._pixel_size} µm"
         else:
             repr_str = "Empty FeatureData object"
 
