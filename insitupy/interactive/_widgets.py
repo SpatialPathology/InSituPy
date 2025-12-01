@@ -12,7 +12,8 @@ if WITH_NAPARI:
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import QSize, Qt
     from qtpy.QtGui import QFontMetrics, QIcon
-    from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
+    from qtpy.QtWidgets import (QComboBox, QCompleter, QFileDialog,
+                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                 QVBoxLayout, QWidget)
     from scipy.sparse import issparse
 
@@ -58,6 +59,11 @@ if WITH_NAPARI:
         select_data_widget = None
         filter_cells_widget = None
         show_features_widget = None
+
+        def callback_update_legend(event=None):
+            _update_colorlegend(viewer=viewer, viewer_config=viewer_config)
+
+        viewer.layers.selection.events.active.connect(callback_update_legend)
 
         # else:
         if viewer_config.has_cells:
@@ -349,9 +355,6 @@ if WITH_NAPARI:
                     filter_widget=filter_cells_widget
                     )
 
-            def callback_update_legend(event=None):
-                _update_colorlegend(viewer=viewer, viewer_config=viewer_config)
-
             if show_cells_widget is not None:
                 show_cells_widget.call_button.clicked.connect(callback_refresh)
                 show_cells_widget.call_button.clicked.connect(callback_update_legend)
@@ -359,30 +362,51 @@ if WITH_NAPARI:
                 show_boundaries_widget.call_button.clicked.connect(callback_refresh)
                 show_boundaries_widget.call_button.clicked.connect(callback_update_legend)
 
-            viewer.layers.selection.events.active.connect(callback_update_legend)
-
 
         # ====== FEATURES WIDGET ======
         # if not viewer_config.has_features:
         #     show_features_widget = None
         # else:
         if viewer_config.has_features:
+            # Prepare choices
+            obs_choices = [""] + sorted(list(viewer_config.feature_obs))
+            obsm_choices = [""] + sorted(list(viewer_config.feature_obsm))
+
             @magicgui(
                 call_button='Show',
-                key_type={'choices': ["genes", "obs", "obsm"], 'label': 'Type:'},
-                key={'choices': viewer_config.feature_vars[:100], 'label': "Key:"},
-                edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
-                opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'}
+                gene={'label': "Gene (search):"},
+                obs={'choices': obs_choices, 'label': 'Obs:'},
+                obsm={'choices': obsm_choices, 'label': 'Obsm:'}
             )
             def show_features_widget(
-                key_type="genes",
-                key=None,
-                edge_width: int = 2,
-                opacity: float = 0.5
+                gene="",
+                obs="",
+                obsm=""
             ) -> napari.types.LayerDataTuple:
-                if key is None:
+
+                key = None
+                key_type = None
+
+                # Determine which key to use (priority: gene > obs > obsm)
+                if gene != "":
+                    key = gene
+                    key_type = "genes"
+                elif obs != "":
+                    key = obs
+                    key_type = "obs"
+                elif obsm != "":
+                    key = obsm
+                    key_type = "obsm"
+
+                if key is None or key == "":
                     show_warning("Please select a key to visualize.")
                     return None
+
+                # Validate key for genes
+                if key_type == "genes":
+                    if key not in viewer_config.feature_vars:
+                        show_warning(f"Key '{key}' not found in genes.")
+                        return None
 
                 # get expression values
                 color_values = _get_expression_values(
@@ -400,23 +424,46 @@ if WITH_NAPARI:
                     color_values=color_values,
                     name=layer_name,
                     feature_names=viewer_config.features.shapes.index.tolist(),
-                    edge_width=edge_width,
-                    opacity=opacity,
+                    edge_width=0,
+                    opacity=0.5,
                     upper_climit_pct=99
                 )
 
                 return feature_layer
 
-            # Connect callbacks
-            @show_features_widget.key_type.changed.connect
-            @show_features_widget.call_button.clicked.connect
-            def update_feature_keys(event=None):
-                if show_features_widget.key_type.value == "genes":
-                    show_features_widget.key.choices = viewer_config.feature_vars[:100]
-                elif show_features_widget.key_type.value == "obs":
-                    show_features_widget.key.choices = viewer_config.feature_obs
-                elif show_features_widget.key_type.value == "obsm":
-                    show_features_widget.key.choices = viewer_config.feature_obsm
+            # Make the gene text field searchable with completer
+            def _setup_searchable_textfield(widget, full_choices):
+                """Configure QLineEdit to be searchable with QCompleter."""
+                if hasattr(widget, 'native') and isinstance(widget.native, QLineEdit):
+                    # Create completer with full list for efficient searching
+                    completer = QCompleter(full_choices)
+                    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+                    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    widget.native.setCompleter(completer)
+
+            # Setup searchable text field for genes
+            _setup_searchable_textfield(show_features_widget.gene, viewer_config.feature_vars)
+
+            # Connect callbacks to ensure mutual exclusivity
+            @show_features_widget.gene.changed.connect
+            def _on_gene_changed(event=None):
+                if show_features_widget.gene.value != "":
+                    show_features_widget.obs.value = ""
+                    show_features_widget.obsm.value = ""
+
+            @show_features_widget.obs.changed.connect
+            def _on_obs_changed(event=None):
+                if show_features_widget.obs.value != "":
+                    show_features_widget.gene.value = ""
+                    show_features_widget.obsm.value = ""
+
+            @show_features_widget.obsm.changed.connect
+            def _on_obsm_changed(event=None):
+                if show_features_widget.obsm.value != "":
+                    show_features_widget.gene.value = ""
+                    show_features_widget.obs.value = ""
+
+            show_features_widget.call_button.clicked.connect(callback_update_legend)
 
         # if data.annotations.is_empty and data.regions.is_empty:
         #     show_geometries_widget = None

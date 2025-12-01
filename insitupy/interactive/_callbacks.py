@@ -11,7 +11,9 @@ if WITH_NAPARI:
     from matplotlib.lines import Line2D
     from pandas.api.types import is_numeric_dtype
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+    from insitupy._constants import (ANNOTATIONS_SYMBOL,
+                                     DEFAULT_CATEGORICAL_CMAP,
+                                     DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
                                      REGIONS_SYMBOL)
     from insitupy.utils._colors import continuous_data_to_rgba
 
@@ -187,6 +189,42 @@ if WITH_NAPARI:
                     marker="s",
                     marker_mode="edge"
                     )
+            elif layer.name.startswith("features-"):
+                try:
+                    # get values
+                    values = layer.properties["value"]
+                    color_values = layer.face_color
+                except KeyError:
+                    pass
+                else:
+                    if is_numeric_dtype(values):
+                        rgba_list, mapping = continuous_data_to_rgba(data=values,
+                                                cmap=DEFAULT_CONTINUOUS_CMAP,
+                                                #upper_climit_pct=upper_climit_pct,
+                                                return_mapping=True
+                                                )
+
+                        _update_continuous_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name)
+
+                    else:
+                        # substitute pd.NA with np.nan
+                        values = pd.Series(values).fillna(np.nan).values
+                        # assume the data is categorical
+                        unique_values = list(set(values))
+                        mapping = {str(v): tuple(color_values[list(values).index(v)]) for v in unique_values}
+                        # sort mapping dict
+                        mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
+
+                        _update_categorical_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name,
+                            marker="s",
+                            marker_mode="face"
+                            )
         else:
             pass
 
