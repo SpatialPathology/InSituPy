@@ -28,6 +28,7 @@ if WITH_NAPARI:
                                                config_manager)
     from insitupy.interactive._layers import (_create_features_layer,
                                               _create_points_layer,
+                                              _update_features_layer,
                                               _update_points_layer)
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.utils._helpers import _get_expression_values
@@ -376,12 +377,14 @@ if WITH_NAPARI:
                 call_button='Show',
                 gene={'label': "Gene (search):"},
                 obs={'choices': obs_choices, 'label': 'Obs:'},
-                obsm={'choices': obsm_choices, 'label': 'Obsm:'}
+                obsm={'choices': obsm_choices, 'label': 'Obsm:'},
+                add_new_layer={'label': 'Add new layer'}
             )
             def show_features_widget(
                 gene="",
                 obs="",
-                obsm=""
+                obsm="",
+                add_new_layer=False
             ) -> napari.types.LayerDataTuple:
 
                 key = None
@@ -418,18 +421,44 @@ if WITH_NAPARI:
                 # Create layer name
                 layer_name = f"features-{key}"
 
-                # Create features layer
-                feature_layer = _create_features_layer(
-                    gdf=viewer_config.features.shapes,
-                    color_values=color_values,
-                    name=layer_name,
-                    feature_names=viewer_config.features.shapes.index.tolist(),
-                    edge_width=0,
-                    opacity=0.5,
-                    upper_climit_pct=99
-                )
+                # Get existing feature layers
+                feature_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("features-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
 
-                return feature_layer
+                if len(feature_layer_names) == 0:
+                    # Create new features layer
+                    feature_layer = _create_features_layer(
+                        gdf=viewer_config.features.shapes,
+                        color_values=color_values,
+                        name=layer_name,
+                        feature_names=viewer_config.features.shapes.index.tolist(),
+                        edge_width=0,
+                        opacity=0.5,
+                        upper_climit_pct=99
+                    )
+                    return feature_layer
+                else:
+                    if not add_new_layer:
+                        # Update the existing features layer
+                        layer = viewer.layers[feature_layer_names[0]]
+                        _update_features_layer(
+                            layer=layer,
+                            new_color_values=color_values,
+                            new_name=layer_name
+                        )
+                        # Move layer to the top
+                        viewer.layers.move(viewer.layers.index(layer_name), len(viewer.layers))
+                    else:
+                        # Create new features layer
+                        feature_layer = _create_features_layer(
+                            gdf=viewer_config.features.shapes,
+                            color_values=color_values,
+                            name=layer_name,
+                            feature_names=viewer_config.features.shapes.index.tolist(),
+                            edge_width=0,
+                            opacity=0.5,
+                            upper_climit_pct=99
+                        )
+                        return feature_layer
 
             # Make the gene text field searchable with completer
             def _setup_searchable_textfield(widget, full_choices):

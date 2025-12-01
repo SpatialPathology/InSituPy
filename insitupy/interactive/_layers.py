@@ -355,6 +355,47 @@ if WITH_NAPARI:
         if new_name is not None:
             layer.name = new_name
 
+    def _update_features_layer(
+        layer: napari.layers.Layer,
+        new_color_values: List[Number],
+        new_name: Optional[str] = None,
+        upper_climit_pct: int = 99,
+        categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
+        ) -> None:
+        """
+        Update an existing features (shapes) layer with new color values.
+
+        Args:
+            layer: Existing napari shapes layer to update
+            new_color_values: New values to color polygons by
+            new_name: New name for the layer (optional)
+            upper_climit_pct: Upper percentile for color limits
+            categorical_cmap: Colormap for categorical data
+            continuous_cmap: Colormap for continuous data
+        """
+        if categorical_cmap is None:
+            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
+
+        # Get the RGBA colors for the new values
+        new_colors, mapping, cmap = _data_to_rgba(
+            data=new_color_values,
+            continuous_cmap=continuous_cmap,
+            categorical_cmap=categorical_cmap,
+            upper_climit_pct=upper_climit_pct
+        )
+
+        # Update face colors
+        layer.face_color = new_colors
+
+        # Update properties
+        new_props = layer.properties.copy()
+        new_props['value'] = new_color_values
+        layer.properties = new_props
+
+        if new_name is not None:
+            layer.name = new_name
+
 def _create_features_layer(
         gdf: "gpd.GeoDataFrame",
         color_values: Optional[List[Number]] = None,
