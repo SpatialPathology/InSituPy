@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional, Union
+from typing import TYPE_CHECKING, List, Literal, Optional, Union
 from uuid import uuid4
 from warnings import warn
 
@@ -15,6 +15,11 @@ from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.utils._helpers import _get_expression_values
 from insitupy.utils.utils import convert_to_list
+
+# Type checking imports (not executed at runtime)
+if TYPE_CHECKING:
+    from insitupy._core.data import InSituData
+    from insitupy.spatialdata.structured import StructuredSpatialData
 
 # optional packages that are not always installed
 if WITH_NAPARI:
