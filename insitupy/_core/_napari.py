@@ -24,7 +24,8 @@ if WITH_NAPARI:
 
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.interactive._layers import _create_points_layer
-    from insitupy.interactive._widgets import SaveWidget, SyncButton
+    from insitupy.interactive._widgets import (ResetWidgetsButton, SaveWidget,
+                                               SyncButton)
 
     #from napari.layers.shapes.shapes import Shapes
     from ..interactive._widgets import (_initialize_widgets,
@@ -381,12 +382,18 @@ if WITH_NAPARI:
         save_widget = SaveWidget()
         viewer.window.add_dock_widget(save_widget, area='left', name="Save color legend")
 
-    def _add_buttons_to_viewer(viewer: napari.Viewer):
+    def _add_buttons_to_viewer(viewer: napari.Viewer, widgets_max_width: int = 500):
         # create sync button
         sync_button = SyncButton()
 
         # add the sync button to viewer
         viewer.window.add_dock_widget(sync_button, area='right', name="Sync")
+
+        # create reset widgets button
+        reset_widgets_button = ResetWidgetsButton(widgets_max_width=widgets_max_width)
+
+        # add the reset widgets button to viewer
+        viewer.window.add_dock_widget(reset_widgets_button, area='right', name="Reset Widgets")
 
 
 
@@ -441,7 +448,8 @@ if WITH_NAPARI:
 
         # BUTTONS
         _add_buttons_to_viewer(
-            viewer=current_viewer
+            viewer=current_viewer,
+            widgets_max_width=widgets_max_width
         )
 
         # EVENTS

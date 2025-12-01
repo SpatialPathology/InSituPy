@@ -771,6 +771,77 @@ if WITH_NAPARI:
             sync_geometries()
 
 
+    class ResetWidgetsButton(QWidget):
+        """Button widget to reset/restore all closed widgets in the napari viewer."""
+
+        def __init__(self, widgets_max_width: int = 500):
+            super().__init__()
+            self.widgets_max_width = widgets_max_width
+            self.layout = QVBoxLayout()
+            self.setLayout(self.layout)
+
+            # create the reset button
+            self.reset_button = QPushButton("Reset Widgets")
+            self.reset_button.setToolTip("Restore all closed widgets")
+            self.reset_button.clicked.connect(self._reset_widgets)
+            self.layout.addWidget(self.reset_button)
+
+        def _reset_widgets(self):
+            """Re-add all widgets to the current napari viewer."""
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
+            data = viewer_config.data
+
+            # Get list of currently open dock widget names
+            existing_widgets = set()
+            for dock_widget in viewer.window._dock_widgets.values():
+                existing_widgets.add(dock_widget.name)
+
+            # Initialize widgets
+            (
+                show_cells_widget,
+                locate_cells_widget,
+                show_geometries_widget,
+                show_boundaries_widget,
+                select_data,
+                filter_cells_widget,
+                show_features_widget,
+            ) = _initialize_widgets(
+                viewer=viewer,
+                viewer_config=viewer_config
+            )
+
+            # Define widgets to add with their properties
+            widgets_config = [
+                (select_data, "Select data", 80, False),
+                (show_cells_widget, "Show data", 170, False),
+                (show_features_widget, "Show features", None, True),
+                (show_boundaries_widget, "Show boundaries", None, False),
+                (locate_cells_widget, "Navigate to cell", None, False),
+                (filter_cells_widget, "Filter cells", 150, True),
+                (show_geometries_widget, "Show geometries", None, True),
+            ]
+
+            # Add widgets that are not already open
+            for widget, name, max_height, tabify in widgets_config:
+                if widget is not None and name not in existing_widgets:
+                    viewer.window.add_dock_widget(widget, name=name, area="right", tabify=tabify)
+                    if max_height is not None:
+                        widget.max_height = max_height
+                    widget.max_width = self.widgets_max_width
+
+            # Check and add "Add geometries" widget
+            if "Add geometries" not in existing_widgets:
+                add_geom_widget = add_new_geometries_widget()
+                add_geom_widget.max_width = self.widgets_max_width
+                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False)
+
+            show_info("Widgets have been reset.")
+
 
     class SaveWidget(QWidget):
         def __init__(self):
