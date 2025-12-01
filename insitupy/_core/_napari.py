@@ -121,7 +121,11 @@ if WITH_NAPARI:
 
                     if not isinstance(channel_img, list):
                         # create image pyramid for lazy loading
-                        img_pyramid = create_img_pyramid(img=channel_img, nsubres=6)
+                        img_pyramid = create_img_pyramid(
+                            img=channel_img,
+                            axes=axes_str,
+                            nsubres=6
+                            )
                     else:
                         img_pyramid = channel_img
 
@@ -158,7 +162,11 @@ if WITH_NAPARI:
 
                 if not isinstance(img, list):
                     # create image pyramid for lazy loading
-                    img_pyramid = create_img_pyramid(img=img, nsubres=6)
+                    img_pyramid = create_img_pyramid(
+                        img=img,
+                        axes=axes_str,
+                        nsubres=6
+                        )
                 else:
                     img_pyramid = img
 
@@ -246,7 +254,7 @@ if WITH_NAPARI:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        if data.cells.is_empty:
+        if data.cells.is_empty and data.features is None:
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
             add_geom_widget.max_height = 120
@@ -255,12 +263,13 @@ if WITH_NAPARI:
         else:
             # initialize the widgets
             (
-                show_points_widget,
+                show_cells_widget,
                 locate_cells_widget,
                 show_geometries_widget,
                 show_boundaries_widget,
                 select_data,
                 filter_cells_widget,
+                show_features_widget,
             ) = _initialize_widgets(
                 viewer=viewer,
                 viewer_config=viewer_config
@@ -272,10 +281,14 @@ if WITH_NAPARI:
                 select_data.max_height = 80
                 select_data.max_width = widgets_max_width
 
-            if show_points_widget is not None:
-                viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right", tabify=False)
-                show_points_widget.max_height = 170
-                show_points_widget.max_width = widgets_max_width
+            if show_cells_widget is not None:
+                viewer.window.add_dock_widget(show_cells_widget, name="Show data", area="right", tabify=False)
+                show_cells_widget.max_height = 170
+                show_cells_widget.max_width = widgets_max_width
+
+            if show_features_widget is not None:
+                viewer.window.add_dock_widget(show_features_widget, name="Show features", area="right", tabify=True)
+                show_features_widget.max_width = widgets_max_width
 
             if show_boundaries_widget is not None:
                 viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
@@ -290,7 +303,7 @@ if WITH_NAPARI:
             if filter_cells_widget is not None:
                 viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
                 filter_cells_widget.max_height = 150
-                show_points_widget.max_width = widgets_max_width
+                show_cells_widget.max_width = widgets_max_width
 
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
@@ -302,6 +315,7 @@ if WITH_NAPARI:
             if show_geometries_widget is not None:
                 viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
                 show_geometries_widget.max_width = widgets_max_width
+
 
     def _add_events_to_viewer(viewer: napari.Viewer):
         # get viewer configuration from configuration manager

@@ -5,6 +5,7 @@ if WITH_NAPARI:
 
     import napari
     import numpy as np
+    import pandas as pd
     from magicgui import magic_factory, magicgui
     from magicgui.widgets import FunctionGui
     from matplotlib.colors import ListedColormap
@@ -13,6 +14,7 @@ if WITH_NAPARI:
     from qtpy.QtGui import QFontMetrics, QIcon
     from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
                                 QVBoxLayout, QWidget)
+    from scipy.sparse import issparse
 
     from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                      REGION_CMAP, REGIONS_SYMBOL)
@@ -23,7 +25,8 @@ if WITH_NAPARI:
         _update_key_on_type_change, _update_keys_based_on_geom_type)
     from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
                                                config_manager)
-    from insitupy.interactive._layers import (_create_points_layer,
+    from insitupy.interactive._layers import (_create_features_layer,
+                                              _create_points_layer,
                                               _update_points_layer)
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.utils._helpers import _get_expression_values
@@ -40,12 +43,24 @@ if WITH_NAPARI:
         #viewer = xdata.viewer
         data = viewer_config.data
 
-        if not viewer_config.has_cells:
-            show_cells_widget = None
-            move_to_cell_widget = None
-            show_boundaries_widget = None,
-            filter_cells_widget = None
-        else:
+        # Initialize cell-related widgets only if cells are present
+        # if not viewer_config.has_cells:
+        #     show_cells_widget = None
+        #     move_to_cell_widget = None
+        #     show_boundaries_widget = None
+        #     filter_cells_widget = None
+        #     select_data_widget = None
+
+        show_cells_widget = None
+        move_to_cell_widget = None
+        show_geometries_widget = None
+        show_boundaries_widget = None
+        select_data_widget = None
+        filter_cells_widget = None
+        show_features_widget = None
+
+        # else:
+        if viewer_config.has_cells:
             data_names = data.cells.keys()
             layer_names = ["main"] + list(data.cells.matrix.layers)
 
@@ -346,9 +361,67 @@ if WITH_NAPARI:
 
             viewer.layers.selection.events.active.connect(callback_update_legend)
 
-        if data.annotations.is_empty and data.regions.is_empty:
-            show_geometries_widget = None
-        else:
+
+        # ====== FEATURES WIDGET ======
+        # if not viewer_config.has_features:
+        #     show_features_widget = None
+        # else:
+        if viewer_config.has_features:
+            @magicgui(
+                call_button='Show',
+                key_type={'choices': ["genes", "obs", "obsm"], 'label': 'Type:'},
+                key={'choices': viewer_config.feature_vars[:100], 'label': "Key:"},
+                edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
+                opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'}
+            )
+            def show_features_widget(
+                key_type="genes",
+                key=None,
+                edge_width: int = 2,
+                opacity: float = 0.5
+            ) -> napari.types.LayerDataTuple:
+                if key is None:
+                    show_warning("Please select a key to visualize.")
+                    return None
+
+                # get expression values
+                color_values = _get_expression_values(
+                    adata=viewer_config.features.data,
+                    X=viewer_config.features.data.X,
+                    key_type=key_type, key=key
+                )
+
+                # Create layer name
+                layer_name = f"features-{key}"
+
+                # Create features layer
+                feature_layer = _create_features_layer(
+                    gdf=viewer_config.features.shapes,
+                    color_values=color_values,
+                    name=layer_name,
+                    feature_names=viewer_config.features.shapes.index.tolist(),
+                    edge_width=edge_width,
+                    opacity=opacity,
+                    upper_climit_pct=99
+                )
+
+                return feature_layer
+
+            # Connect callbacks
+            @show_features_widget.key_type.changed.connect
+            @show_features_widget.call_button.clicked.connect
+            def update_feature_keys(event=None):
+                if show_features_widget.key_type.value == "genes":
+                    show_features_widget.key.choices = viewer_config.feature_vars[:100]
+                elif show_features_widget.key_type.value == "obs":
+                    show_features_widget.key.choices = viewer_config.feature_obs
+                elif show_features_widget.key_type.value == "obsm":
+                    show_features_widget.key.choices = viewer_config.feature_obsm
+
+        # if data.annotations.is_empty and data.regions.is_empty:
+        #     show_geometries_widget = None
+        # else:
+        if not (data.annotations.is_empty and data.regions.is_empty):
             #TODO: The following section is weirdly complicated and should be simplified.
             # check which geometries are available
             if not data.annotations.is_empty:
@@ -467,7 +540,7 @@ if WITH_NAPARI:
             show_boundaries_widget,
             select_data_widget,
             filter_cells_widget,
-            #add_new_geometries_widget
+            show_features_widget,
             )
 
     # Difference between magicgui and magic_factory decorators:

@@ -272,6 +272,8 @@ def _data_to_rgba(
     nan_val: tuple = (1,1,1,0),
     rgba_values: Optional[np.ndarray] = None
     ):
+    if isinstance(data, list):
+        data = np.array(data) # make sure the data is not a list but a numpy array
     if not is_numeric_dtype(data) or is_bool_dtype(data):
         if is_bool_dtype(data):
             # in case of boolean data it is important to convert it to object type

@@ -26,6 +26,7 @@ from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._segmentations import _read_proseg
+from insitupy.images.axes import ImageAxes, _transpose_to_standard_axes
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
@@ -1299,6 +1300,9 @@ class ImageData(DeepCopyMixin):
             else:
                 raise ValueError(f"`image` is neither a dask array nor an existing path. Instead: {type(image)}")
 
+            # Transpose image to standard axis order (YX, CYX, or YXS)
+            img, axes = _transpose_to_standard_axes(img, axes)
+
             # set attribute and add names to object
             self._data[name] = img
             self._names.append(name)
@@ -1581,6 +1585,24 @@ class FeatureData(DeepCopyMixin):
         self._shapes = shapes.copy() if shapes is not None else gpd.GeoDataFrame()
         self._data = data.copy()
         self._feature_type = feature_type
+
+        # Convert Point geometries with radius to circles
+        if not self._shapes.empty and 'radius' in self._shapes.columns:
+            # Check if any geometries are Points
+            point_mask = self._shapes.geometry.geom_type.isin(['Point', 'MultiPoint'])
+            if point_mask.any():
+                # Only convert Point geometries that have a valid (non-NA) radius
+                radius_valid = ~self._shapes['radius'].isna()
+                convert_mask = point_mask & radius_valid
+
+                if convert_mask.any():
+                    logger.info(f"Converting {convert_mask.sum()} Point geometries with radius to circular polygons using buffer.")
+                    self._shapes.loc[convert_mask, 'geometry'] = self._shapes.loc[convert_mask].apply(
+                        lambda row: row.geometry.buffer(row.radius), axis=1
+                    )
+
+                # Remove radius column after conversion
+                # self._shapes = self._shapes.drop(columns=['radius'])
 
         # Validate consistency if both features and data are provided
         if not self._shapes.empty and self._data is not None:

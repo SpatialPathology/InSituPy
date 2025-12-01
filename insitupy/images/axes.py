@@ -41,3 +41,47 @@ def get_height_and_width(image, axes_config: ImageAxes):
     h_image = image.shape[axes_config.Y] # height of image
     w_image = image.shape[axes_config.X] # width of image
     return (h_image, w_image)
+
+def _transpose_to_standard_axes(img, axes: str):
+    """
+    Transpose image to standard axis order: YX, CYX, or YXS.
+
+    Args:
+        img: Dask array or list of dask arrays (image pyramid)
+        axes: String describing current axis configuration (e.g., "CYX", "YXS", "TCYX")
+
+    Returns:
+        Tuple of (transposed_img, new_axes_string)
+        - transposed_img: Image with axes in standard order
+        - new_axes_string: Updated axes string ("YX", "CYX", or "YXS")
+    """
+    axes_obj = ImageAxes(axes)
+
+    # Determine target axis order and transpose if necessary
+    if axes_obj.C is not None:
+        # Multi-channel (C) or RGB (S) image - target: CYX or YXS
+        if axes_obj.is_rgb:
+            target_axes = "YXS"
+            target_order = [axes_obj.Y, axes_obj.X, axes_obj.C]
+        else:
+            target_axes = "CYX"
+            target_order = [axes_obj.C, axes_obj.Y, axes_obj.X]
+    else:
+        # Grayscale image - target: YX
+        target_axes = "YX"
+        target_order = [axes_obj.Y, axes_obj.X]
+
+    # Only transpose if current order differs from target
+    current_order = list(range(len(img.shape) if not isinstance(img, list) else len(img[0].shape)))
+    if target_order != current_order:
+        if isinstance(img, list):
+            # Handle image pyramid (list of dask arrays)
+            img = [arr.transpose(target_order) for arr in img]
+        else:
+            # Handle single dask array
+            img = img.transpose(target_order)
+
+        return img, target_axes
+    else:
+        # No transposition needed
+        return img, axes

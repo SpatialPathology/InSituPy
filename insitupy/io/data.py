@@ -295,6 +295,9 @@ def read_visium(
                 )
             )
 
+        if 'radius' in sdata[dataset_id].columns:
+            sdata[dataset_id]['radius'] = sdata[dataset_id]['radius'] * fullres_pixel_size
+
     # Convert to InSituData format
     data = convert_from_spatialdata(
         sdata=sdata,

@@ -54,6 +54,7 @@ if WITH_NAPARI:
             'data_name',
             'layer_name',
             'has_cells',
+            'has_features',
             'static_canvas',
             'key_dict',
             'masks',
@@ -75,6 +76,10 @@ if WITH_NAPARI:
                 self.data_name = None
                 self.layer_name = None
                 self.has_cells = False
+
+            # Check if features are available
+            self.has_features = not data.features is None
+            #self.has_features = not data.features.is_empty
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -152,11 +157,52 @@ if WITH_NAPARI:
                 else:
                     X = self.adata.layers[self.layer_name]
 
-                if issparse(X):
-                    return X.toarray()
+                # converting it to non-sparse array in this step might cause memory problems!
+                # if issparse(X):
+                #     return X.toarray()
                 return X
             else:
                 None
+
+        @property
+        def features(self):
+            """Return FeatureData object if available."""
+            if self.has_features:
+                return self.data.features
+            else:
+                return None
+
+        @property
+        def feature_vars(self):
+            """Return feature variable names."""
+            if self.has_features and self.features.data is not None:
+                return sorted(self.features.data.var_names.tolist())
+            else:
+                return []
+
+        @property
+        def feature_obs(self):
+            """Return feature observation names."""
+            if self.has_features and self.features.data is not None:
+                return sorted(self.features.data.obs.columns.tolist())
+            else:
+                return []
+
+        @property
+        def feature_obsm(self):
+            """Return feature obsm keys."""
+            if self.has_features and self.features.data is not None:
+                obsm_keys = list(self.features.data.obsm.keys())
+                obsm_cats = []
+                for k in sorted(obsm_keys):
+                    fdata = self.features.data.obsm[k]
+                    if isinstance(fdata, pd.DataFrame):
+                        obsm_cats.extend([f"{k}#{col}" for col in fdata.columns])
+                    elif isinstance(fdata, np.ndarray):
+                        obsm_cats.extend([f"{k}#{i+1}" for i in range(fdata.shape[1])])
+                return obsm_cats
+            else:
+                return []
 
         def refresh_variables(self):
             self.key_dict = self._build_key_dict()
@@ -168,11 +214,16 @@ if WITH_NAPARI:
         #     self.data_name = new_data_name
 
         def _build_key_dict(self):
-            return {
+            key_dict = {
                 "genes": self.genes,
                 "obs": self.observations,
                 "obsm": self.obsm
             }
+            if self.has_features:
+                key_dict["feature_vars"] = self.feature_vars
+                key_dict["feature_obs"] = self.feature_obs
+                key_dict["feature_obsm"] = self.feature_obsm
+            return key_dict
 
         def _extract_masks(self):
             if not self.data.cells.is_empty:

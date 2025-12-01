@@ -426,12 +426,23 @@ def _add_images_to_insitudata(
             if verbose:
                 print(f"Warning: Image key '{key}' not found in SpatialData", flush=True)
             continue
-
         img_data = sdata[key]
         try:
             data_array = img_data.scale0['image']
         except AttributeError:
             data_array = img_data
+
+        # get information about axis configuration
+        axes = "".join(data_array.dims).upper()
+
+        # check whether the data_array is an RGB image
+        try:
+            c_axis = data_array['c'].data
+        except KeyError:
+            print("No channel axis 'c' found.")
+        else:
+            if "".join(c_axis) == "rgb":
+                axes = axes.replace("C", "S")
 
         da_img = data_array.data
         # try:
@@ -440,7 +451,7 @@ def _add_images_to_insitudata(
         #     # assume no scales are provided
         #     da_img = img_data.data
 
-        axes = "".join(data_array.dims).upper()
+
 
         data.images.add_image(
             image=da_img,
