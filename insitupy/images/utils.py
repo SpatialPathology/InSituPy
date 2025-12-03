@@ -15,6 +15,31 @@ from insitupy._exceptions import InvalidDataTypeError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 
 
+def _get_chunksize(image_axes: ImageAxes, ndim: int):
+    """Build chunk size tuple based on actual axis positions.
+
+    Args:
+        image_axes: ImageAxes object describing the axis configuration
+        ndim: Number of dimensions in the image
+
+    Returns:
+        Tuple of chunk sizes for each dimension
+    """
+    chunks = [None] * ndim
+    chunks[image_axes.Y] = DEFAULT_CHUNK_SIZE_Y
+    chunks[image_axes.X] = DEFAULT_CHUNK_SIZE_X
+
+    # Set channel axis chunk size to 1 if present (C or S)
+    if image_axes.C is not None:
+        chunks[image_axes.C] = 1
+
+    # Set time axis chunk size to 1 if present
+    if image_axes.T is not None:
+        chunks[image_axes.T] = 1
+
+    return tuple(chunks)
+
+
 def _efficiently_resize_array(array, scale_factor):
     downscale_factor =  1/scale_factor
 
@@ -226,14 +251,41 @@ def deconvolve_he(
 
     return ihc_h, ihc_e, ihc_d
 
-def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
-                       axes: str, # e.g. 'YXS'. - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-                       nsubres: int = 6,
-                       scale_steps: int = 2,
-                       ):
-    """
-    Create image pyramid by downsampling with slicing.
-    Handles different axis configurations (YX, YXS, CYX, etc.)
+def create_img_pyramid(
+    img: Union[np.ndarray, da.core.Array],
+    axes: str, # e.g. 'YXS'. - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
+    nsubres: int = 6,
+    scale_steps: int = 2,
+    ):
+    """Create image pyramid by downsampling with slicing.
+
+    Generates a multi-resolution pyramid from an input image by iteratively
+    downsampling the Y and X dimensions. Handles different axis configurations
+    (YX, YXS, CYX, TCYX, etc.) by only downsampling spatial dimensions.
+
+    Args:
+        img: Input image as numpy array or dask array.
+        axes: String describing the axis configuration of the image.
+            Examples: 'YX' for grayscale, 'YXS' for RGB, 'CYX' for
+            multi-channel IF, 'TCYXS' for time-series RGB.
+        nsubres: Number of subresolution levels to create. Defaults to 6.
+        scale_steps: Downsampling factor between consecutive pyramid levels.
+            Defaults to 2 (each level is half the size of the previous).
+
+    Returns:
+        List of images representing the pyramid, where index 0 is the
+        original resolution and subsequent indices are progressively
+        lower resolutions.
+
+    Raises:
+        ValueError: If the length of `axes` string does not match the
+            number of dimensions in `img`.
+
+    Example:
+        >>> img = da.from_array(np.random.rand(1024, 1024, 3))
+        >>> pyramid = create_img_pyramid(img, axes='YXS', nsubres=4)
+        >>> [p.shape for p in pyramid]
+        [(1024, 1024, 3), (512, 512, 3), (256, 256, 3), (128, 128, 3), (64, 64, 3)]
     """
     if not len(axes) == len(img.shape):
         raise ValueError("Length of `axes` string must match number of dimensions of `img`.")
@@ -255,9 +307,8 @@ def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
         img = img[tuple(slices)]
 
         try:
-            # rechunk to prevent dask errors
-            #img = img.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-            img = img.rechunk()
+            # rechunk to prevent dask errors using default chunk sizes
+            img = img.rechunk(_get_chunksize(image_axes, img.ndim))
         except AttributeError:
             # in case of numpy arrays an AttributeError is thrown
             pass
@@ -267,39 +318,6 @@ def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
 
     return img_pyramid
 
-# def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
-#                        nsubres: int = 6,
-#                        scale_steps: int = 2,
-#                        axes: str = "YXS" # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-#                        ):
-#     # create subresolution pyramid from mask
-#     img_pyramid = [img]
-
-#     for n in range(nsubres):
-#         # create subresolution by scaling factor 2
-#         img = img[::scale_steps, ::scale_steps]
-#         # img = resize_image(img, scale_factor=1/scale_steps, axes=axes, interpolation=cv2.INTER_LINEAR)
-
-#         # # check dtype of image
-#         # if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
-#         #     warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
-
-#         #     if img.dtype == np.dtype('int8'):
-#         #         img = img.astype('uint8')
-#         #     else:
-#         #         img = img.astype('uint16')
-
-#         try:
-#             # rechunk to prevent dask errors
-#             img = img.rechunk()
-#         except AttributeError:
-#             # in case of numpy arrays a Attribute error is thrown
-#             pass
-
-#         # collect subresolution
-#         img_pyramid.append(img)
-
-#     return img_pyramid
 
 def crop_dask_array_or_pyramid(
     data: Union[da.core.Array, List[da.core.Array]],

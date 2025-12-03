@@ -1,6 +1,7 @@
 import logging
 import os
 import warnings
+from contextlib import ExitStack
 from copy import deepcopy
 from numbers import Number
 from os.path import relpath
@@ -26,7 +27,8 @@ from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._segmentations import _read_proseg
-from insitupy.images.axes import ImageAxes, _transpose_to_standard_axes
+from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
+                                  get_height_and_width)
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
@@ -36,6 +38,37 @@ from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy.utils.utils import convert_to_list, decode_robust_series
 
 logger = logging.getLogger(__name__)
+
+# Detect Zarr version for compatibility
+ZARR_V3 = hasattr(zarr.storage, 'LocalStore')
+
+
+def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
+    """
+    Get a Zarr store compatible with both Zarr v2 and v3.
+
+    Args:
+        path: Path to the zarr store
+        mode: Mode to open the store ('r', 'w', 'a')
+        zipped: Whether the store is a ZipStore
+
+    Returns:
+        For Zarr v3: store object (no context manager needed)
+        For Zarr v2: store object (should be used as context manager)
+    """
+    if ZARR_V3:
+        # Zarr v3 API
+        if zipped:
+            return zarr.storage.ZipStore(path, mode=mode)
+        else:
+            return zarr.storage.LocalStore(path)
+    else:
+        # Zarr v2 API
+        if zipped:
+            return zarr.ZipStore(path, mode=mode)
+        else:
+            return zarr.DirectoryStore(path)
+
 
 if WITH_NAPARI:
     from napari.utils.notifications import show_info, show_warning
@@ -602,62 +635,66 @@ class BoundariesData(DeepCopyMixin):
         if suffix not in ["zarr", "zarr.zip"]:
             raise InvalidFileTypeError(allowed_types=[".zarr", ".zarr.zip"], received_type=suffix)
 
-        # with zarr.ZipStore(bound_file, mode='w') if suffix == "zarr.zip" else zarr.DirectoryStore(bound_file) as dirstore:
+        zipped = suffix == "zarr.zip"
 
-        if suffix == "zarr.zip":
-            dirstore = zarr.storage.ZipStore(bound_file, mode="w")
-        else:
-            dirstore = zarr.storage.LocalStore(bound_file)
+        # Use ExitStack to handle context manager differences between Zarr v2 and v3
+        with ExitStack() as stack:
+            dirstore = _get_zarr_store(bound_file, mode="w", zipped=zipped)
 
-        # for conditional 'with' see also: https://stackoverflow.com/questions/27803059/conditional-with-statement-in-python
-        for n, meta in self._metadata.items():
-            bound_data = self[n]
+            # In Zarr v2, stores are context managers and need to be entered
+            if not ZARR_V3:
+                dirstore = stack.enter_context(dirstore)
 
-            # determine scale factor
-            scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
+            for n, meta in self._metadata.items():
+                bound_data = self[n]
 
-            if bound_data is not None:
-                if scale_factor is not None:
+                # determine scale factor
+                scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
+
+                if bound_data is not None:
+                    if scale_factor is not None:
+                        if isinstance(bound_data, list):
+                            bound_data = bound_data[0]
+                        bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
+                        bound_data = da.from_array(bound_data) # convert to dask array
+                        meta['pixel_size'] = max_resolution # update metadata
+
+                    # check data
                     if isinstance(bound_data, list):
-                        bound_data = bound_data[0]
-                    bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
-                    bound_data = da.from_array(bound_data) # convert to dask array
-                    meta['pixel_size'] = max_resolution # update metadata
-
-                # check data
-                if isinstance(bound_data, list):
-                    if not save_as_pyramid:
-                        bound_data = bound_data[0]
-                else:
-                    if save_as_pyramid:
-                        # create pyramid
-                        bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
+                        if not save_as_pyramid:
+                            bound_data = bound_data[0]
+                    else:
+                        if save_as_pyramid:
+                            # create pyramid
+                            bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
 
 
-                #if isinstance(bound_data, dask.array.core.Array):
-                if isinstance(bound_data, list):
-                    for i, b in enumerate(bound_data):
-                        comp = f"masks/{n}/{i}"
-                        b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                        b.to_zarr(dirstore, component=comp)
-                else:
-                    bound_data.to_zarr(dirstore, component=f"masks/{n}")
+                    #if isinstance(bound_data, dask.array.core.Array):
+                    if isinstance(bound_data, list):
+                        for i, b in enumerate(bound_data):
+                            comp = f"masks/{n}/{i}"
+                            b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
+                            b.to_zarr(dirstore, component=comp)
+                    else:
+                        # Apply chunking for non-pyramid data (YX axes)
+                        bound_data = bound_data.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
+                        bound_data.to_zarr(dirstore, component=f"masks/{n}")
 
-                # add boundaries metadata to zarr.zip
-                store = zarr.open(dirstore, mode="a")
-                store[f"masks/{n}"].attrs.put(meta)
+                    # add boundaries metadata to zarr.zip
+                    store = zarr.open(dirstore, mode="a")
+                    store[f"masks/{n}"].attrs.put(meta)
 
-            # save keys in insitupy metadata
-            #metadata["boundaries"]["keys"].append(n)
+                # save keys in insitupy metadata
+                #metadata["boundaries"]["keys"].append(n)
 
-        # save paths in insitupy metadata
-        #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
+            # save paths in insitupy metadata
+            #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
 
-        #self._cell_ids.to_zarr(dirstore, component="cell_id")
-        self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
+            #self._cell_ids.to_zarr(dirstore, component="cell_id")
+            self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
 
-        if self._seg_mask_value is not None:
-            self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
+            if self._seg_mask_value is not None:
+                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
 
         # # add version to metadata
         # metadata_to_save = self.metadata.copy()
@@ -1550,6 +1587,228 @@ class ImageData(DeepCopyMixin):
         if return_savepaths:
             return savepaths
 
+    def transform(
+        self,
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        reference_pixel_size: Optional[Number] = None,
+        output_size: Optional[Tuple[Number, Number]] = None,
+        inplace: bool = False,
+        verbose: bool = False
+    ):
+        """Apply an affine transformation to all images in the ImageData object.
+
+        Transforms all images using the provided affine transformation matrix.
+        The transformation is applied consistently across images of different
+        resolutions by converting to physical coordinates.
+
+        Args:
+            transformation_matrix: Either a 2x3 or 3x3 numpy array representing
+                the affine transformation matrix, or a path to a CSV/Excel file
+                containing the matrix. The matrix should be in the form:
+                [[a, b, xoff],
+                 [d, e, yoff]]
+                or
+                [[a, b, xoff],
+                 [d, e, yoff],
+                 [0, 0, 1]]
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image
+                used during registration. If provided, the transformation matrix
+                offsets (xoff, yoff) are assumed to be in pixel coordinates of the
+                reference image and will be converted to physical coordinates (µm).
+                If None, the matrix offsets are assumed to already be in physical
+                coordinates (µm). This is important when the transformation matrix
+                was computed in pixel space for a specific image resolution.
+            output_size: Tuple of (height, width) in physical coordinates (µm)
+                specifying the desired output canvas size, following NumPy's
+                (rows, cols) convention. If None, the output size will match the
+                input image size. Use this when transforming images to align with
+                a target image of different dimensions.
+            inplace: If True, modify the object in place. Otherwise, return a
+                transformed copy. Defaults to False.
+            verbose: If True, print status messages. Defaults to False.
+
+        Returns:
+            ImageData: Transformed ImageData object if inplace=False, else None.
+
+        Raises:
+            ValueError: If the transformation matrix has invalid dimensions or format.
+            FileNotFoundError: If the provided path does not exist.
+
+        Example:
+            >>> # Matrix in physical coordinates (µm)
+            >>> images.transform(transformation_matrix=matrix)
+
+            >>> # Matrix in pixel coordinates, computed for reference at 0.2125 µm/pixel
+            >>> images.transform(
+            ...     transformation_matrix=matrix,
+            ...     reference_pixel_size=0.2125
+            ... )
+
+            >>> # Transform to match a target image size (3000 µm height x 4000 µm width)
+            >>> images.transform(
+            ...     transformation_matrix=matrix,
+            ...     output_size=(3000, 4000)  # (height, width) in µm
+            ... )
+        """
+        import cv2
+
+        _self = self if inplace else self.copy()
+
+        # Load transformation matrix if it's a file path
+        if isinstance(transformation_matrix, (str, os.PathLike, Path)):
+            transformation_matrix = Path(transformation_matrix)
+            if not transformation_matrix.exists():
+                raise FileNotFoundError(f"Transformation matrix file not found: {transformation_matrix}")
+
+            # Read file based on extension
+            if transformation_matrix.suffix.lower() in ['.csv', '.txt']:
+                matrix = pd.read_csv(transformation_matrix, header=None).values
+            elif transformation_matrix.suffix.lower() in ['.xlsx', '.xls']:
+                matrix = pd.read_excel(transformation_matrix, header=None).values
+            else:
+                raise ValueError(f"Unsupported file format: {transformation_matrix.suffix}. Use .csv, .txt, .xlsx, or .xls")
+        else:
+            matrix = np.array(transformation_matrix)
+
+        # Validate matrix dimensions
+        if matrix.shape not in [(2, 3), (3, 3)]:
+            raise ValueError(
+                f"Transformation matrix must be 2x3 or 3x3, got shape {matrix.shape}. "
+                f"Expected format:\n"
+                f"[[a, b, xoff],\n"
+                f" [d, e, yoff]] or with [0, 0, 1] as third row."
+            )
+
+        # Extract transformation parameters
+        if matrix.shape == (3, 3):
+            # Validate that the third row is [0, 0, 1]
+            if not np.allclose(matrix[2, :], [0, 0, 1]):
+                raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
+            matrix = matrix[:2, :]
+
+        # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
+        if reference_pixel_size is not None:
+            matrix = matrix.copy().astype(np.float64)
+            matrix[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
+            matrix[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
+            if verbose:
+                print(f"Converted transformation matrix from pixel coordinates "
+                      f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
+
+        if verbose:
+            print(f"Applying transformation matrix (in physical coordinates):\n{matrix}")
+
+        # Apply transformation to each image
+        for name in list(_self._metadata.keys()):
+            img = _self._data[name]
+            pixel_size = _self._metadata[name]['pixel_size']
+            axes = _self._metadata[name]['axes']
+
+            # Handle image pyramids (list of arrays)
+            if isinstance(img, list):
+                img_to_transform = img[0]  # Use highest resolution
+                is_pyramid = True
+            else:
+                img_to_transform = img
+                is_pyramid = False
+
+            # Convert dask array to numpy for transformation
+            if isinstance(img_to_transform, da.Array):
+                img_to_transform = img_to_transform.compute()
+
+            # Scale transformation matrix based on pixel size
+            # The transformation matrix is now in physical coordinates (µm)
+            # We need to convert to pixel coordinates for this specific image
+            scaled_matrix = matrix.copy().astype(np.float64)
+
+            # If reference_pixel_size is provided, scale the linear part (rotation/scaling)
+            if reference_pixel_size is not None:
+                scaled_matrix[:2, :2] *= (reference_pixel_size / pixel_size)
+
+            scaled_matrix[0, 2] /= pixel_size  # Scale x offset: µm → pixels
+            scaled_matrix[1, 2] /= pixel_size  # Scale y offset: µm → pixels
+
+            # Get image dimensions
+            img_axes = ImageAxes(axes)
+            if output_size is not None:
+                # Convert physical output size (height, width) to pixels for this image
+                h = int(round(output_size[0] / pixel_size))
+                w = int(round(output_size[1] / pixel_size))
+            else:
+                # Use input image dimensions
+                h = img_to_transform.shape[img_axes.Y]
+                w = img_to_transform.shape[img_axes.X]
+
+            if verbose:
+                print(f"Transforming image '{name}' with shape {img_to_transform.shape} -> output size ({w}, {h})")
+
+            # Apply transformation based on image type (grayscale, RGB, or multichannel)
+            if len(img_to_transform.shape) == 2:
+                # Grayscale image (YX)
+                transformed = cv2.warpAffine(
+                    img_to_transform,
+                    scaled_matrix,
+                    (w, h),
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=0
+                )
+            elif len(img_to_transform.shape) == 3:
+                if axes == "YXS" or (img_axes.S is not None):
+                    # RGB image - transform directly
+                    transformed = cv2.warpAffine(
+                        img_to_transform,
+                        scaled_matrix,
+                        (w, h),
+                        flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT,
+                        borderValue=0
+                    )
+                else:
+                    # Multichannel image (CYX) - transform each channel
+                    n_channels = img_to_transform.shape[img_axes.C]
+                    transformed_channels = []
+                    for c in range(n_channels):
+                        channel = np.take(img_to_transform, c, axis=img_axes.C)
+                        transformed_channel = cv2.warpAffine(
+                            channel,
+                            scaled_matrix,
+                            (w, h),
+                            flags=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT,
+                            borderValue=0
+                        )
+                        transformed_channels.append(transformed_channel)
+                    # Stack channels back
+                    transformed = np.stack(transformed_channels, axis=img_axes.C)
+            else:
+                raise ValueError(f"Unsupported image shape: {img_to_transform.shape}")
+
+            # Convert back to dask array
+            transformed = da.from_array(transformed)
+
+            # Recreate pyramid if needed
+            if is_pyramid:
+                transformed = create_img_pyramid(transformed, axes=axes, nsubres=len(img))
+
+            # Update data
+            _self._data[name] = transformed
+
+            # Update shape in metadata
+            if isinstance(transformed, list):
+                _self._metadata[name]["shape"] = transformed[0].shape
+            else:
+                _self._metadata[name]["shape"] = transformed.shape
+
+            if verbose:
+                print(f"Transformed image '{name}'")
+
+        if verbose:
+            print(f"Transformed {len(_self._metadata)} images.")
+
+        if not inplace:
+            return _self
+
 
 class FeatureData(DeepCopyMixin):
     """
@@ -1792,24 +2051,42 @@ class FeatureData(DeepCopyMixin):
     def transform(
         self,
         transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        reference_pixel_size: Optional[Number] = None,
+        source_pixel_size: Optional[Number] = None,
         inplace: bool = False,
         verbose: bool = False
     ):
-        """
-        Apply an affine transformation to all geometries in the FeatureData object.
+        """Apply an affine transformation to all geometries in the FeatureData object.
+
+        Transforms all feature geometries using the provided affine transformation
+        matrix. Since FeatureData stores coordinates in physical units (µm), the
+        transformation matrix should also be in physical coordinates.
 
         Args:
-            transformation_matrix: Either a 2x3 or 3x3 numpy array representing the affine
-                transformation matrix, or a path to a CSV/Excel file containing the matrix.
-                The matrix should be in the form:
+            transformation_matrix: Either a 2x3 or 3x3 numpy array representing
+                the affine transformation matrix, or a path to a CSV/Excel file
+                containing the matrix. The matrix should be in the form:
                 [[a, b, xoff],
                  [d, e, yoff]]
                 or
                 [[a, b, xoff],
                  [d, e, yoff],
                  [0, 0, 1]]
-            inplace: If True, modify the object in place. Otherwise, return a transformed copy.
-            verbose: If True, print status messages.
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image
+                used during registration. If provided, the transformation matrix
+                offsets (xoff, yoff) are assumed to be in pixel coordinates of the
+                reference image and will be converted to physical coordinates (µm).
+                If None, the matrix offsets are assumed to already be in physical
+                coordinates (µm). This is important when the transformation matrix
+                was computed in pixel space for a specific image resolution.
+            source_pixel_size: Pixel size (in µm/pixel) of the source image from
+                which the features were derived. Only used if reference_pixel_size
+                is also provided. If None, it is assumed to be equal to
+                reference_pixel_size (i.e., no scaling of the linear transformation
+                component is performed).
+            inplace: If True, modify the object in place. Otherwise, return a
+                transformed copy. Defaults to False.
+            verbose: If True, print status messages. Defaults to False.
 
         Returns:
             FeatureData: Transformed FeatureData object if inplace=False, else None.
@@ -1817,6 +2094,16 @@ class FeatureData(DeepCopyMixin):
         Raises:
             ValueError: If the transformation matrix has invalid dimensions or format.
             FileNotFoundError: If the provided path does not exist.
+
+        Example:
+            >>> # Matrix in physical coordinates (µm)
+            >>> features.transform(transformation_matrix=matrix)
+
+            >>> # Matrix in pixel coordinates, computed for reference at 0.2125 µm/pixel
+            >>> features.transform(
+            ...     transformation_matrix=matrix,
+            ...     reference_pixel_size=0.2125
+            ... )
         """
         _self = self if inplace else self.copy()
 
@@ -1852,13 +2139,27 @@ class FeatureData(DeepCopyMixin):
                 raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
             matrix = matrix[:2, :]
 
+        # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
+        if reference_pixel_size is not None:
+            matrix = matrix.copy().astype(np.float64)
+
+            if source_pixel_size is not None:
+                matrix[:2, :2] *= (reference_pixel_size / source_pixel_size)
+
+            matrix[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
+            matrix[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
+            if verbose:
+                print(f"Converted transformation matrix from pixel coordinates "
+                      f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
+
         # Apply transformation to geometries using shapely's affine_transform
         # Matrix format for shapely: [a, b, d, e, xoff, yoff]
         a, b, xoff = matrix[0, :]
         d, e, yoff = matrix[1, :]
 
         if verbose:
-            print(f"Applying transformation: a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
+            print(f"Applying transformation (in physical coordinates): "
+                  f"a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
 
         _self._shapes["geometry"] = _self._shapes["geometry"].apply(
             lambda geom: affinity.affine_transform(geom, [a, b, d, e, xoff, yoff])

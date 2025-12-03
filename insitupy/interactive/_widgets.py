@@ -201,7 +201,7 @@ if WITH_NAPARI:
                         if not add_new_layer:
                             #print(f"Key '{gene}' already in layer list.", flush=True)
                             # update the existing points layer
-                            layer = viewer.layers[layer_names_for_current_data[0]]
+                            layer = viewer.layers[layer_names_for_current_data[-1]]
                             _update_points_layer(
                                 layer=layer,
                                 new_color_values=color_value,
@@ -212,6 +212,11 @@ if WITH_NAPARI:
                             was_moved = viewer.layers.move(viewer.layers.index(new_layer_name), len(viewer.layers))
 
                         else:
+                            # Check if layer with this name already exists
+                            if new_layer_name in viewer.layers:
+                                show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                                return None
+
                             # create new points layer for genes
                             gene_layer = _create_points_layer(
                                 points=viewer_config.points,
@@ -439,7 +444,7 @@ if WITH_NAPARI:
                 else:
                     if not add_new_layer:
                         # Update the existing features layer
-                        layer = viewer.layers[feature_layer_names[0]]
+                        layer = viewer.layers[feature_layer_names[-1]]
                         _update_features_layer(
                             layer=layer,
                             new_color_values=color_values,
@@ -448,6 +453,11 @@ if WITH_NAPARI:
                         # Move layer to the top
                         viewer.layers.move(viewer.layers.index(layer_name), len(viewer.layers))
                     else:
+                        # Check if layer with this name already exists
+                        if layer_name in viewer.layers:
+                            show_warning(f"Layer '{layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                            return None
+
                         # Create new features layer
                         feature_layer = _create_features_layer(
                             gdf=viewer_config.features.shapes,
