@@ -1590,6 +1590,7 @@ class ImageData(DeepCopyMixin):
     def transform(
         self,
         transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        source_pixel_size: Optional[Number] = None,
         reference_pixel_size: Optional[Number] = None,
         output_size: Optional[Tuple[Number, Number]] = None,
         inplace: bool = False,
@@ -1611,6 +1612,11 @@ class ImageData(DeepCopyMixin):
                 [[a, b, xoff],
                  [d, e, yoff],
                  [0, 0, 1]]
+            source_pixel_size: Pixel size (in µm/pixel) of the source image from
+                which the transformation matrix was derived. Only used if
+                reference_pixel_size is also provided. If None, it is assumed to
+                be equal to reference_pixel_size (i.e., no scaling of the linear
+                transformation component is performed).
             reference_pixel_size: Pixel size (in µm/pixel) of the reference image
                 used during registration. If provided, the transformation matrix
                 offsets (xoff, yoff) are assumed to be in pixel coordinates of the
@@ -1689,6 +1695,10 @@ class ImageData(DeepCopyMixin):
         # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
         if reference_pixel_size is not None:
             matrix = matrix.copy().astype(np.float64)
+
+            if source_pixel_size is not None:
+                matrix[:2, :2] *= (reference_pixel_size / source_pixel_size)
+
             matrix[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
             matrix[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
             if verbose:
@@ -1720,11 +1730,6 @@ class ImageData(DeepCopyMixin):
             # The transformation matrix is now in physical coordinates (µm)
             # We need to convert to pixel coordinates for this specific image
             scaled_matrix = matrix.copy().astype(np.float64)
-
-            # If reference_pixel_size is provided, scale the linear part (rotation/scaling)
-            if reference_pixel_size is not None:
-                scaled_matrix[:2, :2] *= (reference_pixel_size / pixel_size)
-
             scaled_matrix[0, 2] /= pixel_size  # Scale x offset: µm → pixels
             scaled_matrix[1, 2] /= pixel_size  # Scale y offset: µm → pixels
 
@@ -2051,8 +2056,8 @@ class FeatureData(DeepCopyMixin):
     def transform(
         self,
         transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
-        reference_pixel_size: Optional[Number] = None,
         source_pixel_size: Optional[Number] = None,
+        reference_pixel_size: Optional[Number] = None,
         inplace: bool = False,
         verbose: bool = False
     ):
@@ -2072,6 +2077,11 @@ class FeatureData(DeepCopyMixin):
                 [[a, b, xoff],
                  [d, e, yoff],
                  [0, 0, 1]]
+            source_pixel_size: Pixel size (in µm/pixel) of the source image from
+                which the features were derived. Only used if reference_pixel_size
+                is also provided. If None, it is assumed to be equal to
+                reference_pixel_size (i.e., no scaling of the linear transformation
+                component is performed).
             reference_pixel_size: Pixel size (in µm/pixel) of the reference image
                 used during registration. If provided, the transformation matrix
                 offsets (xoff, yoff) are assumed to be in pixel coordinates of the
@@ -2079,11 +2089,6 @@ class FeatureData(DeepCopyMixin):
                 If None, the matrix offsets are assumed to already be in physical
                 coordinates (µm). This is important when the transformation matrix
                 was computed in pixel space for a specific image resolution.
-            source_pixel_size: Pixel size (in µm/pixel) of the source image from
-                which the features were derived. Only used if reference_pixel_size
-                is also provided. If None, it is assumed to be equal to
-                reference_pixel_size (i.e., no scaling of the linear transformation
-                component is performed).
             inplace: If True, modify the object in place. Otherwise, return a
                 transformed copy. Defaults to False.
             verbose: If True, print status messages. Defaults to False.
