@@ -718,6 +718,68 @@ class InSituData:
         if not inplace:
             return _self
 
+    def transform(
+        self,
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        source_pixel_size: Optional[Number] = None,
+        reference_pixel_size: Optional[Number] = None,
+        output_size: Optional[Tuple[Number, Number]] = None,
+        inplace: bool = False,
+        verbose: bool = False
+    ):
+        """
+        Apply an affine transformation to the InSituData object (Images and Features).
+
+        Args:
+            transformation_matrix: Either a 2x3 or 3x3 numpy array representing
+                the affine transformation matrix, or a path to a CSV/Excel file
+                containing the matrix.
+            source_pixel_size: Pixel size (in µm/pixel) of the source image from
+                which the transformation matrix was derived.
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image
+                used during registration.
+            output_size: Tuple of (height, width) in physical coordinates (µm)
+                specifying the desired output canvas size.
+            inplace: If True, modify the object in place. Otherwise, return a
+                transformed copy. Defaults to False.
+            verbose: If True, print status messages. Defaults to False.
+
+        Returns:
+            InSituData: Transformed InSituData object if inplace=False, else None.
+        """
+        if inplace:
+            _self = self
+        else:
+            _self = self.copy()
+
+        # Transform images
+        if not _self.images.is_empty:
+            if verbose:
+                print("Transforming images...")
+            _self.images.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                output_size=output_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+        # Transform features
+        if _self.features is not None:
+            if verbose:
+                print("Transforming features...")
+            _self.features.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+        if not inplace:
+            return _self
+
     def plot_dimred(self, save: Optional[str] = None):
         '''
         Read dimensionality reduction plots.
