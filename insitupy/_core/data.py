@@ -780,6 +780,88 @@ class InSituData:
         if not inplace:
             return _self
 
+    def align_features(
+        self,
+        other: "InSituData",
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        source_image_name: Optional[str] = None,
+        reference_image_name: Optional[str] = None,
+        source_pixel_size: Optional[Number] = None,
+        reference_pixel_size: Optional[Number] = None,
+        verbose: bool = False
+    ):
+        """
+        Align features from another InSituData object to this one.
+
+        This function takes features from another InSituData object, applies a
+        transformation, and adds them to the current object. It is designed for
+        integrating features (e.g., from Visium) onto a high-resolution dataset
+        (e.g., Xenium) after registration.
+
+        Args:
+            other (InSituData): The InSituData object containing the features to align.
+            transformation_matrix: Transformation matrix to align the features.
+            source_image_name: Name of the source image in `other.images` to infer `source_pixel_size`.
+            reference_image_name: Name of the reference image in `self.images` to infer `reference_pixel_size`.
+            source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of features).
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image (target).
+            verbose: If True, print status messages.
+
+        Raises:
+            ValueError: If the configuration of self or other is invalid.
+        """
+        # Check configuration of self
+        if self.cells.is_empty:
+            warn("The target InSituData object (self) has no cells. "
+                 "Alignment is typically done onto a dataset with cells.")
+
+        if self.features is not None:
+            raise ValueError("The target InSituData object (self) already has features. "
+                             "Please remove them before aligning new features.")
+
+        # Check configuration of other
+        if other.features is None:
+            raise ValueError("The source InSituData object (other) has no features to align.")
+
+        if not other.cells.is_empty:
+            warn("The source InSituData object (other) has cells. "
+                 "Typically, the source object should only contain features to be aligned.")
+
+        # Determine reference pixel size
+        if reference_pixel_size is None and reference_image_name is not None:
+            try:
+                reference_pixel_size = self.images.metadata[reference_image_name]["pixel_size"]
+            except KeyError:
+                raise ValueError(f"Reference image '{reference_image_name}' not found in self.images.")
+
+        # Determine source pixel size
+        if source_pixel_size is None and source_image_name is not None:
+            try:
+                source_pixel_size = other.images.metadata[source_image_name]["pixel_size"]
+            except KeyError:
+                raise ValueError(f"Source image '{source_image_name}' not found in other.images.")
+
+        # Copy features from other
+        features_to_add = other.features.copy()
+
+        # Transform features
+        if verbose:
+            print("Transforming and aligning features...")
+
+        features_to_add.transform(
+            transformation_matrix=transformation_matrix,
+            reference_pixel_size=reference_pixel_size,
+            source_pixel_size=source_pixel_size,
+            inplace=True,
+            verbose=verbose
+        )
+
+        # Add to self
+        self._features = features_to_add
+
+        if verbose:
+            print("Features aligned and added to InSituData object.")
+
     def plot_dimred(self, save: Optional[str] = None):
         '''
         Read dimensionality reduction plots.
