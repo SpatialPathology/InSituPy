@@ -1,5 +1,7 @@
+import logging
 import math
 from typing import Literal, Optional, Union
+from warnings import warn
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -14,6 +16,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
 from insitupy.palettes import CustomPalettes
 from insitupy.utils._checks import check_raw
 
+logger = logging.getLogger(__name__)
 
 def _extract_color_values(adata, key, raw, layer):
     ## Extract expression data
@@ -243,6 +246,10 @@ def continuous_data_to_rgba(
         lower_climit = np.min(notna_values)
 
     climits = _determine_climits(color_values=notna_values, upper_climit_pct=upper_climit_pct, lower_climit=lower_climit)
+
+    if climits[1] == 0:
+        logger.warning("Upper contrast limit is 0. Recalculating with upper_climit_pct=100.")
+        climits = _determine_climits(color_values=notna_values, upper_climit_pct=100, lower_climit=lower_climit)
 
     norm = mpl.colors.Normalize(vmin=climits[0], vmax=climits[1], clip=clip)
     scalarMap = cm.ScalarMappable(norm=norm, cmap=cmap)
