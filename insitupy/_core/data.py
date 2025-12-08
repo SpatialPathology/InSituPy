@@ -243,13 +243,6 @@ class InSituData:
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['features']+tf.Bold} features{tf.ResetAll}\n{tf.SPACER}   " + features_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._transcripts is not None:
-                trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
-
-                repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
-                )
-
             if not self._annotations.is_empty:
                 annot_repr = self._annotations.__repr__()
                 repr = (
@@ -260,6 +253,13 @@ class InSituData:
                 region_repr = self._regions.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['regions']+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
+                )
+
+            if self._transcripts is not None:
+                trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
+
+                repr = (
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
                 )
         return repr
 
@@ -359,7 +359,7 @@ class InSituData:
 
     @features.deleter
     def features(self):
-        self._features = FeatureData()
+        self._features = None
         print("Cleared all data from 'features'.")
 
     def add_features(self, data: FeatureData):
@@ -788,6 +788,7 @@ class InSituData:
         reference_image_name: Optional[str] = None,
         source_pixel_size: Optional[Number] = None,
         reference_pixel_size: Optional[Number] = None,
+        transfer_images: bool = False,
         verbose: bool = False
     ):
         """
@@ -798,6 +799,9 @@ class InSituData:
         integrating features (e.g., from Visium) onto a high-resolution dataset
         (e.g., Xenium) after registration.
 
+        If `transfer_images` is True and the source object (other) contains images,
+        they are also transformed and added to the current object.
+
         Args:
             other (InSituData): The InSituData object containing the features to align.
             transformation_matrix: Transformation matrix to align the features.
@@ -805,6 +809,7 @@ class InSituData:
             reference_image_name: Name of the reference image in `self.images` to infer `reference_pixel_size`.
             source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of features).
             reference_pixel_size: Pixel size (in µm/pixel) of the reference image (target).
+            transfer_images: If True, transfer images from `other` to `self`. Defaults to False.
             verbose: If True, print status messages.
 
         Raises:
@@ -861,6 +866,38 @@ class InSituData:
 
         if verbose:
             print("Features aligned and added to InSituData object.")
+
+        # Align images
+        if transfer_images and not other.images.is_empty:
+            if verbose:
+                print("Transforming and aligning images...")
+
+            images_to_add = other.images.copy()
+            images_to_add.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+            for name in images_to_add.names:
+                img = images_to_add[name]
+                if isinstance(img, list):
+                    img = img[0]
+                self.images.add_image(
+                    image=img,
+                    name=name,
+                    axes=images_to_add.metadata[name]["axes"],
+                    pixel_size=images_to_add.metadata[name]["pixel_size"],
+                    ome_meta=images_to_add.metadata[name].get("OME", {}),
+                    is_rgb=images_to_add.metadata[name].get("rgb", None),
+                    overwrite=True,
+                    verbose=verbose
+                )
+
+            if verbose:
+                print("Images aligned and added to InSituData object.")
 
     def plot_dimred(self, save: Optional[str] = None):
         '''

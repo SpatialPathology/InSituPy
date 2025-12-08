@@ -288,7 +288,7 @@ if WITH_NAPARI:
                 select_data.max_width = widgets_max_width
 
             if show_cells_widget is not None:
-                viewer.window.add_dock_widget(show_cells_widget, name="Show data", area="right", tabify=False)
+                viewer.window.add_dock_widget(show_cells_widget, name="Show cells", area="right", tabify=False)
                 show_cells_widget.max_height = 170
                 show_cells_widget.max_width = widgets_max_width
 

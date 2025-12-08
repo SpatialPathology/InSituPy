@@ -565,12 +565,14 @@ def xenium_test_dataset_v4_protein(
 # visium analysis version 2.0.0
 # data from https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
 def visium_human_breast_cancer(
-        overwrite: bool = False
+        overwrite: bool = False,
+        download_fullres: bool = False
 ) -> InSituData:
 
     # URLs for download
     h5_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_filtered_feature_bc_matrix.h5"
     spatial_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_spatial.tar.gz"
+    fullres_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif"
 
     # set up paths
     named_data_dir = DEMODIR / "visium_hbreastcancer"
@@ -578,10 +580,12 @@ def visium_human_breast_cancer(
     h5_file = data_dir / "filtered_feature_bc_matrix.h5"
     spatial_tar = named_data_dir / "CytAssist_FFPE_Human_Breast_Cancer_spatial.tar.gz"
     spatial_dir = data_dir / "spatial"
+    fullres_file = data_dir / "CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif"
 
     # expected md5sums
     expected_h5_md5sum = "1e3557642aa5a7a5efe9fd07b841109f"
     expected_spatial_md5sum = "26febcbd3d43122e5371a6df2f35e073"
+    expected_fullres_md5sum = "9deffd74f614116128c12f3de5be00bc"
 
     # create data directory if it doesn't exist
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -645,10 +649,32 @@ def visium_human_breast_cancer(
         # remove tar file
         os.remove(spatial_tar)
 
+    # check and download full-resolution image
+    if download_fullres:
+        download_fullres_img = False
+        if fullres_file.exists():
+            print("Full-resolution image exists. Checking md5sum...")
+            if md5sum(fullres_file) == expected_fullres_md5sum:
+                if not overwrite:
+                    print(f"The full-resolution image md5sum matches. Download is skipped. To force download set `overwrite=True`.")
+                else:
+                    print(f"The full-resolution image exists but is overwritten because of `overwrite=True`.")
+                    download_fullres_img = True
+            else:
+                print(f"The full-resolution image md5sum doesn't match. File is downloaded.")
+                download_fullres_img = True
+        else:
+            download_fullres_img = True
+
+        if download_fullres_img:
+            download_url(fullres_url, out_dir=data_dir, file_name="CytAssist_FFPE_Human_Breast_Cancer_tissue_image", overwrite=True)
+
     print(f"Visium data structure is ready at {data_dir}")
     print("Dataset contains:")
     print(f"- filtered_feature_bc_matrix.h5")
     print(f"- spatial/ directory")
+    if download_fullres:
+        print(f"- CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif")
 
     # load data into InSituData object
     # Note: You'll need to implement read_visium if not already available

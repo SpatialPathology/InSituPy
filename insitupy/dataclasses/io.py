@@ -1,4 +1,5 @@
 import os
+from contextlib import ExitStack
 from math import ceil
 from numbers import Number
 from os.path import relpath
@@ -17,10 +18,11 @@ from zarr.errors import ArrayNotFoundError
 from insitupy import __version__
 from insitupy._io.files import read_json
 from insitupy.dataclasses._segmentations import _read_baysor_polygons
-from insitupy.dataclasses.dataclasses import (AnnotationsData, BoundariesData,
-                                              CellData, ImageData,
-                                              MultiCellData, RegionsData,
-                                              ShapesData)
+from insitupy.dataclasses.dataclasses import (ZARR_V3, AnnotationsData,
+                                              BoundariesData, CellData,
+                                              ImageData, MultiCellData,
+                                              RegionsData, ShapesData,
+                                              _get_zarr_store)
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 
@@ -138,49 +140,50 @@ def read_celldata(
     bound_data = {}
     meta = {}
     zipped = True if suffix == "zarr.zip" else False
-    # with zarr.ZipStore(bound_path, mode='r') if zipped else zarr.DirectoryStore(bound_path) as dirstore:
+    # Use ExitStack to handle context manager differences between Zarr v2 and v3
+    with ExitStack() as stack:
+        dirstore = _get_zarr_store(bound_path, mode="r", zipped=zipped)
 
-    if zipped:
-        dirstore = zarr.storage.ZipStore(bound_path, mode="r")
-    else:
-        dirstore = zarr.storage.LocalStore(bound_path)
+        # In Zarr v2, stores are context managers and need to be entered
+        if not ZARR_V3:
+            dirstore = stack.enter_context(dirstore)
 
-    # open zarr group
-    root = zarr.open_group(store=dirstore, mode='r')
+        # open zarr group
+        root = zarr.open_group(store=dirstore, mode='r')
 
-    # for k in dirstore.listdir("masks"):
-    #     if not k.startswith("."):
-    for k in ["cells", "nuclei"]:
-        #if (bound_path / "masks" / k).exists():
-        comp = f"masks/{k}"
-        if comp in root:
-            # iterate through subresolutions
-            # subresolutions = dirstore.listdir(f"masks/{k}")
-            subresolutions = sorted(root[comp].keys())
+        # for k in dirstore.listdir("masks"):
+        #     if not k.startswith("."):
+        for k in ["cells", "nuclei"]:
+            #if (bound_path / "masks" / k).exists():
+            comp = f"masks/{k}"
+            if comp in root:
+                # iterate through subresolutions
+                # subresolutions = dirstore.listdir(f"masks/{k}")
+                subresolutions = sorted(root[comp].keys())
 
-            if ".zarray" in subresolutions:
-                if zipped:
-                    bound_data[k] = da.from_zarr(dirstore).persist() # persist is only needed in case of zipped zarrs
+                if ".zarray" in subresolutions:
+                    if zipped:
+                        bound_data[k] = da.from_zarr(dirstore).persist() # persist is only needed in case of zipped zarrs
+                    else:
+                        bound_data[k] = da.from_zarr(dirstore)
                 else:
-                    bound_data[k] = da.from_zarr(dirstore)
-            else:
-                # it is stored as pyramid -> initialize a list for the pyramid
-                bound_data[k] = []
-                for subres in subresolutions:
-                    if not subres.startswith("."):
-                        # append the pyramid to the list
-                        if zipped:
-                            bound_data[k].append(
-                                da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
-                                )
-                        else:
-                            bound_data[k].append(
-                                da.from_zarr(dirstore, component=f"{comp}/{subres}")
-                                )
+                    # it is stored as pyramid -> initialize a list for the pyramid
+                    bound_data[k] = []
+                    for subres in subresolutions:
+                        if not subres.startswith("."):
+                            # append the pyramid to the list
+                            if zipped:
+                                bound_data[k].append(
+                                    da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
+                                    )
+                            else:
+                                bound_data[k].append(
+                                    da.from_zarr(dirstore, component=f"{comp}/{subres}")
+                                    )
 
-            # retrieve boundaries metadata
-            store = zarr.open(dirstore)
-            meta[k] = store[f"masks/{k}"].attrs.asdict()
+                # retrieve boundaries metadata
+                store = zarr.open(dirstore)
+                meta[k] = store[f"masks/{k}"].attrs.asdict()
 
     cell_boundaries = bound_data["cells"]
     if "nuclei" in bound_data:

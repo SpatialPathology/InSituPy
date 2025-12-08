@@ -114,9 +114,19 @@ def read_image(
     if "zarr" in suffix:
         img, ome_meta, axes, pixel_size = read_zarr(path)
 
-    elif suffix in ["ome.tif", "ome.tiff"]:
-        # load image from .ome.tiff
-        img = read_ome_tiff(path=path, levels=None)
+    else:
+        # non-ZARR files
+        if suffix in ["ome.tif", "ome.tiff"]:
+            # load image from .ome.tiff
+            img = read_ome_tiff(path=path, levels=None)
+        elif suffix in ["tif", "tiff"]:
+            img = imread(path)
+        else:
+            raise InvalidFileTypeError(
+                allowed_types=["zarr", "zarr.zip", "ome.tif", "ome.tiff"],
+                received_type=suffix
+                )
+
         # read ome metadata
         with TiffFile(path) as tif:
             axes = tif.pages[0].axes # get axes (important to get it from pages instead of series!)
@@ -126,7 +136,11 @@ def read_image(
             try:
                 pixel_size = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
             except KeyError:
-                pixel_size = float(ome_meta['PhysicalSizeX'])
+                try:
+                    pixel_size = float(ome_meta['PhysicalSizeX'])
+                except KeyError:
+                    # in case of .tif image
+                    pixel_size = float(ome_meta['OME:Image']['OME:Pixels']['PhysicalSizeX'])
 
         if axes == "CYX":
             if isinstance(img, list):
@@ -136,12 +150,6 @@ def read_image(
             if not len(shape) == 3:
                 warn(f"Axes information ({axes}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.")
                 axes = "YX"
-
-    else:
-        raise InvalidFileTypeError(
-            allowed_types=["zarr", "zarr.zip", "ome.tif", "ome.tiff"],
-            received_type=suffix
-            )
 
     return img, ome_meta, axes, pixel_size
 
