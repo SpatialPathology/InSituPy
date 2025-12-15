@@ -10,7 +10,7 @@ def download_url(
     url: str,
     out_dir: Union[str, os.PathLike, Path] = ".",
     file_name: Optional[str] = None,
-    chunk_size: int = 1024,
+    chunk_size: int = 65536,
     overwrite: bool = False
     ) -> None:
     """
@@ -24,7 +24,8 @@ def download_url(
             Default is the current directory (".").
         file_name (str, optional): The name of the downloaded file. If not provided, the function will use the name
             from the URL. Default is None.
-        chunk_size (int, optional): The size of the chunks in bytes to download the file. Default is 1024 bytes.
+        chunk_size (int, optional): The size of the chunks in bytes to download the file. Default is 65536 bytes (64 KB).
+            Larger values can improve download speed for large files.
         overwrite (bool, optional): If True, the function will download the file even if it already exists in the
             output directory, overwriting the existing file. If False and the file exists, the function will skip
             the download. Default is False.
@@ -64,17 +65,38 @@ def download_url(
 
 
     # request content from URL
-    resp = requests.get(url, stream=True)
+    # Use a session for better connection handling and add headers similar to browsers
+    session = requests.Session()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+    }
+
+    # Configure session for better performance
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=10,
+        pool_maxsize=10,
+        max_retries=3,
+        pool_block=False
+    )
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+
+    resp = session.get(url, stream=True, headers=headers, timeout=(10, 30))
+    resp.raise_for_status()  # Raise an error for bad status codes
     total = int(resp.headers.get('content-length', 0))
 
-    # write to file
-    with open(str(outfile), 'wb') as file, tqdm(
-        desc=str(outfile),
+    # write to file with buffered writing
+    with open(str(outfile), 'wb', buffering=1024*1024) as file, tqdm(
+        desc=str(outfile.name),
         total=total,
         unit='iB',
         unit_scale=True,
         unit_divisor=1024,
     ) as bar:
         for data in resp.iter_content(chunk_size=chunk_size):
-            size = file.write(data)
-            bar.update(size)
+            if data:  # filter out keep-alive new chunks
+                size = file.write(data)
+                bar.update(size)

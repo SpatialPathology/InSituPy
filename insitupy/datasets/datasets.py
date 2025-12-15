@@ -11,6 +11,29 @@ from insitupy.io.data import read_visium, read_xenium
 # parameters for download functions
 DEMODIR = CACHE / 'demo_datasets'
 
+# helper function to resolve output directory
+def _resolve_output_dir(output_dir):
+    """
+    Resolve the output directory for datasets.
+
+    Parameters
+    ----------
+    output_dir : str, Path, or None
+        Custom output directory. If None, uses default DEMODIR.
+
+    Returns
+    -------
+    Path
+        Resolved output directory path.
+    """
+    if output_dir is None:
+        return DEMODIR
+    else:
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            raise ValueError(f"The specified output directory does not exist: {output_dir}")
+        return output_path
+
 # functions that each download a dataset into  '~/.cache/InSituPy/demo_dataset'
 def md5sum(filePath):
     with open(filePath, 'rb') as fh:
@@ -43,23 +66,33 @@ def md5sum_image_check(file_path : Path, expected_md5sum, overwrite):
     return download
 
 
-def list_downloaded_datasets():
+def list_downloaded_datasets(output_dir=None):
+    """
+    List all downloaded demo datasets in a directory.
+
+    Parameters
+    ----------
+    output_dir : str, Path, or None
+        Directory to check for datasets. If None, uses default DEMODIR.
+    """
+    check_dir = _resolve_output_dir(output_dir) if output_dir is not None else DEMODIR
+
     try:
         # List all items in the given directory
-        items = os.listdir(DEMODIR)
+        items = os.listdir(check_dir)
         # Filter out only the folders
-        folders = [item for item in items if os.path.isdir(os.path.join(DEMODIR, item))]
+        folders = [item for item in items if os.path.isdir(os.path.join(check_dir, item))]
 
         if folders:
-            print("Following demo datasets were found:\n")
+            print(f"Following demo datasets were found in {check_dir}:\n")
             for folder in folders:
                 print(f"- {folder}")
         else:
-            print("No folders found in the specified directory.")
+            print(f"No folders found in the directory: {check_dir}")
     except FileNotFoundError:
-        print(f"The directory '{DEMODIR}' does not exist.")
+        print(f"The directory '{check_dir}' does not exist.")
     except PermissionError:
-        print(f"Permission denied to access the directory '{DEMODIR}'.")
+        print(f"Permission denied to access the directory '{check_dir}'.")
 
 
 # function that checks data for md5sum, downloads and unpacks the data.
@@ -111,7 +144,8 @@ def data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data
 # Xenium onboard analysis version 1.0.1
 # data from https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
 def xenium_human_breast_cancer(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -120,7 +154,8 @@ def xenium_human_breast_cancer(
     if_url = "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_if_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hbreastcancer"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hbreastcancer"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hbreastcancer"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -157,7 +192,8 @@ def xenium_human_breast_cancer(
 # xenium onboard analysis version 1.5.0
 # data from https://www.10xgenomics.com/resources/datasets/human-kidney-preview-data-xenium-human-multi-tissue-and-cancer-panel-1-standard
 def xenium_human_kidney_nondiseased(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -165,7 +201,8 @@ def xenium_human_kidney_nondiseased(
     he_url = "https://cf.10xgenomics.com/samples/xenium/1.5.0/Xenium_V1_hKidney_nondiseased_section/Xenium_V1_hKidney_nondiseased_section_he_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hkidney"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hkidney"
     data_dir = named_data_dir / "output-XETG0000__slide_id__hkidney"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -197,8 +234,8 @@ def xenium_human_kidney_nondiseased(
 # xenium onboard analysis version 1.6.0
 # data from https://www.10xgenomics.com/datasets/pancreatic-cancer-with-xenium-human-multi-tissue-and-cancer-panel-1-standard
 def xenium_human_pancreatic_cancer(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -207,7 +244,8 @@ def xenium_human_pancreatic_cancer(
     if_url = "https://cf.10xgenomics.com/samples/xenium/1.6.0/Xenium_V1_hPancreas_Cancer_Add_on_FFPE/Xenium_V1_hPancreas_Cancer_Add_on_FFPE_if_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hpancreas"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hpancreas"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hpancreas"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -245,8 +283,8 @@ def xenium_human_pancreatic_cancer(
 # xenium onboard analysis version 1.7.0
 # data from https://www.10xgenomics.com/resources/datasets/human-skin-preview-data-xenium-human-skin-gene-expression-panel-add-on-1-standard
 def xenium_human_skin_melanoma(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -254,7 +292,8 @@ def xenium_human_skin_melanoma(
     he_url = "https://cf.10xgenomics.com/samples/xenium/1.7.0/Xeniumranger_V1_hSkin_Melanoma_Add_on_FFPE/Xeniumranger_V1_hSkin_Melanoma_Add_on_FFPE_he_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hskin"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hskin"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hskin"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -286,8 +325,8 @@ def xenium_human_skin_melanoma(
 # xenium onboard analysis version 2.0.0
 # data from https://www.10xgenomics.com/datasets/ffpe-human-brain-cancer-data-with-human-immuno-oncology-profiling-panel-and-custom-add-on-1-standard
 def xenium_human_brain_cancer(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -295,7 +334,8 @@ def xenium_human_brain_cancer(
     he_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_Human_Brain_GBM_FFPE/Xenium_V1_Human_Brain_GBM_FFPE_he_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hbraincancer"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hbraincancer"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hbraincancer"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -327,8 +367,8 @@ def xenium_human_brain_cancer(
 # xenium onboard analysis 2.0.0
 # data from https://www.10xgenomics.com/datasets/preview-data-ffpe-human-lung-cancer-with-xenium-multimodal-cell-segmentation-1-standard
 def xenium_human_lung_cancer(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -336,7 +376,8 @@ def xenium_human_lung_cancer(
     he_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_humanLung_Cancer_FFPE/Xenium_V1_humanLung_Cancer_FFPE_he_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hlungcancer"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hlungcancer"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hlungcancer"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -368,8 +409,8 @@ def xenium_human_lung_cancer(
 # xenium onboard analysis 3.0.0
 # data from https://www.10xgenomics.com/datasets/preview-data-xenium-prime-gene-expression
 def xenium_human_lymph_node_5k(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -377,7 +418,8 @@ def xenium_human_lymph_node_5k(
     he_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Human_Lymph_Node_Reactive_FFPE/Xenium_Prime_Human_Lymph_Node_Reactive_FFPE_he_image.ome.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hlymphnode_5k"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hlymphnode_5k"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hlymphnode5k"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -409,15 +451,16 @@ def xenium_human_lymph_node_5k(
 # xenium onboard analysis 1.5.0
 # data from https://www.10xgenomics.com/datasets/human-lymph-node-preview-data-xenium-human-multi-tissue-and-cancer-panel-1-standard
 def xenium_human_lymph_node(
-        overwrite: bool = False
-
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.5.0/Xenium_V1_hLymphNode_nondiseased_section/Xenium_V1_hLymphNode_nondiseased_section_outs.zip"
 
     # set up paths
-    named_data_dir = DEMODIR / "xenium_hlymphnode"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_hlymphnode"
     data_dir = named_data_dir / "output-XETG00000__slide_id__hlymphnode"
     image_dir = named_data_dir / "unregistered_images"
     zip_file = named_data_dir / Path(data_url).name
@@ -441,10 +484,12 @@ def xenium_human_lymph_node(
 # data from https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Breast_2fov/Xenium_V1_human_Breast_2fov_outs.zip
 # Human breast, multimodal cell segmentation
 def xenium_test_dataset_v2_mm(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Breast_2fov/Xenium_V1_human_Breast_2fov_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v2_mm"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v2_mm"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v2_mm"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "4632914eca973a1d532231ea646e10cc"
@@ -459,10 +504,12 @@ def xenium_test_dataset_v2_mm(
 # data from https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Lung_2fov/Xenium_V1_human_Lung_2fov_outs.zip
 # Human lung, nuclear expansion
 def xenium_test_dataset_v2_nucex(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Lung_2fov/Xenium_V1_human_Lung_2fov_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v2_nucex"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v2_nucex"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v2_nucex"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "bf9c5e6762681b81eab0a19d3d590381"
@@ -477,10 +524,12 @@ def xenium_test_dataset_v2_nucex(
 # data from https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny_outs.zip
 # Mouse ileum, multimodal cell segmentation
 def xenium_test_dataset_v3_mm(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v3_mm"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v3_mm"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v3_mm"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "be9d917eaac2ade708c111132f0f379d"
@@ -495,10 +544,12 @@ def xenium_test_dataset_v3_mm(
 # data from https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip
 # Mouse ileum, nuclear expansion
 def xenium_test_dataset_v3_nucex(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v3_nucex"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v3_nucex"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v3_nucex"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "0a7469a005576f2932e4f804dd9bc563"
@@ -513,10 +564,12 @@ def xenium_test_dataset_v3_nucex(
 # data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Human_Ovary_tiny/Xenium_V1_Human_Ovary_tiny_outs.zip
 # Human ovary, nuclear expansion
 def xenium_test_dataset_v4_nucex(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Human_Ovary_tiny/Xenium_V1_Human_Ovary_tiny_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v4_nucex"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v4_nucex"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_nucex"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "a1de61c57b468450ba1fbcdcc1d7c811"
@@ -530,10 +583,12 @@ def xenium_test_dataset_v4_nucex(
 # data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip
 # Human kidney, Xenium In Situ Gene and Protein Expression with Cell Segmentation Staining
 def xenium_test_dataset_v4_mm(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_MultiCellSeg_Human_Ovary_tiny/Xenium_V1_MultiCellSeg_Human_Ovary_tiny_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v4_mm"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v4_mm"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_protein"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "c0af4c72bed2c7fb4eb6d9f1fdf3b2e1"
@@ -548,10 +603,12 @@ def xenium_test_dataset_v4_mm(
 # data from https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip
 # Human kidney, Xenium In Situ Gene and Protein Expression with Cell Segmentation Staining
 def xenium_test_dataset_v4_protein(
-        overwrite: bool = False
+        overwrite: bool = False,
+        output_dir = None
 ) -> InSituData:
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip"
-    named_data_dir = DEMODIR / "xenium_test_dataset_v4_protein"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "xenium_test_dataset_v4_protein"
     data_dir = named_data_dir / "output-XETG00000__slide_id__xenium_test_dataset_v4_protein"
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "50c04dea5e751e1c7508ff24528242e8"
@@ -566,7 +623,8 @@ def xenium_test_dataset_v4_protein(
 # data from https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
 def visium_human_breast_cancer(
         overwrite: bool = False,
-        download_fullres: bool = False
+        download_fullres: bool = False,
+        output_dir = None
 ) -> InSituData:
 
     # URLs for download
@@ -575,7 +633,8 @@ def visium_human_breast_cancer(
     fullres_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif"
 
     # set up paths
-    named_data_dir = DEMODIR / "visium_hbreastcancer"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "visium_hbreastcancer"
     data_dir = named_data_dir / "CytAssist_FFPE_Human_Breast_Cancer"
     h5_file = data_dir / "filtered_feature_bc_matrix.h5"
     spatial_tar = named_data_dir / "CytAssist_FFPE_Human_Breast_Cancer_spatial.tar.gz"
