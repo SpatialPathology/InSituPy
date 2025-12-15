@@ -62,17 +62,17 @@ class TestReadXeniumV2MM:
 
     def test_has_cells(self, v2_mm_data):
         """Test that dataset contains cells."""
-        assert v2_mm_data.cells.matrix.n_obs > 0
+        assert v2_mm_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v2_mm_data):
         """Test that dataset contains genes."""
-        assert v2_mm_data.cells.matrix.n_vars > 0
+        assert v2_mm_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v2_mm_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v2_mm_data.cells.matrix.obsm
-        assert v2_mm_data.cells.matrix.obsm["spatial"].shape[0] == v2_mm_data.cells.matrix.n_obs
-        assert v2_mm_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v2_mm_data.cells.table.obsm
+        assert v2_mm_data.cells.table.obsm["spatial"].shape[0] == v2_mm_data.cells.table.n_obs
+        assert v2_mm_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV2Nucex:
@@ -84,17 +84,17 @@ class TestReadXeniumV2Nucex:
 
     def test_has_cells(self, v2_nucex_data):
         """Test that dataset contains cells."""
-        assert v2_nucex_data.cells.matrix.n_obs > 0
+        assert v2_nucex_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v2_nucex_data):
         """Test that dataset contains genes."""
-        assert v2_nucex_data.cells.matrix.n_vars > 0
+        assert v2_nucex_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v2_nucex_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v2_nucex_data.cells.matrix.obsm
-        assert v2_nucex_data.cells.matrix.obsm["spatial"].shape[0] == v2_nucex_data.cells.matrix.n_obs
-        assert v2_nucex_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v2_nucex_data.cells.table.obsm
+        assert v2_nucex_data.cells.table.obsm["spatial"].shape[0] == v2_nucex_data.cells.table.n_obs
+        assert v2_nucex_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV3MM:
@@ -106,17 +106,17 @@ class TestReadXeniumV3MM:
 
     def test_has_cells(self, v3_mm_data):
         """Test that dataset contains cells."""
-        assert v3_mm_data.cells.matrix.n_obs > 0
+        assert v3_mm_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v3_mm_data):
         """Test that dataset contains genes."""
-        assert v3_mm_data.cells.matrix.n_vars > 0
+        assert v3_mm_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v3_mm_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v3_mm_data.cells.matrix.obsm
-        assert v3_mm_data.cells.matrix.obsm["spatial"].shape[0] == v3_mm_data.cells.matrix.n_obs
-        assert v3_mm_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v3_mm_data.cells.table.obsm
+        assert v3_mm_data.cells.table.obsm["spatial"].shape[0] == v3_mm_data.cells.table.n_obs
+        assert v3_mm_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV3Nucex:
@@ -128,17 +128,17 @@ class TestReadXeniumV3Nucex:
 
     def test_has_cells(self, v3_nucex_data):
         """Test that dataset contains cells."""
-        assert v3_nucex_data.cells.matrix.n_obs > 0
+        assert v3_nucex_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v3_nucex_data):
         """Test that dataset contains genes."""
-        assert v3_nucex_data.cells.matrix.n_vars > 0
+        assert v3_nucex_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v3_nucex_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v3_nucex_data.cells.matrix.obsm
-        assert v3_nucex_data.cells.matrix.obsm["spatial"].shape[0] == v3_nucex_data.cells.matrix.n_obs
-        assert v3_nucex_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v3_nucex_data.cells.table.obsm
+        assert v3_nucex_data.cells.table.obsm["spatial"].shape[0] == v3_nucex_data.cells.table.n_obs
+        assert v3_nucex_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV4Nucex:
@@ -150,17 +150,17 @@ class TestReadXeniumV4Nucex:
 
     def test_has_cells(self, v4_nucex_data):
         """Test that dataset contains cells."""
-        assert v4_nucex_data.cells.matrix.n_obs > 0
+        assert v4_nucex_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v4_nucex_data):
         """Test that dataset contains genes."""
-        assert v4_nucex_data.cells.matrix.n_vars > 0
+        assert v4_nucex_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v4_nucex_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v4_nucex_data.cells.matrix.obsm
-        assert v4_nucex_data.cells.matrix.obsm["spatial"].shape[0] == v4_nucex_data.cells.matrix.n_obs
-        assert v4_nucex_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v4_nucex_data.cells.table.obsm
+        assert v4_nucex_data.cells.table.obsm["spatial"].shape[0] == v4_nucex_data.cells.table.n_obs
+        assert v4_nucex_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV4MM:
@@ -172,17 +172,17 @@ class TestReadXeniumV4MM:
 
     def test_has_cells(self, v4_mm_data):
         """Test that dataset contains cells."""
-        assert v4_mm_data.cells.matrix.n_obs > 0
+        assert v4_mm_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v4_mm_data):
         """Test that dataset contains genes."""
-        assert v4_mm_data.cells.matrix.n_vars > 0
+        assert v4_mm_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v4_mm_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v4_mm_data.cells.matrix.obsm
-        assert v4_mm_data.cells.matrix.obsm["spatial"].shape[0] == v4_mm_data.cells.matrix.n_obs
-        assert v4_mm_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v4_mm_data.cells.table.obsm
+        assert v4_mm_data.cells.table.obsm["spatial"].shape[0] == v4_mm_data.cells.table.n_obs
+        assert v4_mm_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumV4Protein:
@@ -194,17 +194,17 @@ class TestReadXeniumV4Protein:
 
     def test_has_cells(self, v4_protein_data):
         """Test that dataset contains cells."""
-        assert v4_protein_data.cells.matrix.n_obs > 0
+        assert v4_protein_data.cells.table.n_obs > 0
 
     def test_has_genes(self, v4_protein_data):
         """Test that dataset contains genes."""
-        assert v4_protein_data.cells.matrix.n_vars > 0
+        assert v4_protein_data.cells.table.n_vars > 0
 
     def test_has_spatial_coords(self, v4_protein_data):
         """Test that spatial coordinates are present."""
-        assert "spatial" in v4_protein_data.cells.matrix.obsm
-        assert v4_protein_data.cells.matrix.obsm["spatial"].shape[0] == v4_protein_data.cells.matrix.n_obs
-        assert v4_protein_data.cells.matrix.obsm["spatial"].shape[1] == 2
+        assert "spatial" in v4_protein_data.cells.table.obsm
+        assert v4_protein_data.cells.table.obsm["spatial"].shape[0] == v4_protein_data.cells.table.n_obs
+        assert v4_protein_data.cells.table.obsm["spatial"].shape[1] == 2
 
 
 class TestReadXeniumCrossVersion:
@@ -257,8 +257,8 @@ class TestReadXeniumCrossVersion:
 
         for data in all_datasets:
             assert hasattr(data, "cells"), "Missing cells attribute"
-            assert hasattr(data.cells, "matrix"), "Missing matrix attribute"
-            assert hasattr(data.cells.matrix, "n_obs"), "Missing n_obs attribute"
-            assert hasattr(data.cells.matrix, "n_vars"), "Missing n_vars attribute"
-            assert hasattr(data.cells.matrix, "obsm"), "Missing obsm attribute"
-            assert "spatial" in data.cells.matrix.obsm, "Missing spatial coordinates"
+            assert hasattr(data.cells, "table"), "Missing table attribute"
+            assert hasattr(data.cells.table, "n_obs"), "Missing n_obs attribute"
+            assert hasattr(data.cells.table, "n_vars"), "Missing n_vars attribute"
+            assert hasattr(data.cells.table, "obsm"), "Missing obsm attribute"
+            assert "spatial" in data.cells.table.obsm, "Missing spatial coordinates"

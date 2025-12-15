@@ -492,7 +492,7 @@ def read_qupath(
               Contains information about the shift of the data relative to the origin.
             - `measurements.tsv`: Tabular data with cellular measurements. Measurements are divided
               into 'Cell', 'Nucleus', 'Cytoplasm', and 'Membrane'. These are saved as layers
-              in the final `AnnData` object in `data.cells.matrix`.
+              in the final `AnnData` object in `data.cells.table`.
             - `cells.geojson`: Nuclear and cellular boundaries of individual cells.
             - `image.ome.tif`: The corresponding image file.
 

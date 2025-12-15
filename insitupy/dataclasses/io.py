@@ -130,7 +130,7 @@ def read_celldata(
         # in older datasets sometimes seg_mask_value is missing
         seg_mask_value = da.from_zarr(bound_path, component="seg_mask_value")
     except ArrayNotFoundError:
-        warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.matrix`.")
+        warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.table`.")
         seg_mask_value = None
 
     # initialize boundaries data object

@@ -217,25 +217,25 @@ if WITH_NAPARI:
             keys = convert_to_list(keys)
 
             # get point coordinates
-            points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
+            points = np.flip(celldata.table.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
             #points *= pixel_size # convert to length unit (e.g. µm)
 
             # get expression matrix
-            if issparse(celldata.matrix.X):
-                X = celldata.matrix.X.toarray()
+            if issparse(celldata.table.X):
+                X = celldata.table.X.toarray()
             else:
-                X = celldata.matrix.X
+                X = celldata.table.X
 
             for i, k in enumerate(keys):
                 # get expression values
                 color_value = _get_expression_values(
-                    adata=celldata.matrix,
+                    adata=celldata.table,
                     X=X,
                     key_type=key_type, key=k
                 )
 
                 # extract names of cells
-                cell_names = celldata.matrix.obs_names.values
+                cell_names = celldata.table.obs_names.values
 
                 # create points layer
                 layer = _create_points_layer(

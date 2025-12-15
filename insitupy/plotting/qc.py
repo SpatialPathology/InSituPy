@@ -32,7 +32,7 @@ def plot_qc_metrics(
     else:
         # retrieve AnnData from cell layer
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-        adata = celldata.matrix.copy()
+        adata = celldata.table.copy()
 
     # QC metrics in .obs
     obs_metrics = ['total_counts', 'n_genes_by_counts', 'pct_counts_mt']
@@ -115,9 +115,7 @@ def test_transformations(
     """
     # retrieve AnnData from cell layer
     celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-    adata = celldata.matrix.copy() # copy it to not affect it during the plotting
-
-    # Check if the matrix consists of raw integer counts
+    adata = celldata.table.copy() # copy it to not affect it during the plotting    # Check if the matrix consists of raw integer counts
     if layer is None:
         if assert_integer_counts:
             check_integer_counts(adata.X)

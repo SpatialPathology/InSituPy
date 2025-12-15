@@ -8,9 +8,9 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
-from insitupy.plotting.save import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import is_integer_counts
 
 
@@ -178,7 +178,7 @@ def overview(
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
         m_gene_counts, m_transcript_counts = _calculate_metrics(
-            celldata.matrix,
+            celldata.table,
             layer=layer,
             force_layer=force_layer)
         list_gene_count.append(m_gene_counts)

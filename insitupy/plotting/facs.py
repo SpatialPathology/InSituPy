@@ -5,14 +5,13 @@ from typing import List, Optional, Tuple, Union
 from warnings import warn
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from matplotlib.font_manager import FontProperties
-from typing import Optional
-
 
 from insitupy.plotting.save import save_and_show_figure
+
 
 def facs_plot(data,
               gene1: str = 'gene1',
@@ -23,7 +22,7 @@ def facs_plot(data,
               layer: str = 'main'
               ):
 
-    adata=data.cells[layer].matrix
+    adata=data.cells[layer].table
 
     expr1 = adata[:, gene1].X.toarray().flatten()
     expr2 = adata[:, gene2].X.toarray().flatten()

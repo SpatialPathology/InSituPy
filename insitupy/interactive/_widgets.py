@@ -69,7 +69,7 @@ if WITH_NAPARI:
         # else:
         if viewer_config.has_cells:
             data_names = data.cells.keys()
-            layer_names = ["main"] + list(data.cells.matrix.layers)
+            layer_names = ["main"] + list(data.cells.table.layers)
 
             @magicgui(
                 call_button=False,

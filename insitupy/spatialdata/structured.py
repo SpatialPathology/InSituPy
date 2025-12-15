@@ -76,7 +76,7 @@ class StructuredCellData:
     def __repr__(self):
         repr_str = ""
         if self.matrix is not None:
-            repr_str += f"{tf.Bold+'matrix'+tf.ResetAll}\n{tf.SPACER}{self.matrix.__repr__()}"
+            repr_str += f"{tf.Bold+'table'+tf.ResetAll}\n{tf.SPACER}{self.matrix.__repr__()}"
         if len(self.boundaries._data) > 0:
             bound_repr = self.boundaries.__repr__().replace("\n", f"\n{tf.SPACER}")
             repr_str += f"\n{tf.Bold+'boundaries'+tf.ResetAll}\n{tf.SPACER}{bound_repr}"
@@ -140,7 +140,7 @@ class StructuredMultiCellData:
     @property
     def matrix(self):
         try:
-            return self._layers[self._main_key].matrix
+            return self._layers[self._main_key].table
         except KeyError:
             print("MultiCellData object is empty.")
             return None
@@ -284,7 +284,7 @@ class StructuredSpatialData:
                 if cell_key not in data._cells._layers:
                     data._cells[cell_key] = StructuredCellData()
                 if parts[2] == "matrix":
-                    data._cells[cell_key].matrix = elem
+                    data._cells[cell_key].table = elem
                 elif parts[2] == "boundaries":
                     data._cells[cell_key].boundaries[parts[3]] = elem
             elif parts[0] == "ANNOTATIONS":

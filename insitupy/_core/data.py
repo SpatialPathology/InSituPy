@@ -443,7 +443,7 @@ class InSituData:
                           ):
         '''
         Function to assign geometries (annotations or regions) to the anndata object in
-        InSituData.cells[layer].matrix. Assignment information is added to the DataFrame in `.obs`.
+        InSituData.cells[layer].table. Assignment information is added to the DataFrame in `.obs`.
         '''
         # assert that prerequisites are met
         try:
@@ -465,8 +465,8 @@ class InSituData:
         keys = convert_to_list(keys)
 
         # convert coordinates into shapely Point objects
-        x = celldata.matrix.obsm["spatial"][:, 0]
-        y = celldata.matrix.obsm["spatial"][:, 1]
+        x = celldata.table.obsm["spatial"][:, 0]
+        y = celldata.table.obsm["spatial"][:, 1]
         cells = gpd.points_from_xy(x, y)
         cells = gpd.GeoSeries(cells)
 
@@ -508,7 +508,7 @@ class InSituData:
 
             # convert into pandas dataframe
             data = pd.DataFrame(data)
-            data.index = celldata.matrix.obs_names
+            data.index = celldata.table.obs_names
 
             # transform data into one column
             column_to_add = [" & ".join(geom_names[row.values]) if np.any(row.values) else "unassigned" for _, row in data.iterrows()]
@@ -517,38 +517,38 @@ class InSituData:
                 # create annotation from annotation masks
                 col_name = f"{geometry_type}-{key}"
                 data[col_name] = column_to_add
-                if col_name in celldata.matrix.obs:
+                if col_name in celldata.table.obs:
                     if overwrite:
-                        celldata.matrix.obs.drop(col_name, axis=1, inplace=True)
+                        celldata.table.obs.drop(col_name, axis=1, inplace=True)
                         print(f'Existing column "{col_name}" is overwritten.', flush=True)
                         add = True
                     else:
-                        warn(f'Column "{col_name}" exists already in `{name}.matrix.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
+                        warn(f'Column "{col_name}" exists already in `{name}.table.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
                         add = False
                 else:
                     add = True
 
                 if add:
                     if add_masks:
-                        celldata.matrix.obs = pd.merge(left=celldata.matrix.obs, right=data, left_index=True, right_index=True)
+                        celldata.table.obs = pd.merge(left=celldata.table.obs, right=data, left_index=True, right_index=True)
                     else:
-                        celldata.matrix.obs = pd.merge(left=celldata.matrix.obs, right=data.iloc[:, -1], left_index=True, right_index=True)
+                        celldata.table.obs = pd.merge(left=celldata.table.obs, right=data.iloc[:, -1], left_index=True, right_index=True)
 
                     # save that the current key was analyzed
                     geom_attr.metadata[key]["analyzed"] = tf.TICK
             else:
                 # add to obsm
-                obsm_keys = celldata.matrix.obsm.keys()
+                obsm_keys = celldata.table.obsm.keys()
                 if geometry_type not in obsm_keys:
                     # add empty pandas dataframe with obs_names as index
-                    celldata.matrix.obsm[geometry_type] = pd.DataFrame(index=celldata.matrix.obs_names)
+                    celldata.table.obsm[geometry_type] = pd.DataFrame(index=celldata.table.obs_names)
 
-                celldata.matrix.obsm[geometry_type][key] = column_to_add
+                celldata.table.obsm[geometry_type][key] = column_to_add
 
                 # save that the current key was analyzed
                 geom_attr.metadata[key]["analyzed"] = tf.TICK
 
-                print(f"Added results to `{name}.matrix.obsm['{geometry_type}']", flush=True)
+                print(f"Added results to `{name}.table.obsm['{geometry_type}']", flush=True)
 
 
     def assign_annotations(
@@ -1495,8 +1495,8 @@ class InSituData:
 
         if add_to_obs:
             obs_col = f"{image_name}_signal_{cells_compartment}_{method}"
-            cellsdata.matrix.obs[obs_col] = res_series
-            print(f"Added quantification results to `.cells['{cells_layer}'].matrix.obs['{obs_col}']`.", flush=True)
+            cellsdata.table.obs[obs_col] = res_series
+            print(f"Added quantification results to `.cells['{cells_layer}'].table.obs['{obs_col}']`.", flush=True)
         else:
             return res_series
 

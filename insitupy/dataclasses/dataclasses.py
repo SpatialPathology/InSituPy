@@ -422,7 +422,7 @@ class BoundariesData(DeepCopyMixin):
         Initialize the BoundariesData object.
 
         Args:
-            cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.matrix` of `CellData`.
+            cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.table` of `CellData`.
             seg_mask_value (Optional[Union[np.ndarray, List]]): Segmentation mask values. Required to have the same length as `cell_names`.
                 Specifies which values in the "cells" segmentation mask correspond to which cell name.
 
@@ -743,7 +743,7 @@ class CellData(DeepCopyMixin):
         Returns:
             int: The number of cells.
         """
-        return len(self.matrix)
+        return len(self.table)
 
     def __repr__(self):
         repr = (
@@ -759,12 +759,32 @@ class CellData(DeepCopyMixin):
 
     @property
     def matrix(self):
+        logger.warning(
+            "The 'matrix' property is deprecated and will be removed in a future version. "
+            "Please use 'table' instead."
+        )
         return self._matrix
 
     @matrix.setter
     def matrix(self, value: AnnData):
+        logger.warning(
+            "The 'matrix' property is deprecated and will be removed in a future version. "
+            "Please use 'table' instead."
+        )
         if not isinstance(value, AnnData):
             raise ValueError(f"Matrix must be an AnnData object. Instead: {type(value)}.")
+        self._matrix = value
+
+    @property
+    def table(self):
+        """Alias for matrix property. This is the preferred name going forward."""
+        return self._matrix
+
+    @table.setter
+    def table(self, value: AnnData):
+        """Alias for matrix setter. This is the preferred name going forward."""
+        if not isinstance(value, AnnData):
+            raise ValueError(f"Table must be an AnnData object. Instead: {type(value)}.")
         self._matrix = value
 
     @property
@@ -801,7 +821,7 @@ class CellData(DeepCopyMixin):
             _self = self.copy()
 
         # retrieve cell coordinates
-        cell_coords = _self.matrix.obsm['spatial'].copy()
+        cell_coords = _self.table.obsm['spatial'].copy()
 
         # Ensure that either both xlim and ylim are not None or shape is not None
         if (xlim is None or ylim is None) and shape is None:
@@ -839,11 +859,11 @@ class CellData(DeepCopyMixin):
             mask = xmask & ymask
 
         # select
-        _self.matrix = _self.matrix[mask, :].copy()
+        _self.table = _self.table[mask, :].copy()
 
         # crop boundaries
         _self.boundaries.crop(
-            cell_ids=_self.matrix.obs_names,
+            cell_ids=_self.table.obs_names,
             xlim=xlim, ylim=ylim,
             inplace=True
             )
@@ -1065,13 +1085,29 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def matrix(self):
+        logger.warning(
+            "The 'matrix' property is deprecated and will be removed in a future version. "
+            "Please use 'table' instead."
+        )
         try:
-            return self._layers[self._main_key].matrix
+            return self._layers[self._main_key].table
         except KeyError:
             print("MultiCellData object is empty.")
             return None
         except AttributeError:
             print("No matrix available.")
+            return None
+
+    @property
+    def table(self):
+        """Alias for matrix property. This is the preferred name going forward."""
+        try:
+            return self._layers[self._main_key].table
+        except KeyError:
+            print("MultiCellData object is empty.")
+            return None
+        except AttributeError:
+            print("No table available.")
             return None
 
     @property
@@ -1935,13 +1971,26 @@ class FeatureData(DeepCopyMixin):
 
     @property
     def data(self) -> Optional[AnnData]:
-        """AnnData object with transcriptomic readouts."""
+        """Alias for table property."""
         return self._data
 
     @data.setter
     def data(self, value: Optional[AnnData]):
+        """Alias for table setter."""
         if value is not None and not isinstance(value, AnnData):
             raise TypeError(f"data must be AnnData object, not {type(value)}")
+        self._data = value
+
+    @property
+    def table(self) -> Optional[AnnData]:
+        """AnnData object with omics readouts. This is the preferred name going forward."""
+        return self._data
+
+    @table.setter
+    def table(self, value: Optional[AnnData]):
+        """Set the AnnData table. This is the preferred name going forward."""
+        if value is not None and not isinstance(value, AnnData):
+            raise TypeError(f"table must be AnnData object, not {type(value)}")
         self._data = value
 
     @property

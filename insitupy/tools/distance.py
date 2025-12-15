@@ -4,8 +4,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy._core.data import InSituData
+from insitupy.dataclasses._utils import _get_cell_layer
 
 
 def calc_distance_of_cells_from(
@@ -42,7 +42,7 @@ def calc_distance_of_cells_from(
     celldata, cells_layer_name = _get_cell_layer(
         cells=data.cells, cells_layer=cells_layer, verbose=True, return_layer_name=True
         )
-    adata = celldata.matrix
+    adata = celldata.table
 
     if region_name is None:
         print(f'Calculate the distance of cells from the annotation "{annotation_class}"')
@@ -97,4 +97,4 @@ def calc_distance_of_cells_from(
         adata.obsm["distance_from"] = pd.DataFrame(index=adata.obs_names)
 
     adata.obsm["distance_from"][key_to_save] = min_dists
-    print(f'Saved distances to `.cells[{cells_layer_name}].matrix.obsm["distance_from"]["{key_to_save}"]`')
+    print(f'Saved distances to `.cells[{cells_layer_name}].table.obsm["distance_from"]["{key_to_save}"]`')

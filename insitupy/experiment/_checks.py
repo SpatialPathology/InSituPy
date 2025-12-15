@@ -12,6 +12,6 @@ def _all_obs_names_unique(
     all_obs_names = []
     for meta, data in exp.iterdata():
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-        all_obs_names += celldata.matrix.obs_names.tolist()
+        all_obs_names += celldata.table.obs_names.tolist()
 
     return _is_list_unique(all_obs_names)

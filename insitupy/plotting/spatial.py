@@ -799,7 +799,7 @@ class _ColorConfigMultiPlot:
                 cells=xd.cells,
                 cells_layer=cells_layer
                 )
-            ad = celldata.matrix
+            ad = celldata.table
 
             # extract the data
             color_values, is_categorical = _extract_color_values(
@@ -846,7 +846,7 @@ class _ColorConfigMultiPlot:
                     cells=xd.cells,
                     cells_layer=cells_layer
                     )
-                ad = celldata.matrix
+                ad = celldata.table
 
                 # extract the data
                 color_values, is_categorical = _extract_color_values(
@@ -1004,7 +1004,7 @@ def _get_data(
     celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
     # extract anndata
-    adata = celldata.matrix
+    adata = celldata.table
 
     # filter anndata
     if data_config.filter_mode is not None and data_config.filter_tuple is not None:

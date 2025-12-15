@@ -537,7 +537,7 @@ class InSituExperiment:
         for _, d in self.iterdata():
             if not d.cells.is_empty:
                 celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
-                n_cells += len(celldata.matrix)
+                n_cells += len(celldata.table)
 
         return n_cells
 
@@ -623,9 +623,9 @@ class InSituExperiment:
                                                     for name in subset.obs_names])
 
             # Check for cell name matches
-            matching_cells = celldata.matrix.obs_names.isin(subset.obs_names)
+            matching_cells = celldata.table.obs_names.isin(subset.obs_names)
             n_matching = matching_cells.sum()
-            n_total = len(celldata.matrix)
+            n_total = len(celldata.table)
 
             if n_matching == 0:
                 raise ValueError(
@@ -650,30 +650,30 @@ class InSituExperiment:
             # Transfer obs columns
             if obs_columns_to_transfer:
                 for col in obs_columns_to_transfer:
-                    if col in celldata.matrix.obs.columns and not overwrite:
+                    if col in celldata.table.obs.columns and not overwrite:
                         raise ValueError(
                             f"Column '{col}' already exists for dataset '{current_uid}'. "
                             f"Set `overwrite=True` to overwrite."
                         )
-                    celldata.matrix.obs[col] = subset.obs[col]
+                    celldata.table.obs[col] = subset.obs[col]
 
             # Transfer obsm keys
             if obsm_keys_to_transfer:
                 for key in obsm_keys_to_transfer:
-                    if key in celldata.matrix.obsm.keys() and not overwrite:
+                    if key in celldata.table.obsm.keys() and not overwrite:
                         raise ValueError(
                             f"Key '{key}' already exists for dataset '{current_uid}'. "
                             f"Set `overwrite=True` to overwrite."
                         )
 
                     # Create empty array with NaN
-                    n_cells_target = len(celldata.matrix)
+                    n_cells_target = len(celldata.table)
                     n_features = subset.obsm[key].shape[1]
                     target_array = np.full((n_cells_target, n_features), np.nan)
 
                     # Fill with matching values
                     subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
-                    for target_idx, cell_name in enumerate(celldata.matrix.obs_names):
+                    for target_idx, cell_name in enumerate(celldata.table.obs_names):
                         if cell_name in subset_index_map:
                             subset_idx = subset_index_map[cell_name]
                             target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
@@ -684,7 +684,7 @@ class InSituExperiment:
                             f"Missing values. Set `fill_missing=True`."
                         )
 
-                    celldata.matrix.obsm[key] = target_array
+                    celldata.table.obsm[key] = target_array
 
         return self
 
@@ -742,7 +742,7 @@ class InSituExperiment:
 
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            adata = celldata.matrix
+            adata = celldata.table
 
             # Filter adata
             adata = _select_anndata_elements(
@@ -866,7 +866,7 @@ class InSituExperiment:
 
             # Get data from MultiCellData
             celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
-            adata = celldata.matrix
+            adata = celldata.table
 
             # plot UMAP and add to axis
             sc.pl.embedding(
@@ -1106,15 +1106,15 @@ class InSituExperiment:
 
                         try:
                             # try to retrieve categories
-                            cats = celldata.matrix.obs[obs_col].cat.categories.values
+                            cats = celldata.table.obs[obs_col].cat.categories.values
                         except AttributeError:
                             # convert to categorical
-                            celldata.matrix.obs[obs_col] = celldata.matrix.obs[obs_col].astype("category")
+                            celldata.table.obs[obs_col] = celldata.table.obs[obs_col].astype("category")
 
                             # retrieve categories
-                            cats = celldata.matrix.obs[obs_col].cat.categories.values
-                            cats = np.unique(celldata.matrix.obs[obs_col])
-                        celldata.matrix.uns[uns_key] = [color_dict[c] for c in cats]
+                            cats = celldata.table.obs[obs_col].cat.categories.values
+                            cats = np.unique(celldata.table.obs[obs_col])
+                        celldata.table.uns[uns_key] = [color_dict[c] for c in cats]
 
                     # save color dict in InSituExperiment
                     self.colors[obs_col] = color_dict
@@ -1488,7 +1488,7 @@ class InSituExperiment:
 
                     if len(parts) >= 3:
                         if parts[2] == "matrix":
-                            struct_data._cells[cell_key].matrix = elem
+                            struct_data._cells[cell_key].table = elem
                         elif parts[2] == "boundaries" and len(parts) >= 4:
                             boundary_name = parts[3]
                             struct_data._cells[cell_key].boundaries[boundary_name] = elem
@@ -1607,7 +1607,7 @@ class InSituExperiment:
         for _, d in self.iterdata():
             if not d.cells.is_empty:
                 celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
-                obs_list.append(celldata.matrix.obs)
+                obs_list.append(celldata.table.obs)
 
         # concatenate the obs dataframes
         all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
@@ -1624,10 +1624,10 @@ class InSituExperiment:
         cols = []
         for _, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            if obs_col in celldata.matrix.obs.columns:
-                if celldata.matrix.obs[obs_col].isna().all():
+            if obs_col in celldata.table.obs.columns:
+                if celldata.table.obs[obs_col].isna().all():
                     raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
-                cols.append(np.unique(celldata.matrix.obs[obs_col]))
+                cols.append(np.unique(celldata.table.obs[obs_col]))
 
         if len(cols) > 0:
             all_cats = np.sort(np.unique(np.concatenate(cols)))

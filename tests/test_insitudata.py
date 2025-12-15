@@ -28,30 +28,17 @@ def test_read():
 
     assert len(xd.transcripts) == n_transripts
     assert len(xd.transcripts.columns) == 13
-    assert xd.cells.matrix.shape == (n_cells, n_genes)
+    assert xd.cells.table.shape == (n_cells, n_genes)
 
-
-# def test_baysor():
-#     xd = xenium_test_dataset()
-#     xd.load_all()
-#     xd.add_baysor(BAYSOR_PATH)
-#     assert xd.alt is not None
-#     assert len(xd.alt) == 1
-#     assert "baysor" in xd.alt.keys()
-#     assert xd.alt["baysor"].matrix is not None
-#     assert xd.alt["baysor"].matrix.shape == (18, 11)
-#     assert xd.alt["baysor"].boundaries is not None
-#     assert xd.alt["baysor"].boundaries
-#     assert 'cellular' in xd.alt["baysor"].boundaries.metadata.keys()
 
 
 def test_functions():
     xd = xenium_test_dataset()
     xd.load_all()
-    sc.pp.filter_cells(xd.cells.matrix, min_counts=1, inplace=True)
+    sc.pp.filter_cells(xd.cells.table, min_counts=1, inplace=True)
     normalize_and_transform(xd, transformation_method="sqrt")
     reduce_dimensions(xd, method="umap")
     cluster_cells(xd, method="leiden")
     for key in ['spatial', 'X_pca', 'X_umap']:
-        assert key in xd.cells.matrix.obsm.keys()
-    assert "leiden" in xd.cells.matrix.obs.columns
+        assert key in xd.cells.table.obsm.keys()
+    assert "leiden" in xd.cells.table.obs.columns

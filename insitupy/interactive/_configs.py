@@ -97,7 +97,7 @@ if WITH_NAPARI:
         def adata(self):
             if not self.data.cells.is_empty:
                 """Return the AnnData object."""
-                return self.data.cells[self.data_name].matrix
+                return self.data.cells[self.data_name].table
             else:
                 return None
 

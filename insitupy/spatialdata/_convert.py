@@ -211,10 +211,10 @@ def _transform_matrix_for_spatialdata(
     ):
     # from spatialdata.models import TableModel
     tables, cell_shapes = {}, {}
-    #if xd.cells is not None and xd.cells.matrix is not None:
+    #if xd.cells is not None and xd.cells.table is not None:
     if xd.cells is not None:
         for cell_key in xd.cells.keys():
-            if xd.cells[cell_key].matrix is not None:
+            if xd.cells[cell_key].table is not None:
                 tables_key = _generate_spatialdata_key(
                     sample_id=sample_id,
                     modality="cells",
@@ -228,7 +228,7 @@ def _transform_matrix_for_spatialdata(
                 )
 
                 adata, circles_sized, circles = _transform_anndata_for_spatialdata(
-                    xd.cells[cell_key].matrix,
+                    xd.cells[cell_key].table,
                     cells_key=circles_dict_key
                     )
 

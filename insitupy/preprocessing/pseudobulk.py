@@ -21,9 +21,9 @@ def get_neighborhood(
 
     for id, data in exp.iterdata():
         layer = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-        coords = layer.matrix.obsm["spatial"]
+        coords = layer.table.obsm["spatial"]
         A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
-        matrices[layer.matrix.obs[sample_col].unique().tolist()[0]] = A
+        matrices[layer.table.obs[sample_col].unique().tolist()[0]] = A
 
     return matrices
 
@@ -40,8 +40,8 @@ def neighborhoods_pseudobulk(
     dc = try_import("decoupler", installation_command="pip install decoupler")
 
     # get AnnData and retrieve coordinates
-    # adata = celldata.matrix
-    # coords = celldata.matrix.obsm["spatial"]
+    # adata = celldata.table
+    # coords = celldata.table.obsm["spatial"]
 
     A = radius_neighbors_graph(
         coords,
@@ -121,7 +121,7 @@ def pseudobulk(
 
         # extract anndata
         celldata= _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-        adata = celldata.matrix
+        adata = celldata.table
 
         # add batch information
         adata.obs["uid"] = uid

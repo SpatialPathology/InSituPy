@@ -52,7 +52,7 @@ def _select_data_for_dge(
 
     # extract anndata object
     celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-    adata_selected = celldata.matrix.copy()
+    adata_selected = celldata.table.copy()
 
     ### REGIONS
     if region_tuple is not None:
