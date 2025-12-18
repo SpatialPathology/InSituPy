@@ -54,7 +54,7 @@ if WITH_NAPARI:
             'data_name',
             'layer_name',
             'has_cells',
-            'has_features',
+            'has_units',
             'static_canvas',
             'key_dict',
             'masks',
@@ -77,9 +77,8 @@ if WITH_NAPARI:
                 self.layer_name = None
                 self.has_cells = False
 
-            # Check if features are available
-            self.has_features = not data.features is None
-            #self.has_features = not data.features.is_empty
+            # Check if units are available
+            self.has_units = not data.units is None
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -165,37 +164,37 @@ if WITH_NAPARI:
                 None
 
         @property
-        def features(self):
-            """Return FeatureData object if available."""
-            if self.has_features:
-                return self.data.features
+        def units(self):
+            """Return SpatialUnitsData object if available."""
+            if self.has_units:
+                return self.data.units
             else:
                 return None
 
         @property
-        def feature_vars(self):
-            """Return feature variable names."""
-            if self.has_features and self.features.data is not None:
-                return sorted(self.features.data.var_names.tolist())
+        def unit_vars(self):
+            """Return variable names of spatial unit."""
+            if self.has_units and self.units.data is not None:
+                return sorted(self.units.data.var_names.tolist())
             else:
                 return []
 
         @property
-        def feature_obs(self):
-            """Return feature observation names."""
-            if self.has_features and self.features.data is not None:
-                return sorted(self.features.data.obs.columns.tolist())
+        def unit_obs(self):
+            """Return observation names of spatial unit."""
+            if self.has_units and self.units.data is not None:
+                return sorted(self.units.data.obs.columns.tolist())
             else:
                 return []
 
         @property
-        def feature_obsm(self):
-            """Return feature obsm keys."""
-            if self.has_features and self.features.data is not None:
-                obsm_keys = list(self.features.data.obsm.keys())
+        def unit_obsm(self):
+            """Return units obsm keys."""
+            if self.has_units and self.units.data is not None:
+                obsm_keys = list(self.units.data.obsm.keys())
                 obsm_cats = []
                 for k in sorted(obsm_keys):
-                    fdata = self.features.data.obsm[k]
+                    fdata = self.units.data.obsm[k]
                     if isinstance(fdata, pd.DataFrame):
                         obsm_cats.extend([f"{k}#{col}" for col in fdata.columns])
                     elif isinstance(fdata, np.ndarray):
@@ -219,10 +218,10 @@ if WITH_NAPARI:
                 "obs": self.observations,
                 "obsm": self.obsm
             }
-            if self.has_features:
-                key_dict["feature_vars"] = self.feature_vars
-                key_dict["feature_obs"] = self.feature_obs
-                key_dict["feature_obsm"] = self.feature_obsm
+            if self.has_units:
+                key_dict["unit_vars"] = self.unit_vars
+                key_dict["unit_obs"] = self.unit_obs
+                key_dict["unit_obsm"] = self.unit_obsm
             return key_dict
 
         def _extract_masks(self):

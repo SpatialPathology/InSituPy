@@ -260,7 +260,7 @@ if WITH_NAPARI:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        if data.cells.is_empty and data.features is None:
+        if data.cells.is_empty and data.units is None:
             # add annotation widget to napari
             add_geom_widget = add_new_geometries_widget()
             add_geom_widget.max_height = 120
@@ -275,7 +275,7 @@ if WITH_NAPARI:
                 show_boundaries_widget,
                 select_data,
                 filter_cells_widget,
-                show_features_widget,
+                show_units_widget,
             ) = _initialize_widgets(
                 viewer=viewer,
                 viewer_config=viewer_config
@@ -292,9 +292,9 @@ if WITH_NAPARI:
                 show_cells_widget.max_height = 170
                 show_cells_widget.max_width = widgets_max_width
 
-            if show_features_widget is not None:
-                viewer.window.add_dock_widget(show_features_widget, name="Show features", area="right", tabify=True)
-                show_features_widget.max_width = widgets_max_width
+            if show_units_widget is not None:
+                viewer.window.add_dock_widget(show_units_widget, name="Show spatial units", area="right", tabify=True)
+                show_units_widget.max_width = widgets_max_width
 
             if show_boundaries_widget is not None:
                 viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)

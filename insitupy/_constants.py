@@ -21,7 +21,7 @@ MODALITIES_ABBR = "CITAR"
 LOAD_FUNCS = [
     'load_annotations',
     'load_cells',
-    'load_features',
+    'load_units',
     'load_images',
     'load_regions',
     'load_transcripts'
@@ -29,7 +29,7 @@ LOAD_FUNCS = [
 MODALITIES_COLOR_DICT = {
     "images": tf.Blue,
     "cells": tf.Green,
-    "features": tf.Magenta,
+    "units": tf.Magenta,
     "transcripts": tf.Purple,
     "annotations": tf.Cyan,
     "regions": tf.Yellow

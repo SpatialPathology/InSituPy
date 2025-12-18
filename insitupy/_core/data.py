@@ -32,12 +32,12 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, FeatureData,
-                                              ImageData, MultiCellData,
-                                              RegionsData)
+from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
+                                              MultiCellData, RegionsData,
+                                              SpatialUnitsData)
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
-                                     _save_features, _save_images,
-                                     _save_regions, _save_transcripts,
+                                     _save_images, _save_regions,
+                                     _save_transcripts, _save_units,
                                      read_multicelldata, read_shapesdata)
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import fast_query_points_within_polygon
@@ -177,7 +177,7 @@ class InSituData:
         # modalities
         self._images = ImageData()
         self._cells = MultiCellData()
-        self._features = None
+        self._units = None
         self._annotations = AnnotationsData()
         self._regions = RegionsData()
         self._transcripts = None
@@ -201,7 +201,7 @@ class InSituData:
         # check if all modalities are empty
         empty_checks = [elem.is_empty for elem in [
             self._images, self._cells, self._annotations, self._regions
-            ]] + [self._transcripts is None, self._features is None] # transcripts and features do not have is_empty property since they are dataframes
+            ]] + [self._transcripts is None, self._units is None] # transcripts and units do not have is_empty property since they are dataframes
         all_empty = np.all(empty_checks)
 
         repr = (
@@ -237,10 +237,10 @@ class InSituData:
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._features is not None:
-                features_repr = self._features.__repr__()
+            if self._units is not None:
+                units_repr = self._units.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['features']+tf.Bold} features{tf.ResetAll}\n{tf.SPACER}   " + features_repr.replace("\n", f"\n{tf.SPACER}   ")
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['units']+tf.Bold} units{tf.ResetAll}\n{tf.SPACER}   " + units_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if not self._annotations.is_empty:
@@ -346,36 +346,36 @@ class InSituData:
         print("Cleared all data from 'cells'.")
 
     @property
-    def features(self):
-        """Return feature data of the InSituData object.
+    def units(self):
+        """Return spatial units data of the InSituData object.
         Returns:
-            insitupy._core.dataclasses.FeatureData: Cell data.
+            insitupy._core.dataclasses.SpatialUnitsData: Spatial units data.
         """
-        return self._features
+        return self._units
 
-    @features.setter
-    def features(self, value):
-        raise AttributeError("Cannot modify 'features' attribute after initialization.")
+    @units.setter
+    def units(self, value):
+        raise AttributeError("Cannot modify 'units' attribute after initialization.")
 
-    @features.deleter
-    def features(self):
-        self._features = None
-        print("Cleared all data from 'features'.")
+    @units.deleter
+    def units(self):
+        self._units = None
+        print("Cleared all data from 'units'.")
 
-    def add_features(self, data: FeatureData):
+    def add_units(self, data: SpatialUnitsData):
         """
-        Add feature data to the InSituData object.
+        Add spatial units data to the InSituData object.
 
         Args:
-            data (FeatureData): The feature data to add.
+            data (SpatialUnitsData): The spatial units data to add.
 
         Raises:
-            TypeError: If data is not of type FeatureData.
+            TypeError: If data is not of type SpatialUnitsData.
         """
-        if not isinstance(data, FeatureData):
-            raise TypeError(f"Data must be of type FeatureData, but got {type(data).__name__} instead.")
+        if not isinstance(data, SpatialUnitsData):
+            raise TypeError(f"Data must be of type SpatialUnitsData, but got {type(data).__name__} instead.")
 
-        self._features = data
+        self._units = data
 
     @property
     def annotations(self):
@@ -765,11 +765,11 @@ class InSituData:
                 verbose=verbose
             )
 
-        # Transform features
-        if _self.features is not None:
+        # Transform units
+        if _self.units is not None:
             if verbose:
-                print("Transforming features...")
-            _self.features.transform(
+                print("Transforming units...")
+            _self.units.transform(
                 transformation_matrix=transformation_matrix,
                 reference_pixel_size=reference_pixel_size,
                 source_pixel_size=source_pixel_size,
@@ -780,7 +780,7 @@ class InSituData:
         if not inplace:
             return _self
 
-    def align_features(
+    def align_units(
         self,
         other: "InSituData",
         transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
@@ -792,22 +792,22 @@ class InSituData:
         verbose: bool = False
     ):
         """
-        Align features from another InSituData object to this one.
+        Align units from another InSituData object to this one.
 
-        This function takes features from another InSituData object, applies a
+        This function takes units from another InSituData object, applies a
         transformation, and adds them to the current object. It is designed for
-        integrating features (e.g., from Visium) onto a high-resolution dataset
+        integrating units (e.g., from Visium) onto a high-resolution dataset
         (e.g., Xenium) after registration.
 
         If `transfer_images` is True and the source object (other) contains images,
         they are also transformed and added to the current object.
 
         Args:
-            other (InSituData): The InSituData object containing the features to align.
-            transformation_matrix: Transformation matrix to align the features.
+            other (InSituData): The InSituData object containing the units to align.
+            transformation_matrix: Transformation matrix to align the units.
             source_image_name: Name of the source image in `other.images` to infer `source_pixel_size`.
             reference_image_name: Name of the reference image in `self.images` to infer `reference_pixel_size`.
-            source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of features).
+            source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of units).
             reference_pixel_size: Pixel size (in µm/pixel) of the reference image (target).
             transfer_images: If True, transfer images from `other` to `self`. Defaults to False.
             verbose: If True, print status messages.
@@ -820,17 +820,17 @@ class InSituData:
             warn("The target InSituData object (self) has no cells. "
                  "Alignment is typically done onto a dataset with cells.")
 
-        if self.features is not None:
-            raise ValueError("The target InSituData object (self) already has features. "
-                             "Please remove them before aligning new features.")
+        if self.units is not None:
+            raise ValueError("The target InSituData object (self) already has spatial units. "
+                             "Please remove them before aligning new units.")
 
         # Check configuration of other
-        if other.features is None:
-            raise ValueError("The source InSituData object (other) has no features to align.")
+        if other.units is None:
+            raise ValueError("The source InSituData object (other) has no spatial units to align.")
 
         if not other.cells.is_empty:
             warn("The source InSituData object (other) has cells. "
-                 "Typically, the source object should only contain features to be aligned.")
+                 "Typically, the source object should only contain spatial units to be aligned.")
 
         # Determine reference pixel size
         if reference_pixel_size is None and reference_image_name is not None:
@@ -846,14 +846,14 @@ class InSituData:
             except KeyError:
                 raise ValueError(f"Source image '{source_image_name}' not found in other.images.")
 
-        # Copy features from other
-        features_to_add = other.features.copy()
+        # Copy units from other
+        units_to_add = other.units.copy()
 
-        # Transform features
+        # Transform units
         if verbose:
-            print("Transforming and aligning features...")
+            print("Transforming and aligning spatial units...")
 
-        features_to_add.transform(
+        units_to_add.transform(
             transformation_matrix=transformation_matrix,
             reference_pixel_size=reference_pixel_size,
             source_pixel_size=source_pixel_size,
@@ -862,10 +862,10 @@ class InSituData:
         )
 
         # Add to self
-        self._features = features_to_add
+        self._units = units_to_add
 
         if verbose:
-            print("Features aligned and added to InSituData object.")
+            print("Spatial units aligned and added to InSituData object.")
 
         # Align images
         if transfer_images and not other.images.is_empty:
@@ -1158,20 +1158,20 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
-    def load_features(self,
+    def load_units(self,
                      verbose: bool = False
                      ):
-        # read features
+        # read units
         if verbose:
-            print("Loading features...", flush=True)
+            print("Loading spatial units...", flush=True)
 
         if self.from_insitudata:
             # extract available paths
-            features_path = Path(self.path) / "features"
+            units_path = Path(self.path) / "units"
 
-            if not features_path.exists():
+            if not units_path.exists():
                 if verbose:
-                    warn(ModalityNotFoundWarning("features"), stacklevel=2)
+                    warn(ModalityNotFoundWarning("units"), stacklevel=2)
             else:
                 import json
 
@@ -1179,27 +1179,27 @@ class InSituData:
                 from anndata import read_h5ad
 
                 # Load shapes
-                shapes_file = features_path / "shapes.parquet"
+                shapes_file = units_path / "shapes.parquet"
                 shapes = gpd.read_parquet(shapes_file)
 
                 # Load data if present
-                data_file = features_path / "data.h5ad"
+                data_file = units_path / "data.h5ad"
                 data = read_h5ad(data_file) if data_file.exists() else None
 
                 # Load metadata
-                meta_file = features_path / "metadata.json"
+                meta_file = units_path / "metadata.json"
                 if meta_file.exists():
                     with open(meta_file, 'r') as f:
                         meta_dict = json.load(f)
-                    feature_type = meta_dict.get("feature_type", "feature")
+                    unit_type = meta_dict.get("unit_type", "unit")
                 else:
-                    feature_type = "feature"
+                    unit_type = "unit"
 
-                # Create FeatureData object and assign
-                self._features = FeatureData(
+                # Create SpatialUnitsData object and assign
+                self._units = SpatialUnitsData(
                     shapes=shapes,
                     data=data,
-                    feature_type=feature_type
+                    unit_type=unit_type
                 )
         else:
             NoProjectLoadWarning()
@@ -1312,11 +1312,11 @@ class InSituData:
                 metadata=self._metadata
                 )
 
-        # save features
-        if self._features is not None:
-            features = self._features
-            _save_features(
-                features=features,
+        # save units
+        if self._units is not None:
+            units = self._units
+            _save_units(
+                units=units,
                 path=path,
                 metadata=self._metadata
                 )

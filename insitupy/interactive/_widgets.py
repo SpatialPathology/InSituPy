@@ -26,10 +26,10 @@ if WITH_NAPARI:
         _update_key_on_type_change, _update_keys_based_on_geom_type)
     from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
                                                config_manager)
-    from insitupy.interactive._layers import (_create_features_layer,
-                                              _create_points_layer,
-                                              _update_features_layer,
-                                              _update_points_layer)
+    from insitupy.interactive._layers import (_create_points_layer,
+                                              _create_units_layer,
+                                              _update_points_layer,
+                                              _update_units_layer)
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.utils._helpers import _get_expression_values
 
@@ -59,7 +59,7 @@ if WITH_NAPARI:
         show_boundaries_widget = None
         select_data_widget = None
         filter_cells_widget = None
-        show_features_widget = None
+        show_units_widget = None
 
         def callback_update_legend(event=None):
             _update_colorlegend(viewer=viewer, viewer_config=viewer_config)
@@ -369,14 +369,14 @@ if WITH_NAPARI:
                 show_boundaries_widget.call_button.clicked.connect(callback_update_legend)
 
 
-        # ====== FEATURES WIDGET ======
-        # if not viewer_config.has_features:
-        #     show_features_widget = None
+        # ====== SPATIAL UNITS WIDGET ======
+        # if not viewer_config.has_units:
+        #     show_units_widget = None
         # else:
-        if viewer_config.has_features:
+        if viewer_config.has_units:
             # Prepare choices
-            obs_choices = [""] + sorted(list(viewer_config.feature_obs))
-            obsm_choices = [""] + sorted(list(viewer_config.feature_obsm))
+            obs_choices = [""] + sorted(list(viewer_config.unit_obs))
+            obsm_choices = [""] + sorted(list(viewer_config.unit_obsm))
 
             @magicgui(
                 call_button='Show',
@@ -385,7 +385,7 @@ if WITH_NAPARI:
                 obsm={'choices': obsm_choices, 'label': 'Obsm:'},
                 add_new_layer={'label': 'Add new layer'}
             )
-            def show_features_widget(
+            def show_units_widget(
                 gene="",
                 obs="",
                 obsm="",
@@ -412,40 +412,40 @@ if WITH_NAPARI:
 
                 # Validate key for genes
                 if key_type == "genes":
-                    if key not in viewer_config.feature_vars:
+                    if key not in viewer_config.unit_vars:
                         show_warning(f"Key '{key}' not found in genes.")
                         return None
 
                 # get expression values
                 color_values = _get_expression_values(
-                    adata=viewer_config.features.data,
-                    X=viewer_config.features.data.X,
+                    adata=viewer_config.units.data,
+                    X=viewer_config.units.data.X,
                     key_type=key_type, key=key
                 )
 
                 # Create layer name
-                layer_name = f"features-{key}"
+                layer_name = f"units-{key}"
 
-                # Get existing feature layers
-                feature_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("features-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
+                # Get existing spatial unit layers
+                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("units-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
 
-                if len(feature_layer_names) == 0:
-                    # Create new features layer
-                    feature_layer = _create_features_layer(
-                        gdf=viewer_config.features.shapes,
+                if len(unit_layer_names) == 0:
+                    # Create new spatial units layer
+                    unit_layer = _create_units_layer(
+                        gdf=viewer_config.units.shapes,
                         color_values=color_values,
                         name=layer_name,
-                        feature_names=viewer_config.features.shapes.index.tolist(),
+                        unit_names=viewer_config.units.shapes.index.tolist(),
                         edge_width=0,
                         opacity=0.5,
                         upper_climit_pct=99
                     )
-                    return feature_layer
+                    return unit_layer
                 else:
                     if not add_new_layer:
-                        # Update the existing features layer
-                        layer = viewer.layers[feature_layer_names[-1]]
-                        _update_features_layer(
+                        # Update the existing spatial units layer
+                        layer = viewer.layers[unit_layer_names[-1]]
+                        _update_units_layer(
                             layer=layer,
                             new_color_values=color_values,
                             new_name=layer_name
@@ -458,17 +458,17 @@ if WITH_NAPARI:
                             show_warning(f"Layer '{layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
                             return None
 
-                        # Create new features layer
-                        feature_layer = _create_features_layer(
-                            gdf=viewer_config.features.shapes,
+                        # Create new units layer
+                        unit_layer = _create_units_layer(
+                            gdf=viewer_config.units.shapes,
                             color_values=color_values,
                             name=layer_name,
-                            feature_names=viewer_config.features.shapes.index.tolist(),
+                            unit_names=viewer_config.units.shapes.index.tolist(),
                             edge_width=0,
                             opacity=0.5,
                             upper_climit_pct=99
                         )
-                        return feature_layer
+                        return unit_layer
 
             # Make the gene text field searchable with completer
             def _setup_searchable_textfield(widget, full_choices):
@@ -481,28 +481,28 @@ if WITH_NAPARI:
                     widget.native.setCompleter(completer)
 
             # Setup searchable text field for genes
-            _setup_searchable_textfield(show_features_widget.gene, viewer_config.feature_vars)
+            _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
 
             # Connect callbacks to ensure mutual exclusivity
-            @show_features_widget.gene.changed.connect
+            @show_units_widget.gene.changed.connect
             def _on_gene_changed(event=None):
-                if show_features_widget.gene.value != "":
-                    show_features_widget.obs.value = ""
-                    show_features_widget.obsm.value = ""
+                if show_units_widget.gene.value != "":
+                    show_units_widget.obs.value = ""
+                    show_units_widget.obsm.value = ""
 
-            @show_features_widget.obs.changed.connect
+            @show_units_widget.obs.changed.connect
             def _on_obs_changed(event=None):
-                if show_features_widget.obs.value != "":
-                    show_features_widget.gene.value = ""
-                    show_features_widget.obsm.value = ""
+                if show_units_widget.obs.value != "":
+                    show_units_widget.gene.value = ""
+                    show_units_widget.obsm.value = ""
 
-            @show_features_widget.obsm.changed.connect
+            @show_units_widget.obsm.changed.connect
             def _on_obsm_changed(event=None):
-                if show_features_widget.obsm.value != "":
-                    show_features_widget.gene.value = ""
-                    show_features_widget.obs.value = ""
+                if show_units_widget.obsm.value != "":
+                    show_units_widget.gene.value = ""
+                    show_units_widget.obs.value = ""
 
-            show_features_widget.call_button.clicked.connect(callback_update_legend)
+            show_units_widget.call_button.clicked.connect(callback_update_legend)
 
         # if data.annotations.is_empty and data.regions.is_empty:
         #     show_geometries_widget = None
@@ -626,7 +626,7 @@ if WITH_NAPARI:
             show_boundaries_widget,
             select_data_widget,
             filter_cells_widget,
-            show_features_widget,
+            show_units_widget,
             )
 
     # Difference between magicgui and magic_factory decorators:
@@ -819,7 +819,7 @@ if WITH_NAPARI:
                 show_boundaries_widget,
                 select_data,
                 filter_cells_widget,
-                show_features_widget,
+                show_units_widget,
             ) = _initialize_widgets(
                 viewer=viewer,
                 viewer_config=viewer_config
@@ -829,7 +829,7 @@ if WITH_NAPARI:
             widgets_config = [
                 (select_data, "Select data", 80, False),
                 (show_cells_widget, "Show data", 170, False),
-                (show_features_widget, "Show features", None, True),
+                (show_units_widget, "Show spatial units", None, True),
                 (show_boundaries_widget, "Show boundaries", None, False),
                 (locate_cells_widget, "Navigate to cell", None, False),
                 (filter_cells_widget, "Filter cells", 150, True),

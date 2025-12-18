@@ -14,7 +14,7 @@ import numpy as np
 
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses import CellData, FeatureData
+from insitupy.dataclasses import CellData, SpatialUnitsData
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata, _create_boundaries_from_spatialdata,
     _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,
@@ -213,8 +213,9 @@ def convert_from_spatialdata(
     table_key: str = 'table',
     # Cell parameters
     cells_key: Optional[str] = None,
-    # Features parameters
-    features_key: Optional[str] = None,
+    # Spatial units parameters
+    units_key: Optional[str] = None,
+    unit_type: Optional[str] = None,
     # Boundaries parameters
     cell_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (cell_boundaries_key, pixel_size)
     nucleus_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (nucleus_boundaries_key, pixel_size)
@@ -245,20 +246,12 @@ def convert_from_spatialdata(
         method_params=sdata.attrs,
     )
 
-    # # Determine pixel size
-    # if cells_key:
-    #     element_to_extract_from = cells_key
-    # elif features_key:
-    #     element_to_extract_from = features_key
-    # else:
-    #     raise ValueError("Either 'cells_key' or 'features_key' must be provided to extract pixel size.")
-
     if 'global' in sdata.coordinate_systems:
         logger.info("Using 'global' coordinate system for pixel size extraction.")
         cs = 'global'
-    elif features_key in sdata.coordinate_systems:
-        logger.info(f"Using '{features_key}' coordinate system for pixel size extraction.")
-        cs = features_key
+    elif units_key in sdata.coordinate_systems:
+        logger.info(f"Using '{units_key}' coordinate system for pixel size extraction.")
+        cs = units_key
     elif cells_key in sdata.coordinate_systems:
         logger.info(f"Using '{cells_key}' coordinate system for pixel size extraction.")
         cs = cells_key
@@ -316,11 +309,12 @@ def convert_from_spatialdata(
         elif verbose:
             logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
 
-    if features_key:
-        data.add_features(
-            FeatureData(
-                shapes=sdata.shapes[features_key],
+    if units_key:
+        data.add_units(
+            SpatialUnitsData(
+                shapes=sdata.shapes[units_key],
                 data=sdata[table_key],
+                unit_type=unit_type if unit_type is not None else "unit",
                 # pixel_size=pixel_size
                 )
             )

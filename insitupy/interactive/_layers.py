@@ -356,7 +356,7 @@ if WITH_NAPARI:
         if new_name is not None:
             layer.name = new_name
 
-    def _update_features_layer(
+    def _update_units_layer(
         layer: napari.layers.Layer,
         new_color_values: List[Number],
         new_name: Optional[str] = None,
@@ -365,7 +365,7 @@ if WITH_NAPARI:
         continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
         ) -> None:
         """
-        Update an existing features (shapes) layer with new color values.
+        Update an existing spatial units (shapes) layer with new color values.
 
         Args:
             layer: Existing napari shapes layer to update
@@ -397,11 +397,11 @@ if WITH_NAPARI:
         if new_name is not None:
             layer.name = new_name
 
-    def _create_features_layer(
+    def _create_units_layer(
             gdf: GeoDataFrame,
             color_values: Optional[List[Number]] = None,
-            name: str = "features",
-            feature_names: Optional[List[str]] = None,
+            name: str = "units",
+            unit_names: Optional[List[str]] = None,
             edge_width: Number = 2,
             opacity: float = 0.5,
             upper_climit_pct: int = 99,
@@ -410,13 +410,13 @@ if WITH_NAPARI:
             tolerance: Number = 1
         ) -> LayerDataTuple:
         """
-        Create a napari shapes layer from FeatureData GeoDataFrame.
+        Create a napari shapes layer from SpatialUnitsData GeoDataFrame.
 
         Args:
             gdf: GeoDataFrame with polygon geometries
             color_values: Values to color polygons by (optional)
             name: Layer name
-            feature_names: Names of features for properties
+            unit_names: Names of spatial units for properties
             edge_width: Edge width in physical units
             opacity: Polygon opacity
             upper_climit_pct: Upper percentile for color limits
@@ -480,13 +480,13 @@ if WITH_NAPARI:
 
         # Check if any shapes were created
         if len(shapes_list) == 0:
-            show_warning("No valid polygon geometries found in FeatureData. Cannot create shapes layer.")
+            show_warning("No valid polygon geometries found in SpatialUnitsData. Cannot create shapes layer.")
             return None
 
         # Prepare properties
         properties = {}
-        if feature_names is not None:
-            # Expand feature names for multi-polygons
+        if unit_names is not None:
+            # Expand units names for multi-polygons
             expanded_names = []
             for i, geom in enumerate(gdf.geometry):
                 geom = geom.simplify(tolerance)
@@ -495,8 +495,8 @@ if WITH_NAPARI:
                         n_polys = len(list(geom.geoms))
                     else:
                         n_polys = 1
-                    expanded_names.extend([feature_names[i]] * n_polys)
-            properties['feature_name'] = expanded_names
+                    expanded_names.extend([unit_names[i]] * n_polys)
+            properties['unit_name'] = expanded_names
 
         if color_values is not None:
             properties['value'] = expanded_colors

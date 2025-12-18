@@ -305,7 +305,8 @@ def read_visium(
             "hires": (f"{dataset_id}_hires_image", hires_pixel_size),
             "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size)
         },
-        features_key=dataset_id,
+        units_key=dataset_id,
+        unit_type="visium",
         cells_key=None,  # No cells available in Visium data
         table_key="table",
         cell_boundaries_data=None,  # Visium uses spots, not boundaries
@@ -313,7 +314,7 @@ def read_visium(
         transcripts_key=None,  # Visium doesn't have single-molecule transcripts
         slide_id=slide_id,
         sample_id=sample_id,
-        method_name="Visium",
+        method_name="visium",
     )
 
     return data

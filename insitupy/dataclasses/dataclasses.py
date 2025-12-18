@@ -1851,12 +1851,12 @@ class ImageData(DeepCopyMixin):
             return _self
 
 
-class FeatureData(DeepCopyMixin):
+class SpatialUnitsData(DeepCopyMixin):
     """
-    Object to store spatial features (e.g., functional tissue units, niches)
+    Object to store spatial units (e.g., functional tissue units, niches)
     with their associated omics data.
 
-    Features are stored as GeoDataFrames with polygon geometries, and their
+    Spatial units are stored as GeoDataFrames with polygon geometries, and their
     omics readouts are stored as AnnData objects. This provides
     flexibility for defining various spatial units beyond cells.
 
@@ -1868,23 +1868,23 @@ class FeatureData(DeepCopyMixin):
         self,
         shapes: Optional[gpd.GeoDataFrame],
         data: Optional[AnnData],
-        feature_type: str = "feature"
+        unit_type: str = "unit"
     ):
         """
-        Initialize FeatureData object.
+        Initialize SpatialUnitsData object.
 
         Args:
-            shapes: GeoDataFrame containing polygon geometries for features.
-                Should have columns: 'geometry', 'name' (feature identifier),
+            shapes: GeoDataFrame containing polygon geometries for spatial units.
+                Should have columns: 'geometry', 'name' (unit identifier),
                 and optionally 'color', 'type', etc.
                 All coordinates are assumed to be in physical units (usually µm).
             data: AnnData object with omics readouts. obs_names should
-                match feature names in the GeoDataFrame.
-            feature_type: Description of feature type (e.g., 'niche', 'functional_unit').
+                match unit names in the GeoDataFrame.
+            unit_type: Description of unit type (e.g., 'niche', 'functional_unit').
         """
         self._shapes = shapes.copy() if shapes is not None else gpd.GeoDataFrame()
         self._data = data.copy()
-        self._feature_type = feature_type
+        self._unit_type = unit_type
 
         # Convert Point geometries with radius to circles
         if not self._shapes.empty and 'radius' in self._shapes.columns:
@@ -1912,25 +1912,25 @@ class FeatureData(DeepCopyMixin):
             self._shapes.index = self._data.obs_names
 
     def __repr__(self):
-        n_features = len(self._shapes)
+        n_units = len(self._shapes)
         has_data = self._data is not None
 
-        if n_features > 0:
+        if n_units > 0:
             repr_str = (
-                f"{tf.Bold}FeatureData{tf.ResetAll} (Type: '{self._feature_type}')\n"
+                f"{tf.Bold}SpatialUnitsData{tf.ResetAll} (Type: '{self._unit_type}')\n"
             )
 
             if has_data:
                 repr_str += (
                     f"{tf.SPACER}.data: {self._data.n_obs} obs × "
                     f"{self._data.n_vars} vars\n"
-                    f"{tf.SPACER}.shapes: {n_features} geometries"
+                    f"{tf.SPACER}.shapes: {n_units} geometries"
                 )
 
             # if self._pixel_size is not None:
             #     repr_str += f"{tf.SPACER}Pixel size: {self._pixel_size} µm"
         else:
-            repr_str = "Empty FeatureData object"
+            repr_str = "Empty SpatialUnitsData object"
 
         return repr_str
 
@@ -1938,13 +1938,13 @@ class FeatureData(DeepCopyMixin):
         return len(self._shapes)
 
     def __getitem__(self, key):
-        """Subset FeatureData by feature indices or names."""
+        """Subset SpatialUnitsData by unit indices or names."""
         new_obj = self.copy()
 
         if isinstance(key, (int, slice, list, np.ndarray, pd.Series)):
             new_obj._shapes = new_obj._shapes.iloc[key].copy()
         elif isinstance(key, str):
-            # Assume string key is a feature name
+            # Assume string key is a unit name
             new_obj._shapes = new_obj._shapes[
                 new_obj._shapes['name'] == key
             ].copy()
@@ -1953,8 +1953,8 @@ class FeatureData(DeepCopyMixin):
 
         # Sync data if present
         if new_obj._data is not None:
-            feature_names = new_obj._shapes.index.tolist()
-            new_obj._data = new_obj._data[feature_names, :].copy()
+            unit_names = new_obj._shapes.index.tolist()
+            new_obj._data = new_obj._data[unit_names, :].copy()
 
         return new_obj
 
@@ -1994,9 +1994,9 @@ class FeatureData(DeepCopyMixin):
         self._data = value
 
     @property
-    def feature_type(self) -> str:
-        """Type of features stored."""
-        return self._feature_type
+    def unit_type(self) -> str:
+        """Type of spatial units stored."""
+        return self._unit_type
 
     @property
     def is_empty(self) -> bool:
@@ -2007,16 +2007,16 @@ class FeatureData(DeepCopyMixin):
         if self._data is None:
             return
 
-        feature_names = self._shapes.index
+        unit_names = self._shapes.index
         data_names = self._data.obs_names
 
-        if len(feature_names) != len(data_names):
+        if len(unit_names) != len(data_names):
             raise ValueError(
-                f"Number of shapes ({len(feature_names)}) does not match "
+                f"Number of shapes ({len(unit_names)}) does not match "
                 f"number of data obs ({len(data_names)})."
             )
 
-        if not np.all(feature_names == data_names):
+        if not np.all(unit_names == data_names):
             logger.warning(
                 f"Indices in `.shapes` do not match `.data.obs_names`. Shapes will be renamed according to the `obs_names`. "
                 f"For this to be valid, please make sure that the order of elements in `.shapes` and `.data` matches."
@@ -2031,7 +2031,7 @@ class FeatureData(DeepCopyMixin):
         verbose: bool = True
     ):
         """
-        Crop features to a specified region.
+        Crop spatial units to a specified region.
 
         Args:
             xlim: X-axis limits (min, max).
@@ -2041,7 +2041,7 @@ class FeatureData(DeepCopyMixin):
             verbose: Print status messages.
 
         Returns:
-            Cropped FeatureData if not inplace, else None.
+            Cropped SpatialUnitsData if not inplace, else None.
         """
         _self = self if inplace else self.copy()
 
@@ -2081,19 +2081,19 @@ class FeatureData(DeepCopyMixin):
 
     def sync(self, verbose: bool = False):
         """
-        Synchronize features and data to have matching indices.
-        Keeps only features present in both.
+        Synchronize spatial units and data to have matching indices.
+        Keeps only units present in both.
         """
         if self._data is None:
             if verbose:
                 print("No data to sync.")
             return
 
-        feature_names = set(self._shapes.index)
+        unit_names = set(self._shapes.index)
         data_names = set(self._data.obs_names)
-        common_names = feature_names & data_names
+        common_names = unit_names & data_names
 
-        # Filter features
+        # Filter units
         self._shapes = self._shapes.loc[list(common_names)]
 
         # Filter data
@@ -2143,7 +2143,7 @@ class FeatureData(DeepCopyMixin):
             verbose: If True, print status messages. Defaults to False.
 
         Returns:
-            FeatureData: Transformed FeatureData object if inplace=False, else None.
+            SpatialUnitsData: Transformed SpatialUnitsData object if inplace=False, else None.
 
         Raises:
             ValueError: If the transformation matrix has invalid dimensions or format.
