@@ -44,24 +44,24 @@ def read_baysor_cells(
     with open(tomlfile, 'r') as f:
         baysor_config = toml.load(f)
 
-    # read matrix
-    print("Parsing count matrix...", flush=True)
+    # read table
+    print("Parsing count table...", flush=True)
     loomfile = baysor_output / "segmentation_counts.loom"
-    matrix = sc.read_loom(loomfile)
+    table = sc.read_loom(loomfile)
 
     # set indices for .obs and .var
-    matrix.obs = matrix.obs.reset_index().set_index("Name")
-    matrix.obs["CellID"] = matrix.obs["CellID"].astype(float).astype(int) # convert cell id to int
-    matrix.var.set_index("Name", inplace=True)
+    table.obs = table.obs.reset_index().set_index("Name")
+    table.obs["CellID"] = table.obs["CellID"].astype(float).astype(int) # convert cell id to int
+    table.var.set_index("Name", inplace=True)
 
     # remove unassigned codewords from genes and obs entries with an NaN in any column
-    varmask = ~matrix.var_names.str.startswith("UnassignedCodeword")
-    obsmask = ~matrix.obs.isna().any(axis=1)
-    matrix = matrix[obsmask, varmask].copy()
+    varmask = ~table.var_names.str.startswith("UnassignedCodeword")
+    obsmask = ~table.obs.isna().any(axis=1)
+    table = table[obsmask, varmask].copy()
 
     # set spatial coordinates
-    matrix.obsm["spatial"] = matrix.obs[["x", "y"]].values
-    matrix.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
+    table.obsm["spatial"] = table.obs[["x", "y"]].values
+    table.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
 
     # read polygons
     print("Reading segmentation masks", flush=True)
@@ -69,15 +69,13 @@ def read_baysor_cells(
     jsonfile = baysor_output / "segmentation_polygons.json"
     df = _read_baysor_polygons(jsonfile)
 
-    # remove polygons of cells that have been removed in the matrix
-    df = df[df.cell.astype(int).isin(matrix.obs["CellID"])]
+    # remove polygons of cells that have been removed in the table
+    df = df[df.cell.astype(int).isin(table.obs["CellID"])]
 
     # determine dimensions of dataset based on polygons
     polygon_bounds = df.geometry.bounds
     xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
     ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
-    # xmax = ceil(matrix.obsm['spatial'][:, 0].max() + 15)
-    # ymax = ceil(matrix.obsm['spatial'][:, 1].max() + 15)
 
     # generate a segmentation mask
     print("\tConvert polygons to segmentation mask", flush=True)
@@ -87,12 +85,12 @@ def read_baysor_cells(
     img = da.from_array(img)
 
     # create boundaries object
-    cell_ids = da.from_array(matrix.obs["CellID"].values) # extract cell ids from adata
+    cell_ids = da.from_array(table.obs["CellID"].values) # extract cell ids from adata
     seg_mask_value = da.from_array(sorted(df["cell"]))
     boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
     boundaries.add_boundaries(data={f"cellular": img}, pixel_size=pixel_size)
 
-    celldata = CellData(matrix=matrix, boundaries=boundaries, config=baysor_config)
+    celldata = CellData(table=table, boundaries=boundaries, config=baysor_config)
 
     return celldata
 
@@ -104,8 +102,11 @@ def read_celldata(
     path = Path(path)
     celldata_metadata = read_json(path / ".celldata")
 
-    # read matrix data
-    matrix = sc.read_h5ad(path / celldata_metadata["matrix"])
+    # read table data
+    try:
+        table = sc.read_h5ad(path / celldata_metadata["table"])
+    except KeyError:
+        table = sc.read_h5ad(path / celldata_metadata["matrix"]) # previously it was called matrix
 
     # get path of boundaries data
     bound_path = path / celldata_metadata["boundaries"]
@@ -206,7 +207,7 @@ def read_celldata(
         config = {}
 
     # create CellData object
-    celldata = CellData(matrix=matrix, boundaries=boundaries, config=config)
+    celldata = CellData(table=table, boundaries=boundaries, config=config)
 
     return celldata
 

@@ -16,7 +16,7 @@ from insitupy._io._qupath import (_read_boundaries_qupath,
                                   _read_measurements_qupath)
 from insitupy._io._read import _read_boundaries, _read_measurements
 from insitupy._io._xenium import (_read_boundaries_from_xenium,
-                                  _read_matrix_from_xenium,
+                                  _read_table_from_xenium,
                                   _restructure_transcripts_dataframe)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
@@ -146,10 +146,10 @@ def read_xenium(
             print("Loading cells...", flush=True)
 
         # read celldata
-        matrix = _read_matrix_from_xenium(path=data.path)
+        table = _read_table_from_xenium(path=data.path)
         boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)
         #data.cells = MultiCellData()
-        cd = CellData(matrix=matrix, boundaries=boundaries)
+        cd = CellData(table=table, boundaries=boundaries)
         data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
         # LOAD IMAGES
@@ -439,7 +439,7 @@ def read_any(
     )
 
     # Add CellData
-    cd = CellData(matrix=adata, boundaries=boundaries)
+    cd = CellData(table=adata, boundaries=boundaries)
     data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
     # Add ImageData if provided
@@ -567,7 +567,7 @@ def read_qupath(
     )
 
     # --- Add CellData ---
-    cd = CellData(matrix=adata, boundaries=boundaries)
+    cd = CellData(table=adata, boundaries=boundaries)
     data.cells.add_celldata(
         cd=cd, key="main", is_main=True
     )
@@ -586,91 +586,3 @@ def read_qupath(
     )
 
     return data
-
-
-# def read_xenium_from_spatialdata(
-#     path: Union[str, os.PathLike, Path],
-#     load_cell_segmentation_images: bool = False,
-#     load_background_images: bool = False,
-#     verbose: bool = True,
-# ) -> InSituData:
-#     """
-#     Reads Xenium In Situ data using spatialdata-io and converts to InSituData.
-
-#     Args:
-#         path: Path to the Xenium data bundle.
-#         load_cell_segmentation_images: Whether to load cell segmentation images.
-#         load_background_images: Whether to load background images.
-#         verbose: Whether to print progress messages.
-
-#     Returns:
-#         InSituData: An object containing the processed Xenium experiment data.
-#     """
-#     from spatialdata_io import xenium
-
-#     path = Path(path)
-
-#     # Read using spatialdata-io
-#     if verbose:
-#         print("Reading Xenium data with spatialdata-io...", flush=True)
-
-#     sdata = xenium(path)
-
-#     # Extract metadata
-#     slide_id = sdata.attrs.get("slide_id", "unknown")
-#     sample_id = sdata.attrs.get("region_name", "unknown")
-
-#     # Initialize InSituData
-#     data = InSituData(
-#         path=path,
-#         metadata=None,
-#         slide_id=slide_id,
-#         sample_id=sample_id,
-#         method_name="Xenium",
-#         method_params=sdata.attrs,
-#     )
-
-#     # LOAD CELLS
-#     if verbose:
-#         print("Converting cell data...", flush=True)
-
-#     # Get expression matrix from spatialdata (typically in sdata.table)
-#     if sdata.table is not None:
-#         matrix = sdata.table.to_df()
-#     else:
-#         matrix = None
-
-#     # Get cell boundaries from shapes
-#     boundaries = None
-#     if "cell_boundaries" in sdata.shapes:
-#         boundaries = sdata.shapes["cell_boundaries"]
-#     elif len(sdata.shapes) > 0:
-#         # Take first available shape
-#         boundaries = list(sdata.shapes.values())[0]
-
-#     if matrix is not None or boundaries is not None:
-#         cd = CellData(matrix=matrix, boundaries=boundaries)
-#         data.cells.add_celldata(cd=cd, key="main", is_main=True)
-
-#     # LOAD IMAGES
-#     if verbose:
-#         print("Converting images...", flush=True)
-
-#     for img_name, img_data in sdata.images.items():
-#         # Filter based on user preferences
-#         if not load_cell_segmentation_images and ("cellseg" in img_name.lower() or img_name in CELLSEG_NAMES):
-#             continue
-#         if not load_background_images and img_name.endswith("_background"):
-#             continue
-
-#         data.images.add_image(img_data, img_name, overwrite=False, verbose=verbose)
-
-#     # LOAD TRANSCRIPTS
-#     if verbose:
-#         print("Converting transcripts...", flush=True)
-
-#     if "transcripts" in sdata.points:
-#         data.transcripts = sdata.points["transcripts"].to_dask_dataframe()
-
-#     return data
-

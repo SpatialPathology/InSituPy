@@ -109,13 +109,14 @@ def test_transformations(
     log1p-transformed, and sqrt-transformed counts.
 
     Args:
-        adata (AnnData): Annotated data matrix.
+        adata (AnnData): Omics data as AnnData object.
         target_sum (int, optional): Target sum for normalization. Defaults to 1e4.
         layer (str, optional): Layer to use for transformation. Defaults to None.
     """
     # retrieve AnnData from cell layer
     celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-    adata = celldata.table.copy() # copy it to not affect it during the plotting    # Check if the matrix consists of raw integer counts
+    adata = celldata.table.copy() # copy it to not affect it during the plotting
+    # Check if the matrix consists of raw integer counts
     if layer is None:
         if assert_integer_counts:
             check_integer_counts(adata.X)

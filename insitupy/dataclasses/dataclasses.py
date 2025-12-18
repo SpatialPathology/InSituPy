@@ -708,19 +708,19 @@ class CellData(DeepCopyMixin):
     Data object containing an AnnData object and a boundary object which are kept in sync.
     '''
     def __init__(self,
-               matrix: AnnData,
+               table: AnnData,
                boundaries: Optional[BoundariesData],
                config: dict = {}
                ):
-        self._matrix = matrix
+        self._table = table
         self._config = config
 
         if boundaries is not None:
             self._boundaries = boundaries
-            self._entries = ["matrix", "boundaries"]
+            self._entries = ["table", "boundaries"]
         else:
             self._boundaries = None
-            self._entries = ["matrix"]
+            self._entries = ["table"]
 
     def __getitem__(self, key):
         """Retrieve a subset of the `CellData` object.
@@ -733,7 +733,7 @@ class CellData(DeepCopyMixin):
             `CellData`: A new `CellData` object with the selected subset of cells.
         """
         new_celldata = self.copy()
-        new_celldata._matrix = new_celldata._matrix[key].copy()
+        new_celldata._table = new_celldata._table[key].copy()
         new_celldata.sync()
         return new_celldata
 
@@ -747,8 +747,8 @@ class CellData(DeepCopyMixin):
 
     def __repr__(self):
         repr = (
-            f"{tf.Bold+'matrix'+tf.ResetAll}\n"
-            f"{tf.SPACER+self._matrix.__repr__()}"
+            f"{tf.Bold+'table'+tf.ResetAll}\n"
+            f"{tf.SPACER+self._table.__repr__()}"
         )
 
         if self._boundaries is not None:
@@ -763,7 +763,7 @@ class CellData(DeepCopyMixin):
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead."
         )
-        return self._matrix
+        return self._table
 
     @matrix.setter
     def matrix(self, value: AnnData):
@@ -773,19 +773,19 @@ class CellData(DeepCopyMixin):
         )
         if not isinstance(value, AnnData):
             raise ValueError(f"Matrix must be an AnnData object. Instead: {type(value)}.")
-        self._matrix = value
+        self._table = value
 
     @property
     def table(self):
         """Alias for matrix property. This is the preferred name going forward."""
-        return self._matrix
+        return self._table
 
     @table.setter
     def table(self, value: AnnData):
         """Alias for matrix setter. This is the preferred name going forward."""
         if not isinstance(value, AnnData):
             raise ValueError(f"Table must be an AnnData object. Instead: {type(value)}.")
-        self._matrix = value
+        self._table = value
 
     @property
     def config(self):
@@ -899,10 +899,10 @@ class CellData(DeepCopyMixin):
         # create directory
         path.mkdir(parents=True, exist_ok=True)
 
-        # write matrix to file
-        mtx_file = path / "matrix.h5ad"
-        self._matrix.write(mtx_file)
-        celldata_metadata["matrix"] = Path(relpath(mtx_file, path)).as_posix()
+        # write table to file
+        mtx_file = path / "table.h5ad"
+        self._table.write(mtx_file)
+        celldata_metadata["table"] = Path(relpath(mtx_file, path)).as_posix()
 
         # save boundaries
         if self._boundaries is not None:
@@ -933,16 +933,16 @@ class CellData(DeepCopyMixin):
     def sync(self,
              verbose: bool = False):
         '''
-        Function to synchronize matrix and boundaries of CellData.
+        Function to synchronize table and boundaries of CellData.
 
         Procedure:
-        1. Select matrix cell IDs
-        2. Check if all matrix cell IDs are in boundaries
+        1. Select table cell IDs
+        2. Check if all table cell IDs are in boundaries
             - if not all are in boundaries, throw error saying that those will also be removed
-        3. Select only matrix cell IDs which are also in boundaries and filter for them
+        3. Select only table cell IDs which are also in boundaries and filter for them
         '''
-        # get cell IDs from matrix
-        matrix_cell_ids_hex = self._matrix.obs_names.astype(str)
+        # get cell IDs from table
+        table_cell_ids_hex = self._table.obs_names.astype(str)
 
         if self._boundaries is None:
             print('No `boundaries` attribute found in CellData found.')
@@ -955,17 +955,17 @@ class CellData(DeepCopyMixin):
                 index=boundaries.cell_names
                 )
 
-            filter_mask_in = ds.index.isin(matrix_cell_ids_hex)
+            filter_mask_in = ds.index.isin(table_cell_ids_hex)
 
             if not np.any(filter_mask_in):
-                raise ValueError("No matching values between boundaries.cell_names and matrix.obs_names. All boundaries would get filtered out.")
+                raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All boundaries would get filtered out.")
 
             # filter cell names and seg_mask_values
             boundaries._seg_mask_value = da.from_array(np.array(ds[filter_mask_in]))
             boundaries._cell_names = da.from_array(np.array(ds.index[filter_mask_in], dtype=str))
 
             # find the seg_mask_values which are not anymore present
-            seg_mask_values_not_in_matrix = ds[~filter_mask_in].values
+            seg_mask_values_not_in_table = ds[~filter_mask_in].values
 
             # extract boundaries
             cell_bounds = boundaries["cells"]
@@ -975,7 +975,7 @@ class CellData(DeepCopyMixin):
                 if nuc_bounds is not None:
                     assert isinstance (nuc_bounds, list), "Cellular boundaries are a image pyramid but nuclear boundaries are not. Both need to be of the same type for the synchronization to work."
                 for i, cell_bound in enumerate(cell_bounds):
-                    removed_cells_mask = da.isin(cell_bound, seg_mask_values_not_in_matrix)
+                    removed_cells_mask = da.isin(cell_bound, seg_mask_values_not_in_table)
                     cell_bound[removed_cells_mask] = 0 # set all removed cells 0
                     if nuc_bounds is not None:
                         nuc_bounds[i][removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
@@ -983,7 +983,7 @@ class CellData(DeepCopyMixin):
                 if nuc_bounds is not None:
                     assert isinstance (nuc_bounds, da.core.Array), "Cellular boundaries are a dask array but nuclear boundaries are not. Both need to be of the same type for the synchronization to work."
                 # set all non existent cell ids to zero
-                removed_cells_mask = da.isin(cell_bounds, seg_mask_values_not_in_matrix)
+                removed_cells_mask = da.isin(cell_bounds, seg_mask_values_not_in_table)
                 cell_bounds[removed_cells_mask] = 0 # set all removed cells 0
 
                 if nuc_bounds is not None:
@@ -999,14 +999,14 @@ class CellData(DeepCopyMixin):
               y: Union[int, float]
               ):
         '''
-        Function to shift the coordinates of both matrix and boundaries data by certain values x/y.
+        Function to shift the coordinates of both table and boundaries data by certain values x/y.
         '''
 
         # move origin again to 0 by subtracting the lower limits from the coordinates
-        cell_coords = self._matrix.obsm['spatial'].copy()
+        cell_coords = self._table.obsm['spatial'].copy()
         cell_coords[:, 0] += x
         cell_coords[:, 1] += y
-        self._matrix.obsm['spatial'] = cell_coords
+        self._table.obsm['spatial'] = cell_coords
 
         if self._boundaries is None:
             print('No `boundaries` attribute found in CellData found.')
@@ -1191,7 +1191,7 @@ class MultiCellData(DeepCopyMixin):
             )
 
         # Create cell data and add to object
-        celldata = CellData(matrix=adata, boundaries=boundaries)
+        celldata = CellData(table=adata, boundaries=boundaries)
 
         self.add_celldata(cd=celldata, key=key, is_main=is_main)
 
@@ -1704,45 +1704,45 @@ class ImageData(DeepCopyMixin):
 
             # Read file based on extension
             if transformation_matrix.suffix.lower() in ['.csv', '.txt']:
-                matrix = pd.read_csv(transformation_matrix, header=None).values
+                M = pd.read_csv(transformation_matrix, header=None).values
             elif transformation_matrix.suffix.lower() in ['.xlsx', '.xls']:
-                matrix = pd.read_excel(transformation_matrix, header=None).values
+                M = pd.read_excel(transformation_matrix, header=None).values
             else:
                 raise ValueError(f"Unsupported file format: {transformation_matrix.suffix}. Use .csv, .txt, .xlsx, or .xls")
         else:
-            matrix = np.array(transformation_matrix)
+            M = np.array(transformation_matrix)
 
         # Validate matrix dimensions
-        if matrix.shape not in [(2, 3), (3, 3)]:
+        if M.shape not in [(2, 3), (3, 3)]:
             raise ValueError(
-                f"Transformation matrix must be 2x3 or 3x3, got shape {matrix.shape}. "
+                f"Transformation matrix must be 2x3 or 3x3, got shape {M.shape}. "
                 f"Expected format:\n"
                 f"[[a, b, xoff],\n"
                 f" [d, e, yoff]] or with [0, 0, 1] as third row."
             )
 
         # Extract transformation parameters
-        if matrix.shape == (3, 3):
+        if M.shape == (3, 3):
             # Validate that the third row is [0, 0, 1]
-            if not np.allclose(matrix[2, :], [0, 0, 1]):
+            if not np.allclose(M[2, :], [0, 0, 1]):
                 raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
-            matrix = matrix[:2, :]
+            M = M[:2, :]
 
         # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
         if reference_pixel_size is not None:
-            matrix = matrix.copy().astype(np.float64)
+            M = M.copy().astype(np.float64)
 
             if source_pixel_size is not None:
-                matrix[:2, :2] *= (reference_pixel_size / source_pixel_size)
+                M[:2, :2] *= (reference_pixel_size / source_pixel_size)
 
-            matrix[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
-            matrix[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
+            M[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
+            M[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
             if verbose:
                 print(f"Converted transformation matrix from pixel coordinates "
                       f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
 
         if verbose:
-            print(f"Applying transformation matrix (in physical coordinates):\n{matrix}")
+            print(f"Applying transformation matrix (in physical coordinates):\n{M}")
 
         # Apply transformation to each image
         for name in list(_self._metadata.keys()):
@@ -1765,9 +1765,9 @@ class ImageData(DeepCopyMixin):
             # Scale transformation matrix based on pixel size
             # The transformation matrix is now in physical coordinates (µm)
             # We need to convert to pixel coordinates for this specific image
-            scaled_matrix = matrix.copy().astype(np.float64)
-            scaled_matrix[0, 2] /= pixel_size  # Scale x offset: µm → pixels
-            scaled_matrix[1, 2] /= pixel_size  # Scale y offset: µm → pixels
+            scaled_M = M.copy().astype(np.float64)
+            scaled_M[0, 2] /= pixel_size  # Scale x offset: µm → pixels
+            scaled_M[1, 2] /= pixel_size  # Scale y offset: µm → pixels
 
             # Get image dimensions
             img_axes = ImageAxes(axes)
@@ -1788,7 +1788,7 @@ class ImageData(DeepCopyMixin):
                 # Grayscale image (YX)
                 transformed = cv2.warpAffine(
                     img_to_transform,
-                    scaled_matrix,
+                    scaled_M,
                     (w, h),
                     flags=cv2.INTER_LINEAR,
                     borderMode=cv2.BORDER_CONSTANT,
@@ -1799,7 +1799,7 @@ class ImageData(DeepCopyMixin):
                     # RGB image - transform directly
                     transformed = cv2.warpAffine(
                         img_to_transform,
-                        scaled_matrix,
+                        scaled_M,
                         (w, h),
                         flags=cv2.INTER_LINEAR,
                         borderMode=cv2.BORDER_CONSTANT,
@@ -1813,7 +1813,7 @@ class ImageData(DeepCopyMixin):
                         channel = np.take(img_to_transform, c, axis=img_axes.C)
                         transformed_channel = cv2.warpAffine(
                             channel,
-                            scaled_matrix,
+                            scaled_M,
                             (w, h),
                             flags=cv2.INTER_LINEAR,
                             borderMode=cv2.BORDER_CONSTANT,
@@ -2169,47 +2169,47 @@ class SpatialUnitsData(DeepCopyMixin):
 
             # Read file based on extension
             if transformation_matrix.suffix.lower() in ['.csv', '.txt']:
-                matrix = pd.read_csv(transformation_matrix, header=None).values
+                M = pd.read_csv(transformation_matrix, header=None).values
             elif transformation_matrix.suffix.lower() in ['.xlsx', '.xls']:
-                matrix = pd.read_excel(transformation_matrix, header=None).values
+                M = pd.read_excel(transformation_matrix, header=None).values
             else:
                 raise ValueError(f"Unsupported file format: {transformation_matrix.suffix}. Use .csv, .txt, .xlsx, or .xls")
         else:
-            matrix = np.array(transformation_matrix)
+            M = np.array(transformation_matrix)
 
         # Validate matrix dimensions
-        if matrix.shape not in [(2, 3), (3, 3)]:
+        if M.shape not in [(2, 3), (3, 3)]:
             raise ValueError(
-                f"Transformation matrix must be 2x3 or 3x3, got shape {matrix.shape}. "
+                f"Transformation matrix must be 2x3 or 3x3, got shape {M.shape}. "
                 f"Expected format:\n"
                 f"[[a, b, xoff],\n"
                 f" [d, e, yoff]] or with [0, 0, 1] as third row."
             )
 
         # Extract transformation parameters
-        if matrix.shape == (3, 3):
+        if M.shape == (3, 3):
             # Validate that the third row is [0, 0, 1]
-            if not np.allclose(matrix[2, :], [0, 0, 1]):
+            if not np.allclose(M[2, :], [0, 0, 1]):
                 raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
-            matrix = matrix[:2, :]
+            M = M[:2, :]
 
         # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
         if reference_pixel_size is not None:
-            matrix = matrix.copy().astype(np.float64)
+            M = M.copy().astype(np.float64)
 
             if source_pixel_size is not None:
-                matrix[:2, :2] *= (reference_pixel_size / source_pixel_size)
+                M[:2, :2] *= (reference_pixel_size / source_pixel_size)
 
-            matrix[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
-            matrix[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
+            M[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
+            M[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
             if verbose:
                 print(f"Converted transformation matrix from pixel coordinates "
                       f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
 
         # Apply transformation to geometries using shapely's affine_transform
         # Matrix format for shapely: [a, b, d, e, xoff, yoff]
-        a, b, xoff = matrix[0, :]
-        d, e, yoff = matrix[1, :]
+        a, b, xoff = M[0, :]
+        d, e, yoff = M[1, :]
 
         if verbose:
             print(f"Applying transformation (in physical coordinates): "

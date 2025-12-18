@@ -97,7 +97,7 @@ def filter_cells(
                 **kwargs
             )
 
-        # sync cell names between boundaries and matrix
+        # sync cell names between boundaries and table
         celldata.sync()
 
 def filter_genes(

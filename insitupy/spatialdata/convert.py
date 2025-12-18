@@ -20,8 +20,8 @@ from insitupy.spatialdata._convert import (
     _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,
     _transform_annotations_for_spatialdata,
     _transform_cell_boundaries_for_spatialdata,
-    _transform_images_for_spatialdata, _transform_matrix_for_spatialdata,
-    _transform_regions_for_spatialdata, _transform_transcripts_for_spatialdata,
+    _transform_images_for_spatialdata, _transform_regions_for_spatialdata,
+    _transform_table_for_spatialdata, _transform_transcripts_for_spatialdata,
     _validate_boundaries_data_format, _validate_image_data_format)
 
 logger = logging.getLogger(__name__)
@@ -158,7 +158,7 @@ def convert_to_spatialdata_dict(
             sample_id = meta["uid"]
         # create SpatialData dictionary
         transcripts = _transform_transcripts_for_spatialdata(d, sample_id=sample_id)
-        tables, cell_shapes = _transform_matrix_for_spatialdata(d, sample_id=sample_id)
+        tables, cell_shapes = _transform_table_for_spatialdata(d, sample_id=sample_id)
         annotations = _transform_annotations_for_spatialdata(d, sample_id=sample_id)
         regions = _transform_regions_for_spatialdata(d, sample_id=sample_id)
         images = _transform_images_for_spatialdata(d, n_pyramids=n_pyramids, sample_id=sample_id)
@@ -280,18 +280,18 @@ def convert_from_spatialdata(
         _validate_boundaries_data_format(cell_boundaries_data, param_name="cell_boundaries_data")
         _validate_boundaries_data_format(nucleus_boundaries_data, param_name="nucleus_boundaries_data")
 
-        # LOAD CELLS (matrix + boundaries)
+        # LOAD CELLS (table + boundaries)
         if table_key is not None:
             if table_key in sdata:
                 if verbose:
                     print("Adding cell data...", flush=True)
-            matrix = sdata[table_key]
-            cell_names = np.array(matrix.obs_names)
+            table = sdata[table_key]
+            cell_names = np.array(table.obs_names)
 
-            if spatial_key in matrix.obsm:
+            if spatial_key in table.obsm:
                 logger.warning(f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using centroids from `'{cells_key}'`.")
 
-            matrix.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
+            table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
 
             # Prepare boundaries if keys provided
             boundaries = None
@@ -304,7 +304,7 @@ def convert_from_spatialdata(
                     # pixel_size
                 )
 
-            cd = CellData(matrix=matrix, boundaries=boundaries)
+            cd = CellData(table=table, boundaries=boundaries)
             data.cells.add_celldata(cd=cd, key="main", is_main=True)
         elif verbose:
             logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)

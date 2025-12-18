@@ -205,7 +205,7 @@ def _transform_transcripts_for_spatialdata(
     return points
 
 
-def _transform_matrix_for_spatialdata(
+def _transform_table_for_spatialdata(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
@@ -218,7 +218,7 @@ def _transform_matrix_for_spatialdata(
                 tables_key = _generate_spatialdata_key(
                     sample_id=sample_id,
                     modality="cells",
-                    locator=[cell_key, "matrix"]
+                    locator=[cell_key, "table"]
                 )
 
                 circles_dict_key = _generate_spatialdata_key(

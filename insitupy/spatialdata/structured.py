@@ -70,13 +70,13 @@ class StructuredBoundariesData:
 
 class StructuredCellData:
     def __init__(self):
-        self.matrix: Optional[AnnData] = None
+        self.table: Optional[AnnData] = None
         self.boundaries = StructuredBoundariesData()
 
     def __repr__(self):
         repr_str = ""
-        if self.matrix is not None:
-            repr_str += f"{tf.Bold+'table'+tf.ResetAll}\n{tf.SPACER}{self.matrix.__repr__()}"
+        if self.table is not None:
+            repr_str += f"{tf.Bold+'table'+tf.ResetAll}\n{tf.SPACER}{self.table.__repr__()}"
         if len(self.boundaries._data) > 0:
             bound_repr = self.boundaries.__repr__().replace("\n", f"\n{tf.SPACER}")
             repr_str += f"\n{tf.Bold+'boundaries'+tf.ResetAll}\n{tf.SPACER}{bound_repr}"
@@ -138,14 +138,14 @@ class StructuredMultiCellData:
         self._main_key = key
 
     @property
-    def matrix(self):
+    def table(self):
         try:
             return self._layers[self._main_key].table
         except KeyError:
             print("MultiCellData object is empty.")
             return None
         except AttributeError:
-            print("No matrix available.")
+            print("No table available.")
             return None
 
     @property
@@ -283,7 +283,7 @@ class StructuredSpatialData:
                 cell_key = parts[1]
                 if cell_key not in data._cells._layers:
                     data._cells[cell_key] = StructuredCellData()
-                if parts[2] == "matrix":
+                if parts[2] == "table":
                     data._cells[cell_key].table = elem
                 elif parts[2] == "boundaries":
                     data._cells[cell_key].boundaries[parts[3]] = elem

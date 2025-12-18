@@ -21,7 +21,7 @@ from insitupy.utils.utils import (convert_int_to_xenium_hex,
                                   decode_robust_series)
 
 
-def _read_matrix_from_xenium(path) -> AnnData:
+def _read_table_from_xenium(path) -> AnnData:
     # extract parameters from metadata
     path = Path(path)
     cf_h5_path = path / "cell_feature_matrix.h5"

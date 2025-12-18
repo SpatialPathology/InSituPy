@@ -1487,13 +1487,13 @@ class InSituExperiment:
                         struct_data._cells[cell_key] = StructuredCellData()
 
                     if len(parts) >= 3:
-                        if parts[2] == "matrix":
+                        if parts[2] == "table":
                             struct_data._cells[cell_key].table = elem
                         elif parts[2] == "boundaries" and len(parts) >= 4:
                             boundary_name = parts[3]
                             struct_data._cells[cell_key].boundaries[boundary_name] = elem
                         elif parts[2] in ["circles", "circles_sized"]:
-                            # Skip circles representations (derived from matrix)
+                            # Skip circles representations (derived from table)
                             pass
 
             elif modality == "TRANSCRIPTS":

@@ -115,7 +115,7 @@ class ModalityNotFoundError(Exception):
 
     Args:
         modality:
-            Name of the modality (e.g. matrix)
+            Name of the modality (e.g. table)
     """
 
     def __init__(self,
@@ -132,7 +132,7 @@ class ModalityNotFoundWarning(UserWarning):
 
     Args:
         modality:
-            Name of the modality (e.g. matrix)
+            Name of the modality (e.g. table)
     """
     def __init__(self, modality: str):
         message = f"No '{modality}' modality found."

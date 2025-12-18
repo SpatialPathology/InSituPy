@@ -75,7 +75,7 @@ def calc_density(
     Spatial coordinates are expected to be saved in `adata.obsm["spatial"]`.
 
     Args:
-        adata (AnnData): The annotated data matrix.
+        adata (AnnData): Omics data as AnnData object.
         groupby (str): The column in `adata.obs` to group by.
         mode (Literal["gauss", "mellon"], optional): The mode of density estimation.
             "gauss" for Gaussian KDE using scipy, "mellon" for Mellon density estimator.
