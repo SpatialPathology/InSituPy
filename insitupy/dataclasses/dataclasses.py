@@ -1285,7 +1285,7 @@ class ImageData(DeepCopyMixin):
                 #impath = path / f
                 self.add_image(
                     image=f,
-                    name=n,
+                    channel_names=n,
                     axes=None,
                     pixel_size=pixel_size,
                     ome_meta=None,
@@ -1308,6 +1308,25 @@ class ImageData(DeepCopyMixin):
     def __getitem__(self, key):
         return self._data.get(key)
 
+    def __delitem__(self, key: str):
+        """Remove an image by name using del syntax.
+
+        Args:
+            key: Name of the image to remove.
+
+        Raises:
+            KeyError: If the image name is not found.
+
+        Example:
+            >>> del img_data['DAPI']
+        """
+        if key not in self._names:
+            raise KeyError(f"Image '{key}' not found in ImageData. Available images: {self._names}")
+
+        del self._data[key]
+        self._names.remove(key)
+        self._metadata.pop(key, None)
+
     def keys(self):
         return self._data.keys()
 
@@ -1326,107 +1345,367 @@ class ImageData(DeepCopyMixin):
     def add_image(
         self,
         image: Union[da.core.Array, np.ndarray, str, os.PathLike, Path],
-        name: str,
+        channel_names: Optional[Union[str, List[str]]] = None,
         axes: Optional[str] = None, # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
         pixel_size: Optional[Number] = None,
         ome_meta: Optional[dict] = {},
         is_rgb: Optional[bool] = None,
+        transformation_matrix: Optional[Union[np.ndarray, str, os.PathLike, Path]] = None,
+        reference_image: Optional[str] = None,
         overwrite: bool = False,
         verbose: bool = True
         ):
+        """Add image data to the ImageData object.
+
+        For multi-channel images ("CYX" axes), each channel is added as a separate entry.
+        RGB images ("YXS" axes with 3 channels) are kept together as a single entry.
+
+        Args:
+            image: Either a dask/numpy array or a path to an image file.
+            channel_names: Name identifier(s) for the image. For multi-channel images (CYX), provide
+                a list of names (one per channel). For single-channel or RGB images, provide
+                a string. If None, channel names are automatically extracted from OME metadata.
+            axes: Axis specification (e.g., 'YX', 'CYX', 'YXS'). Required if image is an array.
+            pixel_size: Physical pixel size in µm/pixel. Required if image is an array.
+            ome_meta: OME metadata dictionary.
+            is_rgb: Whether the image is RGB. Auto-detected if None.
+            transformation_matrix: Optional affine transformation matrix to apply to the image.
+                Can be a 2x3 or 3x3 numpy array, or a path to a CSV/Excel file containing the matrix.
+                The matrix should be in the form:
+                [[a, b, xoff],
+                 [d, e, yoff]]
+                or with [0, 0, 1] as third row.
+            reference_image: Name of the reference image in this ImageData object. If provided,
+                the transformation matrix offsets are assumed to be in pixel coordinates at the
+                reference image's resolution and will be converted to physical coordinates.
+                The pixel size and output canvas size are automatically retrieved from the
+                reference image's metadata. If not provided, the transformation matrix is assumed
+                to be in physical coordinates (µm) and the output size matches the input image.
+            overwrite: If True, overwrite existing image(s) with the same name(s).
+            verbose: If True, print status messages.
+
+        Example:
+            >>> # Add single-channel image
+            >>> img_data.add_image(image_array, name='DAPI', axes='YX', pixel_size=0.5)
+
+            >>> # Add multi-channel IF image (splits into separate channels)
+            >>> img_data.add_image(
+            ...     multichannel_image,
+            ...     channel_names=['DAPI', 'CD45', 'PanCK'],  # One name per channel
+            ...     axes='CYX',
+            ...     pixel_size=0.5
+            ... )
+
+            >>> # Add multi-channel with auto-detected names from OME metadata
+            >>> img_data.add_image(ome_tiff_path, name=None)  # Extracts channel names automatically
+
+            >>> # Add RGB image (keeps all 3 channels together)
+            >>> img_data.add_image(
+            ...     rgb_image,
+            ...     name='HE',
+            ...     axes='YXS',
+            ...     pixel_size=0.5
+            ... )
+        """
+        # Load image data
+        if isinstance(image, da.core.Array) or isinstance(image, np.ndarray):
+            assert axes is not None, "If `image` is numpy or dask array, `axes` needs to be set."
+            assert pixel_size is not None, "If `image` is numpy or dask array, `pixel_size` needs to be set."
+
+            try:
+                # convert to dask array before addition
+                img = da.from_array(image)
+            except ValueError:
+                # in this case the array was already a dask array
+                img = image
+            filename = None
+
+        elif Path(str(image)).exists():
+            # read path
+            image = Path(image)
+            image = image.resolve() # resolve relative path
+            filename = image.name
+            img, ome_meta, axes, pixel_size = read_image(image) # returns image pyramid as list of dask arrays if possible
+        else:
+            raise ValueError(f"`image` is neither a dask array nor an existing path. Instead: {type(image)}")
+
+        # Transpose image to standard axis order (YX, CYX, or YXS)
+        img, axes = _transpose_to_standard_axes(img, axes)
+
+        # Get image shape
+        img_shape = img[0].shape if isinstance(img, list) else img.shape
+
+        # Determine if this is a multi-channel image that should be split
+        axes_config = ImageAxes(axes)
+        is_multichannel = axes == "CYX" or (axes_config.C is not None and axes != "YXS")
+
+        # Handle channel names for multi-channel images
+        if is_multichannel:
+            n_channels = img_shape[axes_config.C]
+
+            # Extract or validate channel names
+            if channel_names is None:
+                # Try to extract from OME metadata
+                if ome_meta and 'Image' in ome_meta:
+                    try:
+                        channels_info = ome_meta['Image']['Pixels']['Channel']
+                        # Handle both single channel (dict) and multiple channels (list)
+                        if isinstance(channels_info, dict):
+                            channel_names = [channels_info.get('Name', f'Channel_0')]
+                        else:
+                            channel_names = [ch.get('Name', f'Channel_{i}') for i, ch in enumerate(channels_info)]
+
+                        if verbose:
+                            print(f"Extracted channel names from OME metadata: {channel_names}")
+                    except (KeyError, TypeError):
+                        # Fallback to numbered channels
+                        channel_names = [f'Channel_{i}' for i in range(n_channels)]
+                        if verbose:
+                            print(f"Could not extract channel names from OME metadata. Using: {channel_names}")
+                else:
+                    # Fallback to numbered channels
+                    channel_names = [f'Channel_{i}' for i in range(n_channels)]
+                    if verbose:
+                        print(f"No OME metadata available. Using channel names: {channel_names}")
+
+            elif isinstance(channel_names, str):
+                raise ValueError(
+                    f"Multi-channel image detected (axes='{axes}', {n_channels} channels) but `name` is a string. "
+                    f"Please provide a list of channel names with length {n_channels}, or set name=None to "
+                    f"automatically extract channel names from OME metadata."
+                )
+
+            elif isinstance(channel_names, list):
+                if len(channel_names) != n_channels:
+                    raise ValueError(
+                        f"Length of `name` list ({len(channel_names)}) does not match number of channels ({n_channels}). "
+                        f"Axes: '{axes}', Image shape: {img_shape}"
+                    )
+                channel_names = channel_names
+
+            else:
+                raise TypeError(f"`name` must be a string, list of strings, or None. Got: {type(channel_names)}")
+
+            # Split channels and add each separately
+            if verbose:
+                print(f"Splitting multi-channel image into {n_channels} separate channels...")
+
+            for i, ch_name in enumerate(channel_names):
+                # Extract single channel
+                if isinstance(img, list):
+                    # Handle image pyramid
+                    channel_img = [np.take(level, i, axis=axes_config.C) for level in img]
+                else:
+                    channel_img = np.take(img, i, axis=axes_config.C)
+
+                # Determine new axes (remove channel dimension)
+                channel_axes = "YX"
+
+                # Add this channel as a separate image (recursive call for single channel)
+                self._add_single_image(
+                    img=channel_img,
+                    name=ch_name,
+                    axes=channel_axes,
+                    pixel_size=pixel_size,
+                    filename=filename,
+                    ome_meta=ome_meta,
+                    is_rgb=False,
+                    transformation_matrix=transformation_matrix,
+                    reference_image=reference_image,
+                    overwrite=overwrite,
+                    verbose=verbose
+                )
+
+        else:
+            # Single-channel or RGB image - add as-is
+            if isinstance(channel_names, list):
+                raise ValueError(
+                    f"Single-channel or RGB image (axes='{axes}') but `name` is a list. "
+                    f"Please provide a single string name for this image."
+                )
+
+            if channel_names is None:
+                # For single-channel images, try to extract name from OME or use default
+                if ome_meta and 'Image' in ome_meta:
+                    try:
+                        channel_names = ome_meta['Image'].get('Name', 'Image_0')
+                        if verbose:
+                            print(f"Extracted image name from OME metadata: {channel_names}")
+                    except (KeyError, TypeError):
+                        channel_names = 'Image_0'
+                else:
+                    channel_names = 'Image_0'
+
+            # Add single image
+            self._add_single_image(
+                img=img,
+                name=channel_names,
+                axes=axes,
+                pixel_size=pixel_size,
+                filename=filename,
+                ome_meta=ome_meta,
+                is_rgb=is_rgb,
+                transformation_matrix=transformation_matrix,
+                reference_image=reference_image,
+                overwrite=overwrite,
+                verbose=verbose
+            )
+
+    def _add_single_image(
+        self,
+        img: Union[da.core.Array, np.ndarray, List],
+        name: str,
+        axes: str,
+        pixel_size: Number,
+        filename: Optional[str],
+        ome_meta: dict,
+        is_rgb: Optional[bool],
+        transformation_matrix: Optional[Union[np.ndarray, str, os.PathLike, Path]],
+        reference_image: Optional[str],
+        overwrite: bool,
+        verbose: bool
+    ):
+        """Internal method to add a single image (used by add_image after channel splitting)."""
+
+        # Check if name already exists
         if name in self._names:
             if not overwrite:
                 print(f"`ImageData` object contains already an image with name '{name}'. Image is not added.") if verbose else None
-                do_addition = False
+                return
             else:
                 # remove attribute with current name
                 del self._data[name]
-
                 # remove from name list and metadata
                 self._names = [elem for elem in self._names if elem != name]
                 self._metadata.pop(name, None)
 
-                do_addition = True
-        else:
-            do_addition = True
+        # Apply transformation if provided
+        if transformation_matrix is not None:
+            if verbose:
+                print(f"Applying transformation to image '{name}'...")
 
-        if do_addition:
-            # check if image is a path or a data array
-            if isinstance(image, da.core.Array) or isinstance(image, np.ndarray):
-                assert axes is not None, "If `image` is numpy or dask array, `axes` needs to be set."
-                assert pixel_size is not None, "If `image` is numpy or dask array, `pixel_size` needs to be set."
+            # Determine reference_pixel_size and output_size from reference_image if provided
+            reference_pixel_size = None
+            output_size = None
 
-                try:
-                    # convert to dask array before addition
-                    img = da.from_array(image)
-                except ValueError:
-                    # in this case the array was already a dask array
-                    img = image
-                filename = None
+            if reference_image is not None:
+                if reference_image not in self._names:
+                    raise ValueError(
+                        f"Reference image '{reference_image}' not found in ImageData. "
+                        f"Available images: {self._names}"
+                    )
+                reference_pixel_size = self._metadata[reference_image]['pixel_size']
 
-            elif Path(str(image)).exists():
-                # read path
-                image = Path(image)
-                image = image.resolve() # resolve relative path
-                filename = image.name
-                img, ome_meta, axes, pixel_size = read_image(image) # returns image pyramid as list of dask arrays if possible
-            else:
-                raise ValueError(f"`image` is neither a dask array nor an existing path. Instead: {type(image)}")
+                # Get output_size from reference image
+                ref_shape = self._metadata[reference_image]['shape']
+                ref_axes = self._metadata[reference_image]['axes']
+                ref_axes_config = ImageAxes(ref_axes)
 
-            # Transpose image to standard axis order (YX, CYX, or YXS)
-            img, axes = _transpose_to_standard_axes(img, axes)
+                # Get height and width from reference image
+                ref_height = ref_shape[ref_axes_config.Y]
+                ref_width = ref_shape[ref_axes_config.X]
 
-            # set attribute and add names to object
-            self._data[name] = img
-            self._names.append(name)
+                # Convert to physical coordinates (µm)
+                output_size = (
+                    ref_height * reference_pixel_size,
+                    ref_width * reference_pixel_size
+                )
 
-            # retrieve metadata
-            img_shape = img[0].shape if isinstance(img, list) else img.shape
-            # img_max = img[0].max() if isinstance(img, list) else img.max()
-            # try:
-            #     img_max = img_max.compute()
-            # except AttributeError:
-            #     img_max = img_max
+                if verbose:
+                    print(f"Using reference image '{reference_image}' (pixel size: {reference_pixel_size} µm/pixel, "
+                          f"shape: {ref_height}x{ref_width} pixels = {output_size[0]:.1f}x{output_size[1]:.1f} µm)")
 
-            # save metadata
-            self._metadata[name] = {}
-            self._metadata[name]["filename"] = filename
-            self._metadata[name]["shape"] = img_shape  # store shape
-            self._metadata[name]["axes"] = axes
-            self._metadata[name]["OME"] = ome_meta
+            # Create a temporary ImageData object to use the transform method
+            temp_img_data = ImageData()
+            temp_img_data._data[name] = img
+            temp_img_data._names = [name]
+            temp_img_data._metadata[name] = {
+                'pixel_size': pixel_size,
+                'axes': axes
+            }
 
-            # if len(ome_meta) > 0:
-            #     # add universal pixel size to metadata
-            #     try:
-            #         self._metadata[name]['pixel_size'] = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
-            #     except KeyError:
-            #         self._metadata[name]['pixel_size'] = float(ome_meta['PhysicalSizeX'])
-            # else:
-            #     self._metadata[name]['pixel_size'] = pixel_size
+            # Apply transformation
+            # source_pixel_size = pixel_size (the image being added)
+            temp_img_data.transform(
+                transformation_matrix=transformation_matrix,
+                source_pixel_size=pixel_size,
+                reference_pixel_size=reference_pixel_size,
+                output_size=output_size,
+                inplace=True,
+                verbose=verbose
+            )
 
-            self._metadata[name]['pixel_size'] = pixel_size
+            # Get transformed image
+            img = temp_img_data._data[name]
 
-            # check whether the image is RGB or not
-            if is_rgb is None:
-                if len(img_shape) == 3:
-                    channels = img_shape[2]
-                    if channels == 3:
-                        self._metadata[name]["rgb"] = True
-                    else:
-                        self._metadata[name]["rgb"] = False
-                elif len(img_shape) == 2:
-                    self._metadata[name]["rgb"] = False
+            # Update axes if needed (transform maintains axes)
+            axes = temp_img_data._metadata[name]['axes']
+
+        # set attribute and add names to object
+        self._data[name] = img
+        self._names.append(name)
+
+        # retrieve metadata
+        img_shape = img[0].shape if isinstance(img, list) else img.shape
+
+        # save metadata
+        self._metadata[name] = {}
+        self._metadata[name]["filename"] = filename
+        self._metadata[name]["shape"] = img_shape  # store shape
+        self._metadata[name]["axes"] = axes
+        self._metadata[name]["OME"] = ome_meta
+
+        self._metadata[name]['pixel_size'] = pixel_size
+
+        # check whether the image is RGB or not
+        if is_rgb is None:
+            if len(img_shape) == 3:
+                channels = img_shape[2]
+                if channels == 3:
+                    self._metadata[name]["rgb"] = True
                 else:
-                    raise ValueError(f"Unknown image shape: {img_shape}")
+                    self._metadata[name]["rgb"] = False
+            elif len(img_shape) == 2:
+                self._metadata[name]["rgb"] = False
             else:
-                self._metadata[name]["rgb"] = is_rgb
+                raise ValueError(f"Unknown image shape: {img_shape}")
+        else:
+            self._metadata[name]["rgb"] = is_rgb
 
-            # # get image contrast limits
-            # if self._metadata[name]["rgb"]:
-            #     self._metadata[name]["contrast_limits"] = (0, img_max)
-            # else:
-            #     self._metadata[name]["contrast_limits"] = (0, img_max)
+    def remove_image(
+        self,
+        names: Union[str, List[str]],
+        verbose: bool = True
+    ):
+        """Remove one or more images from the ImageData object.
 
+        Args:
+            names: Name or list of names of images to remove.
+            verbose: If True, print status messages for each removed image.
+
+        Raises:
+            KeyError: If any of the specified image names is not found.
+
+        Example:
+            >>> # Remove single image
+            >>> img_data.remove_image('DAPI')
+
+            >>> # Remove multiple images
+            >>> img_data.remove_image(['DAPI', 'CD45', 'PanCK'])
+
+            >>> # Remove without verbose output
+            >>> img_data.remove_image('DAPI', verbose=False)
+        """
+        names = convert_to_list(names)
+
+        for name in names:
+            if name not in self._names:
+                raise KeyError(f"Image '{name}' not found in ImageData. Available images: {self._names}")
+
+            del self[name]  # Uses __delitem__
+
+            if verbose:
+                print(f"Removed image '{name}'")
 
     def load(self,
              which: Union[List[str], str] = "all"
@@ -1795,7 +2074,8 @@ class ImageData(DeepCopyMixin):
                     borderValue=0
                 )
             elif len(img_to_transform.shape) == 3:
-                if axes == "YXS" or (img_axes.S is not None):
+                if img_axes.is_rgb:
+                # if axes == "YXS" or (img_axes.S is not None):
                     # RGB image - transform directly
                     transformed = cv2.warpAffine(
                         img_to_transform,
@@ -1856,9 +2136,9 @@ class SpatialUnitsData(DeepCopyMixin):
     Object to store spatial units (e.g., functional tissue units, niches)
     with their associated omics data.
 
-    Spatial units are stored as GeoDataFrames with polygon geometries, and their
-    omics readouts are stored as AnnData objects. This provides
-    flexibility for defining various spatial units beyond cells.
+    Geometric information about the spatial units are stored as GeoDataFrames
+    with polygon geometries, and their omics readouts are stored
+    as AnnData objects. This provides flexibility for defining various spatial units beyond cells.
 
     Note: All coordinates in the geometries are assumed to be given as physical
     coordinates (usually µm).

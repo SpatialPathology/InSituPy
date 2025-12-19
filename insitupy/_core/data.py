@@ -887,7 +887,7 @@ class InSituData:
                     img = img[0]
                 self.images.add_image(
                     image=img,
-                    name=name,
+                    channel_names=name,
                     axes=images_to_add.metadata[name]["axes"],
                     pixel_size=images_to_add.metadata[name]["pixel_size"],
                     ome_meta=images_to_add.metadata[name].get("OME", {}),

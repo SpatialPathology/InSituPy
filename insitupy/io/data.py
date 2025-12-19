@@ -451,7 +451,7 @@ def read_any(
             image_path = Path(image_path)
             if not image_path.exists():
                 raise FileNotFoundError(f"No image file found at '{image_path}'.")
-            data.images.add_image(image=image_path, name=img_name)
+            data.images.add_image(image=image_path, channel_names=img_name)
 
     return data
 
@@ -575,7 +575,7 @@ def read_qupath(
     # --- Add ImageData ---
     data.images.add_image(
         image=image_path,
-        name=method_name,
+        channel_names=method_name,
     )
 
     # --- Add the data annotation as region ---

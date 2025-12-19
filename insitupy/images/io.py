@@ -129,7 +129,17 @@ def read_image(
 
         # read ome metadata
         with TiffFile(path) as tif:
-            axes = tif.pages[0].axes # get axes (important to get it from pages instead of series!)
+            # check whether the data is a multi-file OME-TIFF
+            is_multifile = len(tif.series[0].levels[0].pages) != len(tif.pages)
+            if is_multifile:
+                axes = tif.pages[0].axes
+                logger.warning(
+                    f"'{Path(path).name}' is part of a multi-file OME-TIFF. "
+                    "Axes are inferred from this file only and only data from this file will be returned.",
+                )
+            else:
+                axes = tif.series[0].axes
+
             ome_meta = tif.ome_metadata # read OME metadata
             ome_meta = xmltodict.parse(ome_meta, attr_prefix="")["OME"] # convert XML to dict
 

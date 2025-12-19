@@ -455,7 +455,7 @@ def _add_images_to_insitudata(
 
         data.images.add_image(
             image=da_img,
-            name=name,
+            channel_names=name,
             axes=axes,
             pixel_size=pixel_size,
             overwrite=False,
