@@ -3,7 +3,13 @@ from numbers import Number
 from typing import List, Literal, Tuple, Union
 from warnings import warn
 
-import cv2
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    cv2 = None
+
 import dask.array as da
 import numpy as np
 from numpy.typing import NDArray
@@ -74,13 +80,20 @@ def resize_image(img: NDArray,
                  dim: Tuple[int, int] = None,
                  scale_factor: float = None,
                  axes = "YXS",
-                 interpolation = cv2.INTER_LINEAR
+                 interpolation = None
                  ):
     '''
     Resize width and height of image by scale_factor. Resizing does not affect channels.
     So far the function assumes images to be either grayscale (axes="YX"), RGB (axes="YXS") or multi-channel IF (axes="CYX").
     Time-series images (e.g. "TCYX") are not supported yet.
     '''
+    if not HAS_OPENCV:
+        raise ImportError("OpenCV (cv2) is required for resize_image. Install it with: pip install opencv-python")
+
+    # Set default interpolation if not provided
+    if interpolation is None:
+        interpolation = cv2.INTER_LINEAR
+
     # read and interpret the image axes pattern
     image_axes = ImageAxes(pattern=axes)
     channel_axis = image_axes.C
@@ -376,6 +389,9 @@ def clip_image_histogram(
     return image
 
 def otsu_thresholding(image: np.ndarray) -> np.ndarray:
+    if not HAS_OPENCV:
+        raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python")
+
     # Apply GaussianBlur to reduce image noise if necessary
     #blur = cv2.GaussianBlur(image, (5, 5), 0)
     # Apply Otsu's thresholding

@@ -4,7 +4,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
-import cv2
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    cv2 = None
+
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
@@ -100,6 +106,8 @@ class ImageRegistration:
         return nuclei_img
 
     def load_and_scale_images(self):
+        if not HAS_OPENCV:
+            raise ImportError("OpenCV (cv2) is required for image registration. Install it with: pip install opencv-python")
 
         # load images into memory if they are dask arrays
         if isinstance(self.image, da.Array):
@@ -354,6 +362,8 @@ class ImageRegistration:
         '''
         Function to calculate the transformation matrix.
         '''
+        if not HAS_OPENCV:
+            raise ImportError("OpenCV (cv2) is required for calculating transformation matrix. Install it with: pip install opencv-python")
 
         if self.perspective_transform:
             # compute the homography matrix between the two sets of matched
@@ -791,7 +801,7 @@ def register_images(
 
         data.images.add_image(
             image=imreg_selected.registered,
-            name=channel_names[0],
+            channel_names=channel_names[0],
             axes=axes_image,
             pixel_size=pixel_size,
             ome_meta=ome_metadata,
@@ -839,7 +849,7 @@ def register_images(
             # if add_registered_image:
             data.images.add_image(
                 image=imreg_selected.registered,
-                name=n,
+                channel_names=n,
                 axes="YX", # currently the images are added channel wise and therefore it is always "YX"
                 pixel_size=pixel_size,
                 ome_meta=ome_metadata,
