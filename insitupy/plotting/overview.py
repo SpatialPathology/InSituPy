@@ -134,7 +134,7 @@ def overview(
         raise ImportError("This function requires the 'plottable' framework. Please install it with 'pip install plottable'.")
 
     # Copy the metadata, select the columns to plot, and add index if necessary
-    df = data.metadata.copy()[columns_to_plot]
+    df = data._metadata.copy()[columns_to_plot]
 
     colname_tmp = "ind_tmp"
     if not index and df.shape[1] > 0:
