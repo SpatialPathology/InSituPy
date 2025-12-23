@@ -51,9 +51,16 @@ def parse_geopandas(
 
 def _read_file_helper(file, engine):
     dataframe = geopandas.read_file(file, engine=engine)
-    if engine == "pyogrio":
+    if engine == "pyogrio" and "classification" in dataframe.columns:
         # convert string representations of dicts to actual dicts
-        dataframe['classification'] = dataframe['classification'].apply(ast.literal_eval)
+        # only if they are strings (pyogrio may already parse them as dicts)
+        def safe_literal_eval(val):
+            if isinstance(val, dict):
+                return val
+            if isinstance(val, str):
+                return ast.literal_eval(val)
+            return val
+        dataframe['classification'] = dataframe['classification'].apply(safe_literal_eval)
     return dataframe
 
 def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
