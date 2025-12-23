@@ -52,8 +52,10 @@ Make sure you have Conda installed on your system before proceeding with these s
 
 **Create and activate a conda environment:**
 
+When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwise all python version >=3.10 should work.
+
    ```bash
-   conda create --name insitupy python=3.10
+   conda create --name insitupy python=3.13
    conda activate insitupy
    ```
 
