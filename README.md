@@ -11,6 +11,15 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 *!!!Warning: This repository is under very active development and it cannot be ruled out that changes might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!*
 
+### `0.11.0b1`
+
+* Implementation of bidirectional conversion functions between InSituPy and SpatialData
+   * Due to current dependency conflicts between the packages this is only released as beta version. Please let me know if you run into any problems
+* Introduction of `.units` attribute. "Spatial units" can be any shape within which a omics measurement is available. This can be e.g. results from sequencing-based technologies like Visium but also histological structures such as functional tissue units.
+* New tutorials
+   * Read data from Vannan et al. into InSituPy
+   * Convert data between SpatialData and InSituPy
+
 ### `0.10.0`
 
 * Restructure DGE analysis on single-cell level and implement pseudobulk DGE analysis
