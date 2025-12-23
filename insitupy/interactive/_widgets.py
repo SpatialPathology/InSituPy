@@ -319,13 +319,6 @@ if WITH_NAPARI:
                     print(f"Cell '{cell}' not found.")
 
             # ---CALLBACKS---
-            # @show_cells_widget.key_type.changed.connect
-            # @show_cells_widget.call_button.changed.connect
-            # @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
-            # @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
-            # def update_values_on_type_change(event=None):
-            #     _update_key_on_type_change(show_cells_widget, viewer_config)
-
             # connect key change with update function
             @select_data_widget.data_name.changed.connect
             @select_data_widget.layer_name.changed.connect
@@ -337,7 +330,6 @@ if WITH_NAPARI:
                 # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data_widget.data_name.value
                 viewer_config.layer_name = select_data_widget.layer_name.value
-                #viewer_config.refresh_variables()
 
                 _refresh_widgets_after_data_change(
                     data,

@@ -24,19 +24,6 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
     :link-type: doc
 
     Notebook showing how to generate pseudobulk data from an `InSituExperiment` class.
-
-.. card:: `AnnData`-based multi-sample analysis workflows
-    :link: InSituPy_Anndata_workflow
-    :link-type: doc
-
-    Many analysis tools (e.g. batch correction, niche analysis, etc.) are based on the `AnnData` format. This notebook demonstrates how data of an `InSituExperiment` object can be converted into an `AnnData`, processed using such tools and how the information can be imported back into an `InSituExperiment`.
-
-.. card:: Import data from Vannan et al.
-    :link: InSituPy_Vannan_paper_import
-    :link-type: doc
-
-    Notebook demonstrating how to import and analyze data from the Vannan et al. paper, including splitting data by TMA core, adding metadata, registration of H&E images and preprocessing of the data.
-
 ```
 
 ```{toctree}
@@ -46,6 +33,4 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 InSituPy_InSituExperiment
 InSituPy_split_datasets
 InSituPy_Pseudobulk
-InSituPy_Anndata_workflow
-InSituPy_Vannan_paper_import
 ```
