@@ -296,7 +296,7 @@ def _crop_transcripts(
             try:
                 import dask_geopandas as dask_gpd
             except ImportError:
-                warn("Filtering transcripts based on a shape may take longer if `dask_geopandas` is not installed.")
+                warn("Filtering transcripts based on a shape may take longer if `dask-geopandas` is not installed.")
 
                 # load the dataframe into memory to generate points
                 print("Load transcript dataframe into memory...")

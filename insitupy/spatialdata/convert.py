@@ -193,12 +193,11 @@ def convert_to_spatialdata(
     # is_experiment = _is_experiment(data)
 
     # if is_experiment:
-
     sd_dict = convert_to_spatialdata_dict(
         data,
         n_pyramids=n_pyramids
         )
-    sdata = SpatialData.from_elements_dict(sd_dict)
+    sdata = SpatialData.init_from_elements(sd_dict)
 
     # Check and fix case-insensitive conflicts
     sdata, rename_map = check_and_fix_case_insensitive_conflicts(sdata, inplace=True)
@@ -208,7 +207,12 @@ def convert_to_spatialdata(
 def convert_from_spatialdata(
     sdata: SpatialData,
     # Image parameters
-    image_data: Optional[Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]]] = None, # tuple contains (image_key, pixel_size)
+    image_data: Optional[Union[
+        Tuple[str, Number],
+        Tuple[str, Number, bool],
+        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
+        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
+    ]] = None,
     # Table parameters
     table_key: str = 'table',
     # Cell parameters
@@ -234,6 +238,29 @@ def convert_from_spatialdata(
     """
     Convert a SpatialData object to an InSituData object.
 
+    Args:
+        sdata: SpatialData object to convert.
+        image_data: Image data specification. Supports:
+            - Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
+            - List of tuples: [(image_key, pixel_size), ...] or [(image_key, pixel_size, is_rgb), ...]
+            - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
+            The optional is_rgb flag (default: False) indicates if the image should be treated as RGB.
+        table_key: Key for the cell expression table in SpatialData.
+        cells_key: Key for cell shapes in SpatialData.
+        units_key: Key for spatial units in SpatialData.
+        unit_type: Type of spatial unit.
+        cell_boundaries_data: Tuple of (label_key, pixel_size) for cell segmentation masks.
+        nucleus_boundaries_data: Tuple of (label_key, pixel_size) for nucleus segmentation masks.
+        transcripts_key: Key for transcript points in SpatialData.
+        slide_id: Identifier for the slide.
+        sample_id: Identifier for the sample.
+        metadata: Additional metadata dictionary.
+        method_name: Name of the spatial method (e.g., "Xenium").
+        spatial_key: Key for spatial coordinates in obsm.
+        verbose: Whether to print status messages.
+
+    Returns:
+        InSituData: Converted InSituData object.
     """
 
     # Initialize InSituData

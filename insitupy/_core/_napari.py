@@ -19,7 +19,6 @@ from insitupy.utils.utils import convert_to_list
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
     from insitupy._core.data import InSituData
-    from insitupy.spatialdata.structured import StructuredSpatialData
 
 # optional packages that are not always installed
 if WITH_NAPARI:
@@ -41,7 +40,7 @@ if WITH_NAPARI:
 ################################
 if WITH_NAPARI:
     def _add_images_to_viewer(
-        data: Union["InSituData", "StructuredSpatialData"],
+        data: Union["InSituData"],
         viewer: napari.Viewer,
         grayscale_colormap: List[str] = FLUO_CMAP,
         ):

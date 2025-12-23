@@ -30,6 +30,11 @@ from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+# Feature flag for SpatialData mode
+# Set to True to enable spatialdata mode functionality
+# Currently disabled while the feature is under development
+_SPATIALDATA_MODE_ENABLED = False
+
 
 class InSituExperiment:
     """
@@ -80,7 +85,16 @@ class InSituExperiment:
 
         Args:
             data_type: The type of data to store. Either "insitupy" (default) or "spatialdata".
+                       Note: "spatialdata" mode is currently disabled and will be enabled in a future release.
         """
+        # Check if spatialdata mode is requested but disabled
+        if data_type == "spatialdata" and not _SPATIALDATA_MODE_ENABLED:
+            raise NotImplementedError(
+                "SpatialData mode is currently disabled and under development. "
+                "It will be enabled in a future release. "
+                "Please use data_type='insitupy' for now."
+            )
+
         self._metadata = pd.DataFrame(columns=['uid', 'slide_id', 'sample_id'])
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
@@ -1298,11 +1312,18 @@ class InSituExperiment:
         Args:
             path: Path to the experiment directory or SpatialData zarr store
             mode: Read mode - either "insitupy" (default) or "spatialdata"
+                  Note: "spatialdata" mode is currently disabled and will be enabled in a future release.
 
         Returns:
             InSituExperiment object in the specified mode
         """
         if mode == "spatialdata":
+            if not _SPATIALDATA_MODE_ENABLED:
+                raise NotImplementedError(
+                    "SpatialData mode is currently disabled and under development. "
+                    "It will be enabled in a future release. "
+                    "Please use mode='insitupy' for now."
+                )
             return cls._read_spatialdata(path)
         elif mode == "insitupy":
             return cls._read_insitupy(path)
@@ -1336,11 +1357,12 @@ class InSituExperiment:
 
         except ImportError:
             raise ImportError(
-                "This function requires the spatialdata package. "
-                "Install it with: pip install spatialdata"
+                "This function requires the spatialdata-wrapper package. "
+                "Install it with: pip install insitupy[spatialdata]"
             )
         else:
-            from insitupy.spatialdata._io import _silent_read_zarr
+            from spatialdata_wrapper._io import \
+                silent_read_zarr as _silent_read_zarr
 
         path = Path(path)
         if not path.exists():
@@ -1362,8 +1384,8 @@ class InSituExperiment:
 
         # Create StructuredSpatialData for each sample
         for sample_id, sample_elements in tqdm(samples.items(), desc="Loading samples"):
-            # Import here to avoid circular imports
-            from insitupy.spatialdata import StructuredSpatialData
+            # Import from external package
+            from spatialdata_wrapper import StructuredSpatialData
 
             struct_data = StructuredSpatialData()
             struct_data._path = path
@@ -1482,8 +1504,7 @@ class InSituExperiment:
 
                     # Initialize CellData if not exists
                     if cell_key not in struct_data._cells._layers:
-                        from insitupy.spatialdata.structured import \
-                            StructuredCellData
+                        from spatialdata_wrapper import StructuredCellData
                         struct_data._cells[cell_key] = StructuredCellData()
 
                     if len(parts) >= 3:

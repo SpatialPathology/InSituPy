@@ -1,2 +1,1 @@
-from .convert import convert_to_spatialdata
-from .structured import StructuredSpatialData
+from .convert import convert_from_spatialdata, convert_to_spatialdata

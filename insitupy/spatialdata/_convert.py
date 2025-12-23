@@ -405,11 +405,27 @@ def _extract_pixel_size_from_spatialdata(
 def _add_images_to_insitudata(
     data: InSituData,
     sdata: SpatialData,
-    image_data: Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]],
+    image_data: Union[
+        Tuple[str, Number],
+        Tuple[str, Number, bool],
+        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
+        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
+    ],
     # pixel_size: Optional[float],
     verbose: bool
 ):
-    """Add images to InSituData."""
+    """Add images to InSituData.
+
+    Args:
+        data: InSituData object to add images to.
+        sdata: SpatialData object containing the images.
+        image_data: Image data in one of the supported formats:
+            - Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
+            - List of tuples: [(image_key, pixel_size), ...] or [(image_key, pixel_size, is_rgb), ...]
+            - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
+            The optional is_rgb flag (default: False) indicates if the image is RGB.
+        verbose: Whether to print status messages.
+    """
 
     # Normalize to dict format
     if isinstance(image_data, tuple):
@@ -422,6 +438,7 @@ def _add_images_to_insitudata(
     for name, image_tuple in image_dict.items():
         key = image_tuple[0]
         pixel_size = image_tuple[1]
+        is_rgb = image_tuple[2] if len(image_tuple) > 2 else False
         if key not in sdata:
             if verbose:
                 print(f"Warning: Image key '{key}' not found in SpatialData", flush=True)
@@ -433,30 +450,24 @@ def _add_images_to_insitudata(
             data_array = img_data
 
         # get information about axis configuration
-        axes = "".join(data_array.dims).upper()
+        axes_str = "".join(data_array.dims).upper()
+        if is_rgb:
+            axes_str = axes_str.replace("C", "S")
 
-        # check whether the data_array is an RGB image
-        try:
-            c_axis = data_array['c'].data
-        except KeyError:
-            print("No channel axis 'c' found.")
-        else:
-            if "".join(c_axis) == "rgb":
-                axes = axes.replace("C", "S")
+        axes = ImageAxes(axes_str)
 
         da_img = data_array.data
-        # try:
-        #     da_img = img_data.scale0['image'].data
-        # except AttributeError:
-        #     # assume no scales are provided
-        #     da_img = img_data.data
 
-
+        if da_img.shape[0] == 1:
+            # if the channel axis has length 1, remove it
+            da_img = da_img.squeeze(axes.C)
+            axes_str = axes_str[1:]
+            axes = ImageAxes(axes_str)
 
         data.images.add_image(
             image=da_img,
             channel_names=name,
-            axes=axes,
+            axes=axes_str,
             pixel_size=pixel_size,
             overwrite=False,
             verbose=verbose
@@ -507,16 +518,21 @@ def _create_boundaries_from_spatialdata(
     return boundaries
 
 def _validate_image_data_format(
-    image_data: Optional[Union[Tuple[str, Number], List[Tuple[str, Number]], Dict[str, Tuple[str, Number]]]]
+    image_data: Optional[Union[
+        Tuple[str, Number],
+        Tuple[str, Number, bool],
+        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
+        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
+    ]]
 ) -> None:
     """
     Validate the format of image_data parameter.
 
     Args:
         image_data: Image data in one of the supported formats:
-            - Single tuple: (image_key, pixel_size)
-            - List of tuples: [(image_key, pixel_size), ...]
-            - Dictionary: {name: (image_key, pixel_size), ...}
+            - Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
+            - List of tuples: [(image_key, pixel_size), ...] or [(image_key, pixel_size, is_rgb), ...]
+            - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
 
     Raises:
         ValueError: If the format structure is invalid.
@@ -525,37 +541,37 @@ def _validate_image_data_format(
     if image_data is None:
         return
 
+    def _validate_tuple(t, context=""):
+        """Validate a single image tuple."""
+        if len(t) not in (2, 3):
+            raise ValueError(f"{context}tuple must have 2 or 3 elements (image_key, pixel_size[, is_rgb]), got {len(t)}")
+        if not isinstance(t[0], str):
+            raise TypeError(f"{context}image_key must be a string, got {type(t[0])}")
+        if not isinstance(t[1], Number):
+            raise TypeError(f"{context}pixel_size must be a number, got {type(t[1])}")
+        if len(t) == 3 and not isinstance(t[2], bool):
+            raise TypeError(f"{context}is_rgb must be a boolean, got {type(t[2])}")
+
     if isinstance(image_data, tuple):
-        # Single tuple: (image_key, pixel_size)
-        if len(image_data) != 2:
-            raise ValueError(f"image_data tuple must have 2 elements (image_key, pixel_size), got {len(image_data)}")
-        if not isinstance(image_data[0], str):
-            raise TypeError(f"image_key must be a string, got {type(image_data[0])}")
-        if not isinstance(image_data[1], Number):
-            raise TypeError(f"pixel_size must be a number, got {type(image_data[1])}")
+        # Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
+        _validate_tuple(image_data, "image_data ")
     elif isinstance(image_data, list):
         # List of tuples
-        if not all(isinstance(item, tuple) and len(item) == 2 for item in image_data):
-            raise ValueError("image_data list must contain tuples of format (image_key, pixel_size)")
         for i, item in enumerate(image_data):
-            if not isinstance(item[0], str):
-                raise TypeError(f"image_key at index {i} must be a string, got {type(item[0])}")
-            if not isinstance(item[1], Number):
-                raise TypeError(f"pixel_size at index {i} must be a number, got {type(item[1])}")
+            if not isinstance(item, tuple):
+                raise ValueError(f"image_data list must contain tuples, got {type(item)} at index {i}")
+            _validate_tuple(item, f"image_data[{i}] ")
     elif isinstance(image_data, dict):
-        # Dictionary: {name: (image_key, pixel_size)}
+        # Dictionary: {name: (image_key, pixel_size[, is_rgb])}
         for name, value in image_data.items():
-            if not isinstance(value, tuple) or len(value) != 2:
-                raise ValueError(f"image_data['{name}'] must be a tuple of format (image_key, pixel_size)")
-            if not isinstance(value[0], str):
-                raise TypeError(f"image_key for '{name}' must be a string, got {type(value[0])}")
-            if not isinstance(value[1], Number):
-                raise TypeError(f"pixel_size for '{name}' must be a number, got {type(value[1])}")
+            if not isinstance(value, tuple):
+                raise ValueError(f"image_data['{name}'] must be a tuple, got {type(value)}")
+            _validate_tuple(value, f"image_data['{name}'] ")
     else:
         raise TypeError(
             f"image_data must be a tuple, list of tuples, or dict, got {type(image_data)}. "
-            f"Expected format: (image_key, pixel_size), [(image_key, pixel_size), ...], "
-            f"or {{name: (image_key, pixel_size), ...}}"
+            f"Expected format: (image_key, pixel_size[, is_rgb]), [(image_key, pixel_size[, is_rgb]), ...], "
+            f"or {{name: (image_key, pixel_size[, is_rgb]), ...}}"
         )
 
 def _validate_boundaries_data_format(
