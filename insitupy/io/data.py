@@ -1,3 +1,4 @@
+import logging
 import os
 from numbers import Number
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Dict, Literal, Optional, Union
 import dask.dataframe as dd
 import pandas as pd
 from parse import *
+from shapely import affinity
 
 from insitupy import __version__
 from insitupy._core.data import InSituData
@@ -14,11 +16,13 @@ from insitupy._io._qupath import (_read_boundaries_qupath,
                                   _read_measurements_qupath)
 from insitupy._io._read import _read_boundaries, _read_measurements
 from insitupy._io._xenium import (_read_boundaries_from_xenium,
-                                  _read_matrix_from_xenium,
+                                  _read_table_from_xenium,
                                   _restructure_transcripts_dataframe)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
 from insitupy.dataclasses.dataclasses import CellData
+
+logger = logging.getLogger(__name__)
 
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
@@ -35,12 +39,15 @@ def _handle_image_names(im_path):
 
 def read_xenium(
     path: Union[str, os.PathLike, Path],
-    nuclei_type: Literal["focus", "mip", ""] = "mip",
+    nuclei_type: Literal["focus", "mip", ""] = "focus",
     load_cell_segmentation_images: bool = False,
     load_background_images: bool = False,
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
-    restructure_transcripts: bool = False
+    restructure_transcripts: bool = False,
+    slide_id: str = "slide_id",
+    sample_id: str = "sample_id",
+    backend: Literal["insitupy", "spatialdata"] = "insitupy",
     ) -> InSituData:
     """
     Reads `Xenium In Situ data <https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest>`__
@@ -48,14 +55,20 @@ def read_xenium(
 
     Args:
         path (Union[str, os.PathLike, Path]): Path to the Xenium data bundle.
-        nuclei_type (Literal["focus", "mip", ""], optional): Type of nuclei image to load. Defaults to "mip".
+        nuclei_type (Literal["focus", "mip", ""], optional): Type of nuclei image to load. Defaults to "focus".
             If "mip" is unavailable, "focus" will be used as a fallback.
-        load_cell_segmentation_images (bool, optional): Whether to load cell segmentation images. Defaults to True.
+        load_cell_segmentation_images (bool, optional): Whether to load cell segmentation images. Defaults to False.
+        load_background_images (bool, optional): Whether to load background images. Defaults to False.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
         transcript_mode (Literal["pandas", "dask"], optional): Mode to load transcript data. Defaults to "dask".
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
+        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id". Only used with spatialdata backend.
+        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id". Only used with spatialdata backend.
+        backend (Literal["insitupy", "spatialdata"], optional): Backend to use for loading data. Defaults to "insitupy".
+            - "insitupy": Uses the native InSituPy loader.
+            - "spatialdata": Uses spatialdata-io to load the data and converts to InSituData format.
 
     Returns:
         InSituData: An object containing the processed Xenium experiment data, including metadata, cells, images, and transcripts.
@@ -63,116 +76,246 @@ def read_xenium(
     Raises:
         InvalidXeniumDirectory: If the specified directory does not contain the required Xenium metadata file.
         FileNotFoundError: If the specified directory does not exist.
-        ValueError: If an invalid value is provided for `transcript_mode`.
+        ValueError: If an invalid value is provided for `transcript_mode` or `backend`.
 
     Notes:
         - The function initializes an `InSituData` object with metadata and loads cell data, images, and transcripts.
         - For Xenium versions <2.0, the "mip" image is used if available; otherwise, the "focus" image is loaded.
         - Cell segmentation images are loaded if available and `load_cell_segmentation_images` is True.
+        - Background images are loaded if available and `load_background_images` is True.
         - Transcript data can be loaded using either pandas or Dask, depending on the `transcript_mode` parameter.
+        - The spatialdata backend provides interoperability with the SpatialData ecosystem.
     """
-
     path = Path(path) # make sure the path is a pathlib path
+
     metadata_filename: str = "experiment.xenium"
 
     if not (path / metadata_filename).exists():
         raise InvalidXeniumDirectory(directory=path)
 
-    # check if path exists
+    # read metadata
+    xenium_metadata = read_json(path / metadata_filename)
+    pixel_size = xenium_metadata["pixel_size"]
+
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
 
-    # read metadata
-    xenium_metadata = read_json(path / metadata_filename)
+    if backend == "spatialdata":
+        from spatialdata_io import xenium
 
-    # get slide id and sample id from metadata
-    slide_id = xenium_metadata["slide_id"]
-    sample_id = xenium_metadata["region_name"]
+        from insitupy.spatialdata.convert import convert_from_spatialdata
 
-    data = InSituData(
-        path=path,
-        metadata=None, # initializes new metadata
-        slide_id=slide_id,
-        sample_id=sample_id,
-        method_name="Xenium",
-        method_params=xenium_metadata,
-        )
+        if verbose:
+            logger.info("Reading Xenium data with spatialdata-io backend...")
+        sdata = xenium(path)
+        data = convert_from_spatialdata(
+            sdata=sdata,
+            image_data={
+                "nuclei": ("morphology_mip", pixel_size),
+                "mip": ("morphology_focus", pixel_size)
+            },
+            cells_key="cell_circles",
+            table_key="table",
+            cell_boundaries_data=("cell_labels", pixel_size),
+            nucleus_boundaries_data=("nucleus_labels", pixel_size),
+            transcripts_key="transcripts",
+            slide_id=slide_id,
+            sample_id=sample_id,
+            method_name="Xenium"
+            )
 
-    # LOAD CELLS
-    if verbose:
-        print("Loading cells...", flush=True)
+    elif backend == "insitupy":
+        if verbose:
+            logger.info("Reading Xenium data with InSituPy backend...")
 
-    pixel_size = xenium_metadata["pixel_size"]
+        # get slide id and sample id from metadata
+        slide_id = xenium_metadata["slide_id"]
+        sample_id = xenium_metadata["region_name"]
 
-    # read celldata
-    matrix = _read_matrix_from_xenium(path=data.path)
-    boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)
-    #data.cells = MultiCellData()
-    cd = CellData(matrix=matrix, boundaries=boundaries)
-    data.cells.add_celldata(cd=cd, key="main", is_main=True)
+        data = InSituData(
+            path=path,
+            metadata=None, # initializes new metadata
+            slide_id=slide_id,
+            sample_id=sample_id,
+            method_name="Xenium",
+            method_params=xenium_metadata,
+            )
 
-    # LOAD IMAGES
-    if verbose:
-        print("Loading images...", flush=True)
-    nuclei_file_key = f"morphology_{nuclei_type}_filepath"
+        # LOAD CELLS
+        if verbose:
+            print("Loading cells...", flush=True)
 
-    # In v2.0 the "mip" image was removed due to better focusing of the machine.
-    # For <v2.0 the function still tries to retrieve the "mip" image but in case this is not found
-    # it will retrieve the "focus" image
-    if nuclei_type == "mip" and nuclei_file_key not in data.metadata["method_params"]["images"].keys():
+        # read celldata
+        table = _read_table_from_xenium(path=data.path)
+        boundaries = _read_boundaries_from_xenium(path=data.path, pixel_size=pixel_size)
+        #data.cells = MultiCellData()
+        cd = CellData(table=table, boundaries=boundaries)
+        data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
-        nuclei_type = "focus"
+        # LOAD IMAGES
+        if verbose:
+            print("Loading images...", flush=True)
         nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
-    # if names == "nuclei":
-    img_keys = [nuclei_file_key]
-    img_names = ["nuclei"]
+        # In v2.0 the "mip" image was removed due to better focusing of the machine.
+        # For <v2.0 the function still tries to retrieve the "mip" image but in case this is not found
+        # it will retrieve the "focus" image
+        if nuclei_type == "mip" and nuclei_file_key not in data.metadata["method_params"]["images"].keys():
+            nuclei_type = "focus"
+            nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
-    # get path of image files
-    img_files = [data.metadata["method_params"]["images"][k] for k in img_keys]
+        # if names == "nuclei":
+        img_keys = [nuclei_file_key]
+        img_names = ["nuclei"]
 
-    # get cell segmentation images if available
-    image_dir = path / "morphology_focus/"
-    if image_dir.is_dir():
-        for im_path in image_dir.glob("*.ome.tif"):
-            ch, ch_name = _handle_image_names(im_path)
+        # get path of image files
+        img_files = [data.metadata["method_params"]["images"][k] for k in img_keys]
 
-            if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
-                continue
-            if not load_background_images and ch_name.endswith("_background"):
-                continue
-            if ch_name == "dapi":
-                continue
+        # get cell segmentation images if available
+        image_dir = path / "morphology_focus/"
+        if image_dir.is_dir():
+            for im_path in image_dir.glob("*.ome.tif"):
+                ch, ch_name = _handle_image_names(im_path)
 
-            img_names.append(ch_name)
-            img_files.append(im_path)
+                if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
+                    continue
+                if not load_background_images and ch_name.endswith("_background"):
+                    continue
+                if ch_name == "dapi":
+                    continue
 
-    # create imageData object
-    img_paths = [data.path / elem for elem in img_files]
+                img_names.append(ch_name)
+                img_files.append(im_path)
 
-    # if data.images is None:
-    #     data.images = ImageData(img_paths, img_names)
-    # else:
-    for im, n in zip(img_paths, img_names):
-        data.images.add_image(im, n, overwrite=False, verbose=True)
+        # create imageData object
+        img_paths = [data.path / elem for elem in img_files]
 
-    # LOAD TRANSCRIPTS
-    transcript_filename = "transcripts.parquet"
-    if verbose:
-        print("Loading transcripts...", flush=True)
+        # if data.images is None:
+        #     data.images = ImageData(img_paths, img_names)
+        # else:
+        for im, n in zip(img_paths, img_names):
+            data.images.add_image(im, n, overwrite=False, verbose=True)
 
-    if transcript_mode == "pandas":
-        transcript_dataframe = pd.read_parquet(data.path / transcript_filename)
+        # LOAD TRANSCRIPTS
+        transcript_filename = "transcripts.parquet"
+        if verbose:
+            print("Loading transcripts...", flush=True)
 
-        if restructure_transcripts:
-            data.transcripts = _restructure_transcripts_dataframe(transcript_dataframe)
+        if transcript_mode == "pandas":
+            transcript_dataframe = pd.read_parquet(data.path / transcript_filename)
+
+            if restructure_transcripts:
+                data.transcripts = _restructure_transcripts_dataframe(transcript_dataframe)
+            else:
+                data.transcripts = transcript_dataframe
+        elif transcript_mode == "dask":
+            # Load the transcript data using Dask
+            data.transcripts = dd.read_parquet(data.path / transcript_filename)
         else:
-            data.transcripts = transcript_dataframe
-    elif transcript_mode == "dask":
-        # Load the transcript data using Dask
-        data.transcripts = dd.read_parquet(data.path / transcript_filename)
+            raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
     else:
-        raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
+        raise ValueError(f"Invalid backend: {backend}. Supported backends are 'insitupy' and 'spatialdata'.")
+
+    return data
+
+
+def read_visium(
+    path: Union[str, os.PathLike, Path],
+    dataset_id: Optional[str] = None,
+    slide_id: str = "slide_id",
+    sample_id: str = "sample_id",
+    verbose: bool = True,
+    fullres_pixel_size: Optional[Number] = None, # microns per pixel
+    **kwargs,
+) -> InSituData:
+    """
+    Reads `Visium spatial transcriptomics data <https://www.10xgenomics.com/products/spatial-gene-expression>`__
+    from the specified directory using spatialdata-io.
+
+    Args:
+        path (Union[str, os.PathLike, Path]): Path to the Visium data bundle.
+        dataset_id (Optional[str], optional): Dataset ID for the Visium data. Defaults to "visium".
+        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id".
+        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id".
+        verbose (bool, optional): Whether to print progress messages. Defaults to True.
+        **kwargs: Additional keyword arguments passed to spatialdata-io's visium loader.
+
+    Returns:
+        InSituData: An object containing the processed Visium experiment data, including metadata, cells, and images.
+
+    Raises:
+        FileNotFoundError: If the specified directory does not exist.
+        ValueError: If required Visium files are missing from the directory.
+
+    Notes:
+        - This function uses spatialdata-io to load Visium data and converts it to InSituData format.
+        - The function loads spatial coordinates, gene expression counts, and optional histology images.
+        - Spot positions are stored as features in the InSituData object.
+    """
+    from spatialdata_io import visium
+
+    from insitupy.spatialdata.convert import convert_from_spatialdata
+
+    path = Path(path)
+
+    if dataset_id is None:
+        dataset_id = "visium"
+
+    if not path.is_dir():
+        raise FileNotFoundError(f"No such directory found: {str(path)}")
+
+    if verbose:
+        logger.info("Reading Visium data with spatialdata-io...")
+
+    if fullres_pixel_size is None:
+        logger.warning(f"No `fullres_pixel_size` provided. Setting to 1.0 by default. "
+                       f"For downstream analysis setting the correct pixel size might be important. "
+                       f"If possible, try to find out the resolution of the fullres image")
+        fullres_pixel_size = 1.0 # microns per pixel
+
+    sf_file = path / "spatial" / "scalefactors_json.json"
+    scale_factors = read_json(sf_file)
+    hires_pixel_size = fullres_pixel_size / scale_factors["tissue_hires_scalef"]
+    lowres_pixel_size = fullres_pixel_size / scale_factors["tissue_lowres_scalef"]
+
+    # Load Visium data using spatialdata-io
+    sdata = visium(
+        path=path,
+        dataset_id=dataset_id,
+        **kwargs
+    )
+
+    if fullres_pixel_size != 1.0:
+        # convert spot geometries to microns
+        sdata[dataset_id]['geometry'] = sdata[dataset_id]['geometry'].apply(
+            lambda geom: affinity.scale(
+                geom,
+                xfact=fullres_pixel_size, yfact=fullres_pixel_size,
+                origin=(0, 0)
+                )
+            )
+
+        if 'radius' in sdata[dataset_id].columns:
+            sdata[dataset_id]['radius'] = sdata[dataset_id]['radius'] * fullres_pixel_size
+
+    # Convert to InSituData format
+    data = convert_from_spatialdata(
+        sdata=sdata,
+        image_data={
+            "hires": (f"{dataset_id}_hires_image", hires_pixel_size),
+            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size)
+        },
+        units_key=dataset_id,
+        unit_type="visium",
+        cells_key=None,  # No cells available in Visium data
+        table_key="table",
+        cell_boundaries_data=None,  # Visium uses spots, not boundaries
+        nucleus_boundaries_data=None,
+        transcripts_key=None,  # Visium doesn't have single-molecule transcripts
+        slide_id=slide_id,
+        sample_id=sample_id,
+        method_name="visium",
+    )
 
     return data
 
@@ -296,7 +439,7 @@ def read_any(
     )
 
     # Add CellData
-    cd = CellData(matrix=adata, boundaries=boundaries)
+    cd = CellData(table=adata, boundaries=boundaries)
     data.cells.add_celldata(cd=cd, key="main", is_main=True)
 
     # Add ImageData if provided
@@ -308,7 +451,7 @@ def read_any(
             image_path = Path(image_path)
             if not image_path.exists():
                 raise FileNotFoundError(f"No image file found at '{image_path}'.")
-            data.images.add_image(image=image_path, name=img_name)
+            data.images.add_image(image=image_path, channel_names=img_name)
 
     return data
 
@@ -350,7 +493,7 @@ def read_qupath(
               Contains information about the shift of the data relative to the origin.
             - `measurements.tsv`: Tabular data with cellular measurements. Measurements are divided
               into 'Cell', 'Nucleus', 'Cytoplasm', and 'Membrane'. These are saved as layers
-              in the final `AnnData` object in `data.cells.matrix`.
+              in the final `AnnData` object in `data.cells.table`.
             - `cells.geojson`: Nuclear and cellular boundaries of individual cells.
             - `image.ome.tif`: The corresponding image file.
 
@@ -424,7 +567,7 @@ def read_qupath(
     )
 
     # --- Add CellData ---
-    cd = CellData(matrix=adata, boundaries=boundaries)
+    cd = CellData(table=adata, boundaries=boundaries)
     data.cells.add_celldata(
         cd=cd, key="main", is_main=True
     )
@@ -432,7 +575,7 @@ def read_qupath(
     # --- Add ImageData ---
     data.images.add_image(
         image=image_path,
-        name=method_name,
+        channel_names=method_name,
     )
 
     # --- Add the data annotation as region ---

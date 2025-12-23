@@ -21,7 +21,7 @@ from insitupy.utils.utils import (convert_int_to_xenium_hex,
                                   decode_robust_series)
 
 
-def _read_matrix_from_xenium(path) -> AnnData:
+def _read_table_from_xenium(path) -> AnnData:
     # extract parameters from metadata
     path = Path(path)
     cf_h5_path = path / "cell_feature_matrix.h5"
@@ -68,9 +68,11 @@ def _read_boundaries_from_xenium(
     # else:
     cells_zarr_file = path / "cells.zarr.zip"
 
+    store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
+
     # open zarr directory using dask
-    cell_boundaries = da.from_zarr(cells_zarr_file, component="masks/1")
-    nuclei_boundaries = da.from_zarr(cells_zarr_file, component="masks/0")
+    cell_boundaries = da.from_zarr(store, component="masks/1")
+    nuclei_boundaries = da.from_zarr(store, component="masks/0")
 
     if pixel_size != 1 and downscale:
         cell_boundaries = _efficiently_resize_array(array=cell_boundaries, scale_factor=1/pixel_size)
@@ -81,7 +83,7 @@ def _read_boundaries_from_xenium(
 
     # read cell ids and seg mask value
     # for info see: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-zarr#cells
-    cell_ids = da.from_zarr(cells_zarr_file, component="cell_id").compute()
+    cell_ids = da.from_zarr(store, component="cell_id").compute()
     if len(cell_ids.shape) == 2:
         cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
     elif len(cell_ids.shape) == 1:
@@ -90,7 +92,7 @@ def _read_boundaries_from_xenium(
         raise ValueError(f"Unexpected shape for `cell_ids` array: {cell_ids.shape} instead of 1 or 2.")
 
     try:
-        seg_mask_value = da.from_zarr(cells_zarr_file, component="seg_mask_value")
+        seg_mask_value = da.from_zarr(store, component="seg_mask_value").compute()
     except (ArrayNotFoundError, TypeError):
         seg_mask_value = np.array(range(1, len(cell_names)+1))
 

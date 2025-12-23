@@ -1,0 +1,7 @@
+region_name,ethnicity,tobacco,clinical_diagnosis
+A1,european,y,control
+A2,european,y,IPF
+A3,european,n,ILD
+B1,african american,n,IPF
+B2,hispanic,y,control
+B3,european,y,NSIP

@@ -35,7 +35,7 @@ def calculate_qc_metrics(
     for _, d in iterator:
         celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
         sc.pp.calculate_qc_metrics(
-            celldata.matrix, percent_top=percent_top, log1p=log1p, inplace=True, **kwargs
+            celldata.table, percent_top=percent_top, log1p=log1p, inplace=True, **kwargs
             )
 
 def filter_cells(
@@ -85,10 +85,10 @@ def filter_cells(
         celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
         if mask is not None:
-            celldata.matrix = celldata.matrix[mask]
+            celldata.table = celldata.table[mask]
         else:
             sc.pp.filter_cells(
-                celldata.matrix,
+                celldata.table,
                 min_counts=min_counts,
                 min_genes=min_genes,
                 max_counts=max_counts,
@@ -97,7 +97,7 @@ def filter_cells(
                 **kwargs
             )
 
-        # sync cell names between boundaries and matrix
+        # sync cell names between boundaries and table
         celldata.sync()
 
 def filter_genes(
@@ -119,7 +119,7 @@ def filter_genes(
     for _, xd in iterator:
         celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
         sc.pp.filter_genes(
-            celldata.matrix,
+            celldata.table,
             min_counts=min_counts,
             min_cells=min_cells,
             max_counts=max_counts,
@@ -166,7 +166,7 @@ def normalize_and_transform(
         if not xd.cells.is_empty:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             normalize_and_transform_anndata(
-                adata=celldata.matrix,
+                adata=celldata.table,
                 layer=adata_layer,
                 transformation_method=transformation_method,
                 target_sum=target_sum,
@@ -211,7 +211,7 @@ def reduce_dimensions(
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
             reduce_dimensions_anndata(
-                adata=celldata.matrix,
+                adata=celldata.table,
                 method=method,
                 n_neighbors=n_neighbors,
                 n_pcs=n_pcs
@@ -249,7 +249,7 @@ def cluster_cells(
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
             cluster_anndata(
-                adata=celldata.matrix,
+                adata=celldata.table,
                 method=method,
                 verbose=False
                 )

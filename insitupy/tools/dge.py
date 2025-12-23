@@ -145,7 +145,7 @@ def dge(
         if ref_annotation_tuple == "rest":
             rest_annotations = [
                 elem
-                for elem in ref_celldata.matrix.obsm["annotations"][target_annotation_tuple[0]].unique()
+                for elem in ref_celldata.table.obsm["annotations"][target_annotation_tuple[0]].unique()
                 if elem != target_annotation_tuple[1]
                 ]
             ref_annotation_tuple = (target_annotation_tuple[0], rest_annotations)
@@ -153,7 +153,7 @@ def dge(
         if ref_region_tuple == "rest":
             rest_regions = [
                 elem
-                for elem in ref_celldata.matrix.obsm["regions"][target_region_tuple[0]].unique()
+                for elem in ref_celldata.table.obsm["regions"][target_region_tuple[0]].unique()
                 if elem != target_region_tuple[1]
                 ]
             ref_region_tuple = (target_region_tuple[0], rest_regions)
@@ -161,7 +161,7 @@ def dge(
         if ref_cell_type_tuple == "rest":
             rest_cell_types = [
                 elem
-                for elem in ref_celldata.matrix.obs[target_cell_type_tuple[0]].unique()
+                for elem in ref_celldata.table.obs[target_cell_type_tuple[0]].unique()
                 if elem != target_cell_type_tuple[1]
                 ]
             ref_cell_type_tuple = (target_cell_type_tuple[0], rest_cell_types)

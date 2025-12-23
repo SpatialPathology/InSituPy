@@ -1,9 +1,10 @@
+import logging
 import os
-import warnings
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 from typing import List, Literal, Optional, Union
+from warnings import warn
 
 import dask.array as da
 import numpy as np
@@ -13,20 +14,64 @@ from parse import *
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy import __version__
+from insitupy._exceptions import InvalidFileTypeError
+from insitupy.images.axes import ImageAxes
+from insitupy.images.utils import _get_chunksize, create_img_pyramid
+from insitupy.utils.utils import convert_to_list
 
-from .._exceptions import InvalidFileTypeError
-from ..images.utils import create_img_pyramid
-from ..utils.utils import convert_to_list
+logger = logging.getLogger(__name__)
+
+# Detect Zarr version for compatibility
+ZARR_V3 = hasattr(zarr.storage, 'LocalStore')
+
+if ZARR_V3:
+    logger.info("Using Zarr v3.")
+else:
+    logger.info("Using Zarr v2.")
+
+
+def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
+    """
+    Get a Zarr store compatible with both Zarr v2 and v3.
+
+    Args:
+        path: Path to the zarr store
+        mode: Mode to open the store ('r', 'w', 'a')
+        zipped: Whether the store is a ZipStore
+
+    Returns:
+        For Zarr v3: store object (no context manager needed)
+        For Zarr v2: store object (should be used as context manager)
+    """
+    if ZARR_V3:
+        # Zarr v3 API
+        if zipped:
+            return zarr.storage.ZipStore(path, mode=mode)
+        else:
+            return zarr.storage.LocalStore(path)
+    else:
+        # Zarr v2 API
+        if zipped:
+            return zarr.ZipStore(path, mode=mode)
+        else:
+            return zarr.DirectoryStore(path)
 
 
 def read_zarr(path):
     # load image from .zarr.zip
-    #zipped = True if suffix == "zarr.zip" else False
     zipped = zipfile.is_zipfile(path)
-    with zarr.ZipStore(path, mode="r") if zipped else zarr.DirectoryStore(path) as dirstore:
 
-        # get components of zip store
-        components = dirstore.listdir()
+    # Use ExitStack to handle context manager differences between Zarr v2 and v3
+    with ExitStack() as stack:
+        dirstore = _get_zarr_store(path, mode="r", zipped=zipped)
+
+        # In Zarr v2, stores are context managers and need to be entered
+        if not ZARR_V3:
+            dirstore = stack.enter_context(dirstore)
+
+        # open zarr group
+        root = zarr.open_group(store=dirstore, mode='r')
+        components = sorted(root.keys())
 
         if ".zarray" in components:
             # the store is an array which can be opened
@@ -52,8 +97,12 @@ def read_zarr(path):
         meta = store.attrs.asdict()
         ome_meta = meta["OME"]
         axes = meta["axes"]
+        pixel_size = meta["pixel_size"]
 
-    return img, ome_meta, axes
+        if len(img) == 0:
+            raise ValueError(f"No image data read from zarr file: {path}")
+
+    return img, ome_meta, axes, pixel_size
 
 
 def read_image(
@@ -63,29 +112,61 @@ def read_image(
     suffix = path.name.split(".", maxsplit=1)[-1]
 
     if "zarr" in suffix:
-        img, ome_meta, axes = read_zarr(path)
+        img, ome_meta, axes, pixel_size = read_zarr(path)
 
-    elif suffix in ["ome.tif", "ome.tiff"]:
-        # load image from .ome.tiff
-        img = read_ome_tiff(path=path, levels=None)
+    else:
+        # non-ZARR files
+        if suffix in ["ome.tif", "ome.tiff"]:
+            # load image from .ome.tiff
+            img = read_ome_tiff(path=path, levels=None)
+        elif suffix in ["tif", "tiff"]:
+            img = imread(path)
+        else:
+            raise InvalidFileTypeError(
+                allowed_types=["zarr", "zarr.zip", "ome.tif", "ome.tiff"],
+                received_type=suffix
+                )
+
         # read ome metadata
         with TiffFile(path) as tif:
-            axes = tif.pages[0].axes # get axes (important to get it from pages instead of series!)
+            # check whether the data is a multi-file OME-TIFF
+            is_multifile = len(tif.series[0].levels[0].pages) != len(tif.pages)
+            if is_multifile:
+                axes = tif.pages[0].axes
+                logger.warning(
+                    f"'{Path(path).name}' is part of a multi-file OME-TIFF. "
+                    "Axes are inferred from this file only and only data from this file will be returned.",
+                )
+            else:
+                axes = tif.series[0].axes
+
             ome_meta = tif.ome_metadata # read OME metadata
             ome_meta = xmltodict.parse(ome_meta, attr_prefix="")["OME"] # convert XML to dict
 
-    else:
-        raise InvalidFileTypeError(
-            allowed_types=["zarr", "zarr.zip", "ome.tif", "ome.tiff"],
-            received_type=suffix
-            )
+            try:
+                pixel_size = float(ome_meta['Image']['Pixels']['PhysicalSizeX'])
+            except KeyError:
+                try:
+                    pixel_size = float(ome_meta['PhysicalSizeX'])
+                except KeyError:
+                    # in case of .tif image
+                    pixel_size = float(ome_meta['OME:Image']['OME:Pixels']['PhysicalSizeX'])
 
-    return img, ome_meta, axes
+        if axes == "CYX":
+            if isinstance(img, list):
+                shape = img[0].shape
+            else:
+                shape = img.shape
+            if not len(shape) == 3:
+                warn(f"Axes information ({axes}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.")
+                axes = "YX"
+
+    return img, ome_meta, axes, pixel_size
 
 def write_zarr(image, file,
                img_metadata: dict,
+               axes: str, # channels, e.g. "YXS" for RGB - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
                save_pyramid: bool = True,
-               axes: str = "YXS", # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
                overwrite: bool = False,
                verbose: bool = False
                ):
@@ -97,7 +178,11 @@ def write_zarr(image, file,
 
     if file.exists():
         if overwrite:
-            file.unlink() # delete file
+            if file.is_dir():
+                import shutil
+                shutil.rmtree(file)  # delete directory for .zarr folders
+            else:
+                file.unlink()  # delete file for .zarr.zip
         else:
             raise FileExistsError("Output file exists already ({}).\nFor overwriting it, select `overwrite=True`".format(file))
 
@@ -115,24 +200,38 @@ def write_zarr(image, file,
     else:
         if save_pyramid:
             # create img pyramid
-            image_data = create_img_pyramid(img=image, nsubres=6, axes=axes)
+            image_data = create_img_pyramid(img=image, axes=axes, nsubres=6, scale_steps=2)
         else:
             image_data = image
 
-    with zarr.ZipStore(file, mode="w") if zipped else zarr.DirectoryStore(file) as dirstore:
+    # Use ExitStack to handle context manager differences between Zarr v2 and v3
+    with ExitStack() as stack:
+        dirstore = _get_zarr_store(file, mode="w", zipped=zipped)
+
+        # In Zarr v2, stores are context managers and need to be entered
+        if not ZARR_V3:
+            dirstore = stack.enter_context(dirstore)
+
+        # Parse axes configuration to determine proper chunk sizes
+        axes_config = ImageAxes(axes)
+
         # check whether to save the image as pyramid or not
         if save_pyramid:
             for i, im in enumerate(image_data):
+                chunksize = _get_chunksize(axes_config, im.ndim)
+                im = im.rechunk(chunksize)
                 im.to_zarr(dirstore, component=str(i))
         else:
             # save image data in zipstore without pyramid
+            chunksize = _get_chunksize(axes_config, image_data.ndim)
+            image_data = image_data.rechunk(chunksize)
             image_data.to_zarr(dirstore)
 
         # open zarr store save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
         store.attrs.put(img_metadata)
-        # for k,v in img_metadata.items():
-        #     store.attrs[k] = v
+    # for k,v in img_metadata.items():
+    #     store.attrs[k] = v
 
 def write_ome_tiff(
     image: Union[np.ndarray, da.core.Array, List[da.core.Array]],
@@ -143,20 +242,58 @@ def write_ome_tiff(
     subres_steps: int = 2,
     pixelsize: Optional[float] = 1, # defaults to Xenium settings.
     pixelunit: Optional[str] = None, # usually µm
-    #significant_bits: Optional[int] = 16,
     photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', # before I had rgb here. Xenium doc says minisblack
     tile: tuple = (1024, 1024), # 1024 pixel is optimal for Xenium Explorer
     compression: Literal['jpeg', 'LZW', 'jpeg2000', "ZLIB", None] = 'ZLIB', # jpeg2000 or ZLIB are recommended in the Xenium documentation - ZLIB is faster
     overwrite: bool = False,
     verbose: bool = False
     ):
+    """Write image data to a pyramidal OME-TIFF file.
 
-    '''
-    Function to write (pyramidal) OME-TIFF files.
-    Code adapted from: https://github.com/cgohlke/tifffile and Xenium docs (see below).
+    Creates a multi-resolution pyramidal OME-TIFF file from an input image or
+    image pyramid. Parameters are optimized for compatibility with Xenium Explorer.
 
-    For parameters optimal for Xenium see: https://www.10xgenomics.com/support/software/xenium-explorer/tutorials/xe-image-file-conversion
-    '''
+    Code adapted from: https://github.com/cgohlke/tifffile and Xenium docs.
+    For parameters optimal for Xenium see:
+    https://www.10xgenomics.com/support/software/xenium-explorer/tutorials/xe-image-file-conversion
+
+    Args:
+        image: Input image as numpy array, dask array, or list of arrays
+            representing an existing pyramid.
+        file: Output file path for the OME-TIFF file.
+        axes: String describing the axis configuration of the image.
+            Examples: 'YX' for grayscale, 'YXS' for RGB, 'CYX' for
+            multi-channel IF, 'TCYXS' for time-series RGB. Defaults to 'YXS'.
+        metadata: Additional OME metadata to include in the file. Defaults to {}.
+        subresolutions: Number of pyramid subresolution levels to create.
+            Defaults to 6.
+        subres_steps: Downsampling factor between consecutive pyramid levels.
+            Defaults to 2.
+        pixelsize: Physical pixel size in the specified unit. Defaults to 1.
+        pixelunit: Unit for pixel size (e.g., 'µm'). Defaults to None.
+        photometric: Photometric interpretation of the image data.
+            Options: 'rgb', 'minisblack', 'maxisblack'. Xenium documentation
+            recommends 'minisblack'. Defaults to 'rgb'.
+        tile: Tile size for tiled TIFF writing. 1024x1024 is optimal for
+            Xenium Explorer. Defaults to (1024, 1024).
+        compression: Compression algorithm to use. Options: 'jpeg', 'LZW',
+            'jpeg2000', 'ZLIB', None. JPEG2000 or ZLIB are recommended in
+            Xenium documentation; ZLIB is faster. Defaults to 'ZLIB'.
+        overwrite: If True, overwrite existing file. Defaults to False.
+        verbose: If True, print progress information. Defaults to False.
+
+    Raises:
+        FileExistsError: If the output file already exists and overwrite is False.
+
+    Example:
+        >>> write_ome_tiff(
+        ...     image=my_image,
+        ...     file="output.ome.tiff",
+        ...     axes="YXS",
+        ...     pixelsize=0.2125,
+        ...     pixelunit="µm"
+        ... )
+    """
     if verbose:
         print(f"Saving image to {str(file)}")
     # check if the image is an image pyramid
@@ -166,7 +303,9 @@ def write_ome_tiff(
         image_pyramid = image
     elif isinstance(image, np.ndarray) or isinstance(image, da.core.Array):
         first_image = image
-        image_pyramid = create_img_pyramid(img=image, nsubres=subresolutions, axes=axes)
+        image_pyramid = create_img_pyramid(
+            img=image, nsubres=subresolutions, axes=axes, scale_steps=subres_steps
+            )
 
     # determine significant bits variable - is important that Xenium explorer correctly distinguishes between 8 bit and 16 bit
     if first_image.dtype == np.dtype('uint8'):

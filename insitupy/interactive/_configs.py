@@ -54,6 +54,7 @@ if WITH_NAPARI:
             'data_name',
             'layer_name',
             'has_cells',
+            'has_units',
             'static_canvas',
             'recent_selections',
             'verbose',
@@ -73,7 +74,13 @@ if WITH_NAPARI:
                 self.layer_name = None
                 self.has_cells = False
 
-            self.static_canvas = FigureCanvas(Figure(figsize=(5, 5)))
+            # Check if units are available
+            self.has_units = not data.units is None
+
+            # canvas for static elements like color legends
+            self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
+
+            # list to track the removal of elements
             self._removal_tracker = []
             self.recent_selections = []
             self.verbose = False
@@ -83,8 +90,10 @@ if WITH_NAPARI:
         def adata(self):
             """Return the AnnData object for the selected data layer."""
             if not self.data.cells.is_empty:
-                return self.data.cells[self.data_name].matrix
-            return None
+                """Return the AnnData object."""
+                return self.data.cells[self.data_name].table
+            else:
+                return None
 
         @property
         def boundaries(self):
@@ -141,39 +150,100 @@ if WITH_NAPARI:
             return X.toarray() if issparse(X) else X
 
         @property
-        def key_dict(self) -> Dict[str, List[str]]:
-            """Return dictionary mapping data categories to their keys."""
-            return {
+        def X(self):
+            if not self.adata is None:
+                """Return the data matrix as a dense array."""
+                if self.layer_name == "main":
+                    X = self.adata.X
+                else:
+                    X = self.adata.layers[self.layer_name]
+
+                # converting it to non-sparse array in this step might cause memory problems!
+                # if issparse(X):
+                #     return X.toarray()
+                return X
+            else:
+                None
+
+        @property
+        def units(self):
+            """Return SpatialUnitsData object if available."""
+            if self.has_units:
+                return self.data.units
+            else:
+                return None
+
+        @property
+        def unit_vars(self):
+            """Return variable names of spatial unit."""
+            if self.has_units and self.units.data is not None:
+                return sorted(self.units.data.var_names.tolist())
+            else:
+                return []
+
+        @property
+        def unit_obs(self):
+            """Return observation names of spatial unit."""
+            if self.has_units and self.units.data is not None:
+                return sorted(self.units.data.obs.columns.tolist())
+            else:
+                return []
+
+        @property
+        def unit_obsm(self):
+            """Return units obsm keys."""
+            if self.has_units and self.units.data is not None:
+                obsm_keys = list(self.units.data.obsm.keys())
+                obsm_cats = []
+                for k in sorted(obsm_keys):
+                    fdata = self.units.data.obsm[k]
+                    if isinstance(fdata, pd.DataFrame):
+                        obsm_cats.extend([f"{k}#{col}" for col in fdata.columns])
+                    elif isinstance(fdata, np.ndarray):
+                        obsm_cats.extend([f"{k}#{i+1}" for i in range(fdata.shape[1])])
+                return obsm_cats
+            else:
+                return []
+
+        def refresh_variables(self):
+            self.key_dict = self._build_key_dict()
+            self.masks = self._extract_masks()
+            self.pixel_size = self._get_pixel_size()
+            self.recent_selections = []
+
+        # def update_data_name(self, new_data_name):
+        #     self.data_name = new_data_name
+
+        def _build_key_dict(self):
+            key_dict = {
                 "genes": self.genes,
                 "obs": self.observations,
                 "obsm": self.obsm
             }
+            if self.has_units:
+                key_dict["unit_vars"] = self.unit_vars
+                key_dict["unit_obs"] = self.unit_obs
+                key_dict["unit_obsm"] = self.unit_obsm
+            return key_dict
 
-        @property
-        def masks(self) -> List[str]:
-            """Return list of mask names from boundary metadata containing dask arrays."""
-            boundaries = self.boundaries
-            if boundaries is None:
-                return []
+        def _extract_masks(self):
+            if not self.data.cells.is_empty:
+                masks = []
+                boundaries = self.data.cells[self.data_name].boundaries
 
-            m = []
-            for n in boundaries.metadata.keys():
-                b = boundaries[n]
-                if b is not None:
-                    if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
-                        m.append(n)
+                for n in boundaries._data.keys():
+                    b = boundaries[n]
+                    if b is not None:
+                        if isinstance(b, dask.array.core.Array) or np.all([isinstance(elem, dask.array.core.Array) for elem in b]):
+                            masks.append(n)
 
-            return m
+                return masks
 
-        @property
-        def pixel_size(self) -> Optional[float]:
-            """Return pixel size from image metadata, or None if no images available."""
-            if self.data.images.is_empty:
-                return None
-
-            metadata_keys = list(self.data.images.metadata.keys())
-            if not metadata_keys:
-                return None
+        def _get_pixel_size(self):
+            if not self.data.images.is_empty:
+                first_key = list(self.data.images._data.keys())[0]
+                return self.data.images.metadata[first_key]["pixel_size"]
+            return None
 
             first_key = metadata_keys[0]
             return self.data.images.metadata[first_key].get("pixel_size")

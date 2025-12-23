@@ -222,7 +222,7 @@ def _read_proseg(
     # Read Proseg polygons
     polygons = _read_proseg_polygons(path_polygons)
 
-    # Scale Baysor polygons
+    # Scale Proseg polygons
     if pixel_size != 1:
         polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
         polygons["maxx"] = polygons["maxx"] / pixel_size

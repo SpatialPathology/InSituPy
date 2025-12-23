@@ -41,7 +41,7 @@ Follow these tutorials sequentially to learn essential analysis steps:
     Perform quality control filtering, normalization, feature selection, dimensionality reduction (PCA, UMAP), and clustering.
 
 .. card:: Working with Annotations & Regions
-    :link: 03: 03_InSituPy_demo_annotations
+    :link: 03_InSituPy_demo_annotations
     :link-type: doc
     :link-alt: Annotations and regions
 

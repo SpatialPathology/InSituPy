@@ -1,7 +1,7 @@
 
 import gc
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
 
 import dask.array as da
@@ -10,6 +10,7 @@ import numpy as np
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import colors
+from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
@@ -111,7 +112,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     spot_size: float = 10
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
-    palette: str = DEFAULT_CATEGORICAL_CMAP
+    palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
     spot_type: str = "o"
     background_color: str = "white"
     cmap_center: Optional[float] = None
@@ -798,7 +799,7 @@ class _ColorConfigMultiPlot:
                 cells=xd.cells,
                 cells_layer=cells_layer
                 )
-            ad = celldata.matrix
+            ad = celldata.table
 
             # extract the data
             color_values, is_categorical = _extract_color_values(
@@ -845,7 +846,7 @@ class _ColorConfigMultiPlot:
                     cells=xd.cells,
                     cells_layer=cells_layer
                     )
-                ad = celldata.matrix
+                ad = celldata.table
 
                 # extract the data
                 color_values, is_categorical = _extract_color_values(
@@ -1003,7 +1004,7 @@ def _get_data(
     celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
 
     # extract anndata
-    adata = celldata.matrix
+    adata = celldata.table
 
     # filter anndata
     if data_config.filter_mode is not None and data_config.filter_tuple is not None:

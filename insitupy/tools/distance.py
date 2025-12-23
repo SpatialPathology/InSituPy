@@ -4,8 +4,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy._core.data import InSituData
+from insitupy.dataclasses._utils import _get_cell_layer
 
 
 def calc_distance_of_cells_from(
@@ -22,7 +22,7 @@ def calc_distance_of_cells_from(
     Calculate the distance of cells from a specified annotation class within a given region and save the results.
 
     This function calculates the distance of each cell in the spatial data to the closest point
-    of a specified annotation class. The distances are then saved in the cell data matrix.
+    of a specified annotation class. The distances are then saved in the cell data table.
 
     Args:
         data (InSituData): The input data containing cell and annotation information.
@@ -32,7 +32,7 @@ def calc_distance_of_cells_from(
                                      for the analysis.
         region_name: (Optional[str]): If not None, `region_name` is used together with `region_key` to determine the region in which cells are considered
                                      for the analysis.
-        key_to_save (Optional[str]): The key under which to save the calculated distances in the cell data matrix.
+        key_to_save (Optional[str]): The key under which to save the calculated distances in the cell data table.
                                      If None, a default key is generated based on the annotation class.
 
     Returns:
@@ -42,7 +42,7 @@ def calc_distance_of_cells_from(
     celldata, cells_layer_name = _get_cell_layer(
         cells=data.cells, cells_layer=cells_layer, verbose=True, return_layer_name=True
         )
-    adata = celldata.matrix
+    adata = celldata.table
 
     if region_name is None:
         print(f'Calculate the distance of cells from the annotation "{annotation_class}"')
@@ -97,4 +97,4 @@ def calc_distance_of_cells_from(
         adata.obsm["distance_from"] = pd.DataFrame(index=adata.obs_names)
 
     adata.obsm["distance_from"][key_to_save] = min_dists
-    print(f'Saved distances to `.cells[{cells_layer_name}].matrix.obsm["distance_from"]["{key_to_save}"]`')
+    print(f'Saved distances to `.cells[{cells_layer_name}].table.obsm["distance_from"]["{key_to_save}"]`')

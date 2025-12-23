@@ -1,0 +1,11 @@
+dataset,function,time_seconds,current_memory_mb,peak_memory_mb,area
+GSE250346_IPFTMA5,xenium,1147.09,50966.38,85432.70,230
+GSE250346_IPFTMA5,read_xenium,19.90,318.10,640.11,230
+GSM7990532_THD0008,xenium,157.32,7614.49,12649.01,33
+GSM7990532_THD0008,read_xenium,3.05,49.70,108.65,33
+GSM7990548_VUILD106MA,xenium,128.58,9678.70,15971.73,42
+GSM7990548_VUILD106MA,read_xenium,5.02,136.40,229.72,42
+Janesick_et_al,xenium,188.15,9424.79,15696.76,41.25
+Janesick_et_al,read_xenium,5.18,111.12,257.97,41.25
+Human_GBM,xenium,657.35,28818.87,47880.80,105
+Human_GBM,read_xenium,25.45,549.64,1282.54,105

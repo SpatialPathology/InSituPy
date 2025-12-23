@@ -10,8 +10,8 @@
 #     fontsize: int = 28
 #     ):
 #     # extract binned expression matrix and gene names
-#     binex = self._cells["main"].matrix.varm["binned_expression"]
-#     gene_names = self._cells["main"].matrix.var_names
+#     binex = self._cells["main"].table.varm["binned_expression"]
+#     gene_names = self._cells["main"].table.var_names
 
 #     genes = convert_to_list(genes)
 
@@ -101,5 +101,5 @@
 #     else:
 #         print("Calculate highly-variable genes per batch key {} using {} flavor...".format(hvg_batch_key, hvg_flavor)) if verbose else None
 
-#     sc.pp.highly_variable_genes(self._cells["main"].matrix, batch_key=hvg_batch_key, flavor=hvg_flavor, layer=hvg_layer, n_top_genes=hvg_n_top_genes)
+#     sc.pp.highly_variable_genes(self._cells["main"].table, batch_key=hvg_batch_key, flavor=hvg_flavor, layer=hvg_layer, n_top_genes=hvg_n_top_genes)
 

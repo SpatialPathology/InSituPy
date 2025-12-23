@@ -5,14 +5,17 @@ if WITH_NAPARI:
 
     import napari
     import numpy as np
+    import pandas as pd
     from magicgui import magic_factory, magicgui
     from magicgui.widgets import FunctionGui
     from matplotlib.colors import ListedColormap
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import QSize, Qt
     from qtpy.QtGui import QFontMetrics, QIcon
-    from qtpy.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QPushButton,
+    from qtpy.QtWidgets import (QComboBox, QCompleter, QFileDialog,
+                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                 QVBoxLayout, QWidget)
+    from scipy.sparse import issparse
 
     from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                      REGION_CMAP, REGIONS_SYMBOL)
@@ -24,7 +27,9 @@ if WITH_NAPARI:
     from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
                                                config_manager)
     from insitupy.interactive._layers import (_create_points_layer,
-                                              _update_points_layer)
+                                              _create_units_layer,
+                                              _update_points_layer,
+                                              _update_units_layer)
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.utils._helpers import _get_expression_values
 
@@ -40,14 +45,31 @@ if WITH_NAPARI:
         #viewer = xdata.viewer
         data = viewer_config.data
 
-        if not viewer_config.has_cells:
-            show_cells_widget = None
-            move_to_cell_widget = None
-            show_boundaries_widget = None,
-            filter_cells_widget = None
-        else:
-            data_names = data.cells.get_all_keys()
-            layer_names = ["main"] + list(data.cells.matrix.layers)
+        # Initialize cell-related widgets only if cells are present
+        # if not viewer_config.has_cells:
+        #     show_cells_widget = None
+        #     move_to_cell_widget = None
+        #     show_boundaries_widget = None
+        #     filter_cells_widget = None
+        #     select_data_widget = None
+
+        show_cells_widget = None
+        move_to_cell_widget = None
+        show_geometries_widget = None
+        show_boundaries_widget = None
+        select_data_widget = None
+        filter_cells_widget = None
+        show_units_widget = None
+
+        def callback_update_legend(event=None):
+            _update_colorlegend(viewer=viewer, viewer_config=viewer_config)
+
+        viewer.layers.selection.events.active.connect(callback_update_legend)
+
+        # else:
+        if viewer_config.has_cells:
+            data_names = data.cells.keys()
+            layer_names = ["main"] + list(data.cells.table.layers)
 
             @magicgui(
                 call_button=False,
@@ -179,7 +201,7 @@ if WITH_NAPARI:
                         if not add_new_layer:
                             #print(f"Key '{gene}' already in layer list.", flush=True)
                             # update the existing points layer
-                            layer = viewer.layers[layer_names_for_current_data[0]]
+                            layer = viewer.layers[layer_names_for_current_data[-1]]
                             _update_points_layer(
                                 layer=layer,
                                 new_color_values=color_value,
@@ -190,6 +212,11 @@ if WITH_NAPARI:
                             was_moved = viewer.layers.move(viewer.layers.index(new_layer_name), len(viewer.layers))
 
                         else:
+                            # Check if layer with this name already exists
+                            if new_layer_name in viewer.layers:
+                                show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                                return None
+
                             # create new points layer for genes
                             gene_layer = _create_points_layer(
                                 points=viewer_config.points,
@@ -326,9 +353,6 @@ if WITH_NAPARI:
                     filter_widget=filter_cells_widget
                     )
 
-            def callback_update_legend(event=None):
-                _update_colorlegend(viewer=viewer, viewer_config=viewer_config)
-
             if show_cells_widget is not None:
                 show_cells_widget.call_button.clicked.connect(callback_refresh)
                 show_cells_widget.call_button.clicked.connect(callback_update_legend)
@@ -336,11 +360,146 @@ if WITH_NAPARI:
                 show_boundaries_widget.call_button.clicked.connect(callback_refresh)
                 show_boundaries_widget.call_button.clicked.connect(callback_update_legend)
 
-            viewer.layers.selection.events.active.connect(callback_update_legend)
 
-        if data.annotations.is_empty and data.regions.is_empty:
-            show_geometries_widget = None
-        else:
+        # ====== SPATIAL UNITS WIDGET ======
+        # if not viewer_config.has_units:
+        #     show_units_widget = None
+        # else:
+        if viewer_config.has_units:
+            # Prepare choices
+            obs_choices = [""] + sorted(list(viewer_config.unit_obs))
+            obsm_choices = [""] + sorted(list(viewer_config.unit_obsm))
+
+            @magicgui(
+                call_button='Show',
+                gene={'label': "Gene (search):"},
+                obs={'choices': obs_choices, 'label': 'Obs:'},
+                obsm={'choices': obsm_choices, 'label': 'Obsm:'},
+                add_new_layer={'label': 'Add new layer'}
+            )
+            def show_units_widget(
+                gene="",
+                obs="",
+                obsm="",
+                add_new_layer=False
+            ) -> napari.types.LayerDataTuple:
+
+                key = None
+                key_type = None
+
+                # Determine which key to use (priority: gene > obs > obsm)
+                if gene != "":
+                    key = gene
+                    key_type = "genes"
+                elif obs != "":
+                    key = obs
+                    key_type = "obs"
+                elif obsm != "":
+                    key = obsm
+                    key_type = "obsm"
+
+                if key is None or key == "":
+                    show_warning("Please select a key to visualize.")
+                    return None
+
+                # Validate key for genes
+                if key_type == "genes":
+                    if key not in viewer_config.unit_vars:
+                        show_warning(f"Key '{key}' not found in genes.")
+                        return None
+
+                # get expression values
+                color_values = _get_expression_values(
+                    adata=viewer_config.units.data,
+                    X=viewer_config.units.data.X,
+                    key_type=key_type, key=key
+                )
+
+                # Create layer name
+                layer_name = f"units-{key}"
+
+                # Get existing spatial unit layers
+                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("units-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
+
+                if len(unit_layer_names) == 0:
+                    # Create new spatial units layer
+                    unit_layer = _create_units_layer(
+                        gdf=viewer_config.units.shapes,
+                        color_values=color_values,
+                        name=layer_name,
+                        unit_names=viewer_config.units.shapes.index.tolist(),
+                        edge_width=0,
+                        opacity=0.5,
+                        upper_climit_pct=99
+                    )
+                    return unit_layer
+                else:
+                    if not add_new_layer:
+                        # Update the existing spatial units layer
+                        layer = viewer.layers[unit_layer_names[-1]]
+                        _update_units_layer(
+                            layer=layer,
+                            new_color_values=color_values,
+                            new_name=layer_name
+                        )
+                        # Move layer to the top
+                        viewer.layers.move(viewer.layers.index(layer_name), len(viewer.layers))
+                    else:
+                        # Check if layer with this name already exists
+                        if layer_name in viewer.layers:
+                            show_warning(f"Layer '{layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                            return None
+
+                        # Create new units layer
+                        unit_layer = _create_units_layer(
+                            gdf=viewer_config.units.shapes,
+                            color_values=color_values,
+                            name=layer_name,
+                            unit_names=viewer_config.units.shapes.index.tolist(),
+                            edge_width=0,
+                            opacity=0.5,
+                            upper_climit_pct=99
+                        )
+                        return unit_layer
+
+            # Make the gene text field searchable with completer
+            def _setup_searchable_textfield(widget, full_choices):
+                """Configure QLineEdit to be searchable with QCompleter."""
+                if hasattr(widget, 'native') and isinstance(widget.native, QLineEdit):
+                    # Create completer with full list for efficient searching
+                    completer = QCompleter(full_choices)
+                    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+                    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    widget.native.setCompleter(completer)
+
+            # Setup searchable text field for genes
+            _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
+
+            # Connect callbacks to ensure mutual exclusivity
+            @show_units_widget.gene.changed.connect
+            def _on_gene_changed(event=None):
+                if show_units_widget.gene.value != "":
+                    show_units_widget.obs.value = ""
+                    show_units_widget.obsm.value = ""
+
+            @show_units_widget.obs.changed.connect
+            def _on_obs_changed(event=None):
+                if show_units_widget.obs.value != "":
+                    show_units_widget.gene.value = ""
+                    show_units_widget.obsm.value = ""
+
+            @show_units_widget.obsm.changed.connect
+            def _on_obsm_changed(event=None):
+                if show_units_widget.obsm.value != "":
+                    show_units_widget.gene.value = ""
+                    show_units_widget.obs.value = ""
+
+            show_units_widget.call_button.clicked.connect(callback_update_legend)
+
+        # if data.annotations.is_empty and data.regions.is_empty:
+        #     show_geometries_widget = None
+        # else:
+        if not (data.annotations.is_empty and data.regions.is_empty):
             #TODO: The following section is weirdly complicated and should be simplified.
             # check which geometries are available
             if not data.annotations.is_empty:
@@ -352,7 +511,7 @@ if WITH_NAPARI:
                 choices = ["Regions"]
 
             for c in choices:
-                if len(getattr(data, c.lower()).metadata.keys()) == 0:
+                if len(getattr(data, c.lower()).keys()) == 0:
                     choices.remove(c)
 
             if len(choices) == 0:
@@ -363,7 +522,7 @@ if WITH_NAPARI:
                 geom = getattr(data, choices[0].lower())
 
                 # extract annotations keys
-                annot_keys = list(geom.metadata.keys())
+                annot_keys = list(geom.keys())
                 try:
                     first_annot_key = list(annot_keys)[0] # for dropdown menu
                 except IndexError:
@@ -459,7 +618,7 @@ if WITH_NAPARI:
             show_boundaries_widget,
             select_data_widget,
             filter_cells_widget,
-            #add_new_geometries_widget
+            show_units_widget,
             )
 
     # Difference between magicgui and magic_factory decorators:
@@ -613,6 +772,77 @@ if WITH_NAPARI:
         def _sync_geometries(self):
             sync_geometries()
 
+
+    class ResetWidgetsButton(QWidget):
+        """Button widget to reset/restore all closed widgets in the napari viewer."""
+
+        def __init__(self, widgets_max_width: int = 500):
+            super().__init__()
+            self.widgets_max_width = widgets_max_width
+            self.layout = QVBoxLayout()
+            self.setLayout(self.layout)
+
+            # create the reset button
+            self.reset_button = QPushButton("Reset Widgets")
+            self.reset_button.setToolTip("Restore all closed widgets")
+            self.reset_button.clicked.connect(self._reset_widgets)
+            self.layout.addWidget(self.reset_button)
+
+        def _reset_widgets(self):
+            """Re-add all widgets to the current napari viewer."""
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
+            data = viewer_config.data
+
+            # Get list of currently open dock widget names
+            existing_widgets = set()
+            for dock_widget in viewer.window._dock_widgets.values():
+                existing_widgets.add(dock_widget.name)
+
+            # Initialize widgets
+            (
+                show_cells_widget,
+                locate_cells_widget,
+                show_geometries_widget,
+                show_boundaries_widget,
+                select_data,
+                filter_cells_widget,
+                show_units_widget,
+            ) = _initialize_widgets(
+                viewer=viewer,
+                viewer_config=viewer_config
+            )
+
+            # Define widgets to add with their properties
+            widgets_config = [
+                (select_data, "Select data", 80, False),
+                (show_cells_widget, "Show data", 170, False),
+                (show_units_widget, "Show spatial units", None, True),
+                (show_boundaries_widget, "Show boundaries", None, False),
+                (locate_cells_widget, "Navigate to cell", None, False),
+                (filter_cells_widget, "Filter cells", 150, True),
+                (show_geometries_widget, "Show geometries", None, True),
+            ]
+
+            # Add widgets that are not already open
+            for widget, name, max_height, tabify in widgets_config:
+                if widget is not None and name not in existing_widgets:
+                    viewer.window.add_dock_widget(widget, name=name, area="right", tabify=tabify)
+                    if max_height is not None:
+                        widget.max_height = max_height
+                    widget.max_width = self.widgets_max_width
+
+            # Check and add "Add geometries" widget
+            if "Add geometries" not in existing_widgets:
+                add_geom_widget = add_new_geometries_widget()
+                add_geom_widget.max_width = self.widgets_max_width
+                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False)
+
+            show_info("Widgets have been reset.")
 
 
     class SaveWidget(QWidget):

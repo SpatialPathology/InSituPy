@@ -11,7 +11,6 @@ from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
-import dask.array as da
 import dask.dataframe as dd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -20,14 +19,12 @@ import pandas as pd
 import seaborn as sns
 from parse import *
 from pyarrow import ArrowInvalid
-from scipy.sparse import issparse
 from tqdm import tqdm
 
-from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import (CACHE, FLUO_CMAP, ISPY_METADATA_FILE,
-                                 LOAD_FUNCS, MODALITIES, MODALITIES_COLOR_DICT)
-from insitupy._exceptions import (InSituDataMissingObject,
-                                  InSituDataRepeatedCropError,
+from insitupy import __version__
+from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
+                                 MODALITIES, MODALITIES_COLOR_DICT)
+from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
 from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
@@ -36,31 +33,15 @@ from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
-                                              MultiCellData, RegionsData)
+                                              MultiCellData, RegionsData,
+                                              SpatialUnitsData)
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      _save_images, _save_regions,
-                                     _save_transcripts, read_multicelldata,
-                                     read_shapesdata)
-from insitupy.images.axes import ImageAxes
-from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
-from insitupy.utils._helpers import (_get_expression_values,
-                                     sort_paths_by_datetime)
+                                     _save_transcripts, _save_units,
+                                     read_multicelldata, read_shapesdata)
+from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
-
-# optional packages that are not always installed
-if WITH_NAPARI:
-    import napari
-    from napari.layers import Layer, Points, Shapes
-    from napari.utils.notifications import show_info, show_warning
-
-    from insitupy.interactive._configs import _get_viewer_uid, config_manager
-    from insitupy.interactive._layers import _create_points_layer
-    from insitupy.interactive._widgets import SaveWidget, SyncButton
-
-    #from napari.layers.shapes.shapes import Shapes
-    from ..interactive._widgets import (_initialize_widgets,
-                                        add_new_geometries_widget)
 
 
 class InSituData:
@@ -196,6 +177,7 @@ class InSituData:
         # modalities
         self._images = ImageData()
         self._cells = MultiCellData()
+        self._units = None
         self._annotations = AnnotationsData()
         self._regions = RegionsData()
         self._transcripts = None
@@ -219,7 +201,7 @@ class InSituData:
         # check if all modalities are empty
         empty_checks = [elem.is_empty for elem in [
             self._images, self._cells, self._annotations, self._regions
-            ]] + [self._transcripts is None] # transcripts doe not have is_empty property since they are a dataframe
+            ]] + [self._transcripts is None, self._units is None] # transcripts and units do not have is_empty property since they are dataframes
         all_empty = np.all(empty_checks)
 
         repr = (
@@ -255,11 +237,10 @@ class InSituData:
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._transcripts is not None:
-                trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
-
+            if self._units is not None:
+                units_repr = self._units.__repr__()
                 repr = (
-                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['units']+tf.Bold} units{tf.ResetAll}\n{tf.SPACER}   " + units_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
             if not self._annotations.is_empty:
@@ -272,6 +253,13 @@ class InSituData:
                 region_repr = self._regions.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['regions']+tf.Bold} regions{tf.ResetAll}\n{tf.SPACER}   " + region_repr.replace("\n", f"\n{tf.SPACER}   ")
+                )
+
+            if self._transcripts is not None:
+                trans_repr = f"DataFrame with shape {self._transcripts.shape[0]} x {self._transcripts.shape[1]}"
+
+                repr = (
+                    repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['transcripts']+tf.Bold} transcripts{tf.ResetAll}\n{tf.SPACER}   " + trans_repr
                 )
         return repr
 
@@ -358,6 +346,38 @@ class InSituData:
         print("Cleared all data from 'cells'.")
 
     @property
+    def units(self):
+        """Return spatial units data of the InSituData object.
+        Returns:
+            insitupy._core.dataclasses.SpatialUnitsData: Spatial units data.
+        """
+        return self._units
+
+    @units.setter
+    def units(self, value):
+        raise AttributeError("Cannot modify 'units' attribute after initialization.")
+
+    @units.deleter
+    def units(self):
+        self._units = None
+        print("Cleared all data from 'units'.")
+
+    def add_units(self, data: SpatialUnitsData):
+        """
+        Add spatial units data to the InSituData object.
+
+        Args:
+            data (SpatialUnitsData): The spatial units data to add.
+
+        Raises:
+            TypeError: If data is not of type SpatialUnitsData.
+        """
+        if not isinstance(data, SpatialUnitsData):
+            raise TypeError(f"Data must be of type SpatialUnitsData, but got {type(data).__name__} instead.")
+
+        self._units = data
+
+    @property
     def annotations(self):
         """Return annotations of the InSituData object.
         Returns:
@@ -403,6 +423,8 @@ class InSituData:
     def transcripts(self, value: dd.DataFrame):
         if isinstance(value, dd.DataFrame):
             self._transcripts = value
+        elif isinstance(value, pd.DataFrame):
+            self._transcripts = dd.from_pandas(value, npartitions=8)
         else:
             raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
@@ -421,7 +443,7 @@ class InSituData:
                           ):
         '''
         Function to assign geometries (annotations or regions) to the anndata object in
-        InSituData.cells[layer].matrix. Assignment information is added to the DataFrame in `.obs`.
+        InSituData.cells[layer].table. Assignment information is added to the DataFrame in `.obs`.
         '''
         # assert that prerequisites are met
         try:
@@ -443,8 +465,8 @@ class InSituData:
         keys = convert_to_list(keys)
 
         # convert coordinates into shapely Point objects
-        x = celldata.matrix.obsm["spatial"][:, 0]
-        y = celldata.matrix.obsm["spatial"][:, 1]
+        x = celldata.table.obsm["spatial"][:, 0]
+        y = celldata.table.obsm["spatial"][:, 1]
         cells = gpd.points_from_xy(x, y)
         cells = gpd.GeoSeries(cells)
 
@@ -486,7 +508,7 @@ class InSituData:
 
             # convert into pandas dataframe
             data = pd.DataFrame(data)
-            data.index = celldata.matrix.obs_names
+            data.index = celldata.table.obs_names
 
             # transform data into one column
             column_to_add = [" & ".join(geom_names[row.values]) if np.any(row.values) else "unassigned" for _, row in data.iterrows()]
@@ -495,38 +517,38 @@ class InSituData:
                 # create annotation from annotation masks
                 col_name = f"{geometry_type}-{key}"
                 data[col_name] = column_to_add
-                if col_name in celldata.matrix.obs:
+                if col_name in celldata.table.obs:
                     if overwrite:
-                        celldata.matrix.obs.drop(col_name, axis=1, inplace=True)
+                        celldata.table.obs.drop(col_name, axis=1, inplace=True)
                         print(f'Existing column "{col_name}" is overwritten.', flush=True)
                         add = True
                     else:
-                        warn(f'Column "{col_name}" exists already in `{name}.matrix.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
+                        warn(f'Column "{col_name}" exists already in `{name}.table.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
                         add = False
                 else:
                     add = True
 
                 if add:
                     if add_masks:
-                        celldata.matrix.obs = pd.merge(left=celldata.matrix.obs, right=data, left_index=True, right_index=True)
+                        celldata.table.obs = pd.merge(left=celldata.table.obs, right=data, left_index=True, right_index=True)
                     else:
-                        celldata.matrix.obs = pd.merge(left=celldata.matrix.obs, right=data.iloc[:, -1], left_index=True, right_index=True)
+                        celldata.table.obs = pd.merge(left=celldata.table.obs, right=data.iloc[:, -1], left_index=True, right_index=True)
 
                     # save that the current key was analyzed
                     geom_attr.metadata[key]["analyzed"] = tf.TICK
             else:
                 # add to obsm
-                obsm_keys = celldata.matrix.obsm.keys()
+                obsm_keys = celldata.table.obsm.keys()
                 if geometry_type not in obsm_keys:
                     # add empty pandas dataframe with obs_names as index
-                    celldata.matrix.obsm[geometry_type] = pd.DataFrame(index=celldata.matrix.obs_names)
+                    celldata.table.obsm[geometry_type] = pd.DataFrame(index=celldata.table.obs_names)
 
-                celldata.matrix.obsm[geometry_type][key] = column_to_add
+                celldata.table.obsm[geometry_type][key] = column_to_add
 
                 # save that the current key was analyzed
                 geom_attr.metadata[key]["analyzed"] = tf.TICK
 
-                print(f"Added results to `{name}.matrix.obsm['{geometry_type}']", flush=True)
+                print(f"Added results to `{name}.table.obsm['{geometry_type}']", flush=True)
 
 
     def assign_annotations(
@@ -537,7 +559,7 @@ class InSituData:
         overwrite: bool = True
     ):
         if cells_layers is None:
-            layers_list = self._cells.get_all_keys()
+            layers_list = self._cells.keys()
         else:
             layers_list = convert_to_list(cells_layers)
 
@@ -558,7 +580,7 @@ class InSituData:
         overwrite: bool = True
     ):
         if cells_layers is None:
-            layers_list = self._cells.get_all_keys()
+            layers_list = self._cells.keys()
         else:
             layers_list = convert_to_list(cells_layers)
 
@@ -695,6 +717,187 @@ class InSituData:
 
         if not inplace:
             return _self
+
+    def transform(
+        self,
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        source_pixel_size: Optional[Number] = None,
+        reference_pixel_size: Optional[Number] = None,
+        output_size: Optional[Tuple[Number, Number]] = None,
+        inplace: bool = False,
+        verbose: bool = False
+    ):
+        """
+        Apply an affine transformation to the InSituData object (Images and Features).
+
+        Args:
+            transformation_matrix: Either a 2x3 or 3x3 numpy array representing
+                the affine transformation matrix, or a path to a CSV/Excel file
+                containing the matrix.
+            source_pixel_size: Pixel size (in µm/pixel) of the source image from
+                which the transformation matrix was derived.
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image
+                used during registration.
+            output_size: Tuple of (height, width) in physical coordinates (µm)
+                specifying the desired output canvas size.
+            inplace: If True, modify the object in place. Otherwise, return a
+                transformed copy. Defaults to False.
+            verbose: If True, print status messages. Defaults to False.
+
+        Returns:
+            InSituData: Transformed InSituData object if inplace=False, else None.
+        """
+        if inplace:
+            _self = self
+        else:
+            _self = self.copy()
+
+        # Transform images
+        if not _self.images.is_empty:
+            if verbose:
+                print("Transforming images...")
+            _self.images.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                output_size=output_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+        # Transform units
+        if _self.units is not None:
+            if verbose:
+                print("Transforming units...")
+            _self.units.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+        if not inplace:
+            return _self
+
+    def align_units(
+        self,
+        other: "InSituData",
+        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
+        source_image_name: Optional[str] = None,
+        reference_image_name: Optional[str] = None,
+        source_pixel_size: Optional[Number] = None,
+        reference_pixel_size: Optional[Number] = None,
+        transfer_images: bool = False,
+        verbose: bool = False
+    ):
+        """
+        Align units from another InSituData object to this one.
+
+        This function takes units from another InSituData object, applies a
+        transformation, and adds them to the current object. It is designed for
+        integrating units (e.g., from Visium) onto a high-resolution dataset
+        (e.g., Xenium) after registration.
+
+        If `transfer_images` is True and the source object (other) contains images,
+        they are also transformed and added to the current object.
+
+        Args:
+            other (InSituData): The InSituData object containing the units to align.
+            transformation_matrix: Transformation matrix to align the units.
+            source_image_name: Name of the source image in `other.images` to infer `source_pixel_size`.
+            reference_image_name: Name of the reference image in `self.images` to infer `reference_pixel_size`.
+            source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of units).
+            reference_pixel_size: Pixel size (in µm/pixel) of the reference image (target).
+            transfer_images: If True, transfer images from `other` to `self`. Defaults to False.
+            verbose: If True, print status messages.
+
+        Raises:
+            ValueError: If the configuration of self or other is invalid.
+        """
+        # Check configuration of self
+        if self.cells.is_empty:
+            warn("The target InSituData object (self) has no cells. "
+                 "Alignment is typically done onto a dataset with cells.")
+
+        if self.units is not None:
+            raise ValueError("The target InSituData object (self) already has spatial units. "
+                             "Please remove them before aligning new units.")
+
+        # Check configuration of other
+        if other.units is None:
+            raise ValueError("The source InSituData object (other) has no spatial units to align.")
+
+        if not other.cells.is_empty:
+            warn("The source InSituData object (other) has cells. "
+                 "Typically, the source object should only contain spatial units to be aligned.")
+
+        # Determine reference pixel size
+        if reference_pixel_size is None and reference_image_name is not None:
+            try:
+                reference_pixel_size = self.images.metadata[reference_image_name]["pixel_size"]
+            except KeyError:
+                raise ValueError(f"Reference image '{reference_image_name}' not found in self.images.")
+
+        # Determine source pixel size
+        if source_pixel_size is None and source_image_name is not None:
+            try:
+                source_pixel_size = other.images.metadata[source_image_name]["pixel_size"]
+            except KeyError:
+                raise ValueError(f"Source image '{source_image_name}' not found in other.images.")
+
+        # Copy units from other
+        units_to_add = other.units.copy()
+
+        # Transform units
+        if verbose:
+            print("Transforming and aligning spatial units...")
+
+        units_to_add.transform(
+            transformation_matrix=transformation_matrix,
+            reference_pixel_size=reference_pixel_size,
+            source_pixel_size=source_pixel_size,
+            inplace=True,
+            verbose=verbose
+        )
+
+        # Add to self
+        self._units = units_to_add
+
+        if verbose:
+            print("Spatial units aligned and added to InSituData object.")
+
+        # Align images
+        if transfer_images and not other.images.is_empty:
+            if verbose:
+                print("Transforming and aligning images...")
+
+            images_to_add = other.images.copy()
+            images_to_add.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                inplace=True,
+                verbose=verbose
+            )
+
+            for name in images_to_add.names:
+                img = images_to_add[name]
+                if isinstance(img, list):
+                    img = img[0]
+                self.images.add_image(
+                    image=img,
+                    channel_names=name,
+                    axes=images_to_add.metadata[name]["axes"],
+                    pixel_size=images_to_add.metadata[name]["pixel_size"],
+                    ome_meta=images_to_add.metadata[name].get("OME", {}),
+                    is_rgb=images_to_add.metadata[name].get("rgb", None),
+                    overwrite=True,
+                    verbose=verbose
+                )
+
+            if verbose:
+                print("Images aligned and added to InSituData object.")
 
     def plot_dimred(self, save: Optional[str] = None):
         '''
@@ -955,6 +1158,52 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
+    def load_units(self,
+                     verbose: bool = False
+                     ):
+        # read units
+        if verbose:
+            print("Loading spatial units...", flush=True)
+
+        if self.from_insitudata:
+            # extract available paths
+            units_path = Path(self.path) / "units"
+
+            if not units_path.exists():
+                if verbose:
+                    warn(ModalityNotFoundWarning("units"), stacklevel=2)
+            else:
+                import json
+
+                import geopandas as gpd
+                from anndata import read_h5ad
+
+                # Load shapes
+                shapes_file = units_path / "shapes.parquet"
+                shapes = gpd.read_parquet(shapes_file)
+
+                # Load data if present
+                data_file = units_path / "data.h5ad"
+                data = read_h5ad(data_file) if data_file.exists() else None
+
+                # Load metadata
+                meta_file = units_path / "metadata.json"
+                if meta_file.exists():
+                    with open(meta_file, 'r') as f:
+                        meta_dict = json.load(f)
+                    unit_type = meta_dict.get("unit_type", "unit")
+                else:
+                    unit_type = "unit"
+
+                # Create SpatialUnitsData object and assign
+                self._units = SpatialUnitsData(
+                    shapes=shapes,
+                    data=data,
+                    unit_type=unit_type
+                )
+        else:
+            NoProjectLoadWarning()
+
     @classmethod
     def read(cls, path: Union[str, os.PathLike, Path]):
         """Read an InSituData object from a specified folder.
@@ -1059,6 +1308,15 @@ class InSituData:
             transcripts = self._transcripts
             _save_transcripts(
                 transcripts=transcripts,
+                path=path,
+                metadata=self._metadata
+                )
+
+        # save units
+        if self._units is not None:
+            units = self._units
+            _save_units(
+                units=units,
                 path=path,
                 metadata=self._metadata
                 )
@@ -1175,8 +1433,72 @@ class InSituData:
             # save to the respective directory
             self.saveas(path=path)
 
+    def quantify_signal(
+        self,
+        image_name: str,
+        cells_layer: Optional[str] = None,
+        cells_compartment: Literal["cells", "nuclei"] = "cells",
+        method: Literal["mean", "median"] = "median",
+        downsample_factor: Optional[int] = None,
+        tile_size: Optional[int] = None,
+        add_to_obs: bool = True
+    ):
+        from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
+                                          summarize_tile_measurements)
+        img = self.images[image_name]
+        pixel_size = self.images.metadata[image_name]["pixel_size"]
+        if isinstance(img, list):
+            img = img[0]
+        cellsdata = _get_cell_layer(self.cells, cells_layer=cells_layer)
+        mask = cellsdata.boundaries[cells_compartment]
+        if isinstance(mask, list):
+            mask = mask[0]
 
+        if tile_size is None:
+            measurements, cell_ids = quantify_fluorescence(
+                image_dask=img,
+                mask_dask=mask,
+                method=method,
+                downsample_factor=downsample_factor
+            )
+        else:
 
+            # Tiled approach
+            overlap = int(100 / pixel_size)
+            print(f"Quantification using tiled approach with overlap {overlap}...", flush=True)
+            img_tiles = create_tiles(img, tile_size=tile_size, overlap=overlap)
+            mask_tiles = create_tiles(mask, tile_size=tile_size, overlap=overlap)
+
+            quant_results = []
+            for i in tqdm(range(len(img_tiles)), desc="Processing tiles"):
+                img_tile = img_tiles[i][0]
+                mask_tile = mask_tiles[i][0]
+                quant_results.append(quantify_fluorescence(
+                    image_dask=img_tile,
+                    mask_dask=mask_tile,
+                    method=method,
+                    return_area=True
+                ))
+
+            # extract measurements from tiled results
+            print("Collecting results...", flush=True)
+            measurements, cell_ids = summarize_tile_measurements(quant_results)
+
+        name_mapping = dict(zip(
+            cellsdata.boundaries.seg_mask_value.compute(),
+            cellsdata.boundaries.cell_names.compute()))
+
+        res_series = pd.Series(
+            measurements,
+            index=list(map(name_mapping.get, cell_ids))
+        )
+
+        if add_to_obs:
+            obs_col = f"{image_name}_signal_{cells_compartment}_{method}"
+            cellsdata.table.obs[obs_col] = res_series
+            print(f"Added quantification results to `.cells['{cells_layer}'].table.obs['{obs_col}']`.", flush=True)
+        else:
+            return res_series
 
 
 
@@ -1274,66 +1596,26 @@ class InSituData:
         widgets_max_width: int = 500,
         verbose: bool = False
         ):
-
-        # check if napari is installed
+        # check whether napari is installed
         try:
             import napari
+
+            from insitupy._core._napari import _show
         except ImportError:
             raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
 
-        # initialize a config class manager with new ID
-        uid_viewer = config_manager.add_config(data=self)
-        current_viewer_config = config_manager[uid_viewer] # get current viewer config
-        if verbose:
-            current_viewer_config.verbose = True
-
-        # create viewer
-        current_viewer = napari.Viewer(title=f"{self.slide_id}: {self.sample_id} #{uid_viewer}")
-
-        # IMAGES
-        if self.images.is_empty:
-            warn("No images found.")
-        else:
-            self._add_images_to_viewer(viewer=current_viewer)
-
-        # CELLS
-        if keys is not None:
-            self._add_cells_to_viewer(
-                viewer=current_viewer,
-                keys=keys,
-                key_type=key_type,
-                cells_layer=cells_layer,
-                point_size=point_size
-                )
-
-        # WIDGETS
-        self._add_widgets_to_viewer(
-            viewer=current_viewer,
-            widgets_max_width=widgets_max_width
+        _show(
+            data=self,
+            keys=keys,
+            key_type=key_type,
+            cells_layer=cells_layer,
+            point_size=point_size,
+            scalebar=scalebar,
+            unit=unit,
+            return_viewer=return_viewer,
+            widgets_max_width=widgets_max_width,
+            verbose=verbose
         )
-
-        # BUTTONS
-        self._add_buttons_to_viewer(
-            viewer=current_viewer
-        )
-
-        # EVENTS
-        self._add_events_to_viewer(viewer=current_viewer)
-
-        # COLOR LEGEND
-        self._add_color_legend_to_viewer(viewer=current_viewer)
-
-        # NAPARI SETTINGS
-        if scalebar:
-            # add scale bar
-            current_viewer.scale_bar.visible = True
-            current_viewer.scale_bar.unit = unit
-
-        napari.run()
-
-        if return_viewer:
-            return current_viewer
-
 
     def reload(
         self,
@@ -1466,338 +1748,4 @@ class InSituData:
         if verbose:
             print("Saved.")
 
-    ################################
-    ### NAPARI-RELATED FUNCTIONS ###
-    ################################
-    if WITH_NAPARI:
-        def _add_images_to_viewer(
-            self,
-            viewer: napari.Viewer,
-            grayscale_colormap: List[str] = FLUO_CMAP,
-            ):
-            images_attr = self._images
-            n_images = len(images_attr.metadata)
-            n_grayscales = 0 # number of grayscale images
-            for i, (img_name, img_metadata) in enumerate(images_attr.metadata.items()):
-                # get image
-                img = images_attr[img_name]
 
-                # only last image is set visible
-                is_visible = False if i < n_images - 1 else True
-                pixel_size = img_metadata['pixel_size']
-
-                # check if the current image is RGB
-                #is_rgb = self._images.metadata[img_name]["rgb"]
-                axes_str = self._images.metadata[img_name]["axes"]
-                shape = self._images.metadata[img_name]["shape"]
-                if self._images.metadata[img_name]["axes"] == "CYX":
-                    if not len(shape) == 3:
-                        warn((
-                            f"Axes information ({axes_str}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.\n"
-                            f"Error is likely caused by inconsistencies in the metadata file occuring in insitupy versions < 0.9.0."
-                            )
-                            )
-                        axes_str = "YX"
-
-                axes = ImageAxes(axes_str)
-                is_rgb = axes.is_rgb
-
-                if not is_rgb and axes.C is not None:
-                    if not isinstance(img, list):
-                        n_channels = img.shape[axes.C]
-                    else:
-                        n_channels = img[0].shape[axes.C]
-
-                    try:
-                        # get channel names
-                        channel_names = [
-                            elem["Name"]
-                            for elem
-                            in self._images.metadata[img_name]['OME']['Image']['Pixels']['Channel']
-                            ]
-                    except KeyError:
-                        channel_names = [f"Channel {i+1}" for i in range(n_channels)]
-
-                    # Multichannel grayscale image
-                    for ch in range(n_channels):
-                        # get channel name
-                        ch_name = channel_names[ch]
-
-                        # select channel
-                        if not isinstance(img, list):
-                            channel_img = da.take(img, indices=ch, axis=axes.C)
-                        else:
-                            channel_img = [da.take(elem, indices=ch, axis=axes.C) for elem in img]
-                        #channel_img = img[ch]
-
-                        # select color map
-                        if ch_name in ["nuclei", "nucleus"] or "DAPI" in ch_name:
-                            cmap = "blue"
-                        else:
-                            cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
-                            n_grayscales += 1
-
-                        if not isinstance(channel_img, list):
-                            # create image pyramid for lazy loading
-                            img_pyramid = create_img_pyramid(img=channel_img, nsubres=6)
-                        else:
-                            img_pyramid = channel_img
-
-                        # get contrast limits
-                        contrast_limits = _get_contrast_limits(img_pyramid)
-
-                        if contrast_limits[1] == 0:
-                            warn("The maximum value of the image is 0. Is the image really completely empty?")
-                            contrast_limits = (0, 255)
-
-                        # add image to viewer
-                        viewer.add_image(
-                            img_pyramid,
-                            name=f"{img_name}: {ch_name}",
-                            colormap=cmap,
-                            blending="additive",
-                            rgb=False,
-                            contrast_limits=contrast_limits,
-                            scale=(pixel_size, pixel_size),
-                            visible=is_visible
-                        )
-
-                else:
-                    if is_rgb:
-                        cmap = None  # default value of cmap
-                        blending = "translucent_no_depth"  # set blending mode
-                    else:
-                        if img_name in ["nuclei", "nucleus"] or "DAPI" in img_name:
-                            cmap = "blue"
-                        else:
-                            cmap = grayscale_colormap[n_grayscales % len(grayscale_colormap)]
-                            n_grayscales += 1
-                        blending = "additive"  # set blending mode
-
-                    if not isinstance(img, list):
-                        # create image pyramid for lazy loading
-                        img_pyramid = create_img_pyramid(img=img, nsubres=6)
-                    else:
-                        img_pyramid = img
-
-                    # infer contrast limits
-                    contrast_limits = _get_contrast_limits(img_pyramid)
-
-                    if contrast_limits[1] == 0:
-                        warn("The maximum value of the image is 0. Is the image really completely empty?")
-                        contrast_limits = (0, 255)
-
-                    # add img pyramid to napari viewer
-                    viewer.add_image(
-                            img_pyramid,
-                            name=img_name,
-                            colormap=cmap,
-                            blending=blending,
-                            rgb=is_rgb,
-                            contrast_limits=contrast_limits,
-                            scale=(pixel_size, pixel_size),
-                            visible=is_visible
-                        )
-
-        def _add_cells_to_viewer(
-            self,
-            viewer: napari.viewer,
-            keys: str,
-            key_type: Literal["genes", "obs", "obsm"] = "genes",
-            cells_layer: Optional[str] = None,
-            point_size: int = 8
-            ):
-            if self.cells.is_empty:
-                raise InSituDataMissingObject("cells")
-            else:
-                celldata = _get_cell_layer(cells=self.cells, cells_layer=cells_layer)
-
-                if cells_layer is None:
-                    cells_layer_name = self.cells.main_key
-                else:
-                    cells_layer_name = cells_layer
-
-                # convert keys to list
-                keys = convert_to_list(keys)
-
-                # get point coordinates
-                points = np.flip(celldata.matrix.obsm["spatial"].copy(), axis=1) # switch x and y (napari uses [row,column])
-                #points *= pixel_size # convert to length unit (e.g. µm)
-
-                # get expression matrix
-                if issparse(celldata.matrix.X):
-                    X = celldata.matrix.X.toarray()
-                else:
-                    X = celldata.matrix.X
-
-                for i, k in enumerate(keys):
-                    # get expression values
-                    color_value = _get_expression_values(
-                        adata=celldata.matrix,
-                        X=X,
-                        key_type=key_type, key=k
-                    )
-
-                    # extract names of cells
-                    cell_names = celldata.matrix.obs_names.values
-
-                    # create points layer
-                    layer = _create_points_layer(
-                        points=points,
-                        color_values=color_value,
-                        name=f"{cells_layer_name}-{k}",
-                        point_names=cell_names,
-                        point_size=point_size,
-                        visible=True
-                    )
-
-                    # add layer programmatically - does not work for all types of layers
-                    # see: https://forum.image.sc/t/add-layerdatatuple-to-napari-viewer-programmatically/69878
-                    #self._viewer.add_layer(Layer.create(*layer))
-                    viewer.add_layer(Layer.create(*layer))
-
-        def _add_widgets_to_viewer(
-            self,
-            viewer: napari.Viewer,
-            widgets_max_width: int = 500
-            ):
-            # get viewer configuration from configuration manager
-            viewer_config = config_manager[_get_viewer_uid(viewer)]
-
-            if self.cells.is_empty:
-                # add annotation widget to napari
-                add_geom_widget = add_new_geometries_widget()
-                add_geom_widget.max_height = 120
-                add_geom_widget.max_width = widgets_max_width
-                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
-            else:
-                #celldata = self._cells
-                # initialize the widgets
-                (
-                    show_points_widget,
-                    locate_cells_widget,
-                    show_geometries_widget,
-                    show_boundaries_widget,
-                    select_data,
-                    filter_cells_widget,
-                ) = _initialize_widgets(
-                    viewer=viewer,
-                    viewer_config=viewer_config
-                    )
-
-                # add widgets to napari window
-                if select_data is not None:
-                    viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
-                    select_data.max_height = 80
-                    select_data.max_width = widgets_max_width
-
-                if show_points_widget is not None:
-                    viewer.window.add_dock_widget(show_points_widget, name="Show data", area="right", tabify=False)
-                    show_points_widget.max_height = 170
-                    show_points_widget.max_width = widgets_max_width
-
-                if show_boundaries_widget is not None:
-                    viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
-                    #show_boundaries_widget.max_height = 80
-                    show_boundaries_widget.max_width = widgets_max_width
-
-                if locate_cells_widget is not None:
-                    viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
-                    #locate_cells_widget.max_height = 130
-                    locate_cells_widget.max_width = widgets_max_width
-
-                if filter_cells_widget is not None:
-                    viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
-                    filter_cells_widget.max_height = 150
-                    show_points_widget.max_width = widgets_max_width
-
-                # add annotation widget to napari
-                add_geom_widget = add_new_geometries_widget()
-                #annot_widget.max_height = 100
-                add_geom_widget.max_width = widgets_max_width
-                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
-                                                    )
-
-                if show_geometries_widget is not None:
-                    viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
-                    show_geometries_widget.max_width = widgets_max_width
-
-        def _add_events_to_viewer(
-            self,
-            viewer: napari.Viewer
-            ):
-            # get viewer configuration from configuration manager
-            viewer_config = config_manager[_get_viewer_uid(viewer)]
-
-            # Assign function to an layer addition event
-            def _update_uid(event):
-                global uids_before_removal
-                if event is not None:
-                    layer = event.source
-                    print(event.action) if viewer_config.verbose else None
-                    if event.action == "added" and viewer_config._auto_set_uid:
-                        if isinstance(layer, Shapes):
-                            type_last = layer.shape_type[-1]
-                            if type_last in ["polygon", "rectangle", "ellipse"]:
-                                geom_type = "polygon_exterior"
-                            elif type_last in ["path", "line"]:
-                                geom_type = "line"
-                            else:
-                                show_warning(f"Unsupported shape type '{type_last}' for UID assignment. Only 'polygon' and 'path' are supported.")
-                        elif isinstance(layer, Points):
-                            geom_type = "point"
-                        #if 'uid' in layer.properties:
-                        uid = str(uuid4())
-                        print(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
-                        try:
-                            layer.properties['uid'][-1] = uid
-                            layer.properties['type'][-1] = geom_type
-                        except KeyError:
-                            layer.properties['uid'] = np.array([uid], dtype='object')
-                            layer.properties['uid'] = np.array([geom_type], dtype='object')
-
-                    elif event.action == "removing":
-                        uids_before_removal = set(layer.properties['uid'])
-                    elif event.action == "removed":
-                        removed_uids = uids_before_removal ^ set(layer.properties['uid'])
-                        print(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
-                        viewer_config._removal_tracker += list(removed_uids)
-                    else:
-                        pass
-
-            # Assign the function to data of all existing layers
-            for layer in viewer.layers:
-                if isinstance(layer, Shapes) or isinstance(layer, Points):
-                    layer.events.data.connect(_update_uid)
-
-            # Connect the function to the data of existing shapes and points layers in the viewer
-            def connect_to_all_shapes_layers(event):
-                layer = event.source[event.index]
-                if event is not None:
-                    if isinstance(layer, Shapes) or isinstance(layer, Points):
-                        layer.events.data.connect(_update_uid)
-
-            # Connect the function to any new layers added to the viewer
-            viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
-
-        def _add_color_legend_to_viewer(
-            self,
-            viewer: napari.Viewer
-            ):
-            # # add color legend widget
-            config = config_manager[_get_viewer_uid(viewer)]
-            viewer.window.add_dock_widget(config.static_canvas, area='left', name='Color legend')
-
-            # add save widget for color legends
-            save_widget = SaveWidget()
-            viewer.window.add_dock_widget(save_widget, area='left', name="Save color legend")
-
-        def _add_buttons_to_viewer(
-            self,
-            viewer: napari.Viewer
-        ):
-            # create sync button
-            sync_button = SyncButton()
-
-            # add the sync button to viewer
-            viewer.window.add_dock_widget(sync_button, area='right', name="Sync")

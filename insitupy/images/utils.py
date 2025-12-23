@@ -3,15 +3,47 @@ from numbers import Number
 from typing import List, Literal, Tuple, Union
 from warnings import warn
 
-import cv2
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    cv2 = None
+
 import dask.array as da
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import zoom
 from skimage.color import hed2rgb, rgb2hed
 
-from .._exceptions import InvalidDataTypeError
-from .axes import ImageAxes, get_height_and_width
+from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
+from insitupy._exceptions import InvalidDataTypeError
+from insitupy.images.axes import ImageAxes, get_height_and_width
+
+
+def _get_chunksize(image_axes: ImageAxes, ndim: int):
+    """Build chunk size tuple based on actual axis positions.
+
+    Args:
+        image_axes: ImageAxes object describing the axis configuration
+        ndim: Number of dimensions in the image
+
+    Returns:
+        Tuple of chunk sizes for each dimension
+    """
+    chunks = [None] * ndim
+    chunks[image_axes.Y] = DEFAULT_CHUNK_SIZE_Y
+    chunks[image_axes.X] = DEFAULT_CHUNK_SIZE_X
+
+    # Set channel axis chunk size to 1 if present (C or S)
+    if image_axes.C is not None:
+        chunks[image_axes.C] = 1
+
+    # Set time axis chunk size to 1 if present
+    if image_axes.T is not None:
+        chunks[image_axes.T] = 1
+
+    return tuple(chunks)
 
 
 def _efficiently_resize_array(array, scale_factor):
@@ -48,13 +80,20 @@ def resize_image(img: NDArray,
                  dim: Tuple[int, int] = None,
                  scale_factor: float = None,
                  axes = "YXS",
-                 interpolation = cv2.INTER_LINEAR
+                 interpolation = None
                  ):
     '''
     Resize width and height of image by scale_factor. Resizing does not affect channels.
     So far the function assumes images to be either grayscale (axes="YX"), RGB (axes="YXS") or multi-channel IF (axes="CYX").
     Time-series images (e.g. "TCYX") are not supported yet.
     '''
+    if not HAS_OPENCV:
+        raise ImportError("OpenCV (cv2) is required for resize_image. Install it with: pip install opencv-python")
+
+    # Set default interpolation if not provided
+    if interpolation is None:
+        interpolation = cv2.INTER_LINEAR
+
     # read and interpret the image axes pattern
     image_axes = ImageAxes(pattern=axes)
     channel_axis = image_axes.C
@@ -225,39 +264,73 @@ def deconvolve_he(
 
     return ihc_h, ihc_e, ihc_d
 
-def create_img_pyramid(img: Union[np.ndarray, da.core.Array],
-                       nsubres: int = 6,
-                       scale_steps: int = 2,
-                       axes: str = "YXS" # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-                       ):
+def create_img_pyramid(
+    img: Union[np.ndarray, da.core.Array],
+    axes: str, # e.g. 'YXS'. - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
+    nsubres: int = 6,
+    scale_steps: int = 2,
+    ):
+    """Create image pyramid by downsampling with slicing.
+
+    Generates a multi-resolution pyramid from an input image by iteratively
+    downsampling the Y and X dimensions. Handles different axis configurations
+    (YX, YXS, CYX, TCYX, etc.) by only downsampling spatial dimensions.
+
+    Args:
+        img: Input image as numpy array or dask array.
+        axes: String describing the axis configuration of the image.
+            Examples: 'YX' for grayscale, 'YXS' for RGB, 'CYX' for
+            multi-channel IF, 'TCYXS' for time-series RGB.
+        nsubres: Number of subresolution levels to create. Defaults to 6.
+        scale_steps: Downsampling factor between consecutive pyramid levels.
+            Defaults to 2 (each level is half the size of the previous).
+
+    Returns:
+        List of images representing the pyramid, where index 0 is the
+        original resolution and subsequent indices are progressively
+        lower resolutions.
+
+    Raises:
+        ValueError: If the length of `axes` string does not match the
+            number of dimensions in `img`.
+
+    Example:
+        >>> img = da.from_array(np.random.rand(1024, 1024, 3))
+        >>> pyramid = create_img_pyramid(img, axes='YXS', nsubres=4)
+        >>> [p.shape for p in pyramid]
+        [(1024, 1024, 3), (512, 512, 3), (256, 256, 3), (128, 128, 3), (64, 64, 3)]
+    """
+    if not len(axes) == len(img.shape):
+        raise ValueError("Length of `axes` string must match number of dimensions of `img`.")
+    # Parse axes to find Y and X positions
+    image_axes = ImageAxes(pattern=axes)
+    y_axis = image_axes.Y
+    x_axis = image_axes.X
+
     # create subresolution pyramid from mask
     img_pyramid = [img]
 
     for n in range(nsubres):
-        # create subresolution by scaling factor 2
-        img = img[::scale_steps, ::scale_steps]
-        #img = resize_image(img, scale_factor=1/scale_steps, axes=axes, interpolation=cv2.INTER_LINEAR)
+        # Create slice tuple for all dimensions
+        slices = [slice(None)] * img.ndim
+        slices[y_axis] = slice(None, None, scale_steps)
+        slices[x_axis] = slice(None, None, scale_steps)
 
-        # # check dtype of image
-        # if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
-        #     warnings.warn("Image does not have dtype 'uint8' or 'uint16'. Is converted to 'uint16'.")
-
-        #     if img.dtype == np.dtype('int8'):
-        #         img = img.astype('uint8')
-        #     else:
-        #         img = img.astype('uint16')
+        # Apply downsampling only to Y and X axes
+        img = img[tuple(slices)]
 
         try:
-            # rechunk to prevent dask errors
-            img = img.rechunk()
+            # rechunk to prevent dask errors using default chunk sizes
+            img = img.rechunk(_get_chunksize(image_axes, img.ndim))
         except AttributeError:
-            # in case of numpy arrays a Attribute error is thrown
+            # in case of numpy arrays an AttributeError is thrown
             pass
 
         # collect subresolution
         img_pyramid.append(img)
 
     return img_pyramid
+
 
 def crop_dask_array_or_pyramid(
     data: Union[da.core.Array, List[da.core.Array]],
@@ -316,6 +389,9 @@ def clip_image_histogram(
     return image
 
 def otsu_thresholding(image: np.ndarray) -> np.ndarray:
+    if not HAS_OPENCV:
+        raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python")
+
     # Apply GaussianBlur to reduce image noise if necessary
     #blur = cv2.GaussianBlur(image, (5, 5), 0)
     # Apply Otsu's thresholding

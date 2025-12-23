@@ -230,7 +230,7 @@ def _get_adata(d, cells_layer, mask_col):
         cells_layer=cells_layer,
         verbose=False
         )
-    adata = celldata.matrix.copy()
+    adata = celldata.table.copy()
 
     if mask_col is not None:
         adata = adata[adata.obs[mask_col]].copy()
@@ -468,8 +468,8 @@ def cellular_composition(
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
         # Check and convert to category if needed
-        if not pd.api.types.is_categorical_dtype(celldata.matrix.obs[cell_type_col]):
-            celldata.matrix.obs[cell_type_col] = celldata.matrix.obs[cell_type_col].astype('category')
+        if not pd.api.types.is_categorical_dtype(celldata.table.obs[cell_type_col]):
+            celldata.table.obs[cell_type_col] = celldata.table.obs[cell_type_col].astype('category')
             print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
 
         if palette_is_dict:
@@ -480,23 +480,23 @@ def cellular_composition(
                     color_dict ={
                         a: b
                         for a,b in zip(
-                            celldata.matrix.obs[cell_type_col].cat.categories,
-                            celldata.matrix.uns[f"{cell_type_col}_colors"]
+                            celldata.table.obs[cell_type_col].cat.categories,
+                            celldata.table.uns[f"{cell_type_col}_colors"]
                             )
                     }
                 except KeyError:
                     color_dict = map_to_colors(
-                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    sorted(celldata.table.obs[cell_type_col].cat.categories),
                     palette=DEFAULT_CATEGORICAL_CMAP)
             else:
                 color_dict = map_to_colors(
-                    sorted(celldata.matrix.obs[cell_type_col].cat.categories),
+                    sorted(celldata.table.obs[cell_type_col].cat.categories),
                     palette=palette)
             # try:
             #     color_dict = map_to_colors(
-            #         sorted(celldata.matrix.obs[cell_type_col].unique()),
+            #         sorted(celldata.table.obs[cell_type_col].unique()),
             #         palette=palette)
-            #     #color_dict = celldata.matrix.uns[f"{cell_type_col}_colors"]
+            #     #color_dict = celldata.table.uns[f"{cell_type_col}_colors"]
             # except KeyError:
             #     color_dict = None
 

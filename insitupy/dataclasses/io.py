@@ -1,4 +1,5 @@
 import os
+from contextlib import ExitStack
 from math import ceil
 from numbers import Number
 from os.path import relpath
@@ -17,10 +18,11 @@ from zarr.errors import ArrayNotFoundError
 from insitupy import __version__
 from insitupy._io.files import read_json
 from insitupy.dataclasses._segmentations import _read_baysor_polygons
-from insitupy.dataclasses.dataclasses import (AnnotationsData, BoundariesData,
-                                              CellData, ImageData,
-                                              MultiCellData, RegionsData,
-                                              ShapesData)
+from insitupy.dataclasses.dataclasses import (ZARR_V3, AnnotationsData,
+                                              BoundariesData, CellData,
+                                              ImageData, MultiCellData,
+                                              RegionsData, ShapesData,
+                                              _get_zarr_store)
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 
@@ -42,24 +44,24 @@ def read_baysor_cells(
     with open(tomlfile, 'r') as f:
         baysor_config = toml.load(f)
 
-    # read matrix
-    print("Parsing count matrix...", flush=True)
+    # read table
+    print("Parsing count table...", flush=True)
     loomfile = baysor_output / "segmentation_counts.loom"
-    matrix = sc.read_loom(loomfile)
+    table = sc.read_loom(loomfile)
 
     # set indices for .obs and .var
-    matrix.obs = matrix.obs.reset_index().set_index("Name")
-    matrix.obs["CellID"] = matrix.obs["CellID"].astype(float).astype(int) # convert cell id to int
-    matrix.var.set_index("Name", inplace=True)
+    table.obs = table.obs.reset_index().set_index("Name")
+    table.obs["CellID"] = table.obs["CellID"].astype(float).astype(int) # convert cell id to int
+    table.var.set_index("Name", inplace=True)
 
     # remove unassigned codewords from genes and obs entries with an NaN in any column
-    varmask = ~matrix.var_names.str.startswith("UnassignedCodeword")
-    obsmask = ~matrix.obs.isna().any(axis=1)
-    matrix = matrix[obsmask, varmask].copy()
+    varmask = ~table.var_names.str.startswith("UnassignedCodeword")
+    obsmask = ~table.obs.isna().any(axis=1)
+    table = table[obsmask, varmask].copy()
 
     # set spatial coordinates
-    matrix.obsm["spatial"] = matrix.obs[["x", "y"]].values
-    matrix.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
+    table.obsm["spatial"] = table.obs[["x", "y"]].values
+    table.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
 
     # read polygons
     print("Reading segmentation masks", flush=True)
@@ -67,15 +69,13 @@ def read_baysor_cells(
     jsonfile = baysor_output / "segmentation_polygons.json"
     df = _read_baysor_polygons(jsonfile)
 
-    # remove polygons of cells that have been removed in the matrix
-    df = df[df.cell.astype(int).isin(matrix.obs["CellID"])]
+    # remove polygons of cells that have been removed in the table
+    df = df[df.cell.astype(int).isin(table.obs["CellID"])]
 
     # determine dimensions of dataset based on polygons
     polygon_bounds = df.geometry.bounds
     xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
     ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
-    # xmax = ceil(matrix.obsm['spatial'][:, 0].max() + 15)
-    # ymax = ceil(matrix.obsm['spatial'][:, 1].max() + 15)
 
     # generate a segmentation mask
     print("\tConvert polygons to segmentation mask", flush=True)
@@ -85,12 +85,12 @@ def read_baysor_cells(
     img = da.from_array(img)
 
     # create boundaries object
-    cell_ids = da.from_array(matrix.obs["CellID"].values) # extract cell ids from adata
+    cell_ids = da.from_array(table.obs["CellID"].values) # extract cell ids from adata
     seg_mask_value = da.from_array(sorted(df["cell"]))
     boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
     boundaries.add_boundaries(data={f"cellular": img}, pixel_size=pixel_size)
 
-    celldata = CellData(matrix=matrix, boundaries=boundaries, config=baysor_config)
+    celldata = CellData(table=table, boundaries=boundaries, config=baysor_config)
 
     return celldata
 
@@ -102,8 +102,11 @@ def read_celldata(
     path = Path(path)
     celldata_metadata = read_json(path / ".celldata")
 
-    # read matrix data
-    matrix = sc.read_h5ad(path / celldata_metadata["matrix"])
+    # read table data
+    try:
+        table = sc.read_h5ad(path / celldata_metadata["table"])
+    except KeyError:
+        table = sc.read_h5ad(path / celldata_metadata["matrix"]) # previously it was called matrix
 
     # get path of boundaries data
     bound_path = path / celldata_metadata["boundaries"]
@@ -128,7 +131,7 @@ def read_celldata(
         # in older datasets sometimes seg_mask_value is missing
         seg_mask_value = da.from_zarr(bound_path, component="seg_mask_value")
     except ArrayNotFoundError:
-        warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.matrix`.")
+        warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.table`.")
         seg_mask_value = None
 
     # initialize boundaries data object
@@ -138,13 +141,26 @@ def read_celldata(
     bound_data = {}
     meta = {}
     zipped = True if suffix == "zarr.zip" else False
-    with zarr.ZipStore(bound_path, mode='r') if zipped else zarr.DirectoryStore(bound_path) as dirstore:
+    # Use ExitStack to handle context manager differences between Zarr v2 and v3
+    with ExitStack() as stack:
+        dirstore = _get_zarr_store(bound_path, mode="r", zipped=zipped)
+
+        # In Zarr v2, stores are context managers and need to be entered
+        if not ZARR_V3:
+            dirstore = stack.enter_context(dirstore)
+
+        # open zarr group
+        root = zarr.open_group(store=dirstore, mode='r')
+
         # for k in dirstore.listdir("masks"):
         #     if not k.startswith("."):
         for k in ["cells", "nuclei"]:
-            if (bound_path / "masks" / k).exists():
+            #if (bound_path / "masks" / k).exists():
+            comp = f"masks/{k}"
+            if comp in root:
                 # iterate through subresolutions
-                subresolutions = dirstore.listdir(f"masks/{k}")
+                # subresolutions = dirstore.listdir(f"masks/{k}")
+                subresolutions = sorted(root[comp].keys())
 
                 if ".zarray" in subresolutions:
                     if zipped:
@@ -159,11 +175,11 @@ def read_celldata(
                             # append the pyramid to the list
                             if zipped:
                                 bound_data[k].append(
-                                    da.from_zarr(dirstore, component=f"masks/{k}/{subres}").persist()
+                                    da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
                                     )
                             else:
                                 bound_data[k].append(
-                                    da.from_zarr(dirstore, component=f"masks/{k}/{subres}")
+                                    da.from_zarr(dirstore, component=f"{comp}/{subres}")
                                     )
 
                 # retrieve boundaries metadata
@@ -191,7 +207,7 @@ def read_celldata(
         config = {}
 
     # create CellData object
-    celldata = CellData(matrix=matrix, boundaries=boundaries, config=config)
+    celldata = CellData(table=table, boundaries=boundaries, config=config)
 
     return celldata
 
@@ -208,9 +224,10 @@ def read_shapesdata(
         scale_factor = 1
 
     # read metadata and retrieve keys and files from it
-    metadata = read_json(path / "metadata.json")
-    keys = metadata.keys()
-    files = [path / f"{k}.geojson" for k in keys]
+    # metadata = read_json(path / "metadata.json")
+    # keys = metadata.keys()
+    # files = [path / f"{k}.geojson" for k in keys]
+    files_dict = {f.stem: f for f in path.glob("*.geojson") if f.stem != "metadata"}
 
     # check which type of ShapesData is read here
     if mode == "annotations":
@@ -223,16 +240,18 @@ def read_shapesdata(
         ValueError(f"Unknown `mode`: {mode}")
 
     # make sure files and keys are a list
-    files = convert_to_list(files)
-    keys = convert_to_list(keys)
+    # files = convert_to_list(files)
+    # keys = convert_to_list(keys)
 
-    for k, f in zip(keys, files):
-        data.add_data(data=f, key=k,
-                      scale_factor=scale_factor
-                      )
+    # for k, f in zip(keys, files):
+    for k, f in files_dict.items():
+        data.add_data(
+            data=f, key=k,
+            scale_factor=scale_factor
+            )
 
     # overwrite metadata
-    data.metadata = metadata
+    # data.metadata = metadata
     return data
 
 def read_multicelldata(
@@ -334,6 +353,33 @@ def _save_transcripts(transcripts, path, metadata):
 
     #if metadata is not None:
     metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
+
+
+def _save_units(units, path, metadata):
+    # create file path
+    units_path = path / "units"
+    units_path.mkdir(parents=True, exist_ok=True) # create directory
+
+    # save shapes as parquet
+    shapes_file = units_path / "shapes.parquet"
+    units.shapes.to_parquet(shapes_file)
+
+    # save data as h5ad if present
+    if units.data is not None:
+        data_file = units_path / "data.h5ad"
+        units.data.write_h5ad(data_file)
+
+    # save metadata
+    meta_dict = {
+        "unit_type": units.unit_type
+    }
+    meta_file = units_path / "metadata.json"
+    import json
+    with open(meta_file, 'w') as f:
+        json.dump(meta_dict, f)
+
+    #if metadata is not None:
+    metadata["data"]["units"] = Path(relpath(units_path, path)).as_posix()
 
 
 def _save_annotations(annotations, path, metadata):

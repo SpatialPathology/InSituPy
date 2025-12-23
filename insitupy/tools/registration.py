@@ -4,12 +4,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
-import cv2
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    cv2 = None
+
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
 from dask_image.imread import imread
-from parse import *
 
 from insitupy import __version__
 from insitupy._constants import CACHE, SHRT_MAX
@@ -37,6 +42,9 @@ class ImageRegistration:
                  axes_template: str = "YX",  # channel axes of template. Normally it is just a grayscale image - therefore YX.
                  max_width: Optional[int] = 4000,
                  convert_to_grayscale: bool = False,
+                 deconvolve_image: bool = False,  # whether to apply HE deconvolution to the image
+                 deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
+                 decon_scale_factor: float = 0.2,  # scale factor for deconvolution to save memory
                  perspective_transform: bool = False,
                  feature_detection_method: Literal["sift", "surf"] = "sift",
                  flann: bool = True,
@@ -59,6 +67,9 @@ class ImageRegistration:
         self.axes_config_template = ImageAxes(self.axes_template)
         self.max_width = max_width
         self.convert_to_grayscale = convert_to_grayscale
+        self.deconvolve_image = deconvolve_image
+        self.deconvolve_template = deconvolve_template
+        self.decon_scale_factor = decon_scale_factor
         self.perspective_transform = perspective_transform
         self.feature_detection_method = feature_detection_method
         self.flann = flann
@@ -68,7 +79,35 @@ class ImageRegistration:
         self.maxFeatures = maxFeatures
         self.verbose = verbose
 
+    def _deconvolve_he_image(self, img: np.ndarray, axes: str, name: str = "image") -> np.ndarray:
+        """
+        Apply HE color deconvolution to extract nuclei channel from an H&E stained image.
+
+        Args:
+            img: Input H&E RGB image
+            axes: Axes configuration of the image (e.g., "YXS")
+            name: Name for logging purposes ("image" or "template")
+
+        Returns:
+            Grayscale nuclei image after deconvolution
+        """
+        self.verboseprint(f"\t\tRun color deconvolution on {name}...", flush=True)
+
+        # deconvolve HE - performed on resized image to save memory
+        nuclei_img, _, _ = deconvolve_he(
+            img=resize_image(img, scale_factor=self.decon_scale_factor, axes=axes),
+            return_type="grayscale",
+            convert=True
+        )
+
+        # bring back to original size
+        nuclei_img = resize_image(nuclei_img, scale_factor=1/self.decon_scale_factor, axes="YX")
+
+        return nuclei_img
+
     def load_and_scale_images(self):
+        if not HAS_OPENCV:
+            raise ImportError("OpenCV (cv2) is required for image registration. Install it with: pip install opencv-python")
 
         # load images into memory if they are dask arrays
         if isinstance(self.image, da.Array):
@@ -78,6 +117,25 @@ class ImageRegistration:
         if isinstance(self.template, da.Array):
             self.verboseprint("\t\tLoad template into memory...", flush=True)
             self.template = self.template.compute()  # load into memory
+
+        # Apply HE deconvolution if requested (before grayscale conversion)
+        # Store original images for later use in registration
+        self.image_original = self.image
+        self.template_original = self.template
+
+        if self.deconvolve_image:
+            if self.axes_image not in ["YXS", "SYX"]:
+                raise ValueError(f"HE deconvolution requires RGB image with axes 'YXS' or 'SYX', got '{self.axes_image}'")
+            self.image = self._deconvolve_he_image(self.image, self.axes_image, "image")
+            self.axes_image = "YX"  # update axes after deconvolution
+            self.axes_config_image = ImageAxes(self.axes_image)
+
+        if self.deconvolve_template:
+            if self.axes_template not in ["YXS", "SYX"]:
+                raise ValueError(f"HE deconvolution requires RGB template with axes 'YXS' or 'SYX', got '{self.axes_template}'")
+            self.template = self._deconvolve_he_image(self.template, self.axes_template, "template")
+            self.axes_template = "YX"  # update axes after deconvolution
+            self.axes_config_template = ImageAxes(self.axes_template)
 
         if self.convert_to_grayscale:
             # check format
@@ -304,6 +362,8 @@ class ImageRegistration:
         '''
         Function to calculate the transformation matrix.
         '''
+        if not HAS_OPENCV:
+            raise ImportError("OpenCV (cv2) is required for calculating transformation matrix. Install it with: pip install opencv-python")
 
         if self.perspective_transform:
             # compute the homography matrix between the two sets of matched
@@ -348,9 +408,9 @@ class ImageRegistration:
         self.verboseprint(f"\t\t{datetime.now():%Y-%m-%d %H:%M:%S}: Register image by {warp_name} transformation...")
         self.registered = warp_func(self.image_to_register, self.T_to_register, (w, h))
 
-    def register_images(self):
+    def run(self):
         '''
-        Function running the registration including following steps:
+        Run the complete registration pipeline including following steps:
             1. Loading of images
             2. Feature extraction
             3. Calculation of transformation matrix
@@ -368,35 +428,32 @@ class ImageRegistration:
         # perform registration
         self.perform_registration()
 
-    def save(self,
-             output_dir: Union[str, os.PathLike, Path],
-             identifier: str,
-             axes: str,  # string describing the channel axes, e.g. YXS or CYX
-             photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', # before I had rgb here. Xenium doc says minisblack
-             ome_metadata: dict = {},
-             registered: Optional[np.ndarray] = None,  # registered image
-             _T: Optional[np.ndarray] = None,  # transformation matrix
-             matchedVis: Optional[np.ndarray] = None  # image showing the matched visualization
-             ):
-        # Optionally the registered image, transformation matrix and matchedVis can be added externally.
-        # Otherwise they are retrieved from self.
+    def save_registered_image(
+        self,
+        output_dir: Union[str, os.PathLike, Path],
+        identifier: str,
+        axes: str,  # string describing the channel axes, e.g. YXS or CYX
+        photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb',
+        ome_metadata: dict = {},
+        registered: Optional[np.ndarray] = None,  # registered image
+        ):
+        """
+        Save the registered image as OME-TIFF.
+
+        Args:
+            output_dir: Directory to save the registered image.
+            identifier: Identifier string for the output filename.
+            axes: String describing the channel axes, e.g. 'YXS' or 'CYX'.
+            photometric: Photometric interpretation ('rgb', 'minisblack', 'maxisblack').
+            ome_metadata: OME metadata dictionary to include in the TIFF.
+            registered: Registered image array. If None, uses self.registered.
+        """
         if registered is None:
             registered = self.registered
 
-        if _T is None:
-            if self.resize_factor_image == 1:
-                # if the image was not resized the transformation matrix to save is identical to the one used for registration
-                T_to_save = self.T_to_register
-            else:
-                # if the image WAS resized the transformation matrix to save is not identical to the one used for registration
-                # instead the transformation matrix before resizing needs to be used
-                T_to_save = self.T
-
-        if matchedVis is None:
-            matchedVis = self.matchedVis
-
         # save registered image as OME-TIFF
-        output_dir.mkdir(parents=True, exist_ok=True) # create folder for registered images
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         self.outfile = output_dir / f"{identifier}__registered.ome.tif"
         print(f"\t\tSave OME-TIFF to {self.outfile}", flush=True)
         write_ome_tiff(
@@ -408,15 +465,46 @@ class ImageRegistration:
             metadata=ome_metadata
             )
 
+    def save_qc(
+        self,
+        output_dir: Union[str, os.PathLike, Path],
+        identifier: str,
+        _T: Optional[np.ndarray] = None,  # transformation matrix
+        matchedVis: Optional[np.ndarray] = None  # image showing the matched visualization
+        ):
+        """
+        Save registration QC files (transformation matrix and feature matches visualization).
+
+        Args:
+            output_dir: Directory to save QC files (will create 'registration_qc' subdirectory).
+            identifier: Identifier string for the output filenames.
+            _T: Transformation matrix. If None, uses the appropriate matrix from self.
+            matchedVis: Image showing matched features. If None, uses self.matchedVis.
+        """
+        if _T is None:
+            if self.resize_factor_image == 1:
+                # if the image was not resized the transformation matrix to save is identical to the one used for registration
+                T_to_save = self.T_to_register
+            else:
+                # if the image WAS resized the transformation matrix to save is not identical to the one used for registration
+                # instead the transformation matrix before resizing needs to be used
+                T_to_save = self.T
+        else:
+            T_to_save = _T
+
+        if matchedVis is None:
+            matchedVis = self.matchedVis
+
         # save registration QC files
+        output_dir = Path(output_dir)
         reg_dir = output_dir / "registration_qc"
-        reg_dir.mkdir(parents=True, exist_ok=True) # create folder for QC outputs
+        reg_dir.mkdir(parents=True, exist_ok=True)
         print(f"\t\tSave QC files to {reg_dir}", flush=True)
 
         # save transformation matrix
-        T_to_save = np.vstack([T_to_save, [0,0,1]]) # add last line of affine transformation matrix
+        T_to_save = np.vstack([T_to_save, [0,0,1]])  # add last line of affine transformation matrix
         T_csv = reg_dir / f"{identifier}__T.csv"
-        np.savetxt(T_csv, T_to_save, delimiter=",") # save as .csv file
+        np.savetxt(T_csv, T_to_save, delimiter=",")
 
         # remove last line break from csv since this gives error when importing to Xenium Explorer
         remove_last_line_from_csv(T_csv)
@@ -426,6 +514,50 @@ class ImageRegistration:
         plt.imshow(matchedVis)
         plt.savefig(matchedVis_file, dpi=400)
         plt.close()
+
+    def save(
+        self,
+        output_dir: Union[str, os.PathLike, Path],
+        identifier: str,
+        axes: str,  # string describing the channel axes, e.g. YXS or CYX
+        photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb',
+        ome_metadata: dict = {},
+        registered: Optional[np.ndarray] = None,  # registered image
+        _T: Optional[np.ndarray] = None,  # transformation matrix
+        matchedVis: Optional[np.ndarray] = None  # image showing the matched visualization
+        ):
+        """
+        Save both the registered image and QC files.
+
+        This is a convenience method that calls both save_registered_image() and save_qc().
+
+        Args:
+            output_dir: Directory to save output files.
+            identifier: Identifier string for the output filenames.
+            axes: String describing the channel axes, e.g. 'YXS' or 'CYX'.
+            photometric: Photometric interpretation ('rgb', 'minisblack', 'maxisblack').
+            ome_metadata: OME metadata dictionary to include in the TIFF.
+            registered: Registered image array. If None, uses self.registered.
+            _T: Transformation matrix. If None, uses the appropriate matrix from self.
+            matchedVis: Image showing matched features. If None, uses self.matchedVis.
+        """
+        # Save registered image
+        self.save_registered_image(
+            output_dir=output_dir,
+            identifier=identifier,
+            axes=axes,
+            photometric=photometric,
+            ome_metadata=ome_metadata,
+            registered=registered
+        )
+
+        # Save QC files
+        self.save_qc(
+            output_dir=output_dir,
+            identifier=identifier,
+            _T=_T,
+            matchedVis=matchedVis
+        )
 
 
 def register_images(
@@ -441,6 +573,7 @@ def register_images(
     min_good_matches_per_area: int = 5, # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
+    deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
     physicalsize: str = 'µm'
     ):
     """
@@ -449,24 +582,27 @@ def register_images(
     Args:
         data (InSituData): The InSituData object containing the images.
         image_to_be_registered (Union[str, os.PathLike, Path]): Path to the image to be registered.
-        image_type (Literal["histo", "IF"]): Type of the image, either "histo" or "IF".
+        axes_image (Literal["CYX", "YXS"]): Axes of the image to be registered, e.g. YXS for RGB images, CYX for IF images.
+        axes_template (Literal["YX", "CYX", "YXS"]): Axes of the template image, e.g. YX for grayscale images, YXS for HE images.
         channel_names (Union[str, List[str]]): Names of the channels in the image.
         channel_name_for_registration (Optional[str], optional): Name of the channel used for registration. Required for IF images. Defaults to None.
         template_image_name (str, optional): Name of the template image. Defaults to "nuclei".
         save_registered_images (bool, optional): Whether to save the registered images. Defaults to True.
-        min_good_matches (int, optional): Minimum number of good matches required for registration. Defaults to 20.
+        min_good_matches_per_area (int, optional): Minimum number of good matches per mm² required for registration. Defaults to 5.
         test_flipping (bool): Whether to test flipping of images during registration. Defaults to True.
         decon_scale_factor (float, optional): Scale factor for deconvolution. Defaults to 0.2.
+        deconvolve_template (bool, optional): Whether to apply HE color deconvolution to the template image.
+            Set to True when the template is an H&E RGB image. Defaults to False.
         physicalsize (str, optional): Unit of physical size. Defaults to 'µm'.
 
     Raises:
-        ValueError: If `image_type` is "IF" and `channel_name_for_registration` is None.
+        ValueError: If `axes_image` is "CYX"/"YXC" and `channel_name_for_registration` is None.
         FileNotFoundError: If the image to be registered is not found.
         ValueError: If more than one image name is retrieved for histo images.
         ValueError: If no image name is found in the file.
-        UnknownOptionError: If an unknown image type is provided.
-        TypeError: If `channel_name_for_registration` is None for IF images.
-        ValueError: If no channel indicator `C` is found in the image axes.
+        ValueError: If an unknown axes configuration is provided.
+        ValueError: If no channel indicator `C` is found in the image axes for IF images.
+        ValueError: If deconvolve_template is True but axes_template is not RGB (YXS/SYX).
 
     Returns:
         None
@@ -561,9 +697,13 @@ def register_images(
     image_area = h * w * pixel_size**2 / 1000**2 # in mm²
     min_good_matches = int(min_good_matches_per_area * image_area)
 
+    # Validate deconvolve_template parameter
+    if deconvolve_template and axes_template not in ["YXS", "SYX"]:
+        raise ValueError(f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', got '{axes_template}'")
+
     # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
     if image_type == "histo":
-        print("\t\tRun color deconvolution", flush=True)
+        print("\t\tRun color deconvolution on image", flush=True)
         # deconvolve HE - performed on resized image to save memory
         # TODO: Scale to max width instead of using a fixed scale factor before deconvolution (`scale_to_max_width`)
         nuclei_img, eo, dab = deconvolve_he(img=resize_image(image, scale_factor=decon_scale_factor, axes="YXS"),
@@ -600,18 +740,24 @@ def register_images(
         template=template,
         axes_image=axes_image,
         axes_template=axes_template,
+        deconvolve_template=deconvolve_template,
+        decon_scale_factor=decon_scale_factor,
         verbose=True
         )
     # load and scale the whole image
     print('Load and scale image data containing all channels.')
     imreg_complete.load_and_scale_images()
 
+    # Determine the axes_template for the selected registration object
+    # If template was deconvolved, it's now grayscale (YX)
+    axes_template_selected = "YX" if deconvolve_template else axes_template
+
     # setup ImageRegistration object with the nucleus image (either from deconvolution or just selected from IF image)
     imreg_selected = ImageRegistration(
         image=nuclei_img,
-        template=imreg_complete.template,
+        template=imreg_complete.template,  # use the (potentially deconvolved) template
         axes_image="YX", # at this point the nuclei image was extracted and therefore the axes are always "YX"
-        axes_template=axes_template,
+        axes_template=axes_template_selected,
         max_width=4000,
         convert_to_grayscale=False,
         perspective_transform=False,
@@ -655,7 +801,7 @@ def register_images(
 
         data.images.add_image(
             image=imreg_selected.registered,
-            name=channel_names[0],
+            channel_names=channel_names[0],
             axes=axes_image,
             pixel_size=pixel_size,
             ome_meta=ome_metadata,
@@ -672,7 +818,7 @@ def register_images(
         for i, n in enumerate(channel_names):
             # skip the DAPI image
             if n == channel_name_for_registration:
-                break
+                continue
 
             if imreg_complete.image_resized is None:
                 # select one channel from non-resized original image
@@ -703,7 +849,7 @@ def register_images(
             # if add_registered_image:
             data.images.add_image(
                 image=imreg_selected.registered,
-                name=n,
+                channel_names=n,
                 axes="YX", # currently the images are added channel wise and therefore it is always "YX"
                 pixel_size=pixel_size,
                 ome_meta=ome_metadata,

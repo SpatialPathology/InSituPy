@@ -108,20 +108,27 @@ def has_valid_labels(ax):
 
 def is_valid_rgb_tuple(value):
     """
-    Check if a value is a valid RGB tuple.
+    Check if a value is a valid RGB sequence.
 
-    A valid RGB tuple is defined as a list or tuple containing three integers,
-    each in the range of 0 to 255.
+    A valid RGB sequence is defined as a sequence (list, tuple, numpy array, etc.)
+    containing three numeric values, each in the range of 0 to 255.
 
     Parameters:
-    value (list or tuple): The value to check.
+    value: The value to check (list, tuple, numpy array, or sequence).
 
     Returns:
-    bool: True if the value is a valid RGB tuple, False otherwise.
+    bool: True if the value is a valid RGB sequence, False otherwise.
     """
-    if isinstance(value, (list, tuple)) and len(value) == 3:
-        return all(isinstance(v, int) and 0 <= v <= 255 for v in value)
-    return False
+    try:
+        # Check if it's a sequence with length 3
+        if len(value) != 3:
+            return False
+
+        # Check if all values are numeric and in range [0, 255]
+        return all(isinstance(v, (int, np.integer, float, np.floating)) and 0 <= v <= 255 for v in value)
+    except (TypeError, AttributeError):
+        # Not a sequence or doesn't have len()
+        return False
 
 def check_rgb_column(df, column_name):
     """

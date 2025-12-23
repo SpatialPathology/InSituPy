@@ -18,11 +18,11 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
                                  DEFAULT_CONTINUOUS_CMAP)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.plotting.save import save_and_show_figure
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
 from insitupy.experiment.data import InSituExperiment
+from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils._checks import check_raw
 from insitupy.utils._colors import (_add_colorlegend_to_axis,
@@ -110,7 +110,7 @@ class _ColorConfigMultiPlot:
                 cells=xd.cells,
                 cells_layer=self.cells_layer
                 )
-            ad = celldata.matrix
+            ad = celldata.table
 
             # extract the data
             color_values, is_categorical = _extract_color_values(
@@ -147,7 +147,7 @@ class _ColorConfigMultiPlot:
                     cells=xd.cells,
                     cells_layer=self.cells_layer
                     )
-                ad = celldata.matrix
+                ad = celldata.table
 
                 # extract the data
                 color_values, is_categorical = _extract_color_values(
@@ -652,7 +652,7 @@ class MultiSpatialPlot:
         celldata = _get_cell_layer(cells=xd.cells, cells_layer=self.cells_layer)
 
         # extract anndata
-        adata = celldata.matrix
+        adata = celldata.table
 
         # filter anndata
         if self.filter_mode is not None and self.filter_tuple is not None:

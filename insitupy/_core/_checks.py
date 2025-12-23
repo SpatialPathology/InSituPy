@@ -13,7 +13,7 @@ def _check_assignment(
 ):
     celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
     try:
-        column = celldata.matrix.obsm[modality].columns
+        column = celldata.table.obsm[modality].columns
     except KeyError:
         do_assignment = True
     else:

@@ -9,6 +9,7 @@ if WITH_NAPARI:
     import napari
     import numpy as np
     import pandas as pd
+    from geopandas import GeoDataFrame
     from matplotlib.colors import rgb2hex
     from napari.types import LayerDataTuple
     from napari.utils.notifications import show_info, show_warning
@@ -354,6 +355,169 @@ if WITH_NAPARI:
 
         if new_name is not None:
             layer.name = new_name
+
+    def _update_units_layer(
+        layer: napari.layers.Layer,
+        new_color_values: List[Number],
+        new_name: Optional[str] = None,
+        upper_climit_pct: int = 99,
+        categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
+        ) -> None:
+        """
+        Update an existing spatial units (shapes) layer with new color values.
+
+        Args:
+            layer: Existing napari shapes layer to update
+            new_color_values: New values to color polygons by
+            new_name: New name for the layer (optional)
+            upper_climit_pct: Upper percentile for color limits
+            categorical_cmap: Colormap for categorical data
+            continuous_cmap: Colormap for continuous data
+        """
+        if categorical_cmap is None:
+            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
+
+        # Get the RGBA colors for the new values
+        new_colors, mapping, cmap = _data_to_rgba(
+            data=new_color_values,
+            continuous_cmap=continuous_cmap,
+            categorical_cmap=categorical_cmap,
+            upper_climit_pct=upper_climit_pct
+        )
+
+        # Update face colors
+        layer.face_color = new_colors
+
+        # Update properties
+        new_props = layer.properties.copy()
+        new_props['value'] = new_color_values
+        layer.properties = new_props
+
+        if new_name is not None:
+            layer.name = new_name
+
+    def _create_units_layer(
+            gdf: GeoDataFrame,
+            color_values: Optional[List[Number]] = None,
+            name: str = "units",
+            unit_names: Optional[List[str]] = None,
+            edge_width: Number = 2,
+            opacity: float = 0.5,
+            upper_climit_pct: int = 99,
+            categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+            continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
+            tolerance: Number = 1
+        ) -> LayerDataTuple:
+        """
+        Create a napari shapes layer from SpatialUnitsData GeoDataFrame.
+
+        Args:
+            gdf: GeoDataFrame with polygon geometries
+            color_values: Values to color polygons by (optional)
+            name: Layer name
+            unit_names: Names of spatial units for properties
+            edge_width: Edge width in physical units
+            opacity: Polygon opacity
+            upper_climit_pct: Upper percentile for color limits
+            categorical_cmap: Colormap for categorical data
+            continuous_cmap: Colormap for continuous data
+            tolerance: Simplification tolerance for polygons
+
+        Returns:
+            LayerDataTuple for napari
+        """
+        from shapely import MultiPolygon, Polygon
+
+        if categorical_cmap is None:
+            categorical_cmap = DEFAULT_CATEGORICAL_CMAP
+
+        # Extract polygon coordinates from geometries
+        shapes_list = []
+        shape_types = []
+
+        for geom in gdf.geometry:
+            # Simplify for performance
+            geom = geom.simplify(tolerance)
+
+            if isinstance(geom, Polygon):
+                polys = [geom]
+            elif isinstance(geom, MultiPolygon):
+                polys = list(geom.geoms)
+            else:
+                show_warning(f"Skipping non-polygon geometry of type {type(geom).__name__}")
+                continue
+
+            for poly in polys:
+                # Extract exterior coordinates (Y, X order for napari)
+                coords = np.array(poly.exterior.coords[:-1])  # Remove last point (duplicate)
+                # Swap X, Y to Y, X for napari
+                shapes_list.append(coords[:, [1, 0]])
+                shape_types.append('polygon')
+
+        # Handle coloring
+        if color_values is not None:
+            # Replicate color values for multi-polygons
+            expanded_colors = []
+            for i, geom in enumerate(gdf.geometry):
+                geom = geom.simplify(tolerance)
+                if isinstance(geom, (Polygon, MultiPolygon)):
+                    if isinstance(geom, MultiPolygon):
+                        n_polys = len(list(geom.geoms))
+                    else:
+                        n_polys = 1
+                    expanded_colors.extend([color_values[i]] * n_polys)
+
+            colors, mapping, cmap = _data_to_rgba(
+                data=expanded_colors,
+                continuous_cmap=continuous_cmap,
+                categorical_cmap=categorical_cmap,
+                upper_climit_pct=upper_climit_pct
+            )
+            face_color = colors
+        else:
+            face_color = 'transparent'
+
+        # Check if any shapes were created
+        if len(shapes_list) == 0:
+            show_warning("No valid polygon geometries found in SpatialUnitsData. Cannot create shapes layer.")
+            return None
+
+        # Prepare properties
+        properties = {}
+        if unit_names is not None:
+            # Expand units names for multi-polygons
+            expanded_names = []
+            for i, geom in enumerate(gdf.geometry):
+                geom = geom.simplify(tolerance)
+                if isinstance(geom, (Polygon, MultiPolygon)):
+                    if isinstance(geom, MultiPolygon):
+                        n_polys = len(list(geom.geoms))
+                    else:
+                        n_polys = 1
+                    expanded_names.extend([unit_names[i]] * n_polys)
+            properties['unit_name'] = expanded_names
+
+        if color_values is not None:
+            properties['value'] = expanded_colors
+
+        # Create layer tuple
+        layer = (
+            shapes_list,
+            {
+                'name': name,
+                'properties': properties,
+                'shape_type': shape_types,
+                'edge_width': edge_width,
+                'edge_color': 'white',
+                'face_color': face_color,
+                'opacity': opacity,
+                'metadata': {'upper_climit_pct': upper_climit_pct}
+            },
+            'shapes'
+        )
+        return layer
+
 
 #TODO: Why is this function not used anywhere?
 # def _determine_color_settings(

@@ -1,13 +1,15 @@
+import contextlib
+import os
+import sys
 from datetime import datetime
 from warnings import warn
 
 import dask.array as da
 import numpy as np
 import pandas as pd
+from scipy.sparse import issparse
 from shapely import MultiPolygon, Polygon
-import contextlib
-import os
-import sys
+
 
 def _get_expression_values(adata, X, key_type, key):
     # get expression values
@@ -15,6 +17,9 @@ def _get_expression_values(adata, X, key_type, key):
         try:
             gene_loc = adata.var_names.get_loc(key)
             color_value = X[:, gene_loc]
+
+            if issparse(color_value):
+                color_value = color_value.toarray().flatten()
         except KeyError:
             if key in adata.obs.columns:
                 color_value = adata.obs[key]
@@ -117,4 +122,5 @@ def suppress_output():
             yield
         finally:
             sys.stdout = old_stdout
+            sys.stderr = old_stderr
             sys.stderr = old_stderr

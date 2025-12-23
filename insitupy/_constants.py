@@ -21,6 +21,7 @@ MODALITIES_ABBR = "CITAR"
 LOAD_FUNCS = [
     'load_annotations',
     'load_cells',
+    'load_units',
     'load_images',
     'load_regions',
     'load_transcripts'
@@ -28,10 +29,16 @@ LOAD_FUNCS = [
 MODALITIES_COLOR_DICT = {
     "images": tf.Blue,
     "cells": tf.Green,
+    "units": tf.Magenta,
     "transcripts": tf.Purple,
     "annotations": tf.Cyan,
     "regions": tf.Yellow
 }
+
+# spatialdata
+SAMPLE_STR = "SAMPLE"
+DEFAULT_CHUNK_SIZE_X = 4096
+DEFAULT_CHUNK_SIZE_Y = 4096
 
 # naming
 ISPY_METADATA_FILE = ".ispy"

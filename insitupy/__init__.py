@@ -7,7 +7,6 @@ try:
     import napari
     WITH_NAPARI = True
 except ImportError:
-    from warnings import warn
     print((
         f"Napari is not installed. Interactive visualization using `.show()` will not be possible. "
         f"If you want to use these features, install insitupy with `pip install insitupy[gui]` or "
@@ -49,13 +48,15 @@ __all__ = [
     "utils"
 ]
 
-# configure warnings
+# configure logging
 import logging
 
 logger = logging.getLogger('insitupy')
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.INFO)
 logger.propagate = False
 
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
-logger.addHandler(handler)
+# Only add handler if one doesn't exist yet
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    logger.addHandler(handler)
