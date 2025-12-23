@@ -16,9 +16,15 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 * Implementation of bidirectional conversion functions between InSituPy and SpatialData
    * Due to current dependency conflicts between the packages this is only released as beta version. Please let me know if you run into any problems
 * Introduction of `.units` attribute. "Spatial units" can be any shape within which a omics measurement is available. This can be e.g. results from sequencing-based technologies like Visium but also histological structures such as functional tissue units.
+* implement `quantify_signal` function
 * New tutorials
+   * Align Xenium and Visium data
    * Read data from Vannan et al. into InSituPy
    * Convert data between SpatialData and InSituPy
+   * Quantify fluorescence signals
+* Benchmarkings:
+   * `quantify_signal`
+   * Xenium reader of `spatialdata-io` vs. InSituPy's
 
 ### `0.10.0`
 

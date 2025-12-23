@@ -21,6 +21,12 @@ These tutorials explain how to import data from different technologies and tools
 
     Tutorial on how to improve cell segmentation with Proseg and add the data to `InSituData` for downstream analysis.
 
+.. card:: Align Visium and Xenium data
+    :link: InSituPy_visium_xenium_alignment
+    :link-type: doc
+
+    Tutorial on how to align Visium spatial transcriptomics data to Xenium data for integrating data from different spatial technologies on the same tissue sample.
+
 ```
 
 ```{toctree}
