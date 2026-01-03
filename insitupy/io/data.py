@@ -575,7 +575,7 @@ def read_qupath(
     # --- Add ImageData ---
     data.images.add_image(
         image=image_path,
-        channel_names=method_name,
+        channel_names=None,
     )
 
     # --- Add the data annotation as region ---

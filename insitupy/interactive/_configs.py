@@ -59,7 +59,10 @@ if WITH_NAPARI:
             'recent_selections',
             'verbose',
             '_removal_tracker',
-            '_auto_set_uid'
+            '_auto_set_uid',
+            'key_dict',
+            'masks',
+            'pixel_size'
         ]
 
         def __init__(self, data):
@@ -85,6 +88,9 @@ if WITH_NAPARI:
             self.recent_selections = []
             self.verbose = False
             self._auto_set_uid = True
+
+            # Initialize masks, key_dict, and pixel_size
+            self.refresh_variables()
 
         @property
         def adata(self):
