@@ -644,9 +644,6 @@ if WITH_NAPARI:
 
         if (class_name != "") & (annot_key != ""):
             if key == "Geometric annotations":
-                # print(annot_key)
-                # print(class_name)
-                # print(viewer_config)
                 _test_existance(viewer_config, annot_key, class_name, modality="annotations")
                 # generate name
                 name = name_pattern.format(
