@@ -269,7 +269,7 @@ class InSituExperiment:
         if self.interactive_metadata:
             try:
                 from itables import show
-                show(self._metadata)
+                show(self._metadata, layout={"bottom1": "searchBuilder"}, column_filters="footer")
                 return None
             except ImportError:
 
