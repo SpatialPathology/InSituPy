@@ -51,12 +51,15 @@ __all__ = [
 # configure logging
 import logging
 
+from insitupy._logging import TqdmLoggingHandler
+
 logger = logging.getLogger('insitupy')
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
 # Only add handler if one doesn't exist yet
+# Use TqdmLoggingHandler to prevent progress bar disruption from log messages
 if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    handler = TqdmLoggingHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s | [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
     logger.addHandler(handler)

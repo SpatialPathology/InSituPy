@@ -90,6 +90,14 @@ def read_xenium(
 
     metadata_filename: str = "experiment.xenium"
 
+    # Check if the directory exists first
+    if not path.exists():
+        raise FileNotFoundError(f"The directory '{path}' does not exist.")
+
+    if not path.is_dir():
+        raise NotADirectoryError(f"The path '{path}' is not a directory.")
+
+    # Check if the required metadata file exists
     if not (path / metadata_filename).exists():
         raise InvalidXeniumDirectory(directory=path)
 

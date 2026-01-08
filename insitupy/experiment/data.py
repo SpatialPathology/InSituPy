@@ -22,6 +22,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
+from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.io.data import read_xenium
@@ -1198,14 +1199,19 @@ class InSituExperiment:
     @classmethod
     def from_config(cls,
                     config_path: Union[str, os.PathLike, Path],
-                    mode: Literal["insitupy", "xenium"] = "insitupy",
+                    mode: Literal["insitupy", "xenium"],
+                    collect_warnings_mode: bool = True,
                     **kwargs
                     ):
         """Create an InSituExperiment object from a configuration file.
 
         Args:
             config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
-            mode (Literal["insitupy", "xenium"], optional): The mode to use for loading the datasets. Defaults to "insitupy".
+            mode (Literal["insitupy", "xenium"]): The mode to use for loading the datasets.
+                - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
+                - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
+            collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
+                This keeps the progress bar clean while still showing important warnings. Defaults to True.
         """
         config_path = Path(config_path)
 
@@ -1227,6 +1233,9 @@ class InSituExperiment:
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
 
+        # Create a warning collector if collect_warnings_mode is enabled
+        warning_collector = WarningCollector() if collect_warnings_mode else None
+
         # Iterate over each row in the configuration file
         for i in tqdm(range(len(config))):
             row = config.iloc[i, :]
@@ -1240,12 +1249,22 @@ class InSituExperiment:
             if not dataset_path.exists():
                 raise FileNotFoundError(f"No such directory found: {str(dataset_path)}")
 
-            if mode == "insitupy":
-                dataset = InSituData.read(dataset_path)
-            elif mode == "xenium":
-                dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+            # Use collect_warnings context manager to capture warnings without disrupting progress bar
+            if collect_warnings_mode:
+                with collect_warnings(warning_collector):
+                    if mode == "insitupy":
+                        dataset = InSituData.read(dataset_path)
+                    elif mode == "xenium":
+                        dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+                    else:
+                        raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
             else:
-                raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
+                if mode == "insitupy":
+                    dataset = InSituData.read(dataset_path)
+                elif mode == "xenium":
+                    dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+                else:
+                    raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
             experiment._data.append(dataset)
 
@@ -1257,6 +1276,10 @@ class InSituExperiment:
 
             # Append the metadata to the experiment's metadata DataFrame
             experiment._metadata = pd.concat([experiment._metadata, pd.DataFrame([metadata])], ignore_index=True)
+
+        # Print collected warnings summary at the end
+        if warning_collector and len(warning_collector) > 0:
+            warning_collector.print_summary()
 
         return experiment
 
