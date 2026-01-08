@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import warnings
 from collections import defaultdict
@@ -30,6 +31,8 @@ from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 # Feature flag for SpatialData mode
 # Set to True to enable spatialdata mode functionality
@@ -101,6 +104,7 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._data_type = data_type
+        self.interactive_metadata = False  # If True, use itables for interactive metadata display
 
     def __repr__(self):
         """
@@ -248,23 +252,38 @@ class InSituExperiment:
 
     @property
     def metadata(self):
-
         """
-        Returns a copy of the experiment-level metadata.
+        Returns the experiment-level metadata.
+
+        If `interactive_metadata` is True, displays an interactive table using itables.
+        Otherwise, returns a copy of the metadata DataFrame.
 
         Note:
-            This is a **copy** of the internal metadata DataFrame.
-            Any modifications to this copy (e.g., adding columns) will **not** affect the actual metadata.
-            To modify metadata, use `add_metadata_column()` instead.
+            When `interactive_metadata=False` (default), this returns a **copy** of the internal
+            metadata DataFrame. Any modifications to this copy will **not** affect the actual metadata.
+            To modify metadata, use `add_metadata_column()` or `append_metadata()`.
 
         Returns:
-            pd.DataFrame: A copy of the metadata DataFrame.
+            pd.DataFrame: A copy of the metadata DataFrame (when interactive_metadata=False).
         """
-        print(
-            f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
-        )
-        return self._metadata.copy() # the copy prevents the metadata from being modified
+        if self.interactive_metadata:
+            try:
+                from itables import show
+                show(self._metadata)
+                return None
+            except ImportError:
+
+                logger.warning(
+                    f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
+                    f"Falling back to static display.{tf.ResetAll}"
+                )
+                return self._metadata.copy()
+        else:
+            print(
+                f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
+                f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
+            )
+            return self._metadata.copy()
 
     @property
     def path(self):
