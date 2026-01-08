@@ -1018,8 +1018,19 @@ class InSituExperiment:
         self,
         path: Union[str, os.PathLike, Path],
         overwrite: bool = False,
-        verbose: bool = False, **kwargs):
-        """Save all datasets to a specified folder."""
+        verbose: bool = False,
+        collect_warnings_mode: bool = True,
+        **kwargs):
+        """Save all datasets to a specified folder.
+
+        Args:
+            path: Path to save the InSituExperiment.
+            overwrite: If True, overwrite existing files.
+            verbose: If True, print verbose output.
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to dataset.saveas().
+        """
         self._check_mode_compatibility("saveas")
 
         # Create the main directory if it doesn't exist
@@ -1030,10 +1041,20 @@ class InSituExperiment:
 
         print(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
-        # Iterate over the datasets and save each one in a numbered subfolder
-        for index, dataset in enumerate(tqdm(self._data)):
-            subfolder_path = path / f"data-{str(index).zfill(3)}"
-            dataset.saveas(subfolder_path, verbose=False, **kwargs)
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                # Iterate over the datasets and save each one in a numbered subfolder
+                for index, dataset in enumerate(tqdm(self._data)):
+                    subfolder_path = path / f"data-{str(index).zfill(3)}"
+                    dataset.saveas(subfolder_path, verbose=False, **kwargs)
+
+            # Print collected warnings at the end
+            collector.print_summary()
+        else:
+            # Original behavior - warnings shown inline
+            for index, dataset in enumerate(tqdm(self._data)):
+                subfolder_path = path / f"data-{str(index).zfill(3)}"
+                dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
         # Optionally, save the metadata as a CSV file
         self._metadata.to_csv(path / "metadata.csv", index=True)

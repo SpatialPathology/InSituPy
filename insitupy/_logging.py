@@ -5,7 +5,9 @@ This module provides custom logging handlers and context managers for managing
 log output during batch operations with progress bars.
 """
 
+import io
 import logging
+import sys
 import warnings
 from collections import Counter
 from contextlib import contextmanager
@@ -38,6 +40,7 @@ class WarningCollector:
     def __init__(self):
         self.warnings = []
         self._log_records = []
+        self._stdout_messages = []
 
     def add_warning(self, message: str, category: str = "Warning"):
         """Add a warning message to the collection."""
@@ -47,14 +50,22 @@ class WarningCollector:
         """Add a log record to the collection."""
         self._log_records.append(record)
 
+    def add_stdout_message(self, message: str):
+        """Add a captured stdout message to the collection."""
+        # Clean up the message
+        message = message.strip()
+        if message:
+            self._stdout_messages.append(message)
+
     def get_summary(self) -> str:
         """Get a summary of all collected warnings."""
-        if not self.warnings and not self._log_records:
+        if not self.warnings and not self._log_records and not self._stdout_messages:
             return ""
 
         # Count unique warnings
         warning_counts = Counter(self.warnings)
         log_counts = Counter((r.levelname, r.getMessage()) for r in self._log_records)
+        stdout_counts = Counter(self._stdout_messages)
 
         lines = []
 
@@ -72,6 +83,13 @@ class WarningCollector:
                 else:
                     lines.append(f"  [{level}] {message}")
 
+        if stdout_counts:
+            for message, count in stdout_counts.items():
+                if count > 1:
+                    lines.append(f"  [INFO] {message} (x{count})")
+                else:
+                    lines.append(f"  [INFO] {message}")
+
         if lines:
             return "Collected warnings:\n" + "\n".join(lines)
         return ""
@@ -84,7 +102,7 @@ class WarningCollector:
             tqdm.write(summary)
 
     def __len__(self):
-        return len(self.warnings) + len(self._log_records)
+        return len(self.warnings) + len(self._log_records) + len(self._stdout_messages)
 
 
 class CollectingHandler(logging.Handler):
@@ -98,16 +116,40 @@ class CollectingHandler(logging.Handler):
         self.collector.add_log_record(record)
 
 
-@contextmanager
-def collect_warnings(collector: WarningCollector = None):
+class StdoutCapture(io.StringIO):
     """
-    Context manager that collects warnings and log messages into a WarningCollector.
+    A StringIO wrapper that captures stdout and stores messages in a WarningCollector.
 
-    This allows batch operations to run without interruption from warnings,
+    This allows us to intercept print statements (like those from anndata/scanpy)
+    that would otherwise disrupt progress bars.
+    """
+
+    def __init__(self, collector: WarningCollector, original_stdout):
+        super().__init__()
+        self.collector = collector
+        self.original_stdout = original_stdout
+
+    def write(self, s):
+        # Capture the output
+        if s.strip():  # Only capture non-empty, non-whitespace strings
+            self.collector.add_stdout_message(s)
+        return len(s)
+
+    def flush(self):
+        pass  # No-op, we don't need to flush
+
+
+@contextmanager
+def collect_warnings(collector: WarningCollector = None, capture_stdout: bool = True):
+    """
+    Context manager that collects warnings, log messages, and optionally stdout into a WarningCollector.
+
+    This allows batch operations to run without interruption from warnings or print statements,
     while still capturing them for later review.
 
     Args:
         collector: An optional WarningCollector instance. If not provided, a new one is created.
+        capture_stdout: If True, also capture stdout (print statements from libraries like anndata).
 
     Yields:
         WarningCollector: The collector containing all captured warnings.
@@ -120,6 +162,12 @@ def collect_warnings(collector: WarningCollector = None):
     """
     if collector is None:
         collector = WarningCollector()
+
+    # Set up stdout capture if requested
+    original_stdout = None
+    if capture_stdout:
+        original_stdout = sys.stdout
+        sys.stdout = StdoutCapture(collector, original_stdout)
 
     # Set up warning capture
     with warnings.catch_warnings(record=True) as caught_warnings:
@@ -152,6 +200,10 @@ def collect_warnings(collector: WarningCollector = None):
         try:
             yield collector
         finally:
+            # Restore stdout first
+            if original_stdout is not None:
+                sys.stdout = original_stdout
+
             # Process captured warnings
             for w in caught_warnings:
                 collector.add_warning(str(w.message), w.category.__name__)
