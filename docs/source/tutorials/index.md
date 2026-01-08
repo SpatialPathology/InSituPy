@@ -30,6 +30,12 @@ To help you get started with **InSituPy**, you can find a collection of differen
 
     Tutorials explaining how to import data from different technologies or tools.
 
+.. card:: SpatialData Integration
+    :link: 07_spatialdata/index
+    :link-type: doc
+    :link-alt: SpatialData conversion tutorials
+
+    Tutorials for converting between InSituPy and SpatialData formats for integration with the scverse ecosystem.
 
 .. card:: Plotting functionalities
     :link: 04_plotting/index
@@ -55,6 +61,7 @@ To help you get started with **InSituPy**, you can find a collection of differen
 01_demo_analysis/index.md
 02_multisample_analysis/index.md
 03_data_import/index.md
+07_spatialdata/index.md
 04_plotting/index.md
 05_publication/index.md
 ```
