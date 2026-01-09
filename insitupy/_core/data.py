@@ -5,7 +5,7 @@ import shutil
 from copy import deepcopy
 from datetime import datetime
 from numbers import Number
-from os.path import abspath
+from os.path import abspath, relpath
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
@@ -1367,7 +1367,9 @@ class InSituData:
              path: Optional[Union[str, os.PathLike, Path]] = None,
              zarr_zipped: bool = False,
              verbose: bool = True,
-             keep_history: bool = False
+             keep_history: bool = False,
+             sync_images: bool = False,
+             images_only: bool = False
              ):
 
         # check path
@@ -1383,6 +1385,10 @@ class InSituData:
                     f"Use `saveas()` instead to save the data to a new project folder."
                     )
                 return
+
+        # if images_only is True, sync_images must also be True
+        if images_only:
+            sync_images = True
 
         if path.exists():
             if verbose:
@@ -1405,11 +1411,16 @@ class InSituData:
                 if current_uid == project_uid:
                     self._update_to_existing_project(path=path,
                                                      zarr_zipped=zarr_zipped,
-                                                     verbose=verbose
+                                                     verbose=verbose,
+                                                     sync_images=sync_images,
+                                                     images_only=images_only
                                                      )
 
                     # reload the modalities
                     self.reload(verbose=False, skip=["transcripts", "images"])
+
+                    if sync_images:
+                        self.reload(verbose=False, skip=["transcripts"])
 
                     if not keep_history:
                         self.remove_history(verbose=False)
@@ -1690,49 +1701,74 @@ class InSituData:
         else:
             print(f"No modality '{modality}' found. Nothing removed.")
 
-    def _update_to_existing_project(self,
-                                    path: Optional[Union[str, os.PathLike, Path]],
-                                    zarr_zipped: bool = False,
-                                    verbose: bool = True
-                                    ):
+    def _update_to_existing_project(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]],
+        zarr_zipped: bool = False,
+        verbose: bool = True,
+        sync_images: bool = False,
+        images_only: bool = False
+        ):
         if verbose:
             print(f"Updating project in {path}")
 
-        # save cells
-        if not self._cells.is_empty:
-            cells = self._cells
+        # save images (only new ones that don't exist yet)
+        if sync_images and not self._images.is_empty:
             if verbose:
-                print("\tUpdating cells...", flush=True)
-            _save_cells(
-                cells=cells,
-                path=path,
-                metadata=self._metadata,
-                boundaries_zipped=zarr_zipped,
-                overwrite=True
+                print("\tSyncing images (saving new images only)...", flush=True)
+            img_path = path / "images"
+            savepaths = self._images.save(
+                output_folder=img_path,
+                as_zarr=True,
+                zipped=zarr_zipped,
+                return_savepaths=True,
+                overwrite=False,  # only save images that don't exist yet
+                verbose=verbose
             )
 
+            # update metadata for any newly saved images
+            if "images" not in self._metadata["data"]:
+                self._metadata["data"]["images"] = {}
+            for n, s in savepaths.items():
+                self._metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
 
-        # save annotations
-        if not self._annotations.is_empty:
-            annotations = self._annotations
-            if verbose:
-                print("\tUpdating annotations...", flush=True)
-            _save_annotations(
-                annotations=annotations,
-                path=path,
-                metadata=self._metadata
-            )
+        # skip other modalities if images_only is True
+        if not images_only:
+            # save cells
+            if not self._cells.is_empty:
+                cells = self._cells
+                if verbose:
+                    print("\tUpdating cells...", flush=True)
+                _save_cells(
+                    cells=cells,
+                    path=path,
+                    metadata=self._metadata,
+                    boundaries_zipped=zarr_zipped,
+                    overwrite=True
+                )
 
-        # save regions
-        if not self._regions.is_empty:
-            regions = self._regions
-            if verbose:
-                print("\tUpdating regions...", flush=True)
-            _save_regions(
-                regions=regions,
-                path=path,
-                metadata=self._metadata
-            )
+
+            # save annotations
+            if not self._annotations.is_empty:
+                annotations = self._annotations
+                if verbose:
+                    print("\tUpdating annotations...", flush=True)
+                _save_annotations(
+                    annotations=annotations,
+                    path=path,
+                    metadata=self._metadata
+                )
+
+            # save regions
+            if not self._regions.is_empty:
+                regions = self._regions
+                if verbose:
+                    print("\tUpdating regions...", flush=True)
+                _save_regions(
+                    regions=regions,
+                    path=path,
+                    metadata=self._metadata
+                )
 
         # save version of InSituPy
         self._metadata["version"] = __version__

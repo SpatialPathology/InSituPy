@@ -104,7 +104,6 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._data_type = data_type
-        self.interactive_metadata = False  # If True, use itables for interactive metadata display
 
     def __repr__(self):
         """
@@ -253,35 +252,46 @@ class InSituExperiment:
     @property
     def metadata(self):
         """
-        Returns the experiment-level metadata.
+        Returns the experiment-level metadata as a pandas DataFrame.
 
-        If `interactive_metadata` is True, displays an interactive table using itables.
-        Otherwise, returns a copy of the metadata DataFrame.
+        Returns a copy of the metadata DataFrame. For interactive display, use :attr:`imetadata`.
 
         Note:
-            When `interactive_metadata=False` (default), this returns a **copy** of the internal
-            metadata DataFrame. Any modifications to this copy will **not** affect the actual metadata.
-            To modify metadata, use `add_metadata_column()` or `append_metadata()`.
+            This returns a **copy** of the internal metadata :class:`pandas.DataFrame`. Any modifications
+            to this copy will **not** affect the actual metadata. To modify metadata, use
+            `add_metadata_column()` or `append_metadata()`.
 
         Returns:
-            pd.DataFrame: A copy of the metadata DataFrame (when interactive_metadata=False).
+            pandas.DataFrame: A copy of the metadata DataFrame.
         """
-        if self.interactive_metadata:
-            try:
-                from itables import show
-                show(self._metadata, layout={"bottom1": "searchBuilder"}, column_filters="footer")
-                return None
-            except ImportError:
+        print(
+            f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
+            f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
+        )
+        return self._metadata.copy()
 
-                logger.warning(
-                    f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
-                    f"Falling back to static display.{tf.ResetAll}"
-                )
-                return self._metadata.copy()
-        else:
-            print(
-                f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-                f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
+    @property
+    def imetadata(self):
+        """
+        Displays the experiment-level metadata as an interactive table using itables.
+
+        This property provides an interactive view of the metadata with search and filter capabilities.
+        Requires the `itables` package to be installed.
+
+        Returns:
+            None: Displays the interactive table in the output.
+
+        Raises:
+            ImportError: If the `itables` package is not installed.
+        """
+        try:
+            from itables import show
+            show(self._metadata, layout={"bottom1": "searchBuilder"}, column_filters="footer")
+            return None
+        except ImportError:
+            logger.warning(
+                f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
+                f"Falling back to static display.{tf.ResetAll}"
             )
             return self._metadata.copy()
 
@@ -1000,9 +1010,26 @@ class InSituExperiment:
              overwrite_metadata: bool = True,
              overwrite_colors: bool = True,
              metadata_only: bool = False,
+             sync_images: bool = False,
+             images_only: bool = False,
+             collect_warnings_mode: bool = True,
              **kwargs
              ):
-        """Save the experiment."""
+        """Save the experiment.
+
+        Args:
+            verbose: If True, print verbose output.
+            overwrite_metadata: If True, overwrite the metadata CSV file.
+            overwrite_colors: If True, overwrite the colors JSON file.
+            metadata_only: If True, only save the metadata (not the datasets).
+            sync_images: If True, save new images that don't exist yet in each dataset's
+                images folder. Existing images are skipped.
+            images_only: If True, only save image data and skip all other modalities
+                (cells, annotations, regions). Implies sync_images=True.
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to InSituData.save().
+        """
         self._check_mode_compatibility("save")
 
         if metadata_only and not overwrite_metadata:
@@ -1017,11 +1044,25 @@ class InSituExperiment:
                 if not np.all(parent_path_identical):
                     print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self._metadata['uid'][parent_path_identical].values}")
                 else:
-                    for xd in tqdm(self._data):
-                        xd.save(
-                            verbose=verbose,
-                            **kwargs
-                            )
+                    if collect_warnings_mode:
+                        with collect_warnings() as collector:
+                            for xd in tqdm(self._data):
+                                xd.save(
+                                    verbose=verbose,
+                                    sync_images=sync_images,
+                                    images_only=images_only,
+                                    **kwargs
+                                    )
+                        # Print collected warnings at the end
+                        collector.print_summary()
+                    else:
+                        for xd in tqdm(self._data):
+                            xd.save(
+                                verbose=verbose,
+                                sync_images=sync_images,
+                                images_only=images_only,
+                                **kwargs
+                                )
 
             if overwrite_colors:
                 with open(self.path / "colors.json", 'w') as f:

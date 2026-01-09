@@ -1794,7 +1794,7 @@ class ImageData(DeepCopyMixin):
             Optional[Dict[str, Path]]: A dictionary mapping image keys to their save paths if `return_savepaths` is True. Otherwise, returns None.
 
         Raises:
-            FileExistsError: If `overwrite` is False and the output folder already contains files.
+            FileExistsError: If `overwrite` is False and a file with the same name already exists.
 
         """
         output_folder = Path(output_folder)
@@ -1804,10 +1804,7 @@ class ImageData(DeepCopyMixin):
         else:
             keys_to_save = convert_to_list(keys_to_save)
 
-        # check overwrite
-        check_overwrite_and_remove_if_true(path=output_folder, overwrite=overwrite)
-
-        # create output directory
+        # create output directory (allow saving to existing directories)
         output_folder.mkdir(parents=True, exist_ok=True)
 
         if return_savepaths:
@@ -1863,15 +1860,29 @@ class ImageData(DeepCopyMixin):
 
                     # write to zarr
                     img_path = output_folder / filename
+
+                    # check if file exists and handle overwrite
+                    if img_path.exists() and not overwrite:
+                        logger.warning(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
+                        continue
+
                     write_zarr(image=img, file=img_path,
                                img_metadata=new_img_metadata,
                                save_pyramid=save_pyramid,
-                               axes=axes, verbose=verbose
+                               axes=axes, verbose=verbose,
+                               overwrite=overwrite
                                )
                 else:
                     # get file name for saving
                     #filename = Path(img_metadata["file"]).name.split(".")[0] + ".ome.tif"
                     filename = name + ".ome.tif"
+
+                    # check if file exists and handle overwrite
+                    img_path = output_folder / filename
+                    if img_path.exists() and not overwrite:
+                        warnings.warn(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
+                        continue
+
                     # retrieve image metadata for saving
                     photometric = 'rgb' if new_img_metadata['rgb'] else 'minisblack'
 
@@ -1888,10 +1899,10 @@ class ImageData(DeepCopyMixin):
                     selected_metadata = {key: pixel_meta[key] for key in ome_meta_to_retrieve if key in pixel_meta}
 
                     # write images as OME-TIFF
-                    write_ome_tiff(image=img, file=output_folder / filename,
+                    write_ome_tiff(image=img, file=img_path,
                                 photometric=photometric, axes=axes,
                                 compression=compression,
-                                metadata=selected_metadata, overwrite=False,
+                                metadata=selected_metadata, overwrite=overwrite,
                                 verbose=verbose
                                 )
 
