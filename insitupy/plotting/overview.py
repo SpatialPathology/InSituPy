@@ -14,7 +14,7 @@ from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import is_integer_counts
 
 
-def _calculate_max_cell_widths_and_sum(df, multiplier=0.15):
+def _calculate_max_cell_widths_and_sum(df, multiplier=0.13):
     """
     Calculate the maximum cell width for each column based on text length, including the column name in the calculation, and return the sum of them.
 
@@ -165,8 +165,9 @@ def overview(
             column_definition.append(
                 ColumnDefinition(name=column_name,
                                  textprops={"ha": "center"},
-                                 width=width_dict[column_name],
-                                 title="Sample", border=border))
+                                 width=0.5,
+                                #  width=width_dict[column_name],
+                                 title="ID", border=border))
         else:
             column_definition.append(
                 ColumnDefinition(name=column_name,
