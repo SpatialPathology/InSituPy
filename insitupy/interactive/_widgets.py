@@ -106,8 +106,18 @@ if WITH_NAPARI:
                         else:
                             mask_pyramid = mask
 
+                        # Create properties DataFrame with label IDs as index
+                        label_ids = viewer_config.boundaries.seg_mask_value.compute()
+                        cell_names = viewer_config.boundaries.cell_names.compute()
+                        properties = pd.DataFrame({'name': cell_names}, index=label_ids)
+
                         # add masks as labels to napari viewer
-                        viewer.add_labels(mask_pyramid, name=layer_name, scale=(pixel_size,pixel_size))
+                        viewer.add_labels(
+                            mask_pyramid,
+                            name=layer_name,
+                            scale=(pixel_size,pixel_size),
+                            properties=properties
+                            )
                         if key == "cells":
                             viewer.layers[layer_name].contour = 1
                     else:
