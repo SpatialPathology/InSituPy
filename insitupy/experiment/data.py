@@ -452,6 +452,125 @@ class InSituExperiment:
         # Update the object's metadata only if the check passes
         self._metadata = updated_metadata
 
+    def set_metadata_values(
+        self,
+        index: Union[int, List[int], List[bool], slice, range, np.ndarray, pd.Series],
+        column_name: str,
+        values: Union[Any, List, pd.Series, np.ndarray]
+    ):
+        """
+        Set metadata values for one or more indices.
+
+        Args:
+            index: Row index/indices to update. Can be:
+                - int: Single row index (e.g., 0)
+                - List[int]: Multiple specific indices (e.g., [0, 2, 5])
+                - List[bool]: Boolean mask (e.g., [True, False, True])
+                - slice: Range of indices (e.g., slice(0, 5))
+                - range: Range object (e.g., range(0, 5))
+                - np.ndarray: Array of indices or boolean mask
+                - pd.Series: Boolean Series for filtering
+            column_name: Name of the metadata column to update
+            values: Value(s) to set. Can be:
+                - Single value: Applied to all specified indices (broadcast)
+                - List/Series/array: Must have same length as number of indices
+
+        Raises:
+            ValueError: If values is a sequence with mismatched length to indices,
+                or if boolean mask length doesn't match metadata length
+            KeyError: If column_name doesn't exist in metadata
+            IndexError: If any index is out of bounds
+
+        Examples:
+            >>> # Single value at single index
+            >>> exp.set_metadata_values(0, "type", "tumor")
+
+            >>> # Same value for multiple indices (broadcast)
+            >>> exp.set_metadata_values([0, 1, 2], "type", "tumor")
+
+            >>> # Different values for multiple indices
+            >>> exp.set_metadata_values([0, 1, 2], "type", ["tumor", "normal", "tumor"])
+
+            >>> # Using slice notation
+            >>> exp.set_metadata_values(slice(0, 5), "Localisation", "head")
+
+            >>> # Using range
+            >>> exp.set_metadata_values(range(0, 3), "type", ["tumor", "normal", "tumor"])
+
+            >>> # Using boolean mask
+            >>> exp.set_metadata_values(exp.metadata["type"] == "normal", "Localisation", "body")
+
+            >>> # Using boolean list
+            >>> exp.set_metadata_values([True, False, True, False], "type", "tumor")
+        """
+        # Normalize index to list
+        if isinstance(index, int):
+            indices = [index]
+        elif isinstance(index, pd.Series):
+            # Handle pandas Series (typically boolean masks)
+            if index.dtype == bool:
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = list(self._metadata.index[index])
+            else:
+                indices = index.tolist()
+        elif isinstance(index, slice):
+            indices = list(range(*index.indices(len(self._metadata))))
+        elif isinstance(index, range):
+            indices = list(index)
+        elif isinstance(index, np.ndarray):
+            # Handle numpy arrays (could be indices or boolean masks)
+            if index.dtype == bool:
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = list(np.where(index)[0])
+            else:
+                indices = index.tolist()
+        elif isinstance(index, list):
+            # Check if it's a boolean list
+            if index and isinstance(index[0], (bool, np.bool_)):
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = [i for i, mask in enumerate(index) if mask]
+            else:
+                indices = list(index)
+        else:
+            indices = list(index)
+
+        # Validate column exists
+        if column_name not in self._metadata.columns:
+            raise KeyError(f"Column '{column_name}' does not exist in metadata")
+
+        # Validate indices are in bounds
+        max_idx = len(self._metadata) - 1
+        out_of_bounds = [i for i in indices if i > max_idx or i < -len(self._metadata)]
+        if out_of_bounds:
+            raise IndexError(
+                f"Indices out of bounds: {out_of_bounds}. "
+                f"Valid range: 0 to {max_idx}"
+            )
+
+        # Handle values: check if sequence and validate length
+        is_sequence = isinstance(values, (list, pd.Series, np.ndarray, tuple))
+
+        if is_sequence:
+            values_list = list(values) if not isinstance(values, list) else values
+            if len(values_list) != len(indices):
+                raise ValueError(
+                    f"Length mismatch: {len(indices)} index/indices specified but "
+                    f"{len(values_list)} value(s) provided. They must match."
+                )
+            self._metadata.loc[indices, column_name] = values_list
+        else:
+            # Single value - broadcast to all indices
+            self._metadata.loc[indices, column_name] = values
+
     def remove_metadata_columns(self, columns):
         """
         Remove specified columns from the internal metadata.
@@ -754,6 +873,7 @@ class InSituExperiment:
         varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        meta_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = True,
     ) -> anndata.AnnData:
         """
@@ -768,6 +888,7 @@ class InSituExperiment:
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
+            meta_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
             make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
 
         Returns:
@@ -799,18 +920,42 @@ class InSituExperiment:
                 layer_keys=layer_keys
             )
 
+            # Add metadata columns to obs
+            if meta_keys is not None:
+                if meta_keys == "all":
+                    keys_to_add = list(meta.index)
+                else:
+                    # make sure keys are a list
+                    keys_to_add = convert_to_list(meta_keys)
+
+                for key in keys_to_add:
+                    if key in meta.index:
+                        adata.obs[key] = meta[key]
+                    else:
+                        raise ValueError(
+                            f"Column '{key}' not found in metadata. "
+                            f"Available columns: {list(self._metadata.columns)}"
+                        )
+
             if make_obs_names_unique:
                 adata.obs_names = f"{str(i)}-" + adata.obs_names
 
             adatas[meta[label_col]] = adata
 
-        return anndata.concat(
+        adata_concat = anndata.concat(
             adatas,
             axis='obs',
             join='inner',
             label=label_col,
             merge="unique"
         )
+
+        # Move label_col to first position in obs columns
+        if label_col in adata_concat.obs.columns:
+            cols = [label_col] + [col for col in adata_concat.obs.columns if col != label_col]
+            adata_concat.obs = adata_concat.obs[cols]
+
+        return adata_concat
 
 
     def load_all(self,
