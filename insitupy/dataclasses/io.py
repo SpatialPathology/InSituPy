@@ -134,8 +134,27 @@ def read_celldata(
         warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.table`.")
         seg_mask_value = None
 
+    # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+)
+    # Stored as a 2D array with columns [nucleus_index, cell_index]
+    try:
+        nucleus_map_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
+        nucleus_to_cell_map = {int(row[0]): int(row[1]) for row in nucleus_map_arr}
+    except (ArrayNotFoundError, TypeError):
+        nucleus_to_cell_map = None  # Not available in older datasets
+
+    # Read nucleus_count (number of nuclei per cell)
+    try:
+        nucleus_count = da.from_zarr(bound_path, component="nucleus_count").compute()
+    except (ArrayNotFoundError, TypeError):
+        nucleus_count = None  # Not available in older datasets
+
     # initialize boundaries data object
-    boundaries = BoundariesData(cell_names=cell_names, seg_mask_value=seg_mask_value)
+    boundaries = BoundariesData(
+        cell_names=cell_names,
+        seg_mask_value=seg_mask_value,
+        nucleus_to_cell_map=nucleus_to_cell_map,
+        nucleus_count=nucleus_count
+    )
 
     # retrieve the boundaries data
     bound_data = {}

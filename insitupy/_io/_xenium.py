@@ -96,10 +96,37 @@ def _read_boundaries_from_xenium(
     except (ArrayNotFoundError, TypeError):
         seg_mask_value = np.array(range(1, len(cell_names)+1))
 
+    # Read nucleus polygon cell_index (maps each nucleus to its parent cell)
+    # This is needed for Xenium v2.0+ which supports multinucleated cells
+    try:
+        nucleus_cell_index = da.from_zarr(store, component="polygon_sets/0/cell_index").compute()
+    except (ArrayNotFoundError, TypeError):
+        nucleus_cell_index = None  # v1.x fallback: assume 1:1 mapping
+
+    # Read cell_summary to get nucleus_count per cell
+    try:
+        cell_summary = da.from_zarr(store, component="cell_summary").compute()
+        nucleus_count = cell_summary[:, 7]  # column index 7 = nucleus_count
+    except (ArrayNotFoundError, TypeError, IndexError):
+        nucleus_count = None
+
+    # Build nucleus index to cell index mapping (both 0-indexed)
+    if nucleus_cell_index is not None:
+        # v2.0+: nucleus_cell_index[i] gives the cell index for nucleus polygon i
+        # To look up a mask value N, use: nucleus_to_cell_map[N - 1]
+        nucleus_to_cell_map = {
+            i: int(nucleus_cell_index[i]) for i in range(len(nucleus_cell_index))
+        }
+    else:
+        # v1.x: 1:1 mapping (nucleus index = cell index)
+        nucleus_to_cell_map = {i: i for i in range(len(cell_names))}
+
     # create boundariesdata object
     boundaries = BoundariesData(
         cell_names=cell_names,
-        seg_mask_value=seg_mask_value
+        seg_mask_value=seg_mask_value,
+        nucleus_to_cell_map=nucleus_to_cell_map,
+        nucleus_count=nucleus_count
         )
 
     boundaries.add_boundaries(

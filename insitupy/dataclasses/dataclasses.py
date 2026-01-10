@@ -417,6 +417,8 @@ class BoundariesData(DeepCopyMixin):
     def __init__(self,
                  cell_names: Union[np.ndarray, List],
                  seg_mask_value: Optional[Union[np.ndarray, List]],
+                 nucleus_to_cell_map: Optional[Dict[int, int]] = None,
+                 nucleus_count: Optional[np.ndarray] = None,
                  ):
         """
         Initialize the BoundariesData object.
@@ -425,6 +427,12 @@ class BoundariesData(DeepCopyMixin):
             cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.table` of `CellData`.
             seg_mask_value (Optional[Union[np.ndarray, List]]): Segmentation mask values. Required to have the same length as `cell_names`.
                 Specifies which values in the "cells" segmentation mask correspond to which cell name.
+            nucleus_to_cell_map (Optional[Dict[int, int]]): Mapping from nucleus index (0-indexed) to cell index (0-indexed).
+                For Xenium v2.0+ with multinucleated cells, this allows mapping each nucleus to its parent cell.
+                To look up a nucleus mask value N, use: `nucleus_to_cell_map[N - 1]` (since mask values are 1-indexed).
+                If None, assumes 1:1 mapping between nuclei and cells (Xenium v1.x behavior).
+            nucleus_count (Optional[np.ndarray]): Array with the number of nuclei per cell.
+                Useful for identifying multinucleated cells. If None, not available.
 
         For more details on how these values are saved in case of Xenium In Situ, see:
         https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/tutorials/outputs/xoa-output-zarr
@@ -443,6 +451,10 @@ class BoundariesData(DeepCopyMixin):
             self._seg_mask_value = da.from_array(np.array(seg_mask_value, dtype=np.uint32))
         else:
             raise ValueError("Argument 'seg_mask_value' is None. This argument is required to be set.")
+
+        # Store nucleus-to-cell mapping for multinucleated cell support (Xenium v2.0+)
+        self._nucleus_to_cell_map = nucleus_to_cell_map
+        self._nucleus_count = nucleus_count
 
         self._data = dict()
 
@@ -491,6 +503,16 @@ class BoundariesData(DeepCopyMixin):
     @property
     def seg_mask_value(self):
         return self._seg_mask_value
+
+    @property
+    def nucleus_to_cell_map(self):
+        """Mapping from nucleus label ID to cell index. None if not available (v1.x data)."""
+        return self._nucleus_to_cell_map
+
+    @property
+    def nucleus_count(self):
+        """Array with number of nuclei per cell. None if not available."""
+        return self._nucleus_count
 
     @property
     def is_empty(self):
@@ -695,6 +717,16 @@ class BoundariesData(DeepCopyMixin):
 
             if self._seg_mask_value is not None:
                 self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
+
+            # Save nucleus_to_cell_map if available (for multinucleated cell support)
+            if self._nucleus_to_cell_map is not None:
+                # Store as 2D array with columns [nucleus_index, cell_index]
+                nucleus_map_arr = np.array([[k, v] for k, v in self._nucleus_to_cell_map.items()], dtype=np.int64)
+                da.from_array(nucleus_map_arr).to_zarr(dirstore, component="nucleus_to_cell_map", overwrite=True)
+
+            # Save nucleus_count if available
+            if self._nucleus_count is not None:
+                da.from_array(self._nucleus_count).to_zarr(dirstore, component="nucleus_count", overwrite=True)
 
         # # add version to metadata
         # metadata_to_save = self.metadata.copy()
@@ -1161,20 +1193,56 @@ class MultiCellData(DeepCopyMixin):
             Adds output of Proseg https://github.com/dcjones/proseg segmentation to the object.
 
             Args:
-                path_counts (Union[str, os.PathLike, Path]): Path to the counts file (.parquet, .csv or csv.gz).
-                path_metadata (Union[str, os.PathLike, Path]): Path to the metadata file (.parquet, .csv or csv.gz).
-                path_baysor_polygons (Union[str, os.PathLike, Path]): Path to the Baysor-like polygons file.
+                path (Union[str, os.PathLike, Path]): Path to proseg output. Can be either:
+                    - A directory containing individual files (counts, metadata, and polygon files) for legacy proseg output
+                    - A .zarr directory containing a SpatialData object with proseg results.
+                      The SpatialData object should contain:
+                      * tables['table']: AnnData with counts and cell metadata
+                      * shapes['cell_boundaries']: GeoDataFrame with cell polygons
+                counts_file (Optional[str]): Name of the counts file. Only used with legacy directory input.
+                cell_metadata_file (Optional[str]): Name of the cell metadata file. Only used with legacy directory input.
+                polygons_file (Optional[str]): Name of the polygons file. Only used with legacy directory input.
                 pixel_size (float): Size of the pixel for scaling.
                 key (str, optional): Key to store the data. Defaults to "proseg".
                 is_main (bool, optional): Flag to indicate if this is the main data. Defaults to False.
         """
+        from ._segmentations import _read_proseg, _read_proseg_from_spatialdata
 
-
-        # generate data paths
+        # Convert to Path object
         path = Path(path)
 
-        adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
-            path, counts_file=counts_file, cell_metadata_file=cell_metadata_file, polygons_file=polygons_file, pixel_size=pixel_size
+        # Check if this is a zarr file containing spatialdata
+        if path.suffix == '.zarr' or path.name.endswith('.zarr'):
+            # Read SpatialData from zarr
+            try:
+                import spatialdata
+            except ImportError:
+                raise ImportError(
+                    "Reading proseg output from zarr requires the spatialdata package. "
+                    "Please install with `pip install spatialdata`."
+                )
+
+            # File-specific parameters are ignored for spatialdata input
+            if any([counts_file, cell_metadata_file, polygons_file]):
+                import warnings
+                warnings.warn(
+                    "File-specific parameters (counts_file, cell_metadata_file, polygons_file) "
+                    "are ignored when reading from .zarr (SpatialData) format.",
+                    UserWarning
+                )
+
+            # Read spatialdata from zarr
+            sdata = spatialdata.read_zarr(path)
+
+            # Process spatialdata object
+            adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg_from_spatialdata(
+                sdata, pixel_size=pixel_size
+            )
+        else:
+            # Legacy path-based input (directory with individual files)
+            adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
+                path, counts_file=counts_file, cell_metadata_file=cell_metadata_file,
+                polygons_file=polygons_file, pixel_size=pixel_size
             )
 
         # generate boundaries data object
