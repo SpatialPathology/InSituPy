@@ -189,6 +189,86 @@ def _read_proseg_counts(
     return adata
 
 
+def _read_proseg_from_spatialdata(
+    sdata,
+    pixel_size: Number = 1
+    ):
+    """
+    Read proseg data from a SpatialData object.
+
+    Expected structure:
+    - sdata.tables['table']: AnnData with counts and cell metadata
+    - sdata.shapes['cell_boundaries']: GeoDataFrame with cell polygons
+
+    Args:
+        sdata: SpatialData object containing proseg results
+        pixel_size: Size of the pixel for scaling
+
+    Returns:
+        Tuple of (adata, boundaries_mask, cell_names, seg_mask_value)
+    """
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+
+    # Extract AnnData table
+    adata = sdata.tables['table'].copy()
+
+    # Extract cell boundaries GeoDataFrame
+    polygons = sdata.shapes['cell_boundaries'].copy()
+
+    # Ensure spatial coordinates are in adata.obsm if not already present
+    if 'spatial' not in adata.obsm:
+        # Calculate centroids from polygons
+        centroids = polygons.geometry.centroid
+        spatial_coords = np.stack([centroids.x.to_numpy(), centroids.y.to_numpy()], axis=1)
+        adata.obsm['spatial'] = spatial_coords
+
+    # Add bounding box columns if not present
+    if 'maxx' not in polygons.columns or 'maxy' not in polygons.columns:
+        bounds = polygons.geometry.bounds
+        polygons['minx'] = bounds['minx']
+        polygons['miny'] = bounds['miny']
+        polygons['maxx'] = bounds['maxx']
+        polygons['maxy'] = bounds['maxy']
+
+    # Determine cell identifier column
+    if 'cell' in polygons.columns:
+        cell_id_col = 'cell'
+    elif polygons.index.name:
+        cell_id_col = polygons.index.name
+        polygons['cell'] = polygons.index
+    else:
+        # Use index values as cell identifiers
+        polygons['cell'] = polygons.index.astype(str)
+        cell_id_col = 'cell'
+
+    # Scale Proseg polygons if needed
+    if pixel_size != 1:
+        polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
+        polygons["maxx"] = polygons["maxx"] / pixel_size
+        polygons["maxy"] = polygons["maxy"] / pixel_size
+        # Scale spatial coordinates in adata
+        if 'spatial' in adata.obsm:
+            adata.obsm['spatial'] = adata.obsm['spatial'] / pixel_size
+
+    # Calculate bounds for rasterization
+    polygon_bounds = polygons.geometry.bounds
+    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
+    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
+
+    # Get cell names and generate segmentation mask values
+    cell_names = polygons['cell'].values
+    seg_mask_value = range(1, len(polygons['cell'])+1)
+
+    # Rasterize polygons
+    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
+    boundaries_mask = da.from_array(boundaries_mask)
+
+    return adata, boundaries_mask, cell_names, seg_mask_value
+
+
 def _read_proseg(
     path,
     counts_file: Optional[str] = None,
