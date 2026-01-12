@@ -119,8 +119,8 @@ def read_xenium(
         data = convert_from_spatialdata(
             sdata=sdata,
             image_data={
-                "nuclei": ("morphology_mip", pixel_size),
-                "mip": ("morphology_focus", pixel_size)
+                "nuclei": ("morphology_focus", pixel_size),
+                "mip": ("morphology_mip", pixel_size)
             },
             cells_key="cell_circles",
             table_key="table",
