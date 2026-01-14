@@ -819,8 +819,12 @@ class BoundariesData(DeepCopyMixin):
             # save paths in insitupy metadata
             #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
 
-            #self._cell_ids.to_zarr(dirstore, component="cell_id")
-            self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
+            # save cell names
+            self.cell_names.to_zarr(
+                dirstore,
+                component="cell_names",
+                overwrite=True
+                )
 
             if self._seg_mask_value is not None:
                 self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)

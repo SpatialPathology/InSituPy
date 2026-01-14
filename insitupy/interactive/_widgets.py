@@ -94,30 +94,56 @@ if WITH_NAPARI:
 
                     if layer_name not in viewer.layers:
                         # get geopandas dataframe with regions
-                        mask = viewer_config.boundaries[key]
+                        try:
+                            mask = viewer_config.boundaries[key]
+                        except KeyError:
+                            show_warning(f"Key '{key}' not found in boundaries masks.")
+                            return
+
+                        if mask is None:
+                            show_warning(f"No mask data available for key '{key}'.")
+                            return
 
                         # get metadata for mask
                         metadata = viewer_config.boundaries.metadata
                         pixel_size = metadata[key]["pixel_size"]
 
                         if not isinstance(mask, list):
-                            # generate pyramid of the mask
-                            mask_pyramid = create_img_pyramid(img=mask, nsubres=6)
+                            # generate pyramid of the mask - segmentation masks are 2D (YX)
+                            mask_pyramid = create_img_pyramid(img=mask, axes="YX", nsubres=6)
                         else:
                             mask_pyramid = mask
 
                         # Create properties DataFrame with label IDs as index
                         label_ids = viewer_config.boundaries.seg_mask_value.compute()
                         cell_names = viewer_config.boundaries.cell_names.compute()
-                        properties = pd.DataFrame({'name': cell_names}, index=label_ids)
 
-                        # add masks as labels to napari viewer
-                        viewer.add_labels(
+                        # Determine cell names for properties
+                        if key == "nuclei" and viewer_config.boundaries.nucleus_to_cell_map is not None:
+                            nucleus_to_cell_map = viewer_config.boundaries.nucleus_to_cell_map
+                            # Use list comprehension with dict.get() for efficiency
+                            names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
+                        else:
+                            names = cell_names
+
+                        # properties = pd.DataFrame({'name': names}, index=label_ids)
+                        properties = {
+                            'index': label_ids,
+                            'name': names
+                            }
+
+                        for prop in ["cell_area", "surface_area"]:
+                            if prop in viewer_config.adata.obs.columns:
+                                properties[prop] = viewer_config.adata.obs[prop].values
+
+                        # Add masks as labels to napari viewer
+                        layer = viewer.add_labels(
                             mask_pyramid,
                             name=layer_name,
-                            scale=(pixel_size,pixel_size),
-                            properties=properties
-                            )
+                            scale=(pixel_size, pixel_size),
+                            properties=properties,
+                        )
+
                         if key == "cells":
                             viewer.layers[layer_name].contour = 1
                     else:
