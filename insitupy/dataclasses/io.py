@@ -95,22 +95,49 @@ def read_baysor_cells(
     return celldata
 
 
-def read_celldata(
-    path: Union[str, os.PathLike, Path],
-    ) -> CellData:
-    # read metadata
-    path = Path(path)
-    celldata_metadata = read_json(path / ".celldata")
+def _read_table_from_celldata(
+    path: Path,
+    metadata: dict
+) -> sc.AnnData:
+    """
+    Read the AnnData table from CellData directory.
 
-    # read table data
+    Parameters
+    ----------
+    path : Path
+        Path to the CellData directory
+    metadata : dict
+        Metadata dictionary from .celldata file
+
+    Returns
+    -------
+    sc.AnnData
+        The loaded AnnData table
+    """
     try:
-        table = sc.read_h5ad(path / celldata_metadata["table"])
+        table = sc.read_h5ad(path / metadata["table"])
     except KeyError:
-        table = sc.read_h5ad(path / celldata_metadata["matrix"]) # previously it was called matrix
+        # backward compatibility: previously it was called matrix
+        table = sc.read_h5ad(path / metadata["matrix"])
+    return table
 
-    # get path of boundaries data
-    bound_path = path / celldata_metadata["boundaries"]
 
+def _read_boundaries_from_celldata_zarr(
+    bound_path: Path,
+) -> BoundariesData:
+    """
+    Read BoundariesData from a zarr store.
+
+    Parameters
+    ----------
+    bound_path : Path
+        Path to the boundaries zarr store
+
+    Returns
+    -------
+    BoundariesData
+        The boundaries object with cells and nuclei masks
+    """
     # check whether it is zipped or not
     suffix = bound_path.name.split(".", maxsplit=1)[-1]
 
@@ -183,7 +210,7 @@ def read_celldata(
 
                 if ".zarray" in subresolutions:
                     if zipped:
-                        bound_data[k] = da.from_zarr(dirstore).persist() # persist is only needed in case of zipped zarrs
+                        bound_data[k] = da.from_zarr(dirstore).persist()  # persist is only needed in case of zipped zarrs
                     else:
                         bound_data[k] = da.from_zarr(dirstore)
                 else:
@@ -195,35 +222,58 @@ def read_celldata(
                             if zipped:
                                 bound_data[k].append(
                                     da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
-                                    )
+                                )
                             else:
                                 bound_data[k].append(
                                     da.from_zarr(dirstore, component=f"{comp}/{subres}")
-                                    )
+                                )
 
                 # retrieve boundaries metadata
                 store = zarr.open(dirstore)
                 meta[k] = store[f"masks/{k}"].attrs.asdict()
 
-    cell_boundaries = bound_data["cells"]
-    if "nuclei" in bound_data:
-        nuclei_boundaries = bound_data["nuclei"]
-    else:
-        nuclei_boundaries = None
+    cell_boundaries = bound_data.get("cells")
+    nuclei_boundaries = bound_data.get("nuclei")
 
     # add boundaries
     boundaries.add_boundaries(
-        #data=bound_data,
         cell_boundaries=cell_boundaries,
         nuclei_boundaries=nuclei_boundaries,
         pixel_size=meta[list(meta.keys())[0]]["pixel_size"]
-        )
+    )
 
-    # try to extract configuration
-    try:
-        config = celldata_metadata["config"]
-    except KeyError:
-        config = {}
+    return boundaries
+
+
+def read_celldata(
+    path: Union[str, os.PathLike, Path],
+) -> CellData:
+    """
+    Read CellData from a saved directory.
+
+    Parameters
+    ----------
+    path : Union[str, os.PathLike, Path]
+        Path to the CellData directory
+
+    Returns
+    -------
+    CellData
+        The loaded CellData object
+    """
+    # read metadata
+    path = Path(path)
+    celldata_metadata = read_json(path / ".celldata")
+
+    # read table (AnnData)
+    table = _read_table_from_celldata(path, celldata_metadata)
+
+    # read boundaries
+    bound_path = path / celldata_metadata["boundaries"]
+    boundaries = _read_boundaries_from_celldata_zarr(bound_path)
+
+    # extract configuration
+    config = celldata_metadata.get("config", {})
 
     # create CellData object
     celldata = CellData(table=table, boundaries=boundaries, config=config)

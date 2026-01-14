@@ -518,6 +518,113 @@ class BoundariesData(DeepCopyMixin):
     def is_empty(self):
         return len(self._data) == 0
 
+    def update_nucleus_metadata_from_xenium(
+        self,
+        xenium_path: Union[str, os.PathLike, Path],
+        overwrite: bool = False,
+    ) -> None:
+        """
+        Update nucleus_to_cell_map and nucleus_count from raw Xenium data if they are None.
+
+        This method reads the nucleus metadata from the Xenium cells.zarr.zip file
+        and updates the BoundariesData object in-place if the properties are missing.
+        Useful for updating older saved data that lacks multinucleated cell support.
+
+        Parameters
+        ----------
+        xenium_path : Union[str, os.PathLike, Path]
+            Path to the raw Xenium output directory containing cells.zarr.zip
+        overwrite : bool, default False
+            If True, update the metadata even if it already exists.
+            If False, only update metadata that is currently None.
+
+        Returns
+        -------
+        None
+            Updates the object in-place
+
+        Examples
+        --------
+        >>> boundaries = read_celldata("path/to/celldata").boundaries
+        >>> if boundaries.nucleus_to_cell_map is None:
+        ...     boundaries.update_nucleus_metadata_from_xenium("path/to/xenium/output")
+        >>>
+        >>> # Force update even if metadata exists
+        >>> boundaries.update_nucleus_metadata_from_xenium("path/to/xenium/output", overwrite=True)
+        """
+        from pathlib import Path
+        from warnings import warn
+
+        import dask.array as da
+        import zarr
+        from zarr.errors import ArrayNotFoundError
+
+        xenium_path = Path(xenium_path)
+        cells_zarr_file = xenium_path / "cells.zarr.zip"
+
+        if not cells_zarr_file.exists():
+            raise FileNotFoundError(f"Could not find cells.zarr.zip at {cells_zarr_file}")
+
+        # Check if we need to update anything
+        needs_nucleus_map = self._nucleus_to_cell_map is None or overwrite
+        needs_nucleus_count = self._nucleus_count is None or overwrite
+
+        if not needs_nucleus_map and not needs_nucleus_count:
+            print("nucleus_to_cell_map and nucleus_count are already set. No update needed.")
+            return
+
+        # Count unique cell and nucleus IDs in current boundaries (excluding background=0)
+        cells_data = self._data["cells"][0] if isinstance(self._data["cells"], list) else self._data["cells"]
+        ncells_current = len(da.unique(cells_data).compute()) - 1
+
+        nnuclei_current = None
+        if "nuclei" in self._data and self._data["nuclei"] is not None:
+            nuclei_data = self._data["nuclei"][0] if isinstance(self._data["nuclei"], list) else self._data["nuclei"]
+            nnuclei_current = len(da.unique(nuclei_data).compute()) - 1
+
+        # Import helper functions from _io module
+        from insitupy._io._xenium import (_read_nucleus_count_from_store,
+                                          _read_nucleus_to_cell_map_from_store)
+
+        # Open the Xenium zarr store
+        store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
+
+        # Read nucleus_to_cell_map if needed
+        if needs_nucleus_map:
+            try:
+                nucleus_to_cell_map = _read_nucleus_to_cell_map_from_store(store, self._cell_names.compute())
+
+                # Validate that the number of nuclei matches
+                if nnuclei_current is not None and len(nucleus_to_cell_map) != nnuclei_current:
+                    warn(f"Number of nuclei in nucleus_to_cell_map ({len(nucleus_to_cell_map)}) does not match "
+                         f"the number of unique nuclei in boundaries mask ({nnuclei_current}). This may indicate "
+                         f"a mismatch between the saved boundaries and the source Xenium data.")
+
+                self._nucleus_to_cell_map = nucleus_to_cell_map
+                print(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
+            except Exception as e:
+                warn(f"Could not read nucleus_to_cell_map from Xenium data: {e}")
+
+        # Read nucleus_count if needed
+        if needs_nucleus_count:
+            try:
+                nucleus_count = _read_nucleus_count_from_store(store)
+                if nucleus_count is not None:
+                    # Validate that the number of cells matches
+                    if len(nucleus_count) != ncells_current:
+                        warn(f"Number of cells in nucleus_count ({len(nucleus_count)}) does not match "
+                             f"the number of unique cells in boundaries mask ({ncells_current}). This may indicate "
+                             f"a mismatch between the saved boundaries and the source Xenium data.")
+
+                    self._nucleus_count = nucleus_count
+                    print(f"Updated nucleus_count for {len(nucleus_count)} cells.")
+                else:
+                    warn("nucleus_count not available in Xenium data.")
+            except Exception as e:
+                warn(f"Could not read nucleus_count from Xenium data: {e}")
+
+        store.close()
+
     def add_boundaries(self,
                        cell_boundaries: Union[da.core.Array, np.ndarray],
                        pixel_size: Number, # required for boundaries that are saved as masks
