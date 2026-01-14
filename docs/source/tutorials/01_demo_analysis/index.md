@@ -75,6 +75,20 @@ Follow these tutorials sequentially to learn essential analysis steps:
 
     Perform differential gene expression analysis between cell types or spatial regions, followed by Gene Ontology enrichment analysis.
 
+.. card:: 08: Contamination-Aware DGE
+    :link: 08_contamination_aware_dge
+    :link-type: doc
+    :link-alt: Contamination-aware differential gene expression
+
+    Perform contamination-aware differential gene expression analysis to identify transcript misassignment artifacts from neighboring cells.
+
+.. card:: 09: Quantify IF Signal
+    :link: 09_quantify_IF_signal
+    :link-type: doc
+    :link-alt: Quantify immunofluorescence signal
+
+    Quantify fluorescence intensity from immunofluorescence images in cells or nuclei.
+
 ```
 ```{toctree}
 :hidden: true
@@ -88,4 +102,6 @@ Follow these tutorials sequentially to learn essential analysis steps:
 05_InSituPy_cell_type_annotation
 06_InSituPy_gene_expression_along_axis
 07_InSituPy_differential_gene_expression
+08_contamination_aware_dge
+09_quantify_IF_signal
 ```
