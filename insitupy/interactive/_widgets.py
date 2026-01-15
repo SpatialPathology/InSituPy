@@ -119,12 +119,31 @@ if WITH_NAPARI:
                         cell_names = viewer_config.boundaries.cell_names.compute()
 
                         # Determine cell names for properties
+                        props_dict = {}
+                        prop_names = ["cell_area", "surface_area"]
                         if key == "nuclei" and viewer_config.boundaries.nucleus_to_cell_map is not None:
                             nucleus_to_cell_map = viewer_config.boundaries.nucleus_to_cell_map
                             # Use list comprehension with dict.get() for efficiency
-                            names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
-                        else:
+                            cell_ids = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
+                            names = [cell_names[ci] if ci is not None else "unmapped" for ci in cell_ids]
+                            # names = [cell_names[nucleus_to_cell_map[label_id - 1]] if (label_id - 1) in nucleus_to_cell_map else "unmapped" for label_id in label_ids]
+                            # names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
+                            for prop_name in prop_names:
+                                if prop_name in viewer_config.adata.obs.columns:
+                                    prop_values = viewer_config.adata.obs[prop_name].values
+                                    props_dict[prop_name] = [prop_values[ci] if ci is not None else None for ci in cell_ids]
+
+                        elif key == "cells":
                             names = cell_names
+                            cell_ids = label_ids
+
+                            for prop_name in prop_names:
+                                if prop_name in viewer_config.adata.obs.columns:
+                                    props_dict[prop_name] = viewer_config.adata.obs[prop_name].values
+
+                        else:
+                            show_warning(f"Unknown key for boundaries: {key}.")
+                            return
 
                         # properties = pd.DataFrame({'name': names}, index=label_ids)
                         properties = {
@@ -132,9 +151,12 @@ if WITH_NAPARI:
                             'name': names
                             }
 
-                        for prop in ["cell_area", "surface_area"]:
-                            if prop in viewer_config.adata.obs.columns:
-                                properties[prop] = viewer_config.adata.obs[prop].values
+                        for prop_name, prop_values in props_dict.items():
+                            properties[prop_name] = prop_values
+
+                        # for prop in ["cell_area", "surface_area"]:
+                        #     if prop in viewer_config.adata.obs.columns:
+                        #         properties[prop] = viewer_config.adata.obs[prop].values
 
                         # Add masks as labels to napari viewer
                         layer = viewer.add_labels(
