@@ -169,3 +169,32 @@ def _is_list_of_dask_arrays(variable):
     return True
 
 
+def _calculate_single_metrics(adata, layer=None, force_layer=False):
+    """
+    Calculate median genes by counts and median total counts for a single AnnData.
+
+    Args:
+        adata: AnnData object to calculate metrics for.
+        layer: The layer to use for calculations. If None, uses adata.X or 'counts' layer.
+        force_layer: Whether to use specified layer even if not integer counts.
+
+    Returns:
+        Tuple of (median_genes_per_cell, median_transcripts_per_cell).
+    """
+    import warnings
+
+    import scanpy as sc
+
+    # Determine which data to use
+    use_layer = layer
+    if layer is None and not is_integer_counts(adata.X) and not force_layer:
+        use_layer = "counts"
+
+    # Validate counts
+    data = adata.layers.get(use_layer) if use_layer else adata.X
+    if data is None or (not is_integer_counts(data) and not force_layer):
+        warnings.warn(f"No raw counts provided{f' in layer {use_layer!r}' if use_layer else ''}, metrics are set to 0.")
+        return 0, 0
+
+    df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer=use_layer)
+    return df_cells["n_genes_by_counts"].median(), df_cells["total_counts"].median()

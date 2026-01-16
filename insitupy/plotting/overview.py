@@ -11,7 +11,7 @@ from matplotlib.axes._axes import Axes
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.utils._checks import is_integer_counts
+from insitupy.utils._checks import _calculate_single_metrics
 
 
 def _calculate_max_cell_widths_and_sum(df, multiplier=0.13):
@@ -64,40 +64,6 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
             ax.text(width + 1, rect.get_y() + rect.get_height() / 2, f'{width:.0f}',
                     ha='left', va='center', fontsize=fontsize)
         return bar
-
-
-def _calculate_metrics(adata: AnnData, layer: str = None, force_layer: bool = False):
-        """
-        Calculate quality control metrics for an AnnData object.
-
-        Args:
-            adata (AnnData): Annotated data matrix.
-            layer (str, optional): The layer of the AnnData object to use for calculations. If None, the function will use the main matrix (adata.X) or the 'counts' layer if the main matrix does not contain integer counts.
-
-        Returns:
-            tuple: A tuple containing the median number of genes by counts and the median total counts.
-
-        Notes:
-            - If no raw counts are provided and the main matrix (adata.X) does not contain integer counts, the function will issue a warning and return (0, 0).
-        """
-        if layer is None:
-            if not is_integer_counts(adata.X) and not force_layer:
-                if "counts" not in adata.layers.keys() or ("counts" in adata.layers.keys() and not is_integer_counts(adata.layers["counts"])):
-                    warnings.warn("No raw counts provided, metrics are set to 0.")
-                    return 0, 0
-                else:
-                    df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer="counts")
-            else:
-                df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None)
-        else:
-            if not is_integer_counts(adata.layers[layer]) and not force_layer:
-                warnings.warn(f"No raw counts provided in layer '{layer}', metrics are set to 0.")
-                return 0, 0
-            else:
-                df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer=layer)
-
-        return df_cells["n_genes_by_counts"].median(), df_cells["total_counts"].median()
-
 
 
 def overview(
@@ -186,7 +152,7 @@ def overview(
         # get CellData
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        m_gene_counts, m_transcript_counts = _calculate_metrics(
+        m_gene_counts, m_transcript_counts = _calculate_single_metrics(
             celldata.table,
             layer=layer,
             force_layer=force_layer)

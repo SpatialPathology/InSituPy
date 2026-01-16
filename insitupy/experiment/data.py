@@ -286,7 +286,13 @@ class InSituExperiment:
         """
         try:
             from itables import show
-            show(self._metadata, layout={"bottom1": "searchBuilder"}, column_filters="footer")
+            show(
+                self._metadata.reset_index(),
+                layout={"bottom1": "searchBuilder"},
+                column_filters="footer",
+                scrollX=True,  # Required for fixedColumns to work
+                fixedColumns={"start": 2}
+                )
             return None
         except ImportError:
             logger.warning(
@@ -1907,3 +1913,63 @@ class InSituExperiment:
             return color_dict
         else:
             return None
+
+    def calculate_qc_metrics(
+        self,
+        cells_layer: Optional[str] = None,
+        layer: str = None,
+        force_layer: bool = False,
+        add_to_metadata: bool = True,
+        return_metrics: bool = False,
+    ) -> Optional[Dict]:
+        """
+        Calculate quality control metrics for the InSituExperiment.
+
+        Args:
+            cells_layer: The layer of cells to use. Defaults to None.
+            layer: The layer of the AnnData object to use for calculations.
+                If None, uses adata.X or 'counts' layer if X is not integer counts.
+            force_layer: Whether to use specified layer even if not integer counts.
+            add_to_metadata: Whether to add metrics to exp._metadata. Default True.
+            return_metrics: Whether to return metrics as dict. Default False.
+
+        Returns:
+            If return_metrics is True, returns dict with 'median_genes_per_cell'
+            and 'median_transcripts_per_cell' lists. Otherwise returns None.
+        """
+        from insitupy.utils._checks import _calculate_single_metrics
+
+        median_genes = []
+        median_transcripts = []
+        num_cells = []
+
+        for _, dataset in self.iterdata():
+            if dataset.cells.is_empty:
+                warnings.warn("Cells were not loaded. Loading cells.")
+                dataset.load_cells()
+
+            celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
+            m_genes, m_transcripts = _calculate_single_metrics(
+                celldata.table, layer=layer, force_layer=force_layer
+            )
+            median_genes.append(m_genes)
+            median_transcripts.append(m_transcripts)
+            num_cells.append(celldata.table.n_obs)
+
+        # Create column names with optional cells_layer suffix
+        suffix = f" ('{cells_layer}')" if cells_layer else ""
+        genes_col = f"median_genes_per_cell{suffix}"
+        transcripts_col = f"median_transcripts_per_cell{suffix}"
+        cells_col = f"num_cells{suffix}"
+
+        if add_to_metadata:
+            self._metadata[genes_col] = median_genes
+            self._metadata[transcripts_col] = median_transcripts
+            self._metadata[cells_col] = num_cells
+
+        if return_metrics:
+            return {
+                genes_col: median_genes,
+                transcripts_col: median_transcripts,
+                cells_col: num_cells,
+            }
