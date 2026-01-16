@@ -270,30 +270,67 @@ class InSituExperiment:
         )
         return self._metadata.copy()
 
-    @property
-    def imetadata(self):
+    # @property
+    def imetadata(self, fixed=None):
         """
         Displays the experiment-level metadata as an interactive table using itables.
 
-        This property provides an interactive view of the metadata with search and filter capabilities.
+        This method provides an interactive view of the metadata with search and filter capabilities.
         Requires the `itables` package to be installed.
+
+        Parameters:
+            fixed: str, list of str, or None
+                Column name(s) to fix/freeze on the left side when scrolling horizontally.
+                These columns will be reordered to the left of the table.
+                The index column is always included as the first fixed column.
+                If None, no columns are fixed.
 
         Returns:
             None: Displays the interactive table in the output.
 
         Raises:
             ImportError: If the `itables` package is not installed.
+            ValueError: If any specified fixed column is not found in the metadata.
         """
         try:
             from itables import show
-            show(
-                self._metadata.reset_index(),
-                layout={"bottom1": "searchBuilder"},
-                column_filters="footer",
-                scrollX=True,  # Required for fixedColumns to work
-                fixedColumns={"start": 2}
-                )
+
+            df = self._metadata.reset_index()
+            index_col = df.columns[0]  # Get the name of the index column
+
+            # Determine columns to fix and reorder
+            if fixed is not None:
+                if isinstance(fixed, str):
+                    fixed = [fixed]
+
+                # Validate that all fixed columns exist
+                missing = [col for col in fixed if col not in df.columns]
+                if missing:
+                    raise ValueError(f"Fixed column(s) not found in metadata: {missing}")
+
+                # Ensure index column is first, then other fixed columns (avoid duplicates)
+                fixed = [index_col] + [col for col in fixed if col != index_col]
+
+                # Reorder columns: fixed columns first, then the rest
+                other_cols = [col for col in df.columns if col not in fixed]
+                df = df[fixed + other_cols]
+
+                fixed_columns = {"start": len(fixed)}
+            else:
+                fixed_columns = None
+
+            show_kwargs = {
+                "layout": {"bottom1": "searchBuilder"},
+                "column_filters": "footer",
+            }
+
+            if fixed_columns:
+                show_kwargs["scrollX"] = True
+                show_kwargs["fixedColumns"] = fixed_columns
+
+            show(df, **show_kwargs)
             return None
+
         except ImportError:
             logger.warning(
                 f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
