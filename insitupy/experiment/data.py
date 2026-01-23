@@ -912,7 +912,7 @@ class InSituExperiment:
         label_col: str = "uid",
         obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
         varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,

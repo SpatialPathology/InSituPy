@@ -12,6 +12,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.preprocessing.filtering import _compute_mad_threshold
 from insitupy.utils._checks import check_integer_counts
 
 
@@ -27,11 +28,14 @@ def plot_qc_metrics(
     batch: Optional[str] = None,
     counts_thresh: Optional[Number] = None,
     genes_thresh: Optional[Number] = None,
+    log1p: bool = False,
+    mad_thresh: Optional[Number] = None,
 ):
     """
     Plots the QC metrics calculated by sc.pp.calculate_qc_metrics.
 
-    Parameters:
+    Parameters
+    ----------
     data : InSituData or AnnData
         Annotated data matrix with QC metrics calculated.
     cells_layer : str, optional
@@ -55,6 +59,13 @@ def plot_qc_metrics(
         Threshold to display as vertical line on total_counts plots. Default is None.
     genes_thresh : Number, optional
         Threshold to display as vertical line on n_genes_by_counts plots. Default is None.
+    log1p : bool, optional
+        Whether to plot log1p-transformed values for total_counts and n_genes_by_counts.
+        Uses log1p_total_counts and log1p_n_genes_by_counts from .obs. Default is False.
+    mad_thresh : Number, optional
+        Number of MADs from median to use for automatic threshold calculation.
+        Computes lower threshold as median - mad_thresh * MAD. Overrides counts_thresh
+        and genes_thresh if provided. Default is None.
     """
     # Validate batch argument
     if batch is not None and plot_obs and plot_var:
@@ -79,8 +90,32 @@ def plot_qc_metrics(
         batch_values = [None]
         n_batches = 1
 
+    # Validate that mad_thresh and manual thresholds are not both set
+    if mad_thresh is not None:
+        if counts_thresh is not None or genes_thresh is not None:
+            raise ValueError(
+                "Cannot specify both 'mad_thresh' and 'counts_thresh'/'genes_thresh'. "
+                "Use either MAD-based automatic thresholds or manual thresholds, not both."
+            )
+
+    # Warn user about MAD computation on log1p scale when log1p=False
+    if mad_thresh is not None and not log1p:
+        print(
+            "Note: MAD thresholds are computed on log1p-transformed values for statistical "
+            "validity (as recommended by sc-best-practices), then back-transformed to raw "
+            "scale for display."
+        )
+
+    # Define metric mappings for log1p
+    if log1p:
+        counts_metric = 'log1p_total_counts'
+        genes_metric = 'log1p_n_genes_by_counts'
+    else:
+        counts_metric = 'total_counts'
+        genes_metric = 'n_genes_by_counts'
+
     # QC metrics in .obs
-    obs_metrics = ['total_counts', 'n_genes_by_counts', 'pct_counts_mt']
+    obs_metrics = [counts_metric, genes_metric, 'pct_counts_mt']
     # QC metrics in .var
     var_metrics = ['n_cells_by_counts', 'mean_counts', 'pct_dropout_by_counts', 'total_counts']
 
@@ -128,26 +163,63 @@ def plot_qc_metrics(
     else:
         additional_var_metrics = []
 
-    # Helper function to add threshold lines
-    def add_threshold_line(ax, metric, thresh_value):
-        if thresh_value is not None:
-            ax.axvline(x=thresh_value, color='red', linestyle='--', linewidth=1.5, label=f'thresh={thresh_value}')
+    # Function to compute MAD-based threshold using shared helper
+    def compute_mad_threshold(values, n_mads, transform_back=False):
+        """
+        Compute lower threshold as median - n_mads * MAD.
+        Always computes on log1p scale for statistical validity.
 
-    def get_threshold_for_metric(metric):
-        if metric == 'total_counts' and counts_thresh is not None:
-            return counts_thresh
-        elif metric == 'n_genes_by_counts' and genes_thresh is not None:
-            return genes_thresh
+        Parameters
+        ----------
+        values : array-like
+            Raw count values (will be log1p-transformed internally).
+        n_mads : Number
+            Number of MADs from median.
+        transform_back : bool
+            If True, return threshold in raw scale, else in log1p scale.
+        """
+        thresh_log, thresh_raw = _compute_mad_threshold(values, n_mads)
+        return thresh_raw if transform_back else thresh_log
+
+    # Helper function to add threshold lines
+    def add_threshold_line(ax, thresh_value, label=None):
+        if thresh_value is not None:
+            lbl = f'thresh={thresh_value:.2f}' if label is None else label
+            ax.axvline(x=thresh_value, color='red', linestyle='--', linewidth=1.5, label=lbl)
+
+    def get_threshold_for_metric(metric, adata_subset):
+        """Get threshold for a metric, either from mad_thresh or manual thresholds."""
+        if mad_thresh is not None:
+            if metric in [counts_metric, genes_metric]:
+                # Determine which raw metric to use for MAD calculation
+                if metric == counts_metric:
+                    raw_metric = 'total_counts'
+                else:
+                    raw_metric = 'n_genes_by_counts'
+
+                # Check if raw metric exists
+                if raw_metric not in adata_subset.obs:
+                    print(f"Warning: '{raw_metric}' not found in adata.obs, cannot compute MAD threshold")
+                    return None
+
+                raw_values = adata_subset.obs[raw_metric].values
+                # If log1p=False, compute on log scale and back-transform
+                return compute_mad_threshold(raw_values, mad_thresh, transform_back=not log1p)
+
+        # Fall back to manual thresholds (convert to log1p scale if needed)
+        if metric == counts_metric and counts_thresh is not None:
+            return np.log1p(counts_thresh) if log1p else counts_thresh
+        elif metric == genes_metric and genes_thresh is not None:
+            return np.log1p(genes_thresh) if log1p else genes_thresh
         return None
 
     # Calculate number of plots and layout
-    num_scatter = 1 if ('n_genes_by_counts' in obs_metrics and 'total_counts' in obs_metrics) else 0
+    num_scatter = 1 if (genes_metric in obs_metrics and counts_metric in obs_metrics) else 0
     num_obs_plots = len(obs_metrics) + len(additional_obs_metrics) + num_scatter
     num_var_plots = len(var_metrics) + len(additional_var_metrics)
 
     # Determine layout
     if batch is not None:
-        # Batches as rows
         if num_obs_plots > 0 and num_var_plots > 0:
             raise ValueError("This should not happen due to earlier validation")
         nrows = n_batches
@@ -198,36 +270,63 @@ def plot_qc_metrics(
             ax.set_xlabel('Value')
             ax.set_ylabel('Frequency')
 
-            thresh = get_threshold_for_metric(metric)
+            thresh = get_threshold_for_metric(metric, adata_subset)
             if thresh is not None:
-                add_threshold_line(ax, metric, thresh)
+                add_threshold_line(ax, thresh)
 
             if show_inset:
                 ax_inset = inset_axes(ax, width="40%", height="40%", loc='upper right')
                 sns.histplot(adata_subset.obs[metric], bins=100, color='skyblue', edgecolor='black', kde=False, ax=ax_inset)
-                ax_inset.set_xlim(adata_subset.obs[metric].min(), adata_subset.obs[metric].max() * inset_fraction)
+                data_min = adata_subset.obs[metric].min()
+                data_range = adata_subset.obs[metric].max() - data_min
+                if thresh is not None:
+                    # Center around threshold
+                    margin = data_range * inset_fraction / 2
+                    ax_inset.set_xlim(thresh - margin, thresh + margin)
+                    add_threshold_line(ax_inset, thresh)
+                else:
+                    # Fallback to lower range
+                    ax_inset.set_xlim(data_min, data_min + data_range * inset_fraction)
                 ax_inset.set_xlabel('')
                 ax_inset.set_ylabel('')
                 ax_inset.set_yticklabels([])
-                if thresh is not None:
-                    add_threshold_line(ax_inset, metric, thresh)
             current_col += 1
 
         # Add scatter plot
-        if 'n_genes_by_counts' in obs_metrics and 'total_counts' in obs_metrics:
+        if genes_metric in obs_metrics and counts_metric in obs_metrics:
             scatter_ax = axes[row_idx, current_col]
             scatter_ax.scatter(
-                adata_subset.obs['n_genes_by_counts'], adata_subset.obs['total_counts'],
+                adata_subset.obs[genes_metric], adata_subset.obs[counts_metric],
                 alpha=0.5, color='skyblue', s=8, edgecolor='black', linewidth=0.2
             )
-            scatter_ax.set_title('n_genes_by_counts vs total_counts')
-            scatter_ax.set_xlabel('n_genes_by_counts')
-            scatter_ax.set_ylabel('total_counts')
+            scatter_ax.set_xlabel(genes_metric)
+            scatter_ax.set_ylabel(counts_metric)
 
-            if genes_thresh is not None:
-                scatter_ax.axvline(x=genes_thresh, color='red', linestyle='--', linewidth=1.5)
-            if counts_thresh is not None:
-                scatter_ax.axhline(y=counts_thresh, color='red', linestyle='--', linewidth=1.5)
+            genes_th = get_threshold_for_metric(genes_metric, adata_subset)
+            counts_th = get_threshold_for_metric(counts_metric, adata_subset)
+
+            # Calculate percentage of cells filtered
+            n_total = len(adata_subset)
+            if genes_th is not None and counts_th is not None:
+                n_filtered = np.sum(
+                    (adata_subset.obs[genes_metric] < genes_th) |
+                    (adata_subset.obs[counts_metric] < counts_th)
+                )
+                pct_filtered = 100 * n_filtered / n_total
+                scatter_ax.set_title(f'{pct_filtered:.1f}% filtered ({n_filtered}/{n_total})')
+            elif genes_th is not None:
+                n_filtered = np.sum(adata_subset.obs[genes_metric] < genes_th)
+                pct_filtered = 100 * n_filtered / n_total
+                scatter_ax.set_title(f'{pct_filtered:.1f}% filtered ({n_filtered}/{n_total})')
+            elif counts_th is not None:
+                n_filtered = np.sum(adata_subset.obs[counts_metric] < counts_th)
+                pct_filtered = 100 * n_filtered / n_total
+                scatter_ax.set_title(f'{pct_filtered:.1f}% filtered ({n_filtered}/{n_total})')
+
+            if genes_th is not None:
+                scatter_ax.axvline(x=genes_th, color='red', linestyle='--', linewidth=1.5)
+            if counts_th is not None:
+                scatter_ax.axhline(y=counts_th, color='red', linestyle='--', linewidth=1.5)
             current_col += 1
 
         # Plot additional obs metrics
@@ -241,7 +340,10 @@ def plot_qc_metrics(
             if show_inset:
                 ax_inset = inset_axes(ax, width="40%", height="40%", loc='upper right')
                 sns.histplot(adata_subset.obs[metric], bins=100, color='skyblue', edgecolor='black', kde=False, ax=ax_inset)
-                ax_inset.set_xlim(adata_subset.obs[metric].min(), adata_subset.obs[metric].max() * inset_fraction)
+                data_min = adata_subset.obs[metric].min()
+                data_range = adata_subset.obs[metric].max() - data_min
+                # Fallback to lower range (no threshold for additional metrics)
+                ax_inset.set_xlim(data_min, data_min + data_range * inset_fraction)
                 ax_inset.set_xlabel('')
                 ax_inset.set_ylabel('')
                 ax_inset.set_yticklabels([])
@@ -252,7 +354,6 @@ def plot_qc_metrics(
     def plot_var_row(row_idx, start_col=0, row_label=None):
         var_col = start_col
 
-        # Add row/section label
         if row_label is not None and len(var_metrics) > 0:
             axes[row_idx, var_col].annotate(
                 str(row_label), xy=(0, 0.5),
@@ -288,7 +389,6 @@ def plot_qc_metrics(
 
     # Main plotting logic
     if batch is not None:
-        # Plot each batch as a separate row
         for row_idx, batch_val in enumerate(batch_values):
             adata_batch = adata[adata.obs[batch] == batch_val]
             if plot_obs:
@@ -296,12 +396,10 @@ def plot_qc_metrics(
                 for col in range(end_col, ncols):
                     axes[row_idx, col].set_visible(False)
             elif plot_var:
-                # var metrics don't subset by batch (they're gene-level)
                 end_col = plot_var_row(row_idx, start_col=0, row_label=batch_val)
                 for col in range(end_col, ncols):
                     axes[row_idx, col].set_visible(False)
     else:
-        # Original behavior without batching
         current_col = plot_obs_row(0, adata)
 
         if nrows == 2:
