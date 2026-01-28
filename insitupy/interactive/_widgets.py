@@ -388,6 +388,7 @@ if WITH_NAPARI:
                 # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data_widget.data_name.value
                 viewer_config.layer_name = select_data_widget.layer_name.value
+                viewer_config.refresh_variables()
 
                 _refresh_widgets_after_data_change(
                     data,
