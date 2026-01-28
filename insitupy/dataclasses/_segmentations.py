@@ -249,9 +249,9 @@ def _read_proseg_from_spatialdata(
         polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
         polygons["maxx"] = polygons["maxx"] / pixel_size
         polygons["maxy"] = polygons["maxy"] / pixel_size
-        # Scale spatial coordinates in adata
-        if 'spatial' in adata.obsm:
-            adata.obsm['spatial'] = adata.obsm['spatial'] / pixel_size
+        # # Scale spatial coordinates in adata
+        # if 'spatial' in adata.obsm:
+        #     adata.obsm['spatial'] = adata.obsm['spatial'] / pixel_size
 
     # Calculate bounds for rasterization
     polygon_bounds = polygons.geometry.bounds

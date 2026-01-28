@@ -1347,7 +1347,8 @@ class MultiCellData(DeepCopyMixin):
 
             # Process spatialdata object
             adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg_from_spatialdata(
-                sdata, pixel_size=pixel_size
+                sdata,
+                pixel_size=pixel_size
             )
         else:
             # Legacy path-based input (directory with individual files)
