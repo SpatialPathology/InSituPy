@@ -1365,7 +1365,6 @@ class MultiCellData(DeepCopyMixin):
 
         # add cellular boundaries
         boundaries.add_boundaries(
-            #data={f"cells": img},
             cell_boundaries=boundaries_mask,
             pixel_size=pixel_size
             )
