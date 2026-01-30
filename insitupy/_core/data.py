@@ -1605,8 +1605,29 @@ class InSituData:
         unit: str = "µm",
         return_viewer: bool = False,
         widgets_max_width: int = 500,
-        verbose: bool = False
+        verbose: bool = False,
+        show_transcripts: bool = True,
+        transcript_lazy_loading: bool = False,
+        transcript_config = None,
         ):
+        """Visualize the data using a napari viewer.
+
+        Args:
+            keys: Gene or observation keys to display as point layers.
+            key_type: Type of key ('genes', 'obs', or 'obsm').
+            cells_layer: Name of the cell layer to use.
+            point_size: Size of the cell points in pixels.
+            scalebar: Whether to show the scale bar.
+            unit: Unit for the scale bar.
+            return_viewer: Whether to return the napari viewer instance.
+            widgets_max_width: Maximum width of widgets in pixels.
+            verbose: Whether to enable verbose output.
+            show_transcripts: Whether to show the transcript viewer widget.
+            transcript_lazy_loading: If True, use lazy loading for transcripts
+                (recommended for datasets > 50M transcripts).
+            transcript_config: TranscriptViewerConfig object for customizing
+                the transcript viewer. Import from insitupy.interactive.
+        """
         # check whether napari is installed
         try:
             import napari
@@ -1625,7 +1646,10 @@ class InSituData:
             unit=unit,
             return_viewer=return_viewer,
             widgets_max_width=widgets_max_width,
-            verbose=verbose
+            verbose=verbose,
+            show_transcripts=show_transcripts,
+            transcript_lazy_loading=transcript_lazy_loading,
+            transcript_config=transcript_config,
         )
 
     def reload(

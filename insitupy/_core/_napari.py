@@ -28,6 +28,8 @@ if WITH_NAPARI:
 
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.interactive._layers import _create_points_layer
+    from insitupy.interactive._transcript_viewer import (
+        TranscriptViewerConfig, create_transcript_viewer_widget)
     from insitupy.interactive._widgets import (ResetWidgetsButton, SaveWidget,
                                                SyncButton)
 
@@ -399,6 +401,43 @@ if WITH_NAPARI:
         # add the reset widgets button to viewer
         viewer.window.add_dock_widget(reset_widgets_button, area='right', name="Reset Widgets")
 
+    def _add_transcript_viewer_to_viewer(
+        data: Union["InSituData", "StructuredSpatialData"],
+        viewer: napari.Viewer,
+        lazy_loading: bool = False,
+        transcript_config: Optional[TranscriptViewerConfig] = None,
+        widgets_max_width: int = 500,
+    ) -> None:
+        """Add transcript viewer widget to the napari viewer.
+
+        Args:
+            data: InSituData or StructuredSpatialData object containing transcript data.
+            viewer: The napari viewer instance.
+            lazy_loading: If True, use lazy loading mode for large datasets.
+            transcript_config: Configuration for the transcript viewer widget.
+            widgets_max_width: Maximum width of the widget in pixels.
+        """
+        if data.transcripts is None:
+            return
+
+        # Get viewer config for color legend integration
+        viewer_config = config_manager[_get_viewer_uid(viewer)]
+
+        transcript_widget = create_transcript_viewer_widget(
+            viewer=viewer,
+            transcripts=data.transcripts,
+            lazy_loading=lazy_loading,
+            config=transcript_config,
+            viewer_config=viewer_config,
+        )
+        transcript_widget.setMaximumWidth(widgets_max_width)
+        # Tabify with "Show cells" widget for better organization
+        viewer.window.add_dock_widget(
+            transcript_widget,
+            area='right',
+            name="Transcript Viewer",
+            tabify=True
+        )
 
 
     def _show(
@@ -411,7 +450,10 @@ if WITH_NAPARI:
         unit: str = "µm",
         return_viewer: bool = False,
         widgets_max_width: int = 500,
-        verbose: bool = False
+        verbose: bool = False,
+        show_transcripts: bool = True,
+        transcript_lazy_loading: bool = False,
+        transcript_config: Optional[TranscriptViewerConfig] = None,
         ):
 
         # initialize a config class manager with new ID
@@ -449,6 +491,16 @@ if WITH_NAPARI:
             viewer=current_viewer,
             widgets_max_width=widgets_max_width
         )
+
+        # TRANSCRIPT VIEWER
+        if show_transcripts and data.transcripts is not None:
+            _add_transcript_viewer_to_viewer(
+                data=data,
+                viewer=current_viewer,
+                lazy_loading=transcript_lazy_loading,
+                transcript_config=transcript_config,
+                widgets_max_width=widgets_max_width,
+            )
 
         # BUTTONS
         _add_buttons_to_viewer(
