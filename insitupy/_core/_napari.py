@@ -431,13 +431,27 @@ if WITH_NAPARI:
             viewer_config=viewer_config,
         )
         transcript_widget.setMaximumWidth(widgets_max_width)
-        # Tabify with "Show cells" widget for better organization
-        viewer.window.add_dock_widget(
+
+        # Add transcript viewer widget
+        transcript_dock = viewer.window.add_dock_widget(
             transcript_widget,
             area='right',
             name="Transcript Viewer",
-            tabify=True
+            tabify=False  # Don't auto-tabify, we'll manually tabify with "Show cells"
         )
+
+        # Explicitly tabify with "Show cells" widget if it exists
+        main_window = viewer.window._qt_window
+        show_cells_dock = None
+        for dock in main_window.findChildren(type(transcript_dock)):
+            if dock.windowTitle() == "Show cells":
+                show_cells_dock = dock
+                break
+
+        if show_cells_dock is not None:
+            main_window.tabifyDockWidget(show_cells_dock, transcript_dock)
+            # Ensure "Show cells" tab is active (first tab)
+            show_cells_dock.raise_()
 
 
     def _show(

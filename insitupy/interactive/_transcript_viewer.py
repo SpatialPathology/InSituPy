@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # === Configuration ===
 # Default values that can be overridden via TranscriptViewerConfig
 DEFAULT_MAX_VISIBLE_POINTS = 100_000
-DEFAULT_POINT_SIZE = 0.5
+DEFAULT_POINT_SIZE = 0.2
 DEFAULT_DEBOUNCE_MS = 500
 
 
