@@ -26,7 +26,7 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true,
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy.dataclasses._segmentations import _read_proseg
+from insitupy.dataclasses._segmentations import (_read_proseg,_read_baysor)
 from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
                                   get_height_and_width)
 from insitupy.images.io import read_image, write_ome_tiff, write_zarr
@@ -1356,6 +1356,48 @@ class MultiCellData(DeepCopyMixin):
                 polygons_file=polygons_file, pixel_size=pixel_size
             )
 
+        # generate boundaries data object
+        boundaries = BoundariesData(
+            cell_names=cell_names,
+            seg_mask_value=seg_mask_value
+            )
+
+        # add cellular boundaries
+        boundaries.add_boundaries(
+            #data={f"cells": img},
+            cell_boundaries=boundaries_mask,
+            pixel_size=pixel_size
+            )
+
+        # Create cell data and add to object
+        celldata = CellData(table=adata, boundaries=boundaries)
+
+        self.add_celldata(cd=celldata, key=key, is_main=is_main)
+    
+    
+    def add_baysor(
+                    self,
+                    xd: Union[str, os.PathLike, Path], # XeniumRanger output
+                    path: Union[str, os.PathLike, Path], # baysor output
+                    counts_file: Optional[str] = None,
+                    cell_metadata_file: Optional[str] = None,
+                    polygons_file: Optional[str] = None,
+                    pixel_size: Number = 1,
+                    key: str = "baysor",
+                    is_main: bool = False
+                    ):
+
+        from ._segmentations import _read_baysor
+
+        # Convert to Path object
+        path = Path(path)
+        print(path)
+        # Legacy path-based input (directory with individual files)
+        adata, boundaries_mask, cell_names, seg_mask_value = _read_baysor(path, xd,
+            counts_file=counts_file, cell_metadata_file=cell_metadata_file,
+            polygons_file=polygons_file, pixel_size=pixel_size
+            )
+        
         # generate boundaries data object
         boundaries = BoundariesData(
             cell_names=cell_names,

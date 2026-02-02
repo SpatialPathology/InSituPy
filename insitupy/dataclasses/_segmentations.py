@@ -35,8 +35,9 @@ def _read_baysor_polygons(
     "maxy": []
     }
 
-    for elem in d["geometries"]:
-        coords = elem["coordinates"][0]
+    for i in range(len(d["features"])):
+        cell = d["features"][i]
+        coords = cell['geometry']['coordinates'][0]
 
         # check if there are enough coordinates for a Polygon (some segmented cells are very small in Baysor)
         if len(coords) > 3:
@@ -48,7 +49,7 @@ def _read_baysor_polygons(
             p = shapely.LineString(coords)
             df["geometry"].append(p)
             df["type"].append("line")
-        df["cell"].append(elem["cell"])
+        df["cell"].append(i)
 
         # extract bounding box
         bounds = p.bounds
@@ -316,6 +317,72 @@ def _read_proseg(
 
     # get cell names and generate segmentation mask values
     cell_names = polygons['cell'].values
+    seg_mask_value = range(1, len(polygons['cell'])+1)
+
+    # rasterize polygons
+    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
+    boundaries_mask = da.from_array(boundaries_mask)
+
+    return adata, boundaries_mask, cell_names, seg_mask_value
+
+def _read_baysor(
+    path,
+    xd,
+    counts_file: Optional[str] = None,
+    cell_metadata_file: Optional[str] = None,
+    polygons_file: Optional[str] = None,
+    pixel_size: Number = 1
+    ):
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+    
+    from insitupy.io import read_xenium
+    import scanpy as sc
+
+    if counts_file is None:
+        path_counts = list(path.glob("segmentation_counts.*"))[0] #r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_counts.loom"
+    else:
+        path_counts = path / counts_file
+
+    if cell_metadata_file is None:
+        path_cell_metadata = list(path.glob("segmentation_cell_stats.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_cell_stats.csv"
+    else:
+        path_cell_metadata = path / cell_metadata_file
+
+    if polygons_file is None:
+        path_polygons = list(path.glob("segmentation_polygons_2d.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_polygons_2d.json"
+    else:
+        path_polygons = path / polygons_file
+
+    # read baysor counts
+    xd=read_xenium(xd)
+    cell_metadata=pd.read_csv(path_cell_metadata)
+    counts=sc.read_loom(path_counts)
+    
+    counts.obs=cell_metadata.copy()
+    counts.var_names=counts.var['Name'].copy()
+    
+    adata=counts[:,counts.var_names.isin(xd.cells['main'].matrix.var.index.tolist())].copy()
+
+    # Read Proseg polygons
+    polygons = _read_baysor_polygons(path_polygons)
+
+    # Scale Proseg polygons
+    if pixel_size != 1:
+        polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
+        polygons["maxx"] = polygons["maxx"] / pixel_size
+        polygons["maxy"] = polygons["maxy"] / pixel_size
+
+
+    # Calculate bounds for rasterization
+    polygon_bounds = polygons.geometry.bounds
+    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
+    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
+
+    # get cell names and generate segmentation mask values
+    cell_names = polygons['cell']#.values
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
     # rasterize polygons
