@@ -131,7 +131,7 @@ class InSituData:
     """
 
     # import deprecated functions
-    from ._deprecated import (add_alt, add_baysor, normalize_and_transform,
+    from ._deprecated import (add_alt, normalize_and_transform,
                               read_all, read_annotations, read_cells,
                               read_images, read_regions, read_transcripts,
                               reduce_dimensions, save_colorlegends,
