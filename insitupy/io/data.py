@@ -310,8 +310,8 @@ def read_visium(
     data = convert_from_spatialdata(
         sdata=sdata,
         image_data={
-            "hires": (f"{dataset_id}_hires_image", hires_pixel_size),
-            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size)
+            "hires": (f"{dataset_id}_hires_image", hires_pixel_size, True),
+            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True)
         },
         units_key=dataset_id,
         unit_type="visium",
