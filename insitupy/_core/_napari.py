@@ -404,7 +404,7 @@ if WITH_NAPARI:
     def _add_transcript_viewer_to_viewer(
         data: Union["InSituData", "StructuredSpatialData"],
         viewer: napari.Viewer,
-        lazy_loading: bool = False,
+        lazy_loading: bool = True,
         transcript_config: Optional[TranscriptViewerConfig] = None,
         widgets_max_width: int = 500,
     ) -> None:
@@ -466,7 +466,7 @@ if WITH_NAPARI:
         widgets_max_width: int = 500,
         verbose: bool = False,
         show_transcripts: bool = True,
-        transcript_lazy_loading: bool = False,
+        transcript_lazy_loading: bool = True,
         transcript_config: Optional[TranscriptViewerConfig] = None,
         ):
 

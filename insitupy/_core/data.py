@@ -131,9 +131,9 @@ class InSituData:
     """
 
     # import deprecated functions
-    from ._deprecated import (add_alt, normalize_and_transform,
-                              read_all, read_annotations, read_cells,
-                              read_images, read_regions, read_transcripts,
+    from ._deprecated import (add_alt, normalize_and_transform, read_all,
+                              read_annotations, read_cells, read_images,
+                              read_regions, read_transcripts,
                               reduce_dimensions, save_colorlegends,
                               save_current_colorlegend, store_geometries,
                               sync_geometries)
@@ -1098,23 +1098,10 @@ class InSituData:
                     if not np.all([elem in img_names for elem in names]):
                         not_available = [elem for elem in names if elem not in img_names]
                         raise ValueError(f"Following 'names' are not available: {not_available}")
+                    # filter paths to match the requested names
+                    img_paths = [p for p in img_paths if p.stem in names]
                     img_names = names
 
-                # if names == "all":
-                #     img_names = list(images_dict.keys())
-                # else:
-                #     img_names = convert_to_list(names)
-
-                # # get file paths and names
-                # img_files = [v for k,v in images_dict.items() if k in img_names]
-                # img_names = [k for k,v in images_dict.items() if k in img_names]
-
-                # # create imageData object
-                # img_paths = [self._path / elem for elem in img_files]
-
-                # if self._images is None:
-                #     self._images = ImageData(img_paths, img_names)
-                # else:
                 for im, n in zip(img_paths, img_names):
                     self._images.add_image(im, n, overwrite=overwrite, verbose=verbose)
 
@@ -1369,7 +1356,8 @@ class InSituData:
              verbose: bool = True,
              keep_history: bool = False,
              sync_images: bool = False,
-             images_only: bool = False
+             images_only: bool = False,
+             overwrite_images: bool = False
              ):
 
         # check path
@@ -1413,7 +1401,8 @@ class InSituData:
                                                      zarr_zipped=zarr_zipped,
                                                      verbose=verbose,
                                                      sync_images=sync_images,
-                                                     images_only=images_only
+                                                     images_only=images_only,
+                                                     overwrite_images=overwrite_images
                                                      )
 
                     # reload the modalities
@@ -1607,7 +1596,7 @@ class InSituData:
         widgets_max_width: int = 500,
         verbose: bool = False,
         show_transcripts: bool = True,
-        transcript_lazy_loading: bool = False,
+        transcript_lazy_loading: bool = True,
         transcript_config = None,
         ):
         """Visualize the data using a napari viewer.
@@ -1731,22 +1720,26 @@ class InSituData:
         zarr_zipped: bool = False,
         verbose: bool = True,
         sync_images: bool = False,
-        images_only: bool = False
+        images_only: bool = False,
+        overwrite_images: bool = False
         ):
         if verbose:
             print(f"Updating project in {path}")
 
-        # save images (only new ones that don't exist yet)
+        # save images
         if sync_images and not self._images.is_empty:
             if verbose:
-                print("\tSyncing images (saving new images only)...", flush=True)
+                if overwrite_images:
+                    print("\tSyncing images (overwriting existing)...", flush=True)
+                else:
+                    print("\tSyncing images (saving new images only)...", flush=True)
             img_path = path / "images"
             savepaths = self._images.save(
                 output_folder=img_path,
                 as_zarr=True,
                 zipped=zarr_zipped,
                 return_savepaths=True,
-                overwrite=False,  # only save images that don't exist yet
+                overwrite=overwrite_images,
                 verbose=verbose
             )
 
