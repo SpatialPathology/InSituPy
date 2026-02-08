@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
 
+# Sentinel value to detect when 'by' is not explicitly provided
+_UNSET = object()
+
 
 class InSituExperiment:
     """
@@ -411,14 +414,35 @@ class InSituExperiment:
     def add_metadata_column(
         self,
         column_name: str,
-        values: Union[List, str, pd.Series, np.ndarray]
+        values: Union[List, str, pd.Series, np.ndarray],
+        overwrite: bool = False
         ):
-        """Add a metadata column."""
+        """
+        Add a metadata column to the experiment.
+
+        Args:
+            column_name (str): Name of the column to add.
+            values (Union[List, str, pd.Series, np.ndarray]): Values for the new column.
+            overwrite (bool, optional): Whether to overwrite the column if it already exists.
+                Defaults to False.
+
+        Warns:
+            UserWarning: If the column already exists and overwrite is False.
+        """
+        if column_name in self._metadata.columns and not overwrite:
+            warnings.warn(
+                f"Column '{column_name}' already exists in metadata. "
+                f"Set overwrite=True to replace it.",
+                UserWarning,
+                stacklevel=2
+            )
+            return
+
         self._metadata[column_name] = values
 
     def append_metadata(self,
                         new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],
-                        by: Optional[str],
+                        by: Optional[str] = _UNSET,
                         overwrite: bool = False
                         ):
         """
@@ -427,14 +451,28 @@ class InSituExperiment:
         Args:
             new_metadata (Union[pd.DataFrame, dict, str, os.PathLike, Path]): The new metadata to be added.
                 Can be a DataFrame, a dictionary, or a path to a CSV/Excel file.
-            by (str, optional): The column name to use for pairing metadata. If None, metadata is paired by order.
+            by (str, optional): The column name to use for pairing metadata. If not provided, a warning is
+                raised prompting the user to specify a column. Set `by=None` explicitly to pair by row order.
             overwrite (bool, optional): Whether to overwrite existing columns in the metadata. Defaults to False.
 
         Raises:
+            TypeError: If new_metadata is not a supported type.
             ValueError: If the 'by' column is not unique or missing in either the existing or new metadata.
         """
+        # If 'by' was not explicitly provided, warn and default to None (order-based)
+        if by is _UNSET:
+            warnings.warn(
+                "'by' was not specified. Metadata will be paired by row order, which may lead to "
+                "incorrect alignment if the rows are not in the same order. Pass `by='column_name'` "
+                "to merge on a key column, or `by=None` to explicitly confirm order-based pairing.",
+                UserWarning,
+                stacklevel=2
+            )
+            by = None
         # Convert new_metadata to a DataFrame if it is not already one
-        if isinstance(new_metadata, dict):
+        if isinstance(new_metadata, pd.DataFrame):
+            pass  # already a DataFrame
+        elif isinstance(new_metadata, dict):
             new_metadata = pd.DataFrame(new_metadata)
         elif isinstance(new_metadata, (str, os.PathLike, Path)):
             new_metadata = Path(new_metadata)
@@ -444,13 +482,30 @@ class InSituExperiment:
                 new_metadata = pd.read_excel(new_metadata)
             else:
                 raise ValueError("Unsupported file format. Please provide a path to a CSV or Excel file.")
+        else:
+            raise TypeError(
+                f"new_metadata must be a DataFrame, dict, or file path, got {type(new_metadata).__name__}."
+            )
 
         # Create a copy of the existing metadata
         old_metadata = self._metadata.copy()
 
         if by is not None:
-            if not by in new_metadata.columns or not by in old_metadata.columns:
-                raise ValueError(f"Column '{by}' must be present in both existing and new metadata. If you want to append metadata by order, set `by=None`.")
+            if by not in new_metadata.columns or by not in old_metadata.columns:
+                raise ValueError(
+                    f"Column '{by}' must be present in both existing and new metadata. "
+                    f"If you want to append metadata by order, set `by=None`."
+                )
+
+            # Validate that the 'by' column has no NaN values
+            if new_metadata[by].isna().any():
+                raise ValueError(f"Column '{by}' in new_metadata contains NaN values.")
+            if old_metadata[by].isna().any():
+                raise ValueError(f"Column '{by}' in existing metadata contains NaN values.")
+
+            # Validate uniqueness of the 'by' column
+            if not old_metadata[by].is_unique or not new_metadata[by].is_unique:
+                raise ValueError(f"Column '{by}' must be unique in both existing and new metadata.")
 
         if overwrite:
             # preserve only the columns of the old metadata that are not in the new metadata
@@ -462,10 +517,30 @@ class InSituExperiment:
                 # sort them by the original order
                 cols_to_use = [elem for elem in old_metadata.columns if elem in cols_to_use]
 
+            # Warn if new_metadata has no overlapping columns to overwrite
+            overlapping = list(set(old_metadata.columns) & set(new_metadata.columns) - ({by} if by is not None else set()))
+            if len(overlapping) == 0:
+                warnings.warn(
+                    "No overlapping columns found to overwrite. No changes will be made.",
+                    UserWarning,
+                    stacklevel=2
+                )
+                return
+
             old_metadata = old_metadata[cols_to_use]
         else:
             # preserve only such columns of the new metadata that are not yet in the old metadata
             cols_to_use = list(new_metadata.columns.difference(old_metadata.columns))
+
+            # Warn if new_metadata has no new columns to add
+            if len(cols_to_use) == 0:
+                warnings.warn(
+                    "All columns in new_metadata already exist in the current metadata. "
+                    "No new columns to add. Set `overwrite=True` to replace existing columns.",
+                    UserWarning,
+                    stacklevel=2
+                )
+                return
 
             if by is not None:
                 cols_to_use = [by] + cols_to_use
@@ -475,22 +550,33 @@ class InSituExperiment:
         if by is None:
             if len(new_metadata) != len(old_metadata):
                 raise ValueError("Length of new metadata does not match the existing metadata.")
-            warnings.warn("No 'by' column provided. Metadata will be paired by order.")
+            warnings.warn(
+                "No 'by' column provided. Metadata will be paired by order.",
+                UserWarning,
+                stacklevel=2
+            )
             updated_metadata = pd.merge(left=old_metadata, right=new_metadata,
                                         left_index=True, right_index=True, how="left")
         else:
-            if by not in old_metadata.columns or by not in new_metadata.columns:
-                raise ValueError(f"Column '{by}' must be present in both existing and new metadata.")
-
-            if not old_metadata[by].is_unique or not new_metadata[by].is_unique:
-                raise ValueError(f"Column '{by}' must be unique in both existing and new metadata.")
+            # Warn about unmatched rows in new_metadata
+            unmatched = set(new_metadata[by]) - set(old_metadata[by])
+            if unmatched:
+                warnings.warn(
+                    f"{len(unmatched)} entries in new_metadata['{by}'] have no match in existing metadata "
+                    f"and will be ignored.",
+                    UserWarning,
+                    stacklevel=2
+                )
 
             updated_metadata = pd.merge(left=old_metadata, right=new_metadata,
                                         on=by, how="left")
 
-        # Ensure the metadata is paired with the correct data
-        if len(updated_metadata) != len(self._data):
-            raise ValueError("The number of metadata entries does not match the number of data entries.")
+        # Ensure the metadata row count is preserved
+        if len(updated_metadata) != len(self._metadata):
+            raise ValueError(
+                f"Merge changed the number of metadata rows from {len(self._metadata)} to "
+                f"{len(updated_metadata)}. This indicates a problem with the merge key."
+            )
 
         # Update the object's metadata only if the check passes
         self._metadata = updated_metadata
@@ -1035,16 +1121,18 @@ class InSituExperiment:
 
     def load_images(self,
                     names: Union[Literal["all", "nuclei"], str] = "all",
-                    nuclei_type: Literal["focus", "mip", ""] = "mip",
-                    load_cell_segmentation_images: bool = True
+                    overwrite: bool = False,
+                    verbose: bool = False
                     ):
         """Load images for all datasets."""
         self._check_mode_compatibility("load_images")
 
         for xd in tqdm(self._data):
-            xd.load_images(names=names,
-                           nuclei_type=nuclei_type,
-                           load_cell_segmentation_images=load_cell_segmentation_images)
+            xd.load_images(
+                names=names,
+                overwrite=overwrite,
+                verbose=verbose
+                )
 
     def load_regions(self):
         """Load regions for all datasets."""
@@ -1200,6 +1288,7 @@ class InSituExperiment:
              metadata_only: bool = False,
              sync_images: bool = False,
              images_only: bool = False,
+             overwrite_images: bool = False,
              collect_warnings_mode: bool = True,
              **kwargs
              ):
@@ -1214,6 +1303,8 @@ class InSituExperiment:
                 images folder. Existing images are skipped.
             images_only: If True, only save image data and skip all other modalities
                 (cells, annotations, regions). Implies sync_images=True.
+            overwrite_images: If True, overwrite existing images on disk during sync.
+                Default is False (skip images that already exist).
             collect_warnings_mode: If True, collect warnings and print summary at end
                 instead of displaying them inline (prevents progress bar disruption).
             **kwargs: Additional keyword arguments passed to InSituData.save().
@@ -1239,6 +1330,7 @@ class InSituExperiment:
                                     verbose=verbose,
                                     sync_images=sync_images,
                                     images_only=images_only,
+                                    overwrite_images=overwrite_images,
                                     **kwargs
                                     )
                         # Print collected warnings at the end
@@ -1249,6 +1341,7 @@ class InSituExperiment:
                                 verbose=verbose,
                                 sync_images=sync_images,
                                 images_only=images_only,
+                                overwrite_images=overwrite_images,
                                 **kwargs
                                 )
 
