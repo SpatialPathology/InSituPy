@@ -686,7 +686,7 @@ if WITH_NAPARI:
     def create_transcript_viewer_widget(
         viewer: napari.Viewer,
         transcripts: Union["pd.DataFrame", "dd.DataFrame"],
-        lazy_loading: bool = False,
+        lazy_loading: bool = True,
         config: Optional[TranscriptViewerConfig] = None,
         viewer_config: Optional["ViewerConfig"] = None,
     ) -> TranscriptViewerWidget:
