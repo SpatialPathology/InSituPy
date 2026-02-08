@@ -26,10 +26,11 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true,
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy.dataclasses._segmentations import (_read_proseg,_read_baysor)
+from insitupy.dataclasses._segmentations import _read_baysor, _read_proseg
 from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
                                   get_height_and_width)
-from insitupy.images.io import read_image, write_ome_tiff, write_zarr
+from insitupy.images.io import (get_zarr_source_path, read_image,
+                                write_ome_tiff, write_zarr)
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
@@ -1373,8 +1374,8 @@ class MultiCellData(DeepCopyMixin):
         celldata = CellData(table=adata, boundaries=boundaries)
 
         self.add_celldata(cd=celldata, key=key, is_main=is_main)
-    
-    
+
+
     def add_baysor(
                     self,
                     xd: Union[str, os.PathLike, Path], # XeniumRanger output
@@ -1397,7 +1398,7 @@ class MultiCellData(DeepCopyMixin):
             counts_file=counts_file, cell_metadata_file=cell_metadata_file,
             polygons_file=polygons_file, pixel_size=pixel_size
             )
-        
+
         # generate boundaries data object
         boundaries = BoundariesData(
             cell_names=cell_names,
@@ -1547,6 +1548,9 @@ class ImageData(DeepCopyMixin):
         del self._data[key]
         self._names.remove(key)
         self._metadata.pop(key, None)
+
+    def __contains__(self, key):
+        return key in self.keys()
 
     def keys(self):
         return self._data.keys()
@@ -2087,6 +2091,30 @@ class ImageData(DeepCopyMixin):
                         logger.warning(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
                         continue
 
+                    # Safety check: prevent overwriting a zarr store that the
+                    # dask array is lazily reading from.  Writing to the same
+                    # store would destroy the source data before it is read,
+                    # resulting in zeros / corrupted data.
+                    if overwrite and img_path.exists():
+                        source_path = get_zarr_source_path(img)
+                        target_path = img_path.resolve()
+                        if source_path is not None and source_path == target_path:
+                            raise RuntimeError(
+                                f"Cannot overwrite image '{name}' at {img_path}: the dask array is "
+                                f"lazily backed by the same Zarr store. Writing would destroy the "
+                                f"source data before it is read. To update this image, first load "
+                                f"it into memory (e.g. via `.persist()` or `.compute()`), or save "
+                                f"it under a different name."
+                            )
+                        elif source_path is None:
+                            raise RuntimeError(
+                                f"Cannot overwrite image '{name}' at {img_path}: unable to verify "
+                                f"that the dask array's source Zarr store differs from the target "
+                                f"path. Overwriting could destroy the source data. To update this "
+                                f"image, first load it into memory (e.g. via `.persist()` or "
+                                f"`.compute()`), or save it under a different name."
+                            )
+
                     write_zarr(image=img, file=img_path,
                                img_metadata=new_img_metadata,
                                save_pyramid=save_pyramid,
@@ -2434,7 +2462,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
             if has_data:
                 repr_str += (
-                    f"{tf.SPACER}.data: {self._data.n_obs} obs × "
+                    f"{tf.SPACER}.table: {self._data.n_obs} obs × "
                     f"{self._data.n_vars} vars\n"
                     f"{tf.SPACER}.shapes: {n_units} geometries"
                 )
@@ -2481,17 +2509,17 @@ class SpatialUnitsData(DeepCopyMixin):
             raise TypeError(f"`.shapes` must be GeoDataFrame, not {type(value)}")
         self._shapes = value
 
-    @property
-    def data(self) -> Optional[AnnData]:
-        """Alias for table property."""
-        return self._data
+    # @property
+    # def data(self) -> Optional[AnnData]:
+    #     """Alias for table property."""
+    #     return self._data
 
-    @data.setter
-    def data(self, value: Optional[AnnData]):
-        """Alias for table setter."""
-        if value is not None and not isinstance(value, AnnData):
-            raise TypeError(f"data must be AnnData object, not {type(value)}")
-        self._data = value
+    # @data.setter
+    # def data(self, value: Optional[AnnData]):
+    #     """Alias for table setter."""
+    #     if value is not None and not isinstance(value, AnnData):
+    #         raise TypeError(f"data must be AnnData object, not {type(value)}")
+    #     self._data = value
 
     @property
     def table(self) -> Optional[AnnData]:

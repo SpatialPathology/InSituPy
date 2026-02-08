@@ -30,6 +30,100 @@ else:
     logger.info("Using Zarr v2.")
 
 
+def get_zarr_source_path(arr) -> Optional[Path]:
+    """
+    Extract the source Zarr store path from a dask array loaded via ``da.from_zarr()``.
+
+    For image pyramids (list of dask arrays), inspects each level and returns
+    the first path found.
+
+    Args:
+        arr: A dask array, list of dask arrays, or any other object.
+
+    Returns:
+        The resolved :class:`~pathlib.Path` to the source Zarr store, or
+        ``None`` if the source cannot be determined (e.g. because the array
+        was created from in-memory data or was ``.persist()``-ed).
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        for a in arr:
+            result = get_zarr_source_path(a)
+            if result is not None:
+                return result
+        return None
+
+    if not isinstance(arr, da.Array):
+        return None
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return None
+
+    # Dask stores a zarr.Array object in a MaterializedLayer named
+    # 'original-from-zarr-*'.  We look for zarr.Array values and
+    # extract the store path from them.
+    for layer_name, layer in graph.layers.items():
+        mapping = getattr(layer, 'mapping', None)
+        if mapping is None:
+            if hasattr(layer, 'items'):
+                mapping = layer
+            else:
+                continue
+
+        try:
+            items = list(mapping.items())
+        except Exception:
+            continue
+
+        for _key, val in items:
+            path = _extract_path_from_zarr_array(val)
+            if path is not None:
+                return path
+            # Also check inside tuples (some dask versions)
+            if isinstance(val, tuple):
+                for v in val:
+                    path = _extract_path_from_zarr_array(v)
+                    if path is not None:
+                        return path
+
+    return None
+
+
+def _extract_path_from_zarr_array(v) -> Optional[Path]:
+    """Return the filesystem path of a ``zarr.Array``'s store, or ``None``."""
+    if isinstance(v, zarr.Array):
+        store = v.store
+        return _extract_path_from_zarr_store(store)
+    return None
+
+
+def _extract_path_from_zarr_store(store) -> Optional[Path]:
+    """Return the filesystem path backing a Zarr store, or ``None``."""
+    if ZARR_V3:
+        if isinstance(store, zarr.storage.LocalStore):
+            root = getattr(store, 'root', None)
+            if root is not None:
+                return Path(str(root)).resolve()
+            return Path(str(store)).resolve()
+    else:
+        if isinstance(store, zarr.storage.DirectoryStore):
+            return Path(store.path).resolve()
+
+    # Generic fallback
+    if hasattr(store, 'path'):
+        try:
+            return Path(store.path).resolve()
+        except Exception:
+            pass
+    if hasattr(store, 'root'):
+        try:
+            return Path(str(store.root)).resolve()
+        except Exception:
+            pass
+    return None
+
+
 def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
     """
     Get a Zarr store compatible with both Zarr v2 and v3.
