@@ -1,6 +1,7 @@
 import gc
 import os
 import time
+import tracemalloc
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
@@ -619,6 +620,7 @@ def register_images(
     _prefix = "  "  # consistent print prefix
 
     _t_start = time.time()
+    tracemalloc.start()
 
     # make sure the given image names are in a list
     channel_names = convert_to_list(channel_names)
@@ -894,7 +896,10 @@ def register_images(
         del imreg_complete, imreg_selected, image, template
 
     _elapsed = time.time() - _t_start
-    print(f"{_prefix}{_LSIGN}{_HLINE}{_HLINE} Done ({_elapsed:.1f} s)", flush=True)
+    _, _peak_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
+    print(f"{_prefix}{_LSIGN}{_HLINE}{_HLINE} Done ({_elapsed:.1f} s, peak memory: {_peak_mem_str})", flush=True)
     gc.collect()
 
 

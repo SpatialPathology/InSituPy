@@ -124,6 +124,125 @@ def _extract_path_from_zarr_store(store) -> Optional[Path]:
     return None
 
 
+def is_from_disk(arr) -> bool:
+    """
+    Check whether a dask array (or pyramid of dask arrays) is lazily loaded
+    from disk (e.g. Zarr, HDF5, npy, TIFF).
+
+    For non-dask objects (e.g. plain numpy arrays) this always returns
+    ``False``.
+
+    Args:
+        arr: A dask array, list of dask arrays, numpy array, or any object.
+
+    Returns:
+        ``True`` if the array is lazily backed by an on-disk source.
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        return any(is_from_disk(a) for a in arr)
+
+    if not isinstance(arr, da.Array):
+        return False
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return False
+
+    # Check layer names for well-known disk-backed prefixes
+    disk_indicators = (
+        "from-zarr", "original-from-zarr",
+        "from-npy", "from-hdf5", "from-tiff",
+    )
+    for layer_name in graph.layers:
+        if any(layer_name.startswith(ind) for ind in disk_indicators):
+            return True
+
+    # Fallback: inspect leaf values for zarr arrays (v2 and v3)
+    try:
+        for layer_name, layer in graph.layers.items():
+            mapping = getattr(layer, 'mapping', None)
+            if mapping is None:
+                if hasattr(layer, 'items'):
+                    mapping = layer
+                else:
+                    continue
+            try:
+                items = list(mapping.items())
+            except Exception:
+                continue
+            for _key, val in items:
+                if isinstance(val, zarr.Array):
+                    return True
+                if isinstance(val, tuple):
+                    for v in val:
+                        if isinstance(v, zarr.Array):
+                            return True
+                        if hasattr(v, 'store') and hasattr(v, 'shape'):
+                            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def is_from_zarr_disk(arr) -> bool:
+    """
+    Check whether a dask array (or pyramid) is lazily loaded specifically
+    from a **Zarr** store on disk.
+
+    Returns ``False`` for arrays backed by other on-disk formats (TIFF,
+    HDF5, npy) as well as for in-memory arrays.
+
+    Args:
+        arr: A dask array, list of dask arrays, or any other object.
+
+    Returns:
+        ``True`` if the array is lazily backed by a Zarr store.
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        return any(is_from_zarr_disk(a) for a in arr)
+
+    if not isinstance(arr, da.Array):
+        return False
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return False
+
+    # Check layer names for zarr-specific prefixes
+    zarr_indicators = ("from-zarr", "original-from-zarr")
+    for layer_name in graph.layers:
+        if any(layer_name.startswith(ind) for ind in zarr_indicators):
+            return True
+
+    # Fallback: inspect leaf values for zarr arrays
+    try:
+        for layer_name, layer in graph.layers.items():
+            mapping = getattr(layer, 'mapping', None)
+            if mapping is None:
+                if hasattr(layer, 'items'):
+                    mapping = layer
+                else:
+                    continue
+            try:
+                items = list(mapping.items())
+            except Exception:
+                continue
+            for _key, val in items:
+                if isinstance(val, zarr.Array):
+                    return True
+                if isinstance(val, tuple):
+                    for v in val:
+                        if isinstance(v, zarr.Array):
+                            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
     """
     Get a Zarr store compatible with both Zarr v2 and v3.

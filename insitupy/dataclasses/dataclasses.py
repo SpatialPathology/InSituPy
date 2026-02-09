@@ -29,8 +29,8 @@ from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._segmentations import _read_baysor, _read_proseg
 from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
                                   get_height_and_width)
-from insitupy.images.io import (get_zarr_source_path, read_image,
-                                write_ome_tiff, write_zarr)
+from insitupy.images.io import (get_zarr_source_path, is_from_zarr_disk,
+                                read_image, write_ome_tiff, write_zarr)
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
@@ -2095,25 +2095,35 @@ class ImageData(DeepCopyMixin):
                     # dask array is lazily reading from.  Writing to the same
                     # store would destroy the source data before it is read,
                     # resulting in zeros / corrupted data.
-                    if overwrite and img_path.exists():
+                    #
+                    # The check is only relevant for arrays that are lazily
+                    # backed by a *Zarr* store on disk.  In-memory arrays
+                    # (numpy-backed dask arrays) and arrays loaded from
+                    # non-Zarr formats (TIFF, HDF5, npy) are safe to save
+                    # into a Zarr target because the source is either
+                    # entirely in memory or in a different format/location.
+                    if overwrite and img_path.exists() and is_from_zarr_disk(img):
                         source_path = get_zarr_source_path(img)
                         target_path = img_path.resolve()
                         if source_path is not None and source_path == target_path:
-                            raise RuntimeError(
-                                f"Cannot overwrite image '{name}' at {img_path}: the dask array is "
-                                f"lazily backed by the same Zarr store. Writing would destroy the "
-                                f"source data before it is read. To update this image, first load "
-                                f"it into memory (e.g. via `.persist()` or `.compute()`), or save "
-                                f"it under a different name."
+                            logger.warning(
+                                f"Skipping image '{name}': the dask array is lazily backed by the "
+                                f"same Zarr store at {img_path}. Writing would destroy the source "
+                                f"data before it is read. To update this image, first load it into "
+                                f"memory (e.g. via `.persist()` or `.compute()`), or save it under "
+                                f"a different name."
                             )
+                            continue
                         elif source_path is None:
-                            raise RuntimeError(
-                                f"Cannot overwrite image '{name}' at {img_path}: unable to verify "
-                                f"that the dask array's source Zarr store differs from the target "
-                                f"path. Overwriting could destroy the source data. To update this "
-                                f"image, first load it into memory (e.g. via `.persist()` or "
-                                f"`.compute()`), or save it under a different name."
+                            logger.warning(
+                                f"Skipping image '{name}': the dask array appears to be backed "
+                                f"by a Zarr store but the source path could not be determined. "
+                                f"Cannot verify it differs from the target path {img_path}. "
+                                f"Overwriting could destroy the source data. To update this image, "
+                                f"first load it into memory (e.g. via `.persist()` or `.compute()`), "
+                                f"or save it under a different name."
                             )
+                            continue
 
                     write_zarr(image=img, file=img_path,
                                img_metadata=new_img_metadata,

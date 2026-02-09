@@ -1069,11 +1069,12 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
-    def load_images(self,
-                    names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
-                    overwrite: bool = False,
-                    verbose: bool = False
-                    ):
+    def load_images(
+        self,
+        names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
+        overwrite: bool = True,
+        verbose: bool = False
+        ):
         # load image into ImageData object
         if verbose:
             print("Loading images...", flush=True)
@@ -1662,7 +1663,14 @@ class InSituData:
             print(f"Reloading following modalities: {', '.join(loaded_modalities)}") if verbose else None
             for cm in loaded_modalities:
                 func = getattr(self, f"load_{cm}")
-                func(verbose=verbose)
+                # For images, pass overwrite=True so that in-memory arrays are
+                # replaced with fresh lazy dask arrays from disk.  This prevents
+                # memory accumulation when reload is called in a loop (e.g. after
+                # register_images + save).
+                if cm == "images":
+                    func(verbose=verbose, overwrite=True)
+                else:
+                    func(verbose=verbose)
         else:
             print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
 
