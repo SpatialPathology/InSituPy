@@ -4,6 +4,7 @@ from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Union
 
+import dask
 import dask.array as da
 import geopandas as gpd
 import numpy as np
@@ -260,9 +261,14 @@ def _read_proseg_from_spatialdata(
     cell_names = polygons['cell'].values
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
-    # Rasterize polygons
-    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
-    boundaries_mask = da.from_array(boundaries_mask)
+    # Rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
 
     return adata, boundaries_mask, cell_names, seg_mask_value
 
@@ -316,9 +322,14 @@ def _read_proseg(
     cell_names = polygons['cell'].values
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
-    # rasterize polygons
-    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
-    boundaries_mask = da.from_array(boundaries_mask)
+    # rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
 
     return adata, boundaries_mask, cell_names, seg_mask_value
 
@@ -334,9 +345,10 @@ def _read_baysor(
         from rasterio.features import rasterize
     except ImportError:
         raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-    
-    from insitupy.io import read_xenium
+
     import scanpy as sc
+
+    from insitupy.io import read_xenium
 
     if counts_file is None:
         path_counts = list(path.glob("segmentation_counts.*"))[0] #r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_counts.loom"
@@ -357,10 +369,10 @@ def _read_baysor(
     xd=read_xenium(xd)
     cell_metadata=pd.read_csv(path_cell_metadata)
     counts=sc.read_loom(path_counts)
-    
+
     counts.obs=cell_metadata.copy()
     counts.var_names=counts.var['Name'].copy()
-    
+
     adata=counts[:,counts.var_names.isin(xd.cells['main'].matrix.var.index.tolist())].copy()
 
     # Read Proseg polygons
@@ -382,8 +394,13 @@ def _read_baysor(
     cell_names = polygons['cell']#.values
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
-    # rasterize polygons
-    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
-    boundaries_mask = da.from_array(boundaries_mask)
+    # rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
 
     return adata, boundaries_mask, cell_names, seg_mask_value

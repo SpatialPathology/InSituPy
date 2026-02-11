@@ -1282,12 +1282,18 @@ class MultiCellData(DeepCopyMixin):
     def add_celldata(self,
                      cd: CellData,
                      key: str,
-                     is_main: bool = False):
+                     is_main: bool = False,
+                     overwrite: bool = False):
         if not isinstance(cd, CellData):
             raise ValueError(f"cd must be of type CellData. Instead: {type(cd)}.")
 
         if key in self._layers.keys():
-            print(f"Overwriting {key}.")
+            if not overwrite:
+                raise KeyError(
+                    f"Key '{key}' already exists in MultiCellData. "
+                    f"Set overwrite=True to replace it."
+                )
+            print(f"Overwriting '{key}' in MultiCellData.")
         self._layers[key] = cd
         if is_main:
             self._main_key = key
@@ -1299,7 +1305,8 @@ class MultiCellData(DeepCopyMixin):
                    polygons_file: Optional[str] = None,
                    pixel_size: Number = 1,
                    key: str = "proseg",
-                   is_main: bool = False
+                   is_main: bool = False,
+                   overwrite: bool = False
                    ):
         """
             Adds output of Proseg https://github.com/dcjones/proseg segmentation to the object.
@@ -1317,6 +1324,7 @@ class MultiCellData(DeepCopyMixin):
                 pixel_size (float): Size of the pixel for scaling.
                 key (str, optional): Key to store the data. Defaults to "proseg".
                 is_main (bool, optional): Flag to indicate if this is the main data. Defaults to False.
+                overwrite (bool, optional): If True, allow overwriting an existing key. Defaults to False.
         """
         from ._segmentations import _read_proseg, _read_proseg_from_spatialdata
 
@@ -1351,6 +1359,7 @@ class MultiCellData(DeepCopyMixin):
                 sdata,
                 pixel_size=pixel_size
             )
+            del sdata  # free spatialdata object before heavy allocations
         else:
             # Legacy path-based input (directory with individual files)
             adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
@@ -1369,11 +1378,13 @@ class MultiCellData(DeepCopyMixin):
             cell_boundaries=boundaries_mask,
             pixel_size=pixel_size
             )
+        del boundaries_mask  # no longer needed after add_boundaries
 
         # Create cell data and add to object
         celldata = CellData(table=adata, boundaries=boundaries)
+        del adata, boundaries  # now owned by celldata
 
-        self.add_celldata(cd=celldata, key=key, is_main=is_main)
+        self.add_celldata(cd=celldata, key=key, is_main=is_main, overwrite=overwrite)
 
 
     def add_baysor(
@@ -1385,7 +1396,8 @@ class MultiCellData(DeepCopyMixin):
                     polygons_file: Optional[str] = None,
                     pixel_size: Number = 1,
                     key: str = "baysor",
-                    is_main: bool = False
+                    is_main: bool = False,
+                    overwrite: bool = False
                     ):
 
         from ._segmentations import _read_baysor
@@ -1411,11 +1423,13 @@ class MultiCellData(DeepCopyMixin):
             cell_boundaries=boundaries_mask,
             pixel_size=pixel_size
             )
+        del boundaries_mask  # no longer needed after add_boundaries
 
         # Create cell data and add to object
         celldata = CellData(table=adata, boundaries=boundaries)
+        del adata, boundaries  # now owned by celldata
 
-        self.add_celldata(cd=celldata, key=key, is_main=is_main)
+        self.add_celldata(cd=celldata, key=key, is_main=is_main, overwrite=overwrite)
 
 
     def crop(self,

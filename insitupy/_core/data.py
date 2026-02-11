@@ -1671,6 +1671,13 @@ class InSituData:
                     func(verbose=verbose, overwrite=True)
                 else:
                     func(verbose=verbose)
+
+            # Force garbage collection to free memory from old modality data
+            # that was replaced during reload.  Without this, large arrays
+            # (e.g. boundary masks) may linger until the next automatic GC
+            # cycle, causing memory to accumulate across loop iterations.
+            import gc
+            gc.collect()
         else:
             print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
 
