@@ -292,6 +292,7 @@ if WITH_NAPARI:
             self._setup_debounce()
             self._connect_camera()
             self._connect_layer_selection()
+            self._connect_layer_removal()
             self._setup_ref_layer_cache()
 
         def _setup_ui(self) -> None:
@@ -359,6 +360,21 @@ if WITH_NAPARI:
             layer = self.viewer.layers.selection.active
             if layer is not None and layer.name == self.LAYER_NAME:
                 self._update_color_legend()
+
+        def _connect_layer_removal(self) -> None:
+            """Connect layer removal event to clear UI state when layer is deleted."""
+            self.viewer.layers.events.removed.connect(self._on_layer_removed)
+
+        def _on_layer_removed(self, event) -> None:
+            """Clear active genes and UI when the Transcripts layer is removed."""
+            removed_layer = event.value
+            if removed_layer.name == self.LAYER_NAME:
+                self.active_genes.clear()
+                if self.lazy_loading:
+                    self.gene_data.clear()
+                self._update_active_list()
+                self._update_color_legend()
+                self.status_label.setText("Points: 0")
 
         def _on_view_change(self, event=None) -> None:
             """Restart debounce timer on camera change."""
@@ -492,6 +508,11 @@ if WITH_NAPARI:
             self.active_genes[gene] = None
             self._update_active_list()
             self.search_input.clear()
+
+            # Create the layer if it doesn't exist yet (before querying)
+            if self.LAYER_NAME not in self.viewer.layers:
+                self._create_layer()
+
             self._do_query()
 
         def _load_gene_coords(self, gene: str) -> None:
@@ -606,11 +627,35 @@ if WITH_NAPARI:
 
             self._update_layer()
 
+        def _create_layer(self) -> None:
+            """Create the Transcripts points layer.
+
+            Only called explicitly from _on_add_gene. This ensures the layer
+            is never silently recreated after the user deletes it.
+            """
+            if self.LAYER_NAME in self.viewer.layers:
+                return
+            self.viewer.add_points(
+                np.empty((0, 2)),
+                name=self.LAYER_NAME,
+                face_color="white",
+                size=self.config.point_size,
+                border_width=0,
+            )
+
         def _update_layer(self) -> None:
-            """Update or create the Transcripts points layer."""
+            """Update the Transcripts points layer if it exists.
+
+            This method only updates an existing layer — it never creates one.
+            If the user has deleted the layer, this is a no-op, so camera
+            movements won't cause the layer to reappear.
+            """
+            # If the layer doesn't exist (user deleted it), do nothing
+            if self.LAYER_NAME not in self.viewer.layers:
+                return
+
             if not self.active_genes:
-                if self.LAYER_NAME in self.viewer.layers:
-                    self.viewer.layers.remove(self.LAYER_NAME)
+                self.viewer.layers.remove(self.LAYER_NAME)
                 self.status_label.setText("Points: 0")
                 self._update_color_legend()
                 return
@@ -629,8 +674,7 @@ if WITH_NAPARI:
 
             if not all_coords:
                 self.status_label.setText("Points: 0 (none in view)")
-                if self.LAYER_NAME in self.viewer.layers:
-                    self.viewer.layers[self.LAYER_NAME].data = np.empty((0, 2))
+                self.viewer.layers[self.LAYER_NAME].data = np.empty((0, 2))
                 return
 
             combined = np.vstack(all_coords)
@@ -653,23 +697,12 @@ if WITH_NAPARI:
             # Swap x,y to y,x for napari (napari uses row, column order)
             points_yx = combined[:, ::-1]
 
-            # Update or create layer
+            # Update layer
+            layer = self.viewer.layers[self.LAYER_NAME]
             properties = {"gene": gene_names}
-
-            if self.LAYER_NAME in self.viewer.layers:
-                layer = self.viewer.layers[self.LAYER_NAME]
-                layer.data = points_yx
-                layer.face_color = colors
-                layer.properties = properties
-            else:
-                self.viewer.add_points(
-                    points_yx,
-                    name=self.LAYER_NAME,
-                    face_color=colors,
-                    size=self.config.point_size,
-                    border_width=0,
-                    properties=properties,
-                )
+            layer.data = points_yx
+            layer.face_color = colors
+            layer.properties = properties
 
             # Update status
             if subsampled:
