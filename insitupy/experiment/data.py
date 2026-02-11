@@ -1002,7 +1002,7 @@ class InSituExperiment:
         varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        meta_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = True,
     ) -> anndata.AnnData:
         """
@@ -1017,7 +1017,7 @@ class InSituExperiment:
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
-            meta_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
+            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
             make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
 
         Returns:
@@ -1050,12 +1050,12 @@ class InSituExperiment:
             )
 
             # Add metadata columns to obs
-            if meta_keys is not None:
-                if meta_keys == "all":
+            if metadata_keys is not None:
+                if metadata_keys == "all":
                     keys_to_add = list(meta.index)
                 else:
                     # make sure keys are a list
-                    keys_to_add = convert_to_list(meta_keys)
+                    keys_to_add = convert_to_list(metadata_keys)
 
                 for key in keys_to_add:
                     if key in meta.index:
