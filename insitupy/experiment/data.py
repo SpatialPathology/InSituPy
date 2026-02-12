@@ -16,6 +16,7 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
@@ -1449,7 +1450,7 @@ class InSituExperiment:
         cells_layer: Optional[str] = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         overwrite: bool = False,
-        verbose: bool = True
+        verbose: bool = False
     ):
         """
         Synchronize color dictionaries for categorical metadata across datasets.
@@ -1467,6 +1468,21 @@ class InSituExperiment:
         keys = convert_to_list(keys)
 
         for obs_col in keys:
+            # Skip numeric columns to avoid treating continuous values as categorical
+            is_numeric = False
+            for _, xd in self.iterdata():
+                celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+                if obs_col in celldata.table.obs.columns:
+                    series = celldata.table.obs[obs_col]
+                    if is_numeric_dtype(series) and not is_bool_dtype(series):
+                        is_numeric = True
+                        break
+
+            if is_numeric:
+                if verbose:
+                    print(f"Skipping sync_colors for numeric column '{obs_col}'.")
+                continue
+
             if obs_col not in self.colors or overwrite:
                 # create a color dictionary with all categories
                 color_dict = self._create_categorical_color_dict(

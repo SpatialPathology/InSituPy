@@ -111,14 +111,15 @@ def _get_default_palette(n_cats: int) -> list[str]:
     """Get default color palette, using scanpy's if available."""
     if _check_scanpy():
         import scanpy as sc
+        palettes = sc.pl.palettes
         if n_cats <= 10:
-            return sc.pl.palettes.default_10
+            return palettes.vega_10
         elif n_cats <= 20:
-            return sc.pl.palettes.default_20
+            return palettes.vega_20
         elif n_cats <= 28:
-            return sc.pl.palettes.default_28
+            return palettes.zeileis_28
         else:
-            return sc.pl.palettes.default_102
+            return palettes.godsnot_102
     else:
         # Fallback palette (tab10 + tab20)
         tab10 = [
