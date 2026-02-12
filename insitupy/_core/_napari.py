@@ -477,7 +477,7 @@ if WITH_NAPARI:
             current_viewer_config.verbose = True
 
         # create viewer
-        current_viewer = napari.Viewer(title=f"#{uid_viewer}")
+        current_viewer = napari.Viewer(title=f"#{uid_viewer}: {data.sample_id}")
 
         # IMAGES
         if data.images.is_empty:
