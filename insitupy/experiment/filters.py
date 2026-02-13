@@ -168,7 +168,28 @@ class FilterManager:
                 f"Filter '{key}' length ({len(mask)}) does not match metadata length "
                 f"({len(self._experiment._metadata)})."
             )
-        return self._experiment[pd.Series(mask, index=self._experiment._metadata.index)]
+        return self._experiment._subset(
+            pd.Series(mask, index=self._experiment._metadata.index),
+            as_view=False,
+        )
+
+    def view(self, key: str) -> "InSituExperiment":
+        if key not in self._experiment._filters:
+            raise KeyError(
+                f"Filter '{key}' not found. Available filters: {self.keys()}"
+            )
+        spec = FilterSpec.from_entry(key, self._experiment._filters[key])
+        mask = np.asarray(spec.mask, dtype=bool)
+        if len(mask) != len(self._experiment._metadata):
+            raise ValueError(
+                f"Filter '{key}' length ({len(mask)}) does not match metadata length "
+                f"({len(self._experiment._metadata)})."
+            )
+        return self._experiment._subset(
+            pd.Series(mask, index=self._experiment._metadata.index),
+            as_view=True,
+            added_filter=key,
+        )
 
     def remove(self, key: str):
         if key not in self._experiment._filters:
@@ -199,3 +220,13 @@ class FilterManager:
 
     def __repr__(self):
         return self.summary().__repr__()
+
+    def _repr_html_(self):
+        """HTML representation for notebook display with horizontal scrolling."""
+        df = self.summary()
+        table_html = df.to_html(index=False)
+        return (
+            "<div style='overflow-x:auto; max-width:100%;'>"
+            + table_html +
+            "</div>"
+        )

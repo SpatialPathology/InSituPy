@@ -110,6 +110,7 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._filters = {}
+        self._applied_filters: List[str] = []
         self._data_type = data_type
 
     def __repr__(self):
@@ -140,23 +141,35 @@ class InSituExperiment:
 
         # generate string summary
         sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        return (f"{tf.Bold}InSituExperiment{tf.ResetAll}{mode_str} with {num_samples} samples:\n"
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
+        filters_info = ""
+        if self.applied_filters:
+            filters_info = f"\nApplied filters: {' -> '.join(self.applied_filters)}"
+
+        return (f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str} with {num_samples} samples:{filters_info}\n"
                 f"{sample_summary}")
 
-    def __getitem__(self, key):
+    @property
+    def is_view(self) -> bool:
+        return False
+
+    @property
+    def applied_filters(self) -> List[str]:
+        return list(self._applied_filters)
+
+    def _subset(
+        self,
+        key,
+        as_view: bool = False,
+        added_filter: Optional[str] = None,
+    ):
         """
-        Retrieve a subset of the experiment.
+        Internal helper to subset experiment data and metadata.
 
         Args:
-            key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
-                or Series to retrieve.
-
-        Returns:
-            InSituExperiment: A new InSituExperiment object with the selected subset.
-
-        Raises:
-            IndexError: If the index is out of range.
-            ValueError: If the key is invalid.
+            key: Subsetting key (same accepted types as ``__getitem__``).
+            as_view: If True, keep path linkage and return an InSituExperimentView.
+            added_filter: Optional filter key to append to applied filter history.
         """
         if isinstance(key, int):
             if key > (len(self) - 1):
@@ -166,23 +179,24 @@ class InSituExperiment:
         elif isinstance(key, list):
             if all(isinstance(i, bool) for i in key):
                 key = pd.Series(key)
-            # If it's a list of indices, we let it pass to iloc below
 
         elif isinstance(key, pd.Series):
             if key.dtype != bool:
                 key = key.tolist()
 
+        subset_cls = InSituExperimentView if as_view else InSituExperiment
+
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
             selected_indices = list(self._metadata.index[key])
-            new_experiment = InSituExperiment(data_type=self._data_type)
+            new_experiment = subset_cls(data_type=self._data_type)
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
 
         # Handle slices, list of ints, ndarray, or Series of ints
         else:
             selected_indices = list(self._metadata.iloc[key].index)
-            new_experiment = InSituExperiment(data_type=self._data_type)
+            new_experiment = subset_cls(data_type=self._data_type)
             new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
@@ -208,9 +222,37 @@ class InSituExperiment:
                     "note": note,
                 }
 
-        # Disconnect object from save path
-        new_experiment._path = None
+        # Keep linkage only for view objects
+        if as_view:
+            new_experiment._path = self._path
+        else:
+            new_experiment._path = None
+
+        if as_view:
+            new_experiment._applied_filters = list(self._applied_filters)
+            if added_filter is not None:
+                new_experiment._applied_filters.append(added_filter)
+        else:
+            new_experiment._applied_filters = []
+
         return new_experiment
+
+    def __getitem__(self, key):
+        """
+        Retrieve a subset of the experiment.
+
+        Args:
+            key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
+                or Series to retrieve.
+
+        Returns:
+            InSituExperiment: A new InSituExperiment object with the selected subset.
+
+        Raises:
+            IndexError: If the index is out of range.
+            ValueError: If the key is invalid.
+        """
+        return self._subset(key, as_view=self.is_view)
 
     def __len__(self):
         """Returns the number of datasets in the experiment.
@@ -273,7 +315,7 @@ class InSituExperiment:
     @property
     def filters(self):
         """
-        Filter manager exposing filter operations (create, remove, clear, apply, rename).
+        Filter manager exposing filter operations (create, remove, clear, apply, view, rename).
 
         Returns:
             FilterManager: Manager object for filter operations and summaries.
@@ -1359,6 +1401,38 @@ class InSituExperiment:
         """
         self._check_mode_compatibility("save")
 
+        if self.is_view:
+            if metadata_only:
+                warnings.warn(
+                    "`metadata_only=True` is not supported for InSituExperimentView. "
+                    "View save updates only selected datasets in-place.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                return
+
+            if collect_warnings_mode:
+                with collect_warnings() as collector:
+                    for xd in tqdm(self._data):
+                        xd.save(
+                            verbose=verbose,
+                            sync_images=sync_images,
+                            images_only=images_only,
+                            overwrite_images=overwrite_images,
+                            **kwargs
+                        )
+                collector.print_summary()
+            else:
+                for xd in tqdm(self._data):
+                    xd.save(
+                        verbose=verbose,
+                        sync_images=sync_images,
+                        images_only=images_only,
+                        overwrite_images=overwrite_images,
+                        **kwargs
+                    )
+            return
+
         if metadata_only and not overwrite_metadata:
             raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
 
@@ -2165,7 +2239,6 @@ class InSituExperiment:
                 f"Method '{method_name}' is not yet implemented for SpatialData mode. "
                 f"This will be added in a future update."
             )
-
     def _check_obs_uniqueness(
         self,
         cells_layer: Optional[str] = None
@@ -2274,3 +2347,11 @@ class InSituExperiment:
                 transcripts_col: median_transcripts,
                 cells_col: num_cells,
             }
+
+
+class InSituExperimentView(InSituExperiment):
+    """Lightweight linked view of an InSituExperiment subset."""
+
+    @property
+    def is_view(self) -> bool:
+        return True
