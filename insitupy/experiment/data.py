@@ -27,6 +27,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Set to True to enable spatialdata mode functionality
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
+_FILTERS_SCHEMA_VERSION = 1
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -107,6 +109,7 @@ class InSituExperiment:
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
+        self._filters = {}
         self._data_type = data_type
 
     def __repr__(self):
@@ -171,15 +174,39 @@ class InSituExperiment:
 
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
+            selected_indices = list(self._metadata.index[key])
             new_experiment = InSituExperiment(data_type=self._data_type)
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
 
         # Handle slices, list of ints, ndarray, or Series of ints
         else:
+            selected_indices = list(self._metadata.iloc[key].index)
             new_experiment = InSituExperiment(data_type=self._data_type)
             new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
+
+        # Carry over colors and filters, and subset filters to the new metadata
+        new_experiment._colors = deepcopy(self._colors)
+        new_experiment._filters = {}
+        if self._filters:
+            for name, entry in self._filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(self._metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(self._metadata)}). Skipping filter in subset.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                new_experiment._filters[name] = {
+                    "mask": mask_arr[selected_indices].tolist(),
+                    "note": note,
+                }
 
         # Disconnect object from save path
         new_experiment._path = None
@@ -242,6 +269,26 @@ class InSituExperiment:
             dict: A dictionary mapping metadata keys to color dictionaries.
         """
         return self._colors
+
+    @property
+    def filters(self):
+        """
+        Filter manager exposing filter operations (create, remove, clear, apply, rename).
+
+        Returns:
+            FilterManager: Manager object for filter operations and summaries.
+        """
+        return FilterManager(self)
+
+    @property
+    def filter_masks(self):
+        """
+        Raw filter dictionary mapping keys to boolean masks.
+
+        Returns:
+            dict: A dictionary mapping filter keys to boolean-mask lists.
+        """
+        return self.filters.masks()
 
     @property
     def data(self):
@@ -1354,6 +1401,10 @@ class InSituExperiment:
             # Optionally, save the metadata as a CSV file
             self._metadata.to_csv(self.path / "metadata.csv", index=True)
 
+        # Save filters alongside metadata
+        if self.path is not None:
+            self.save_filters(path=self.path)
+
 
 
     def saveas(
@@ -1404,7 +1455,37 @@ class InSituExperiment:
         with open(path / "colors.json", 'w') as f:
             json.dump(self.colors, f)
 
+        self.save_filters(path=path)
+
         print("Saved.") if verbose else None
+
+    def save_filters(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+    ):
+        """
+        Save only experiment filters to ``filters.json``.
+
+        Args:
+            path: Directory where ``filters.json`` should be written.
+                If None, uses ``self.path``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        filters_payload = self._build_filters_payload()
+        with open(path / "filters.json", 'w') as f:
+            json.dump(filters_payload, f)
 
     def show(
         self,
@@ -1706,7 +1787,8 @@ class InSituExperiment:
     @classmethod
     def read(cls,
              path: Union[str, os.PathLike, Path],
-             mode: Literal["insitupy", "spatialdata"] = "insitupy") -> "InSituExperiment":
+               mode: Literal["insitupy", "spatialdata"] = "insitupy",
+               filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
@@ -1727,7 +1809,7 @@ class InSituExperiment:
                 )
             return cls._read_spatialdata(path)
         elif mode == "insitupy":
-            return cls._read_insitupy(path)
+            return cls._read_insitupy(path, filter_key=filter_key)
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'insitupy' or 'spatialdata'")
 
@@ -1961,7 +2043,8 @@ class InSituExperiment:
         return loaded
 
     @classmethod
-    def _read_insitupy(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+    def _read_insitupy(cls, path: Union[str, os.PathLike, Path],
+                       filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment in InSituPy format (original implementation).
 
@@ -1984,6 +2067,37 @@ class InSituExperiment:
         except FileNotFoundError:
             colors = {}
 
+        # Load filters (optional)
+        filters = {}
+        filters_path = path / "filters.json"
+        if filters_path.exists():
+            try:
+                with open(filters_path, 'r') as f:
+                    filters_payload = json.load(f)
+            except Exception as err:
+                raise ValueError(
+                    f"Could not load filters.json at '{filters_path}': {err}"
+                ) from err
+
+            if not isinstance(filters_payload, dict):
+                raise ValueError(
+                    "Invalid filters schema: expected a JSON object with keys 'version' and 'filters'."
+                )
+
+            version = filters_payload.get("version", None)
+            filters = filters_payload.get("filters", None)
+
+            if version != _FILTERS_SCHEMA_VERSION:
+                raise ValueError(
+                    f"Unsupported filters schema version: {version}. "
+                    f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                )
+
+            if not isinstance(filters, dict):
+                raise ValueError(
+                    "Invalid filters schema: 'filters' must be a dictionary mapping filter keys to filter entries."
+                )
+
         # Load each dataset
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
@@ -1997,8 +2111,49 @@ class InSituExperiment:
         experiment._data = data
         experiment._path = path
         experiment._colors = colors
+        experiment._filters = {}
+
+        # Validate and store filters
+        if filters:
+            for name, entry in filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(metadata)}). Skipping this filter.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                experiment._filters[name] = {
+                    "mask": mask_arr.tolist(),
+                    "note": note,
+                }
+
+        if filter_key is not None:
+            if filter_key not in experiment._filters:
+                raise KeyError(
+                    f"Filter '{filter_key}' not found. Available filters: {list(experiment._filters.keys())}"
+                )
+            experiment = experiment.filters.apply(filter_key)
 
         return experiment
+
+    def _build_filters_payload(self) -> Dict[str, Any]:
+        """Build versioned JSON payload for ``filters.json``."""
+        payload: Dict[str, Any] = {
+            "version": _FILTERS_SCHEMA_VERSION,
+            "filters": {},
+        }
+
+        for key, entry in self._filters.items():
+            spec = FilterSpec.from_entry(key, entry)
+            payload["filters"][key] = spec.to_dict()
+
+        return payload
 
     def _check_mode_compatibility(self, method_name: str):
         """

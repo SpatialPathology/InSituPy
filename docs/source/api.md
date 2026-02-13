@@ -93,6 +93,33 @@ To concatenate multiple `InSituExperiment` objects:
     InSituExperiment.concat
 ```
 
+Working with saved sample filters (including optional notes):
+
+```{eval-rst}
+.. code-block:: python
+
+    from insitupy import InSituExperiment
+
+    exp = InSituExperiment.read("path/to/experiment")
+
+    exp.filters.create(
+        by="sample_id",
+        include=["S01", "S02", "S05"],
+        key="general_quality",
+        note="Samples with overall good quality in total counts and morphology"
+    )
+
+    # overview table with selected/excluded counts and notes
+    exp.filters.summary()
+
+    # programmatic access to raw boolean masks
+    exp.filters.masks()
+
+    # save and later load with filter applied
+    exp.save()
+    exp2 = InSituExperiment.read("path/to/experiment", filter_key="general_quality")
+```
+
 ### Import data objects
 
 Import the data objects like this:
