@@ -21,14 +21,21 @@ if WITH_NAPARI:
 
         # get current viewer config
         viewer = napari.current_viewer() # get the viewer that was open last
-        viewer_id = viewer.title.rsplit("#", 1)[1]
-        config = config_manager[viewer_id]
-
-        data = config.data
-
         if viewer is None:
             print("No napari viewer open to synchronize from. First, use `.show()` to open a napari viewer.")
             return
+
+        viewer_id = _get_viewer_uid(viewer)
+        try:
+            config = config_manager[viewer_id]
+        except KeyError:
+            show_warning(
+                "Could not find viewer configuration for the current napari viewer. "
+                "Please reopen the viewer via `.show()` and try again."
+            )
+            return
+
+        data = config.data
 
         # iterate through layers and save them as annotation or region if they meet requirements
         layers = viewer.layers
