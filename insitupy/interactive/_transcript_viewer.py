@@ -41,6 +41,22 @@ DEFAULT_POINT_SIZE = 0.2
 DEFAULT_DEBOUNCE_MS = 500
 
 
+def _normalize_gene_name(gene: object) -> str:
+    """Normalize transcript gene names to Python strings.
+
+    Qt widgets expect text entries to be ``str``. Some transcript datasets
+    store gene names as raw bytes in parquet-backed columns.
+    """
+    if isinstance(gene, str):
+        return gene
+    if isinstance(gene, bytes):
+        try:
+            return gene.decode("utf-8")
+        except UnicodeDecodeError:
+            return gene.decode("utf-8", errors="replace")
+    return str(gene)
+
+
 class TranscriptViewerConfig:
     """Configuration class for the TranscriptViewerWidget.
 
@@ -109,6 +125,10 @@ def prepare_gene_data(
         logger.info("Computing Dask DataFrame to pandas...")
         df = df[[config.gene_column, config.x_column, config.y_column]].compute()
 
+    # Normalize gene names to strings for UI compatibility
+    df = df.copy()
+    df[config.gene_column] = df[config.gene_column].map(_normalize_gene_name)
+
     # Get unique genes and assign colors
     genes = sorted(df[config.gene_column].unique())
     n_genes = len(genes)
@@ -149,7 +169,8 @@ def prepare_gene_colors(
 
     # Only compute unique gene names
     logger.info("Extracting unique gene names from Dask DataFrame...")
-    genes = sorted(dask_df[config.gene_column].unique().compute().tolist())
+    genes_raw = dask_df[config.gene_column].unique().compute().tolist()
+    genes = sorted({_normalize_gene_name(gene) for gene in genes_raw})
     n_genes = len(genes)
     logger.info("Found %d unique genes", n_genes)
 
@@ -521,12 +542,21 @@ if WITH_NAPARI:
             Args:
                 gene: Gene name to load coordinates for.
             """
-            coords = (
-                self.dask_df[self.dask_df[self.config.gene_column] == gene]
-                [[self.config.x_column, self.config.y_column]]
-                .compute()
-                .values
-            )
+            subset = self.dask_df[self.dask_df[self.config.gene_column] == gene]
+            coords = subset[[self.config.x_column, self.config.y_column]].compute().values
+
+            # Some datasets store gene names as bytes in parquet columns.
+            # Retry with UTF-8 bytes if the normalized string lookup is empty.
+            if len(coords) == 0:
+                try:
+                    gene_as_bytes = gene.encode("utf-8")
+                except UnicodeEncodeError:
+                    gene_as_bytes = None
+
+                if gene_as_bytes is not None:
+                    subset = self.dask_df[self.dask_df[self.config.gene_column] == gene_as_bytes]
+                    coords = subset[[self.config.x_column, self.config.y_column]].compute().values
+
             self.gene_data[gene] = coords
             logger.info("Loaded %d coordinates for gene '%s'", len(coords), gene)
 

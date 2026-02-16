@@ -153,6 +153,20 @@ class TestPrepareGeneData:
         expected = np.array([[10.0, 30.0], [20.0, 40.0]])
         np.testing.assert_array_equal(gene_data["GeneA"], expected)
 
+    def test_mixed_bytes_and_str_gene_names(self):
+        """Test normalization of mixed bytes/str gene names in in-memory mode."""
+        df = pd.DataFrame({
+            "feature_name": [b"GeneA", "GeneA", b"GeneB", "GeneC"],
+            "x_location": [1.0, 2.0, 3.0, 4.0],
+            "y_location": [5.0, 6.0, 7.0, 8.0],
+        })
+
+        gene_data, gene_colors = prepare_gene_data(df)
+
+        assert set(gene_data.keys()) == {"GeneA", "GeneB", "GeneC"}
+        assert all(isinstance(gene, str) for gene in gene_data.keys())
+        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+
 
 class TestPrepareGeneColors:
     """Tests for prepare_gene_colors function (lazy mode)."""
@@ -178,6 +192,24 @@ class TestPrepareGeneColors:
 
         # Check gene_colors
         assert isinstance(gene_colors, dict)
+        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+
+    def test_mixed_bytes_and_str_gene_names(self):
+        """Test normalization of mixed bytes/str gene names in lazy mode."""
+        pytest.importorskip("dask")
+        import dask.dataframe as dd
+
+        df = pd.DataFrame({
+            "feature_name": [b"GeneA", "GeneA", b"GeneB", "GeneC", b"GeneC"],
+            "x_location": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "y_location": [6.0, 7.0, 8.0, 9.0, 10.0],
+        })
+        dask_df = dd.from_pandas(df, npartitions=2)
+
+        gene_list, gene_colors = prepare_gene_colors(dask_df)
+
+        assert gene_list == ["GeneA", "GeneB", "GeneC"]
+        assert all(isinstance(gene, str) for gene in gene_list)
         assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
 
 
