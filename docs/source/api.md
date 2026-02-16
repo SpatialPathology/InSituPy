@@ -115,8 +115,15 @@ Working with saved sample filters (including optional notes):
     # programmatic access to raw boolean masks
     exp.filters.masks()
 
-    # save and later load with filter applied
+    # full project save (datasets + metadata + colors + filters)
     exp.save()
+
+    # dedicated partial-save helpers
+    exp.save_metadata()
+    exp.save_colors()
+    exp.save_images(overwrite=False)
+
+    # load later with filter applied
     exp2 = InSituExperiment.read("path/to/experiment", filter_key="general_quality")
 
     # detached subset (export workflow): exp_apply.path is None

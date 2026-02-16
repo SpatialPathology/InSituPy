@@ -1373,111 +1373,201 @@ class InSituExperiment:
 
     def save(self,
              verbose: bool = False,
-             overwrite_metadata: bool = True,
-             overwrite_colors: bool = True,
-             metadata_only: bool = False,
-             sync_images: bool = False,
-             images_only: bool = False,
-             overwrite_images: bool = False,
              collect_warnings_mode: bool = True,
              **kwargs
              ):
-        """Save the experiment.
+        """Save the full experiment to its existing project path.
+
+        This method has a single responsibility: perform a full project save
+        (datasets + metadata + colors + filters).
+
+        For partial save workflows, use dedicated methods:
+        ``save_metadata()``, ``save_colors()``, ``save_images()``, and ``save_filters()``.
 
         Args:
-            verbose: If True, print verbose output.
-            overwrite_metadata: If True, overwrite the metadata CSV file.
-            overwrite_colors: If True, overwrite the colors JSON file.
-            metadata_only: If True, only save the metadata (not the datasets).
-            sync_images: If True, save new images that don't exist yet in each dataset's
-                images folder. Existing images are skipped.
-            images_only: If True, only save image data and skip all other modalities
-                (cells, annotations, regions). Implies sync_images=True.
-            overwrite_images: If True, overwrite existing images on disk during sync.
-                Default is False (skip images that already exist).
-            collect_warnings_mode: If True, collect warnings and print summary at end
+            verbose: If True, print verbose output for dataset-level save operations.
+            collect_warnings_mode: If True, collect warnings and print a summary at end
                 instead of displaying them inline (prevents progress bar disruption).
-            **kwargs: Additional keyword arguments passed to InSituData.save().
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
         """
         self._check_mode_compatibility("save")
 
         if self.is_view:
-            if metadata_only:
-                warnings.warn(
-                    "`metadata_only=True` is not supported for InSituExperimentView. "
-                    "View save updates only selected datasets in-place.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                return
-
             if collect_warnings_mode:
                 with collect_warnings() as collector:
                     for xd in tqdm(self._data):
-                        xd.save(
-                            verbose=verbose,
-                            sync_images=sync_images,
-                            images_only=images_only,
-                            overwrite_images=overwrite_images,
-                            **kwargs
-                        )
+                        xd.save(verbose=verbose, **kwargs)
                 collector.print_summary()
             else:
                 for xd in tqdm(self._data):
-                    xd.save(
-                        verbose=verbose,
-                        sync_images=sync_images,
-                        images_only=images_only,
-                        overwrite_images=overwrite_images,
-                        **kwargs
-                    )
+                    xd.save(verbose=verbose, **kwargs)
             return
 
-        if metadata_only and not overwrite_metadata:
-            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
+        if self.path is None:
+            raise ValueError(
+                "No save path available. First save the InSituExperiment using `saveas()` "
+                "or set `self.path` by reading an existing experiment."
+            )
 
-        if not metadata_only:
+        parent_path_identical = [
+            (d.path is not None) and (Path(d.path).parent == self.path)
+            for d in self.data
+        ]
+        if not np.all(parent_path_identical):
+            invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+            raise ValueError(
+                "Saving failed: save path of some InSituData objects does not lie inside "
+                f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+            )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(verbose=verbose, **kwargs)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(verbose=verbose, **kwargs)
+
+        self.save_metadata(overwrite=True)
+        self.save_colors(overwrite=True)
+        self.save_filters(path=self.path)
+
+    def save_metadata(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment metadata to ``metadata.csv``.
+
+        Args:
+            path: Directory where ``metadata.csv`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``metadata.csv``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``metadata.csv`` exists and ``overwrite`` is False.
+        """
+        if path is None:
             if self.path is None:
-                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
-                return
-            else:
-                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
-                if not np.all(parent_path_identical):
-                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self._metadata['uid'][parent_path_identical].values}")
-                else:
-                    if collect_warnings_mode:
-                        with collect_warnings() as collector:
-                            for xd in tqdm(self._data):
-                                xd.save(
-                                    verbose=verbose,
-                                    sync_images=sync_images,
-                                    images_only=images_only,
-                                    overwrite_images=overwrite_images,
-                                    **kwargs
-                                    )
-                        # Print collected warnings at the end
-                        collector.print_summary()
-                    else:
-                        for xd in tqdm(self._data):
-                            xd.save(
-                                verbose=verbose,
-                                sync_images=sync_images,
-                                images_only=images_only,
-                                overwrite_images=overwrite_images,
-                                **kwargs
-                                )
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
 
-            if overwrite_colors:
-                with open(self.path / "colors.json", 'w') as f:
-                    json.dump(self.colors, f)
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        metadata_path = path / "metadata.csv"
 
-        if overwrite_metadata:
-            # Optionally, save the metadata as a CSV file
-            self._metadata.to_csv(self.path / "metadata.csv", index=True)
+        if metadata_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {metadata_path}. Set `overwrite=True` to replace it."
+            )
 
-        # Save filters alongside metadata
-        if self.path is not None:
-            self.save_filters(path=self.path)
+        self._metadata.to_csv(metadata_path, index=True)
+
+    def save_colors(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment colors to ``colors.json``.
+
+        Args:
+            path: Directory where ``colors.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``colors.json``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``colors.json`` exists and ``overwrite`` is False.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        colors_path = path / "colors.json"
+
+        if colors_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
+            )
+
+        with open(colors_path, 'w') as f:
+            json.dump(self.colors, f)
+
+    def save_images(
+        self,
+        overwrite: bool = False,
+        collect_warnings_mode: bool = True,
+        **kwargs,
+    ):
+        """Save only image data for datasets in the experiment.
+
+        This method syncs images only by forwarding ``sync_images=True`` and
+        ``images_only=True`` to each dataset save call.
+
+        Args:
+            overwrite: If True, overwrite existing images on disk.
+                Default is False (skip images that already exist).
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_images")
+
+        dataset_verbose = kwargs.pop("verbose", False)
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
+                )
+
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving images failed: save path of some InSituData objects does not lie inside "
+                    f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(
+                        verbose=dataset_verbose,
+                        sync_images=True,
+                        images_only=True,
+                        overwrite_images=overwrite,
+                        **kwargs,
+                    )
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(
+                    verbose=dataset_verbose,
+                    sync_images=True,
+                    images_only=True,
+                    overwrite_images=overwrite,
+                    **kwargs,
+                )
 
 
 
@@ -1488,7 +1578,10 @@ class InSituExperiment:
         verbose: bool = False,
         collect_warnings_mode: bool = True,
         **kwargs):
-        """Save all datasets to a specified folder.
+        """Save experiment to a new location (initial full write).
+
+        This method writes all datasets to ``path`` and then saves metadata,
+        colors, and filters using dedicated helper methods.
 
         Args:
             path: Path to save the InSituExperiment.
@@ -1523,12 +1616,9 @@ class InSituExperiment:
                 subfolder_path = path / f"data-{str(index).zfill(3)}"
                 dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
-        # Optionally, save the metadata as a CSV file
-        self._metadata.to_csv(path / "metadata.csv", index=True)
-
-        with open(path / "colors.json", 'w') as f:
-            json.dump(self.colors, f)
-
+        self._path = path
+        self.save_metadata(path=path, overwrite=True)
+        self.save_colors(path=path, overwrite=True)
         self.save_filters(path=path)
 
         print("Saved.") if verbose else None
