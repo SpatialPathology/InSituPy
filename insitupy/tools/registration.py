@@ -626,7 +626,10 @@ def register_images(
     tracemalloc.start()
 
     if decon_scale_factor <= 0:
-        raise ValueError(f"`decon_scale_factor` must be > 0, got {decon_scale_factor}.")
+        raise ValueError(
+            f"`decon_scale_factor` must be > 0 (typically between 0.1 and 1.0), "
+            f"got {decon_scale_factor}."
+        )
 
     # make sure the given image names are in a list
     channel_names = convert_to_list(channel_names)
@@ -645,7 +648,11 @@ def register_images(
         image_type = "IF"
     else:
         raise ValueError(f"Unknown axes configuration {axes_image} for target image. Please use 'YXS' for histo images or 'CYX'/'YXC' for IF images.")
-
+        raise ValueError(
+            f"For IF images (`axes_image` in {{'CYX', 'YXC'}}), "
+            f"`channel_name_for_registration` must be provided. "
+            f"Available channels: {channel_names}"
+        )
     # if image type is IF, the channel name for registration needs to be given
     if image_type == "IF" and channel_name_for_registration is None:
         raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")

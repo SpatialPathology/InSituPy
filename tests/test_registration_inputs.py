@@ -163,3 +163,12 @@ def test_if_positive_path_smoke(dummy_data, image_file, monkeypatch):
     assert added["channel_names"] == "FITC"
     assert added["axes"] == "YX"
     assert added["image"].shape == (8, 8)
+
+    # Ensure that the registration channel ("DAPI") is not included
+    # in any of the images added to the collection.
+    for img in dummy_data.images.added_images:
+        ch = img["kwargs"].get("channel_names")
+        if isinstance(ch, (list, tuple, set)):
+            assert "DAPI" not in ch
+        else:
+            assert ch != "DAPI"
