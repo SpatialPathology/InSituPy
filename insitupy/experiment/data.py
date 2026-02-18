@@ -27,6 +27,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Set to True to enable spatialdata mode functionality
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
+_FILTERS_SCHEMA_VERSION = 1
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -107,6 +109,8 @@ class InSituExperiment:
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
+        self._filters = {}
+        self._applied_filters: List[str] = []
         self._data_type = data_type
 
     def __repr__(self):
@@ -137,8 +141,101 @@ class InSituExperiment:
 
         # generate string summary
         sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        return (f"{tf.Bold}InSituExperiment{tf.ResetAll}{mode_str} with {num_samples} samples:\n"
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
+        filters_info = ""
+        if self.applied_filters:
+            filters_info = f"\nApplied filters: {' -> '.join(self.applied_filters)}"
+
+        return (f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str} with {num_samples} samples:{filters_info}\n"
                 f"{sample_summary}")
+
+    @property
+    def is_view(self) -> bool:
+        return False
+
+    @property
+    def applied_filters(self) -> List[str]:
+        return list(self._applied_filters)
+
+    def _subset(
+        self,
+        key,
+        as_view: bool = False,
+        added_filter: Optional[str] = None,
+    ):
+        """
+        Internal helper to subset experiment data and metadata.
+
+        Args:
+            key: Subsetting key (same accepted types as ``__getitem__``).
+            as_view: If True, keep path linkage and return an InSituExperimentView.
+            added_filter: Optional filter key to append to applied filter history.
+        """
+        if isinstance(key, int):
+            if key > (len(self) - 1):
+                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
+            key = slice(key, key + 1)
+
+        elif isinstance(key, list):
+            if all(isinstance(i, bool) for i in key):
+                key = pd.Series(key)
+
+        elif isinstance(key, pd.Series):
+            if key.dtype != bool:
+                key = key.tolist()
+
+        subset_cls = InSituExperimentView if as_view else InSituExperiment
+
+        # Handle boolean mask
+        if isinstance(key, pd.Series) and key.dtype == bool:
+            selected_indices = list(self._metadata.index[key])
+            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment._data = [d for d, k in zip(self._data, key) if k]
+            new_experiment._metadata = self._metadata[key].reset_index(drop=True)
+
+        # Handle slices, list of ints, ndarray, or Series of ints
+        else:
+            selected_indices = list(self._metadata.iloc[key].index)
+            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
+            new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
+
+        # Carry over colors and filters, and subset filters to the new metadata
+        new_experiment._colors = deepcopy(self._colors)
+        new_experiment._filters = {}
+        if self._filters:
+            for name, entry in self._filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(self._metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(self._metadata)}). Skipping filter in subset.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                new_experiment._filters[name] = {
+                    "mask": mask_arr[selected_indices].tolist(),
+                    "note": note,
+                }
+
+        # Keep linkage only for view objects
+        if as_view:
+            new_experiment._path = self._path
+        else:
+            new_experiment._path = None
+
+        if as_view:
+            new_experiment._applied_filters = list(self._applied_filters)
+            if added_filter is not None:
+                new_experiment._applied_filters.append(added_filter)
+        else:
+            new_experiment._applied_filters = []
+
+        return new_experiment
 
     def __getitem__(self, key):
         """
@@ -155,35 +252,7 @@ class InSituExperiment:
             IndexError: If the index is out of range.
             ValueError: If the key is invalid.
         """
-        if isinstance(key, int):
-            if key > (len(self) - 1):
-                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
-            key = slice(key, key + 1)
-
-        elif isinstance(key, list):
-            if all(isinstance(i, bool) for i in key):
-                key = pd.Series(key)
-            # If it's a list of indices, we let it pass to iloc below
-
-        elif isinstance(key, pd.Series):
-            if key.dtype != bool:
-                key = key.tolist()
-
-        # Handle boolean mask
-        if isinstance(key, pd.Series) and key.dtype == bool:
-            new_experiment = InSituExperiment(data_type=self._data_type)
-            new_experiment._data = [d for d, k in zip(self._data, key) if k]
-            new_experiment._metadata = self._metadata[key].reset_index(drop=True)
-
-        # Handle slices, list of ints, ndarray, or Series of ints
-        else:
-            new_experiment = InSituExperiment(data_type=self._data_type)
-            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
-            new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
-
-        # Disconnect object from save path
-        new_experiment._path = None
-        return new_experiment
+        return self._subset(key, as_view=self.is_view)
 
     def __len__(self):
         """Returns the number of datasets in the experiment.
@@ -242,6 +311,26 @@ class InSituExperiment:
             dict: A dictionary mapping metadata keys to color dictionaries.
         """
         return self._colors
+
+    @property
+    def filters(self):
+        """
+        Filter manager exposing filter operations (create, remove, clear, apply, view, rename).
+
+        Returns:
+            FilterManager: Manager object for filter operations and summaries.
+        """
+        return FilterManager(self)
+
+    @property
+    def filter_masks(self):
+        """
+        Raw filter dictionary mapping keys to boolean masks.
+
+        Returns:
+            dict: A dictionary mapping filter keys to boolean-mask lists.
+        """
+        return self.filters.masks()
 
     @property
     def data(self):
@@ -1284,75 +1373,201 @@ class InSituExperiment:
 
     def save(self,
              verbose: bool = False,
-             overwrite_metadata: bool = True,
-             overwrite_colors: bool = True,
-             metadata_only: bool = False,
-             sync_images: bool = False,
-             images_only: bool = False,
-             overwrite_images: bool = False,
              collect_warnings_mode: bool = True,
              **kwargs
              ):
-        """Save the experiment.
+        """Save the full experiment to its existing project path.
+
+        This method has a single responsibility: perform a full project save
+        (datasets + metadata + colors + filters).
+
+        For partial save workflows, use dedicated methods:
+        ``save_metadata()``, ``save_colors()``, ``save_images()``, and ``save_filters()``.
 
         Args:
-            verbose: If True, print verbose output.
-            overwrite_metadata: If True, overwrite the metadata CSV file.
-            overwrite_colors: If True, overwrite the colors JSON file.
-            metadata_only: If True, only save the metadata (not the datasets).
-            sync_images: If True, save new images that don't exist yet in each dataset's
-                images folder. Existing images are skipped.
-            images_only: If True, only save image data and skip all other modalities
-                (cells, annotations, regions). Implies sync_images=True.
-            overwrite_images: If True, overwrite existing images on disk during sync.
-                Default is False (skip images that already exist).
-            collect_warnings_mode: If True, collect warnings and print summary at end
+            verbose: If True, print verbose output for dataset-level save operations.
+            collect_warnings_mode: If True, collect warnings and print a summary at end
                 instead of displaying them inline (prevents progress bar disruption).
-            **kwargs: Additional keyword arguments passed to InSituData.save().
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
         """
         self._check_mode_compatibility("save")
 
-        if metadata_only and not overwrite_metadata:
-            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
-
-        if not metadata_only:
-            if self.path is None:
-                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
-                return
+        if self.is_view:
+            if collect_warnings_mode:
+                with collect_warnings() as collector:
+                    for xd in tqdm(self._data):
+                        xd.save(verbose=verbose, **kwargs)
+                collector.print_summary()
             else:
-                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
-                if not np.all(parent_path_identical):
-                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self._metadata['uid'][parent_path_identical].values}")
-                else:
-                    if collect_warnings_mode:
-                        with collect_warnings() as collector:
-                            for xd in tqdm(self._data):
-                                xd.save(
-                                    verbose=verbose,
-                                    sync_images=sync_images,
-                                    images_only=images_only,
-                                    overwrite_images=overwrite_images,
-                                    **kwargs
-                                    )
-                        # Print collected warnings at the end
-                        collector.print_summary()
-                    else:
-                        for xd in tqdm(self._data):
-                            xd.save(
-                                verbose=verbose,
-                                sync_images=sync_images,
-                                images_only=images_only,
-                                overwrite_images=overwrite_images,
-                                **kwargs
-                                )
+                for xd in tqdm(self._data):
+                    xd.save(verbose=verbose, **kwargs)
+            return
 
-            if overwrite_colors:
-                with open(self.path / "colors.json", 'w') as f:
-                    json.dump(self.colors, f)
+        if self.path is None:
+            raise ValueError(
+                "No save path available. First save the InSituExperiment using `saveas()` "
+                "or set `self.path` by reading an existing experiment."
+            )
 
-        if overwrite_metadata:
-            # Optionally, save the metadata as a CSV file
-            self._metadata.to_csv(self.path / "metadata.csv", index=True)
+        parent_path_identical = [
+            (d.path is not None) and (Path(d.path).parent == self.path)
+            for d in self.data
+        ]
+        if not np.all(parent_path_identical):
+            invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+            raise ValueError(
+                "Saving failed: save path of some InSituData objects does not lie inside "
+                f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+            )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(verbose=verbose, **kwargs)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(verbose=verbose, **kwargs)
+
+        self.save_metadata(overwrite=True)
+        self.save_colors(overwrite=True)
+        self.save_filters(path=self.path)
+
+    def save_metadata(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment metadata to ``metadata.csv``.
+
+        Args:
+            path: Directory where ``metadata.csv`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``metadata.csv``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``metadata.csv`` exists and ``overwrite`` is False.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        metadata_path = path / "metadata.csv"
+
+        if metadata_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {metadata_path}. Set `overwrite=True` to replace it."
+            )
+
+        self._metadata.to_csv(metadata_path, index=True)
+
+    def save_colors(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment colors to ``colors.json``.
+
+        Args:
+            path: Directory where ``colors.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``colors.json``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``colors.json`` exists and ``overwrite`` is False.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        colors_path = path / "colors.json"
+
+        if colors_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
+            )
+
+        with open(colors_path, 'w') as f:
+            json.dump(self.colors, f)
+
+    def save_images(
+        self,
+        overwrite: bool = False,
+        collect_warnings_mode: bool = True,
+        **kwargs,
+    ):
+        """Save only image data for datasets in the experiment.
+
+        This method syncs images only by forwarding ``sync_images=True`` and
+        ``images_only=True`` to each dataset save call.
+
+        Args:
+            overwrite: If True, overwrite existing images on disk.
+                Default is False (skip images that already exist).
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_images")
+
+        dataset_verbose = kwargs.pop("verbose", False)
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
+                )
+
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving images failed: save path of some InSituData objects does not lie inside "
+                    f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(
+                        verbose=dataset_verbose,
+                        sync_images=True,
+                        images_only=True,
+                        overwrite_images=overwrite,
+                        **kwargs,
+                    )
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(
+                    verbose=dataset_verbose,
+                    sync_images=True,
+                    images_only=True,
+                    overwrite_images=overwrite,
+                    **kwargs,
+                )
 
 
 
@@ -1363,7 +1578,10 @@ class InSituExperiment:
         verbose: bool = False,
         collect_warnings_mode: bool = True,
         **kwargs):
-        """Save all datasets to a specified folder.
+        """Save experiment to a new location (initial full write).
+
+        This method writes all datasets to ``path`` and then saves metadata,
+        colors, and filters using dedicated helper methods.
 
         Args:
             path: Path to save the InSituExperiment.
@@ -1398,13 +1616,40 @@ class InSituExperiment:
                 subfolder_path = path / f"data-{str(index).zfill(3)}"
                 dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
-        # Optionally, save the metadata as a CSV file
-        self._metadata.to_csv(path / "metadata.csv", index=True)
-
-        with open(path / "colors.json", 'w') as f:
-            json.dump(self.colors, f)
+        self._path = path
+        self.save_metadata(path=path, overwrite=True)
+        self.save_colors(path=path, overwrite=True)
+        self.save_filters(path=path)
 
         print("Saved.") if verbose else None
+
+    def save_filters(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+    ):
+        """
+        Save only experiment filters to ``filters.json``.
+
+        Args:
+            path: Directory where ``filters.json`` should be written.
+                If None, uses ``self.path``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        filters_payload = self._build_filters_payload()
+        with open(path / "filters.json", 'w') as f:
+            json.dump(filters_payload, f)
 
     def show(
         self,
@@ -1706,7 +1951,8 @@ class InSituExperiment:
     @classmethod
     def read(cls,
              path: Union[str, os.PathLike, Path],
-             mode: Literal["insitupy", "spatialdata"] = "insitupy") -> "InSituExperiment":
+               mode: Literal["insitupy", "spatialdata"] = "insitupy",
+               filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
@@ -1727,7 +1973,7 @@ class InSituExperiment:
                 )
             return cls._read_spatialdata(path)
         elif mode == "insitupy":
-            return cls._read_insitupy(path)
+            return cls._read_insitupy(path, filter_key=filter_key)
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'insitupy' or 'spatialdata'")
 
@@ -1961,7 +2207,8 @@ class InSituExperiment:
         return loaded
 
     @classmethod
-    def _read_insitupy(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+    def _read_insitupy(cls, path: Union[str, os.PathLike, Path],
+                       filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment in InSituPy format (original implementation).
 
@@ -1984,6 +2231,37 @@ class InSituExperiment:
         except FileNotFoundError:
             colors = {}
 
+        # Load filters (optional)
+        filters = {}
+        filters_path = path / "filters.json"
+        if filters_path.exists():
+            try:
+                with open(filters_path, 'r') as f:
+                    filters_payload = json.load(f)
+            except Exception as err:
+                raise ValueError(
+                    f"Could not load filters.json at '{filters_path}': {err}"
+                ) from err
+
+            if not isinstance(filters_payload, dict):
+                raise ValueError(
+                    "Invalid filters schema: expected a JSON object with keys 'version' and 'filters'."
+                )
+
+            version = filters_payload.get("version", None)
+            filters = filters_payload.get("filters", None)
+
+            if version != _FILTERS_SCHEMA_VERSION:
+                raise ValueError(
+                    f"Unsupported filters schema version: {version}. "
+                    f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                )
+
+            if not isinstance(filters, dict):
+                raise ValueError(
+                    "Invalid filters schema: 'filters' must be a dictionary mapping filter keys to filter entries."
+                )
+
         # Load each dataset
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
@@ -1997,8 +2275,49 @@ class InSituExperiment:
         experiment._data = data
         experiment._path = path
         experiment._colors = colors
+        experiment._filters = {}
+
+        # Validate and store filters
+        if filters:
+            for name, entry in filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(metadata)}). Skipping this filter.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                experiment._filters[name] = {
+                    "mask": mask_arr.tolist(),
+                    "note": note,
+                }
+
+        if filter_key is not None:
+            if filter_key not in experiment._filters:
+                raise KeyError(
+                    f"Filter '{filter_key}' not found. Available filters: {list(experiment._filters.keys())}"
+                )
+            experiment = experiment.filters.apply(filter_key)
 
         return experiment
+
+    def _build_filters_payload(self) -> Dict[str, Any]:
+        """Build versioned JSON payload for ``filters.json``."""
+        payload: Dict[str, Any] = {
+            "version": _FILTERS_SCHEMA_VERSION,
+            "filters": {},
+        }
+
+        for key, entry in self._filters.items():
+            spec = FilterSpec.from_entry(key, entry)
+            payload["filters"][key] = spec.to_dict()
+
+        return payload
 
     def _check_mode_compatibility(self, method_name: str):
         """
@@ -2010,7 +2329,6 @@ class InSituExperiment:
                 f"Method '{method_name}' is not yet implemented for SpatialData mode. "
                 f"This will be added in a future update."
             )
-
     def _check_obs_uniqueness(
         self,
         cells_layer: Optional[str] = None
@@ -2119,3 +2437,11 @@ class InSituExperiment:
                 transcripts_col: median_transcripts,
                 cells_col: num_cells,
             }
+
+
+class InSituExperimentView(InSituExperiment):
+    """Lightweight linked view of an InSituExperiment subset."""
+
+    @property
+    def is_view(self) -> bool:
+        return True

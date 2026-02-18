@@ -41,6 +41,22 @@ DEFAULT_POINT_SIZE = 0.2
 DEFAULT_DEBOUNCE_MS = 500
 
 
+def _normalize_gene_name(gene: object) -> str:
+    """Normalize transcript gene names to Python strings.
+
+    Qt widgets expect text entries to be ``str``. Some transcript datasets
+    store gene names as raw bytes in parquet-backed columns.
+    """
+    if isinstance(gene, str):
+        return gene
+    if isinstance(gene, bytes):
+        try:
+            return gene.decode("utf-8")
+        except UnicodeDecodeError:
+            return gene.decode("utf-8", errors="replace")
+    return str(gene)
+
+
 class TranscriptViewerConfig:
     """Configuration class for the TranscriptViewerWidget.
 
@@ -109,6 +125,10 @@ def prepare_gene_data(
         logger.info("Computing Dask DataFrame to pandas...")
         df = df[[config.gene_column, config.x_column, config.y_column]].compute()
 
+    # Normalize gene names to strings for UI compatibility
+    df = df.copy()
+    df[config.gene_column] = df[config.gene_column].map(_normalize_gene_name)
+
     # Get unique genes and assign colors
     genes = sorted(df[config.gene_column].unique())
     n_genes = len(genes)
@@ -149,7 +169,8 @@ def prepare_gene_colors(
 
     # Only compute unique gene names
     logger.info("Extracting unique gene names from Dask DataFrame...")
-    genes = sorted(dask_df[config.gene_column].unique().compute().tolist())
+    genes_raw = dask_df[config.gene_column].unique().compute().tolist()
+    genes = sorted({_normalize_gene_name(gene) for gene in genes_raw})
     n_genes = len(genes)
     logger.info("Found %d unique genes", n_genes)
 
@@ -271,6 +292,7 @@ if WITH_NAPARI:
             self.config = config or TranscriptViewerConfig()
             self.viewer_config = viewer_config
             self.active_genes: Dict[str, Optional[np.ndarray]] = {}
+            self._gene_query_mode: str = "str"
 
             if lazy_loading:
                 if dask_df is None:
@@ -278,6 +300,7 @@ if WITH_NAPARI:
                 self.dask_df = dask_df
                 self.gene_list = gene_data_or_list  # list of gene names
                 self.gene_data: Dict[str, np.ndarray] = {}  # cache for loaded coords
+                self._init_gene_query_mode()
             else:
                 self.dask_df = None
                 self.gene_data = gene_data_or_list  # dict of coords
@@ -515,18 +538,75 @@ if WITH_NAPARI:
 
             self._do_query()
 
+        def _init_gene_query_mode(self) -> None:
+            """Infer whether gene column values are stored as strings or bytes."""
+            self._gene_query_mode = "str"
+
+            try:
+                sample = self.dask_df[self.config.gene_column].dropna().head(1)
+            except Exception as exc:
+                logger.debug(
+                    "Could not infer gene query mode from column '%s'; using string mode (%s)",
+                    self.config.gene_column,
+                    exc,
+                )
+                return
+
+            if len(sample) == 0:
+                logger.debug(
+                    "Gene column '%s' has no non-null sample value; using string mode",
+                    self.config.gene_column,
+                )
+                return
+
+            sample_value = sample.iloc[0]
+            if isinstance(sample_value, (bytes, bytearray)):
+                self._gene_query_mode = "bytes"
+
+            logger.debug(
+                "Initialized gene query mode for column '%s' as '%s'",
+                self.config.gene_column,
+                self._gene_query_mode,
+            )
+
+        def _gene_to_query_key(self, gene: str):
+            """Convert normalized gene string to query key for the Dask column."""
+            if self._gene_query_mode == "bytes":
+                try:
+                    return gene.encode("utf-8")
+                except UnicodeEncodeError:
+                    logger.warning(
+                        "Could not UTF-8 encode gene '%s' for bytes-backed lookup; using string key",
+                        gene,
+                    )
+                    return gene
+            return gene
+
         def _load_gene_coords(self, gene: str) -> None:
             """Load gene coordinates from Dask DataFrame (lazy mode only).
 
             Args:
                 gene: Gene name to load coordinates for.
             """
-            coords = (
-                self.dask_df[self.dask_df[self.config.gene_column] == gene]
-                [[self.config.x_column, self.config.y_column]]
-                .compute()
-                .values
-            )
+            query_key = self._gene_to_query_key(gene)
+            subset = self.dask_df[self.dask_df[self.config.gene_column] == query_key]
+            coords = subset[[self.config.x_column, self.config.y_column]].compute().values
+
+            # Guarded fallback for mixed/unknown columns: retry only when primary lookup is empty.
+            if len(coords) == 0:
+                fallback_key = None
+                if self._gene_query_mode == "str":
+                    try:
+                        fallback_key = gene.encode("utf-8")
+                    except UnicodeEncodeError:
+                        fallback_key = None
+                elif self._gene_query_mode == "bytes":
+                    fallback_key = gene
+
+                if fallback_key is not None and fallback_key != query_key:
+                    subset = self.dask_df[self.dask_df[self.config.gene_column] == fallback_key]
+                    coords = subset[[self.config.x_column, self.config.y_column]].compute().values
+
             self.gene_data[gene] = coords
             logger.info("Loaded %d coordinates for gene '%s'", len(coords), gene)
 
