@@ -938,7 +938,7 @@ if WITH_NAPARI:
                     {
                         'name': name,
                         'size': 10,
-                        'edge_color': 'black',
+                        'border_color': 'black',
                         'face_color': 'blue',
                         #'scale': (config.pixel_size, config.pixel_size),
                         'properties': {

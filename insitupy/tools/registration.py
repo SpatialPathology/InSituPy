@@ -563,7 +563,7 @@ class ImageRegistration:
 def register_images(
     data: InSituData, # type: ignore
     image_to_be_registered: Union[str, os.PathLike, Path],
-    axes_image: Literal["CYX", "YXS"],  # axes of the image to be registered, e.g. YXS for RGB images, CYX for IF images
+    axes_image: Literal["CYX", "YXC", "YXS"],  # axes of the image to be registered, e.g. YXS for RGB images, CYX/YXC for IF images
     axes_template: Literal["YX", "CYX", "YXS"],  # axes of the template image, e.g. YX for grayscale images
     channel_names: Union[str, List[str]],
     channel_name_for_registration: Optional[str] = None,  # name used for the nuclei image. Only required for IF images.
@@ -583,7 +583,7 @@ def register_images(
     Args:
         data (InSituData): The InSituData object containing the images.
         image_to_be_registered (Union[str, os.PathLike, Path]): Path to the image to be registered.
-        axes_image (Literal["CYX", "YXS"]): Axes of the image to be registered, e.g. YXS for RGB images, CYX for IF images.
+        axes_image (Literal["CYX", "YXC", "YXS"]): Axes of the image to be registered, e.g. YXS for RGB images, CYX/YXC for IF images.
         axes_template (Literal["YX", "CYX", "YXS"]): Axes of the template image, e.g. YX for grayscale images, YXS for HE images.
         channel_names (Union[str, List[str]]): Names of the channels in the image.
         channel_name_for_registration (Optional[str], optional): Name of the channel used for registration. Required for IF images. Defaults to None.
@@ -606,6 +606,9 @@ def register_images(
         ValueError: If an unknown axes configuration is provided.
         ValueError: If no channel indicator `C` is found in the image axes for IF images.
         ValueError: If deconvolve_template is True but axes_template is not RGB (YXS/SYX).
+        ValueError: If IF channel metadata is inconsistent (channel count mismatch, duplicates,
+            missing registration channel, or no channels left to register).
+        ValueError: If decon_scale_factor is not strictly positive.
 
     Returns:
         None
@@ -621,6 +624,9 @@ def register_images(
 
     _t_start = time.time()
     tracemalloc.start()
+
+    if decon_scale_factor <= 0:
+        raise ValueError(f"`decon_scale_factor` must be > 0, got {decon_scale_factor}.")
 
     # make sure the given image names are in a list
     channel_names = convert_to_list(channel_names)
@@ -642,7 +648,7 @@ def register_images(
 
     # if image type is IF, the channel name for registration needs to be given
     if image_type == "IF" and channel_name_for_registration is None:
-        raise ValueError(f'If `image_type" is "IF", `channel_name_for_registration is not allowed to be `None`.')
+        raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")
 
     if output_dir is None:
         # define output directory
@@ -699,6 +705,35 @@ def register_images(
     if len(image.shape) == 4:
         image = image[0]
 
+    if image_type == "IF":
+        channel_axis = axes_image.find("C")
+        if channel_axis == -1:
+            raise ValueError(f"No channel indicator `C` found in image axes ({axes_image})")
+
+        n_image_channels = image.shape[channel_axis]
+        n_named_channels = len(channel_names)
+        if n_named_channels != n_image_channels:
+            raise ValueError(
+                "Mismatch between `channel_names` and image channels: "
+                f"len(channel_names)={n_named_channels}, image channels={n_image_channels} "
+                f"(axes_image='{axes_image}', image.shape={image.shape}, channel_axis={channel_axis})."
+            )
+
+        if len(set(channel_names)) != n_named_channels:
+            raise ValueError(f"`channel_names` must be unique for IF images, got {channel_names}.")
+
+        if channel_name_for_registration not in channel_names:
+            raise ValueError(
+                f"`channel_name_for_registration` ('{channel_name_for_registration}') "
+                f"was not found in `channel_names`: {channel_names}."
+            )
+
+        if n_named_channels == 1 and channel_name_for_registration == channel_names[0]:
+            raise ValueError(
+                "No channels remain to register: `channel_names` only contains "
+                "`channel_name_for_registration`. Provide at least one additional channel."
+            )
+
     # # read images in InSituData object
     template = data.images[template_image_name][0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
     print(f"{_prefix}{_VLINE}     Image:    {image.shape}", flush=True)
@@ -749,10 +784,6 @@ def register_images(
         # image_type is "IF" then
         # get index of nuclei channel
         channel_id_for_registration = channel_names.index(channel_name_for_registration)
-        channel_axis = axes_image.find("C")
-
-        if channel_axis == -1:
-            raise ValueError(f"No channel indicator `C` found in image axes ({axes_image})")
 
         print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Selecting nuclei channel (index: {channel_id_for_registration})", flush=True)
         # # select nuclei channel from IF image
