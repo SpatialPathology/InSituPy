@@ -22,7 +22,7 @@ dependencies = [
     "openpyxl (>=3.1.2,<4.0.0)",
     "pytest>=7.4.2",
     "xmltodict>=0.13.0",
-    "zarr (>=2.16.1,<4.0.0)",
+    "zarr (>=3.0.0,<4.0.0)",
     "pyarrow (>=14.0.1,<=21.0.0)", # 22.0.0 causes issues reading cell.parquet
     "fastparquet>=2023.10.1",
     "toml (>=0.10.2,<1.0.0)",

@@ -13,9 +13,7 @@ import dask.array as da
 import numpy as np
 import zarr
 
-# Detect Zarr version
-ZARR_V3 = hasattr(zarr.storage, 'LocalStore')
-print(f"Zarr version: {zarr.__version__} (v3 API: {ZARR_V3})")
+print(f"Zarr version: {zarr.__version__}")
 
 
 # ---------------------------------------------------------------------------
@@ -96,17 +94,12 @@ def _extract_path_from_zarr_array(v) -> Path | None:
 def _extract_path_from_store(store) -> Path | None:
     """Extract a filesystem path from a zarr store object."""
 
-    if ZARR_V3:
-        # zarr v3: LocalStore
-        if isinstance(store, zarr.storage.LocalStore):
-            root = getattr(store, 'root', None)
-            if root is not None:
-                return Path(str(root)).resolve()
-            return Path(str(store)).resolve()
-    else:
-        # zarr v2: DirectoryStore
-        if isinstance(store, zarr.storage.DirectoryStore):
-            return Path(store.path).resolve()
+    # zarr v3: LocalStore
+    if isinstance(store, zarr.storage.LocalStore):
+        root = getattr(store, 'root', None)
+        if root is not None:
+            return Path(str(root)).resolve()
+        return Path(str(store)).resolve()
 
     # Generic fallback: .path attribute
     if hasattr(store, 'path'):
@@ -143,9 +136,9 @@ def create_test_zarr_pyramid(path: Path, shape=(100, 100), chunks=(50, 50)):
     """Create a test zarr store with pyramid (group with sub-arrays)."""
     data = np.random.randint(0, 255, size=shape, dtype=np.uint8)
     root = zarr.open_group(str(path), mode='w')
-    root.create_array('0', data=data, shape=data.shape, chunks=chunks, dtype=data.dtype)
+    root.create_array('0', data=data, chunks=chunks)
     half = data[::2, ::2]
-    root.create_array('1', data=half, shape=half.shape, chunks=chunks, dtype=half.dtype)
+    root.create_array('1', data=half, chunks=chunks)
     root.attrs['OME'] = {}
     root.attrs['axes'] = 'YX'
     root.attrs['pixel_size'] = 0.5
@@ -177,7 +170,7 @@ def test_pyramid_zarr_array():
         create_test_zarr_pyramid(zarr_path)
 
         # Load as InSituPy does: da.from_zarr with LocalStore
-        store = zarr.storage.LocalStore(zarr_path) if ZARR_V3 else zarr.DirectoryStore(str(zarr_path))
+        store = zarr.storage.LocalStore(zarr_path)
         arr = da.from_zarr(store, component='0')
 
         result = get_zarr_source_path(arr)
@@ -200,7 +193,7 @@ def test_pyramid_as_list():
         zarr_path = Path(tmpdir) / "pyramid.zarr"
         create_test_zarr_pyramid(zarr_path)
 
-        store = zarr.storage.LocalStore(zarr_path) if ZARR_V3 else zarr.DirectoryStore(str(zarr_path))
+        store = zarr.storage.LocalStore(zarr_path)
         img_list = [
             da.from_zarr(store, component='0'),
             da.from_zarr(store, component='1'),
