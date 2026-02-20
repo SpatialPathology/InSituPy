@@ -15,7 +15,7 @@ from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy import __version__
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy.images.axes import ImageAxes
+from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
 from insitupy.utils.utils import convert_to_list
 
@@ -315,6 +315,8 @@ def read_zarr(path):
         if len(img) == 0:
             raise ValueError(f"No image data read from zarr file: {path}")
 
+        img, axes = normalize_axes_and_shape(img, axes)
+
     return img, ome_meta, axes, pixel_size
 
 
@@ -365,14 +367,7 @@ def read_image(
                     # in case of .tif image
                     pixel_size = float(ome_meta['OME:Image']['OME:Pixels']['PhysicalSizeX'])
 
-        if axes == "CYX":
-            if isinstance(img, list):
-                shape = img[0].shape
-            else:
-                shape = img.shape
-            if not len(shape) == 3:
-                warn(f"Axes information ({axes}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.")
-                axes = "YX"
+        img, axes = normalize_axes_and_shape(img, axes)
 
     return img, ome_meta, axes, pixel_size
 
