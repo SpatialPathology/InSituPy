@@ -152,3 +152,9 @@ data/
 # build files
 jupyter_execute/
 docs/source/generated/
+
+# VS code
+.vscode/
+
+# Claude
+.claude/
