@@ -2,6 +2,7 @@ import gzip
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Union
 
@@ -27,18 +28,22 @@ def write_dict_to_json(
     dictionary: dict,
     file: Union[str, os.PathLike, Path],
     ):
+    # First, serialize to string (may raise TypeError — no file touched yet)
     try:
         dict_json = json.dumps(dictionary, indent=4)
-        with open(file, "w") as metafile:
-                metafile.write(dict_json)
     except TypeError:
         # one reason for this type error could be that there are ndarrays in the dict
         # convert them to lists
         nested_dict_numpy_to_list(dictionary)
-
         dict_json = json.dumps(dictionary, indent=4)
-        with open(file, "w") as metafile:
-                metafile.write(dict_json)
+
+    # Write atomically via temp file to avoid corrupting existing file on failure
+    file = Path(file)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile('w', dir=file.parent, delete=False, suffix='.tmp') as tmp:
+        tmp.write(dict_json)
+        tmp_path = tmp.name
+    os.replace(tmp_path, str(file))
 
 
 def check_overwrite_and_remove_if_true(

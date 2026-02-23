@@ -16,6 +16,7 @@ from zarr.errors import ArrayNotFoundError
 
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.dataclasses.dataclasses import BoundariesData
+from insitupy.images.io import _get_zarr_store
 from insitupy.images.utils import _efficiently_resize_array
 from insitupy.utils.utils import (convert_int_to_xenium_hex,
                                   decode_robust_series)
@@ -128,7 +129,7 @@ def _read_boundaries_from_xenium(
     # else:
     cells_zarr_file = path / "cells.zarr.zip"
 
-    store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
+    store = _get_zarr_store(cells_zarr_file, mode='r', zipped=True)
 
     # open zarr directory using dask
     cell_boundaries = da.from_zarr(store, component="masks/1")
@@ -173,6 +174,9 @@ def _read_boundaries_from_xenium(
         nuclei_boundaries=nuclei_boundaries,
         pixel_size=pixel_size_for_meta
         )
+
+    # Attach the zarr store so it stays open while dask arrays are alive
+    boundaries._store = store
 
     return boundaries
 

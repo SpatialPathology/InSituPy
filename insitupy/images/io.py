@@ -10,7 +10,6 @@ import dask.array as da
 import numpy as np
 import xmltodict
 import zarr
-from parse import *
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy import __version__

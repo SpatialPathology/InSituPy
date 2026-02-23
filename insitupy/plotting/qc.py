@@ -10,12 +10,14 @@ import seaborn as sns
 from anndata import AnnData
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
+from insitupy._constants import with_insitupy_style
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.preprocessing.filtering import _compute_mad_threshold
 from insitupy.utils._checks import check_integer_counts
 
 
+@with_insitupy_style
 def plot_qc_metrics(
     data: Union[InSituData, AnnData],
     cells_layer: Optional[str] = None,
@@ -420,6 +422,7 @@ def plot_qc_metrics(
         plt.tight_layout()
     plt.show()
 
+@with_insitupy_style
 def test_transformations(
     data: InSituData, # type: ignore #TODO: Expand this to InSituExperiment
     cells_layer: Optional[str] = None,

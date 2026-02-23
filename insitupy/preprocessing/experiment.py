@@ -4,7 +4,6 @@ from typing import Collection, Literal, Optional, Union
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from parse import *
 from tqdm import tqdm
 
 from insitupy import __version__

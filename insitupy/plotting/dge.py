@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from adjustText import adjust_text
 
+from insitupy._constants import with_insitupy_style
 from insitupy.dataclasses.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.plotting.config import _add_config_table
@@ -34,6 +35,7 @@ MIN_PVALUE = 1e-300
 TABLE_ROW_HEIGHT = 0.075
 
 
+@with_insitupy_style
 def dual_foldchange_plot(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,

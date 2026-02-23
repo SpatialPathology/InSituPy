@@ -4,7 +4,6 @@ from warnings import warn
 
 import dask.array as da
 import numpy as np
-from parse import *
 from scipy.sparse import issparse
 
 from insitupy import WITH_NAPARI, __version__

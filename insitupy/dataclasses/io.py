@@ -12,7 +12,6 @@ import numpy as np
 import scanpy as sc
 import toml
 import zarr
-from parse import *
 from zarr.errors import ArrayNotFoundError
 
 from insitupy import __version__
@@ -306,7 +305,7 @@ def read_shapesdata(
     elif mode == "shapes":
         data = ShapesData()
     else:
-        ValueError(f"Unknown `mode`: {mode}")
+        raise ValueError(f"Unknown `mode`: {mode}")
 
     # make sure files and keys are a list
     # files = convert_to_list(files)

@@ -17,13 +17,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from parse import *
+from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_COLOR_DICT)
+                                 MODALITIES, MODALITIES_COLOR_DICT,
+                                 with_insitupy_style)
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
@@ -899,6 +900,7 @@ class InSituData:
             if verbose:
                 print("Images aligned and added to InSituData object.")
 
+    @with_insitupy_style
     def plot_dimred(self, save: Optional[str] = None):
         '''
         Read dimensionality reduction plots.
@@ -1552,7 +1554,7 @@ class InSituData:
             "note": []
         }
         for d in self._quicksave_dir.glob("[!.]*"):
-            parse_res = parse(pattern, d.stem).named
+            parse_res = parse_string(pattern, d.stem).named
             for key, value in parse_res.items():
                 res[key].append(value)
 

@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import zarr
 from anndata import AnnData
-from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
@@ -458,6 +457,7 @@ class BoundariesData(DeepCopyMixin):
         self._nucleus_count = nucleus_count
 
         self._data = dict()
+        self._store = None  # zarr store reference for lifecycle management
 
     def __repr__(self):
         if len(self._data) > 0:
@@ -473,6 +473,18 @@ class BoundariesData(DeepCopyMixin):
         else:
             repr = "empty"
         return repr
+
+    def close(self):
+        """Close the underlying zarr store if one is attached."""
+        if self._store is not None:
+            try:
+                self._store.close()
+            except Exception:
+                pass
+            self._store = None
+
+    def __del__(self):
+        self.close()
 
     def __len__(self):
         return len(self._data)
@@ -950,6 +962,13 @@ class CellData(DeepCopyMixin):
 
         return deepcopy(self)
 
+    def close(self):
+        """Close underlying resources owned by this CellData object."""
+        if self._boundaries is not None:
+            close_method = getattr(self._boundaries, "close", None)
+            if callable(close_method):
+                close_method()
+
     def crop(self,
             xlim: Optional[Tuple[int, int]] = None,
             ylim: Optional[Tuple[int, int]] = None,
@@ -1219,9 +1238,20 @@ class MultiCellData(DeepCopyMixin):
         if key in self._layers.keys():
             if key == self._main_key:
                 raise KeyError(f"Cannot delete the main key '{self._main_key}'. Please use `set_main()` to set another key as main first.")
+            layer = self._layers[key]
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
             del self._layers[key]
         else:
             raise KeyError(f"Key '{key}' not found in MultiCellData.")
+
+    def close(self):
+        """Close underlying resources owned by all contained CellData layers."""
+        for layer in self._layers.values():
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
 
     @property
     def layers(self):

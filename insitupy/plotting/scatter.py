@@ -35,6 +35,8 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
+from insitupy._constants import with_insitupy_style
+
 
 def _check_datashader():
     """Check if datashader and matplotlib are available."""
@@ -437,6 +439,7 @@ def _plot_interactive_matplotlib(
     return shaded.opts(fig_size=200, title=title)
 
 
+@with_insitupy_style
 def embedding(
     adata: ad.AnnData,
     basis: str = "X_umap",
@@ -802,6 +805,7 @@ def embedding(
     return None
 
 
+@with_insitupy_style
 def umap(
     adata: ad.AnnData,
     color: str | Sequence[str] | None = None,

@@ -6,7 +6,6 @@ from typing import Dict, Literal, Optional, Union
 
 import dask.dataframe as dd
 import pandas as pd
-from parse import *
 from shapely import affinity
 
 from insitupy import __version__
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
-def _handle_image_names(im_path):
+def _handle_xenium_image_names(im_path):
     im_path = Path(im_path)
     if im_path.name.startswith("ch"):
         ch, ch_name = im_path.name.split(".")[0].split("_", maxsplit=1)
@@ -34,6 +33,13 @@ def _handle_image_names(im_path):
     elif im_path.name.startswith("morphology_"):
         _, _, ch = im_path.name.split(".")[0].split("_")
         ch_name = f"cellseg_{ch}"
+
+    else:
+        raise ValueError(
+            f"Unexpected Xenium image filename '{im_path.name}'. "
+            f"Expected filename starting with 'ch' or 'morphology_'. "
+            f"If this is a valid Xenium image, please open an issue."
+        )
 
     return ch, ch_name
 
@@ -183,7 +189,7 @@ def read_xenium(
         image_dir = path / "morphology_focus/"
         if image_dir.is_dir():
             for im_path in image_dir.glob("*.ome.tif"):
-                ch, ch_name = _handle_image_names(im_path)
+                ch, ch_name = _handle_xenium_image_names(im_path)
 
                 if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
                     continue
