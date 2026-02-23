@@ -9,8 +9,8 @@ try:
 except ImportError:
     print((
         f"Napari is not installed. Interactive visualization using `.show()` will not be possible. "
-        f"If you want to use these features, install insitupy with `pip install insitupy[gui]` or "
-        f"napari with `pip install napari[all]`."
+        f"If you want to use these features, install InSituPy with dependencies (e.g., `pip install insitupy-spatial`) "
+        f"or install napari directly with `pip install napari[all]`."
     )
         )
     WITH_NAPARI = False
