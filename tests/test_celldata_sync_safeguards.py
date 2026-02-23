@@ -109,3 +109,24 @@ def test_sync_zeros_removed_cells_in_pyramid_masks_and_filters_table():
 
     assert 2 not in np.unique(cells)
     assert np.all(nuclei[cells == 0] == 0)
+
+
+def test_sync_is_noop_without_boundaries_even_with_duplicate_obs_names():
+    table = _create_table(["c1", "c1", "c2"])
+    celldata = CellData(table=table, boundaries=None)
+
+    celldata.sync()
+
+    assert list(celldata.table.obs_names) == ["c1", "c1", "c2"]
+
+
+def test_crop_works_without_boundaries():
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=None)
+
+    cropped = celldata.crop(xlim=(1, 4), ylim=(2, 5), inplace=False)
+
+    assert cropped is not None
+    assert cropped.boundaries is None
+    assert list(cropped.table.obs_names) == ["c2", "c3"]
+    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))

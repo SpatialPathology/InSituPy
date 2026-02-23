@@ -1065,11 +1065,12 @@ class CellData(DeepCopyMixin):
         _self._table = _self.table[mask, :].copy()
 
         # crop boundaries
-        _self.boundaries.crop(
-            cell_ids=_self.table.obs_names,
-            xlim=xlim, ylim=ylim,
-            inplace=True
-            )
+        if _self.boundaries is not None:
+            _self.boundaries.crop(
+                cell_ids=_self.table.obs_names,
+                xlim=xlim, ylim=ylim,
+                inplace=True
+                )
 
         # shift coordinates to correct for change of coordinates during cropping
         if shape is not None:
@@ -1144,15 +1145,15 @@ class CellData(DeepCopyMixin):
             - if not all are in boundaries, throw error saying that those will also be removed
         3. Select only table cell IDs which are also in boundaries and filter for them
         '''
-        # get cell IDs from table
-        table_cell_ids = pd.Index(self._table.obs_names.astype(str))
-
-        if len(table_cell_ids.unique()) != len(table_cell_ids):
-            raise ValueError("Table .obs_names must be unique to synchronize with boundaries.")
-
         if self._boundaries is None:
-            print('No `boundaries` attribute found in CellData found.')
+            return
         else:
+            # get cell IDs from table
+            table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+
+            if len(table_cell_ids.unique()) != len(table_cell_ids):
+                raise ValueError("Table .obs_names must be unique to synchronize with boundaries.")
+
             boundaries = self._boundaries
 
             # create pandas series from seg_mask values and cell_names
