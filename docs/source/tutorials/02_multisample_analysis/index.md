@@ -24,6 +24,24 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
     :link-type: doc
 
     Notebook showing how to generate pseudobulk data from an `InSituExperiment` class.
+
+.. card:: Extract individual images from a merged dataset
+    :link: InSituPy_extract_individual_images
+    :link-type: doc
+
+    Notebook showing how to extract individual images from merged multi-sample data.
+
+.. card:: Anndata workflow for multi-sample analysis
+    :link: InSituPy_Anndata_workflow
+    :link-type: doc
+
+    Notebook introducing a multi-sample analysis workflow based on AnnData objects.
+
+.. card:: Import workflow based on the Vannan et al. paper
+    :link: InSituPy_Vannan_paper_import
+    :link-type: doc
+
+    Notebook demonstrating multi-sample data from `Vannan et al. <https://www.nature.com/articles/s41588-025-02080-x>`_ paper.
 ```
 
 ```{toctree}
@@ -33,4 +51,7 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 InSituPy_InSituExperiment
 InSituPy_split_datasets
 InSituPy_Pseudobulk
+InSituPy_extract_individual_images
+InSituPy_Anndata_workflow
+InSituPy_Vannan_paper_import
 ```
