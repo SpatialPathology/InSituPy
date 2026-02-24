@@ -262,3 +262,106 @@ class TestReadXeniumCrossVersion:
             assert hasattr(data.cells.table, "n_vars"), "Missing n_vars attribute"
             assert hasattr(data.cells.table, "obsm"), "Missing obsm attribute"
             assert "spatial" in data.cells.table.obsm, "Missing spatial coordinates"
+
+
+class TestReadXeniumSpatialDataBackend:
+    """Tests for Xenium loading through the spatialdata backend."""
+
+    def test_spatialdata_backend_loads_when_available(self, v2_mm_data):
+        """Test backend='spatialdata' path and core output structure."""
+        pytest.importorskip("spatialdata", minversion="0.7.2")
+        pytest.importorskip("spatialdata_io")
+
+        data = read_xenium(v2_mm_data.path, backend="spatialdata", verbose=False)
+
+        assert isinstance(data, InSituData)
+        assert data.cells.table.n_obs > 0
+        assert "spatial" in data.cells.table.obsm
+
+    def test_spatialdata_backend_transcripts_schema(self, v2_mm_data):
+        """Test transcript schema normalization from SpatialData conversion."""
+        pytest.importorskip("spatialdata", minversion="0.7.2")
+        pytest.importorskip("spatialdata_io")
+
+        data = read_xenium(v2_mm_data.path, backend="spatialdata", verbose=False)
+
+        assert data.transcripts is not None
+        assert "feature_name" in data.transcripts.columns
+        assert "x_location" in data.transcripts.columns
+        assert "y_location" in data.transcripts.columns
+
+    def test_roundtrip_insitudata_spatialdata_insitudata(self, v2_mm_data):
+        """Test roundtrip conversion InSituData -> SpatialData -> InSituData."""
+        pytest.importorskip("spatialdata", minversion="0.7.2")
+
+        from insitupy.spatialdata import (convert_from_spatialdata,
+                                          convert_to_spatialdata)
+
+        xd_original = v2_mm_data
+        sdata = convert_to_spatialdata(xd_original)
+
+        cell_layer_key = xd_original.cells.main_key
+        if cell_layer_key is None:
+            cell_layer_key = next(iter(xd_original.cells.layers.keys()))
+        cell_layer = xd_original.cells[cell_layer_key]
+
+        image_data = {
+            name: (
+                f"IMAGES.{name}",
+                xd_original.images.metadata[name]["pixel_size"],
+                xd_original.images.metadata[name]["rgb"],
+            )
+            for name in xd_original.images.names
+        }
+
+        cells_key = f"CELLS.{cell_layer_key}.circles"
+        table_key = f"CELLS.{cell_layer_key}.table"
+
+        cell_boundaries_data = None
+        nucleus_boundaries_data = None
+        if cell_layer.boundaries is not None and len(cell_layer.boundaries.metadata) > 0:
+            boundary_names = list(cell_layer.boundaries.metadata.keys())
+
+            cell_boundary_name = next((n for n in boundary_names if "cell" in n.lower()), None)
+            nucleus_boundary_name = next((n for n in boundary_names if "nuc" in n.lower()), None)
+
+            if cell_boundary_name is not None:
+                cell_pixel_size = cell_layer.boundaries.metadata[cell_boundary_name]["pixel_size"]
+                cell_boundaries_data = (f"CELLS.{cell_layer_key}.boundaries.{cell_boundary_name}", cell_pixel_size)
+            if nucleus_boundary_name is not None:
+                nucleus_pixel_size = cell_layer.boundaries.metadata[nucleus_boundary_name]["pixel_size"]
+                nucleus_boundaries_data = (f"CELLS.{cell_layer_key}.boundaries.{nucleus_boundary_name}", nucleus_pixel_size)
+
+        if (
+            cell_boundaries_data is None
+            or nucleus_boundaries_data is None
+            or not (cell_boundaries_data[0] in sdata and nucleus_boundaries_data[0] in sdata)
+        ):
+            cell_boundaries_data = None
+            nucleus_boundaries_data = None
+
+        xd_roundtrip = convert_from_spatialdata(
+            sdata=sdata,
+            image_data=image_data,
+            cells_key=cells_key,
+            table_key=table_key,
+            cell_boundaries_data=cell_boundaries_data,
+            nucleus_boundaries_data=nucleus_boundaries_data,
+            transcripts_key="TRANSCRIPTS",
+            slide_id=xd_original.slide_id,
+            sample_id=xd_original.sample_id,
+            method_name=xd_original.metadata.get("method", ""),
+            verbose=False,
+        )
+
+        assert isinstance(xd_roundtrip, InSituData)
+        assert xd_roundtrip.cells.table.n_obs == xd_original.cells.table.n_obs
+        assert xd_roundtrip.cells.table.n_vars == xd_original.cells.table.n_vars
+        assert "spatial" in xd_roundtrip.cells.table.obsm
+
+        assert set(xd_roundtrip.images.names) == set(xd_original.images.names)
+
+        assert xd_roundtrip.transcripts is not None
+        assert "feature_name" in xd_roundtrip.transcripts.columns
+        assert "x_location" in xd_roundtrip.transcripts.columns
+        assert "y_location" in xd_roundtrip.transcripts.columns        assert "y_location" in xd_roundtrip.transcripts.columns

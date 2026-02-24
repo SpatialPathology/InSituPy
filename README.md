@@ -82,6 +82,12 @@ When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwis
    pip install insitupy-spatial
    ```
 
+**Optional: install with SpatialData support (`spatialdata>=0.7.2`):**
+
+   ```bash
+   pip install insitupy-spatial[spatialdata]
+   ```
+
 To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
 
 For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
