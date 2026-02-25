@@ -273,6 +273,8 @@ def _transform_cell_boundaries_for_spatialdata(
 
                     if isinstance(labels_list, list):
                         top_array = labels_list[0]
+                    else:
+                        top_array = labels_list
                     array = DataArray(data=top_array, name=name, dims=("y", "x"))
 
                     dict_key = _generate_spatialdata_key(
@@ -464,9 +466,13 @@ def _add_images_to_insitudata(
             axes_str = axes_str[1:]
             axes = ImageAxes(axes_str)
 
+        channel_names = name
+        if not is_rgb and axes.C is not None and da_img.shape[axes.C] > 1:
+            channel_names = [f"{name}_{i}" for i in range(da_img.shape[axes.C])]
+
         data.images.add_image(
             image=da_img,
-            channel_names=name,
+            channel_names=channel_names,
             axes=axes_str,
             pixel_size=pixel_size,
             overwrite=False,

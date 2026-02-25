@@ -8,6 +8,7 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
+from insitupy._constants import with_insitupy_style
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
@@ -66,6 +67,7 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
         return bar
 
 
+@with_insitupy_style
 def overview(
     data: InSituExperiment,
     cells_layer: Optional[str] = None,

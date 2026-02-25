@@ -20,7 +20,8 @@ from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR)
+                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR,
+                                 with_insitupy_style)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
@@ -1238,6 +1239,7 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.load_transcripts()
 
+    @with_insitupy_style
     def plot_embedding(
         self,
         basis: str,
@@ -1300,6 +1302,7 @@ class InSituExperiment:
             return fig, axes
 
 
+    @with_insitupy_style
     def plot_umaps(
         self,
         cells_layer: Optional[str] = None,

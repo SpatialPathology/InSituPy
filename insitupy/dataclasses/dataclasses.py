@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import zarr
 from anndata import AnnData
-from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
@@ -458,6 +457,7 @@ class BoundariesData(DeepCopyMixin):
         self._nucleus_count = nucleus_count
 
         self._data = dict()
+        self._store = None  # zarr store reference for lifecycle management
 
     def __repr__(self):
         if len(self._data) > 0:
@@ -473,6 +473,18 @@ class BoundariesData(DeepCopyMixin):
         else:
             repr = "empty"
         return repr
+
+    def close(self):
+        """Close the underlying zarr store if one is attached."""
+        if self._store is not None:
+            try:
+                self._store.close()
+            except Exception:
+                pass
+            self._store = None
+
+    def __del__(self):
+        self.close()
 
     def __len__(self):
         return len(self._data)
@@ -915,9 +927,7 @@ class CellData(DeepCopyMixin):
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead."
         )
-        if not isinstance(value, AnnData):
-            raise ValueError(f"Matrix must be an AnnData object. Instead: {type(value)}.")
-        self._table = value
+        self._set_table(value=value, allow_partial_overlap=False)
 
     @property
     def table(self):
@@ -927,9 +937,51 @@ class CellData(DeepCopyMixin):
     @table.setter
     def table(self, value: AnnData):
         """Alias for matrix setter. This is the preferred name going forward."""
+        self._set_table(value=value, allow_partial_overlap=False)
+
+    def set_table(self,
+                  value: AnnData,
+                  allow_partial_overlap: bool = False):
+        """
+        Safely set table data while keeping table and boundaries consistent.
+
+        Args:
+            value: New AnnData table.
+            allow_partial_overlap: If True and boundaries exist, keep only cells present
+                in both table and boundaries. If False, fail when table contains cell IDs
+                that are not present in boundaries.
+        """
+        self._set_table(value=value, allow_partial_overlap=allow_partial_overlap)
+
+    def _set_table(self,
+                   value: AnnData,
+                   allow_partial_overlap: bool = False):
         if not isinstance(value, AnnData):
             raise ValueError(f"Table must be an AnnData object. Instead: {type(value)}.")
+
+        if self._boundaries is not None:
+            table_cell_ids = pd.Index(value.obs_names.astype(str))
+
+            if len(table_cell_ids.unique()) != len(table_cell_ids):
+                raise ValueError("Table .obs_names must be unique when boundaries are present.")
+
+            boundary_cell_ids = pd.Index(self._boundaries.cell_names.compute().astype(str))
+            missing_in_boundaries = table_cell_ids.difference(boundary_cell_ids)
+
+            if len(missing_in_boundaries) > 0 and not allow_partial_overlap:
+                missing_preview = ", ".join(map(str, missing_in_boundaries[:5]))
+                if len(missing_in_boundaries) > 5:
+                    missing_preview += ", ..."
+                raise ValueError(
+                    "New table contains cell IDs that are not present in boundaries "
+                    f"({len(missing_in_boundaries)} missing; examples: {missing_preview}). "
+                    "Use `set_table(..., allow_partial_overlap=True)` to keep only overlapping cells."
+                )
+
         self._table = value
+
+        if self._boundaries is not None:
+            self.sync(verbose=False)
 
     @property
     def config(self):
@@ -949,6 +1001,13 @@ class CellData(DeepCopyMixin):
         '''
 
         return deepcopy(self)
+
+    def close(self):
+        """Close underlying resources owned by this CellData object."""
+        if self._boundaries is not None:
+            close_method = getattr(self._boundaries, "close", None)
+            if callable(close_method):
+                close_method()
 
     def crop(self,
             xlim: Optional[Tuple[int, int]] = None,
@@ -1003,14 +1062,15 @@ class CellData(DeepCopyMixin):
             mask = xmask & ymask
 
         # select
-        _self.table = _self.table[mask, :].copy()
+        _self._table = _self.table[mask, :].copy()
 
         # crop boundaries
-        _self.boundaries.crop(
-            cell_ids=_self.table.obs_names,
-            xlim=xlim, ylim=ylim,
-            inplace=True
-            )
+        if _self.boundaries is not None:
+            _self.boundaries.crop(
+                cell_ids=_self.table.obs_names,
+                xlim=xlim, ylim=ylim,
+                inplace=True
+                )
 
         # shift coordinates to correct for change of coordinates during cropping
         if shape is not None:
@@ -1085,31 +1145,42 @@ class CellData(DeepCopyMixin):
             - if not all are in boundaries, throw error saying that those will also be removed
         3. Select only table cell IDs which are also in boundaries and filter for them
         '''
-        # get cell IDs from table
-        table_cell_ids_hex = self._table.obs_names.astype(str)
-
         if self._boundaries is None:
-            print('No `boundaries` attribute found in CellData found.')
+            return
         else:
+            # get cell IDs from table
+            table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+
+            if len(table_cell_ids.unique()) != len(table_cell_ids):
+                raise ValueError("Table .obs_names must be unique to synchronize with boundaries.")
+
             boundaries = self._boundaries
 
             # create pandas series from seg_mask values and cell_names
             ds = pd.Series(
-                data=boundaries.seg_mask_value,
-                index=boundaries.cell_names
+                data=boundaries.seg_mask_value.compute(),
+                index=boundaries.cell_names.compute().astype(str)
                 )
 
-            filter_mask_in = ds.index.isin(table_cell_ids_hex)
+            # filter table for IDs that are available in boundaries
+            table_mask_in_boundaries = table_cell_ids.isin(ds.index)
 
-            if not np.any(filter_mask_in):
-                raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All boundaries would get filtered out.")
+            if not np.any(table_mask_in_boundaries):
+                raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All table entries would get filtered out.")
 
-            # filter cell names and seg_mask_values
-            boundaries._seg_mask_value = da.from_array(np.array(ds[filter_mask_in]))
-            boundaries._cell_names = da.from_array(np.array(ds.index[filter_mask_in], dtype=str))
+            n_removed_table = int(np.sum(~table_mask_in_boundaries))
+            if n_removed_table > 0:
+                self._table = self._table[table_mask_in_boundaries, :].copy()
+                table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+
+            # align boundary metadata to table order
+            ds_aligned_to_table = ds.reindex(table_cell_ids)
+
+            boundaries._seg_mask_value = da.from_array(np.array(ds_aligned_to_table.values, dtype=np.uint32))
+            boundaries._cell_names = da.from_array(np.array(ds_aligned_to_table.index, dtype=str))
 
             # find the seg_mask_values which are not anymore present
-            seg_mask_values_not_in_table = ds[~filter_mask_in].values
+            seg_mask_values_not_in_table = ds[~ds.index.isin(table_cell_ids)].values
 
             # extract boundaries
             cell_bounds = boundaries["cells"]
@@ -1136,7 +1207,10 @@ class CellData(DeepCopyMixin):
                 warnings.warn(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
 
             if verbose:
-                print(f"Filtered out {np.sum(~filter_mask_in)} boundaries.", flush=True)
+                n_removed_boundaries = int(np.sum(~ds.index.isin(table_cell_ids)))
+                if n_removed_table > 0:
+                    print(f"Filtered out {n_removed_table} table entries not present in boundaries.", flush=True)
+                print(f"Filtered out {n_removed_boundaries} boundaries.", flush=True)
 
     def shift(self,
               x: Union[int, float],
@@ -1219,9 +1293,20 @@ class MultiCellData(DeepCopyMixin):
         if key in self._layers.keys():
             if key == self._main_key:
                 raise KeyError(f"Cannot delete the main key '{self._main_key}'. Please use `set_main()` to set another key as main first.")
+            layer = self._layers[key]
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
             del self._layers[key]
         else:
             raise KeyError(f"Key '{key}' not found in MultiCellData.")
+
+    def close(self):
+        """Close underlying resources owned by all contained CellData layers."""
+        for layer in self._layers.values():
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
 
     @property
     def layers(self):

@@ -14,7 +14,8 @@ from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP)
+                                 DEFAULT_CONTINUOUS_CMAP,
+                                 with_insitupy_style)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
@@ -230,6 +231,7 @@ class LayoutConfig(_UpdatablePlottingConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
+@with_insitupy_style
 def spatial(
     data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
