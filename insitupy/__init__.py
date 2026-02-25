@@ -1,6 +1,6 @@
 __author__ = "Johannes Wirth"
 __email__ = "j.wirth@tum.de"
-__version__ = "0.11.0b2"
+__version__ = "0.11.0b3"
 
 # check if napari is available
 try:
