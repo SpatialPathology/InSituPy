@@ -12,7 +12,7 @@ from insitupy import WITH_NAPARI
 
 
 def _get_viewer_uid(viewer):
-    return viewer.title.rsplit("#", 1)[1]
+    return viewer.title.split(":", 1)[0].rsplit("#", 1)[1]
 
 if WITH_NAPARI:
     class ViewerConfig:

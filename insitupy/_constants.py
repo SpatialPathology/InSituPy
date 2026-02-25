@@ -1,3 +1,4 @@
+import functools
 import string
 from pathlib import Path
 
@@ -84,6 +85,8 @@ RED = [255, 0, 0]
 # font size
 def _init_mpl_fontsize(scale_factor=1):
     '''
+    Apply InSituPy's default matplotlib font sizes.
+
     https://matplotlib.org/stable/api/matplotlib_configuration_api.html#matplotlib.rcParams
     '''
     SMALL_SIZE = 14*scale_factor
@@ -98,4 +101,11 @@ def _init_mpl_fontsize(scale_factor=1):
     plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
     plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-_init_mpl_fontsize()
+
+def with_insitupy_style(func):
+    '''Decorator that applies InSituPy matplotlib font sizes before calling the function.'''
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        _init_mpl_fontsize()
+        return func(*args, **kwargs)
+    return wrapper

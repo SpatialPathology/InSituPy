@@ -4,6 +4,7 @@ from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Union
 
+import dask
 import dask.array as da
 import geopandas as gpd
 import numpy as np
@@ -35,8 +36,9 @@ def _read_baysor_polygons(
     "maxy": []
     }
 
-    for elem in d["geometries"]:
-        coords = elem["coordinates"][0]
+    for i in range(len(d["features"])):
+        cell = d["features"][i]
+        coords = cell['geometry']['coordinates'][0]
 
         # check if there are enough coordinates for a Polygon (some segmented cells are very small in Baysor)
         if len(coords) > 3:
@@ -48,7 +50,7 @@ def _read_baysor_polygons(
             p = shapely.LineString(coords)
             df["geometry"].append(p)
             df["type"].append("line")
-        df["cell"].append(elem["cell"])
+        df["cell"].append(i)
 
         # extract bounding box
         bounds = p.bounds
@@ -189,6 +191,88 @@ def _read_proseg_counts(
     return adata
 
 
+def _read_proseg_from_spatialdata(
+    sdata,
+    pixel_size: Number = 1
+    ):
+    """
+    Read proseg data from a SpatialData object.
+
+    Expected structure:
+    - sdata.tables['table']: AnnData with counts and cell metadata
+    - sdata.shapes['cell_boundaries']: GeoDataFrame with cell polygons
+
+    Args:
+        sdata: SpatialData object containing proseg results
+        pixel_size: Size of the pixel for scaling
+
+    Returns:
+        Tuple of (adata, boundaries_mask, cell_names, seg_mask_value)
+    """
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+
+    # Extract AnnData table
+    adata = sdata.tables['table'].copy()
+
+    # Extract cell boundaries GeoDataFrame
+    polygons = sdata.shapes['cell_boundaries'].copy()
+
+    # Ensure spatial coordinates are in adata.obsm if not already present
+    if 'spatial' not in adata.obsm:
+        # Calculate centroids from polygons
+        centroids = polygons.geometry.centroid
+        spatial_coords = np.stack([centroids.x.to_numpy(), centroids.y.to_numpy()], axis=1)
+        adata.obsm['spatial'] = spatial_coords
+
+    # Add bounding box columns if not present
+    if 'maxx' not in polygons.columns or 'maxy' not in polygons.columns:
+        bounds = polygons.geometry.bounds
+        polygons['minx'] = bounds['minx']
+        polygons['miny'] = bounds['miny']
+        polygons['maxx'] = bounds['maxx']
+        polygons['maxy'] = bounds['maxy']
+
+    # Determine cell identifier column
+    if 'cell' in polygons.columns:
+        cell_id_col = 'cell'
+    elif polygons.index.name:
+        cell_id_col = polygons.index.name
+        polygons['cell'] = polygons.index
+    else:
+        # Use index values as cell identifiers
+        polygons['cell'] = polygons.index.astype(str)
+        cell_id_col = 'cell'
+
+    # Scale Proseg polygons if needed
+    if pixel_size != 1:
+        polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
+        polygons["maxx"] = polygons["maxx"] / pixel_size
+        polygons["maxy"] = polygons["maxy"] / pixel_size
+
+    # Calculate bounds for rasterization
+    polygon_bounds = polygons.geometry.bounds
+    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
+    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
+
+    # Get cell names and generate segmentation mask values
+    cell_names = polygons['cell'].values
+    seg_mask_value = range(1, len(polygons['cell'])+1)
+
+    # Rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
+
+    return adata, boundaries_mask, cell_names, seg_mask_value
+
+
 def _read_proseg(
     path,
     counts_file: Optional[str] = None,
@@ -238,8 +322,85 @@ def _read_proseg(
     cell_names = polygons['cell'].values
     seg_mask_value = range(1, len(polygons['cell'])+1)
 
-    # rasterize polygons
-    boundaries_mask = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax))
-    boundaries_mask = da.from_array(boundaries_mask)
+    # rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
+
+    return adata, boundaries_mask, cell_names, seg_mask_value
+
+def _read_baysor(
+    path,
+    xd,
+    counts_file: Optional[str] = None,
+    cell_metadata_file: Optional[str] = None,
+    polygons_file: Optional[str] = None,
+    pixel_size: Number = 1
+    ):
+    try:
+        from rasterio.features import rasterize
+    except ImportError:
+        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
+
+    import scanpy as sc
+
+    from insitupy.io import read_xenium
+
+    if counts_file is None:
+        path_counts = list(path.glob("segmentation_counts.*"))[0] #r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_counts.loom"
+    else:
+        path_counts = path / counts_file
+
+    if cell_metadata_file is None:
+        path_cell_metadata = list(path.glob("segmentation_cell_stats.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_cell_stats.csv"
+    else:
+        path_cell_metadata = path / cell_metadata_file
+
+    if polygons_file is None:
+        path_polygons = list(path.glob("segmentation_polygons_2d.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_polygons_2d.json"
+    else:
+        path_polygons = path / polygons_file
+
+    # read baysor counts
+    xd=read_xenium(xd)
+    cell_metadata=pd.read_csv(path_cell_metadata)
+    counts=sc.read_loom(path_counts)
+
+    counts.obs=cell_metadata.copy()
+    counts.var_names=counts.var['Name'].copy()
+
+    adata=counts[:,counts.var_names.isin(xd.cells['main'].matrix.var.index.tolist())].copy()
+
+    # Read Proseg polygons
+    polygons = _read_baysor_polygons(path_polygons)
+
+    # Scale Proseg polygons
+    if pixel_size != 1:
+        polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
+        polygons["maxx"] = polygons["maxx"] / pixel_size
+        polygons["maxy"] = polygons["maxy"] / pixel_size
+
+
+    # Calculate bounds for rasterization
+    polygon_bounds = polygons.geometry.bounds
+    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
+    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
+
+    # get cell names and generate segmentation mask values
+    cell_names = polygons['cell']#.values
+    seg_mask_value = range(1, len(polygons['cell'])+1)
+
+    # rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
+    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
+    # Wrap as dask array without copying (da.from_array copies by default)
+    boundaries_mask = da.from_delayed(
+        dask.delayed(np.asarray)(boundaries_mask_np),
+        shape=boundaries_mask_np.shape,
+        dtype=boundaries_mask_np.dtype
+    )
 
     return adata, boundaries_mask, cell_names, seg_mask_value

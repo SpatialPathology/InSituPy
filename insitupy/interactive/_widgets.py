@@ -3,12 +3,14 @@ from insitupy import WITH_NAPARI
 if WITH_NAPARI:
     from typing import List, Optional
 
+    import matplotlib.pyplot as plt
     import napari
     import numpy as np
     import pandas as pd
     from magicgui import magic_factory, magicgui
     from magicgui.widgets import FunctionGui
     from matplotlib.colors import ListedColormap
+    from napari.utils import DirectLabelColormap
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import QSize, Qt
     from qtpy.QtGui import QFontMetrics, QIcon
@@ -34,6 +36,175 @@ if WITH_NAPARI:
     from insitupy.utils._helpers import _get_expression_values
 
     from ._layers import _add_geometries_as_layer
+
+    # Maximum number of unique colors for labels (napari limitation)
+    MAX_LABEL_COLORS = 500
+
+    def _create_colored_labels_layer(
+        viewer: napari.Viewer,
+        viewer_config: "ViewerConfig",
+        color_values: np.ndarray,
+        layer_name: str,
+        mask_key: str,
+        key: str,
+        colormap: Optional[ListedColormap] = None,
+        add_new_layer: bool = False,
+    ) -> None:
+        """Create or update a labels layer with colors based on expression values.
+
+        Args:
+            viewer: The napari viewer instance.
+            viewer_config: ViewerConfig with boundaries data.
+            color_values: Array of values to color by (one per cell).
+            layer_name: Name for the layer.
+            mask_key: Key for the mask ("cells" or "nuclei").
+            key: The key/feature name being displayed.
+            colormap: Optional categorical colormap from adata.uns.
+            add_new_layer: If True, always create a new layer.
+
+        Returns:
+            None (adds layer directly to viewer).
+        """
+        boundaries = viewer_config.boundaries
+        if boundaries is None:
+            show_warning("No boundaries data available.")
+            return None
+
+        # Get the mask data
+        try:
+            mask = boundaries[mask_key]
+        except KeyError:
+            show_warning(f"Key '{mask_key}' not found in boundaries masks.")
+            return None
+
+        if mask is None:
+            show_warning(f"No mask data available for key '{mask_key}'.")
+            return None
+
+        # Get metadata for mask
+        metadata = boundaries.metadata
+        pixel_size = metadata[mask_key]["pixel_size"]
+
+        # Generate pyramid if needed
+        if not isinstance(mask, list):
+            mask_pyramid = create_img_pyramid(img=mask, axes="YX", nsubres=6)
+        else:
+            mask_pyramid = mask
+
+        # Get label IDs and cell names
+        label_ids = boundaries.seg_mask_value.compute()
+        cell_names_boundary = boundaries.cell_names.compute()
+
+        # Handle nuclei mapping if needed
+        if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
+            nucleus_to_cell_map = boundaries.nucleus_to_cell_map
+            # Map nucleus label_ids to cell indices for color lookup
+            cell_indices = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
+        else:
+            # Direct mapping: label_id corresponds to cell index
+            cell_indices = [i for i in range(len(label_ids))]
+
+        # Determine if values are categorical or continuous
+        is_categorical = (
+            colormap is not None or
+            (hasattr(color_values, 'dtype') and color_values.dtype == object) or
+            isinstance(color_values[0], str) if len(color_values) > 0 else False
+        )
+
+        # Build color dictionary for DirectLabelColormap
+        color_dict = {
+            None: np.array([0.5, 0.5, 0.5, 0.5]),  # Default for unmapped labels
+            0: np.array([0.0, 0.0, 0.0, 0.0]),      # Background transparent
+        }
+
+        if is_categorical:
+            # Categorical coloring
+            if colormap is not None:
+                # Use provided colormap
+                unique_categories = np.unique(color_values)
+                n_categories = len(unique_categories)
+                cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
+
+                for label_id, cell_idx in zip(label_ids, cell_indices):
+                    if cell_idx is not None and cell_idx < len(color_values):
+                        cat = color_values[cell_idx]
+                        cat_idx = cat_to_idx.get(cat, 0)
+                        # Limit color index to avoid exceeding colormap
+                        color_idx = cat_idx % min(len(colormap.colors), MAX_LABEL_COLORS)
+                        color = np.array(colormap.colors[color_idx])
+                        if len(color) == 3:
+                            color = np.append(color, 1.0)  # Add alpha
+                        color_dict[int(label_id)] = color
+            else:
+                # Use default categorical colormap (tab20)
+                unique_categories = np.unique(color_values)
+                n_categories = min(len(unique_categories), MAX_LABEL_COLORS)
+                cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
+                cmap_mpl = plt.cm.get_cmap("tab20")
+                n_colors = cmap_mpl.N if hasattr(cmap_mpl, 'N') else 20
+
+                for label_id, cell_idx in zip(label_ids, cell_indices):
+                    if cell_idx is not None and cell_idx < len(color_values):
+                        cat = color_values[cell_idx]
+                        cat_idx = cat_to_idx.get(cat, 0)
+                        color_idx = cat_idx % n_colors
+                        norm_idx = color_idx / (n_colors - 1) if n_colors > 1 else 0
+                        color_dict[int(label_id)] = np.array(cmap_mpl(norm_idx))
+        else:
+            # Continuous coloring
+            # Normalize values to 0-1
+            values = np.array(color_values, dtype=float)
+            # Use percentile for robust normalization
+            vmin = np.nanpercentile(values, 1)
+            vmax = np.nanpercentile(values, 99)
+            if vmax == vmin:
+                vmax = vmin + 1  # Avoid division by zero
+
+            cmap_mpl = plt.cm.viridis
+
+            for label_id, cell_idx in zip(label_ids, cell_indices):
+                if cell_idx is not None and cell_idx < len(color_values):
+                    value = color_values[cell_idx]
+                    if np.isnan(value):
+                        color_dict[int(label_id)] = np.array([0.5, 0.5, 0.5, 0.5])
+                    else:
+                        norm_val = np.clip((value - vmin) / (vmax - vmin), 0, 1)
+                        color_dict[int(label_id)] = np.array(cmap_mpl(norm_val))
+
+        # Create DirectLabelColormap
+        direct_cmap = DirectLabelColormap(color_dict=color_dict)
+
+        # Determine layer name with mask type suffix
+        full_layer_name = f"{layer_name} ({mask_key})"
+
+        # Build properties
+        properties = {
+            'index': label_ids,
+            'name': list(cell_names_boundary),
+        }
+
+        # Check if layer exists and handle accordingly
+        if full_layer_name in viewer.layers and not add_new_layer:
+            # Update existing layer's colormap
+            layer = viewer.layers[full_layer_name]
+            layer.colormap = direct_cmap
+            # Move to top
+            viewer.layers.move(viewer.layers.index(full_layer_name), len(viewer.layers))
+        else:
+            if full_layer_name in viewer.layers:
+                show_warning(f"Layer '{full_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                return None
+
+            # Add new labels layer
+            viewer.add_labels(
+                mask_pyramid,
+                name=full_layer_name,
+                scale=(pixel_size, pixel_size),
+                properties=properties,
+                colormap=direct_cmap,
+            )
+
+        return None
 
     def _initialize_widgets(
         viewer: napari.Viewer,
@@ -94,20 +265,78 @@ if WITH_NAPARI:
 
                     if layer_name not in viewer.layers:
                         # get geopandas dataframe with regions
-                        mask = viewer_config.boundaries[key]
+                        try:
+                            mask = viewer_config.boundaries[key]
+                        except KeyError:
+                            show_warning(f"Key '{key}' not found in boundaries masks.")
+                            return
+
+                        if mask is None:
+                            show_warning(f"No mask data available for key '{key}'.")
+                            return
 
                         # get metadata for mask
                         metadata = viewer_config.boundaries.metadata
                         pixel_size = metadata[key]["pixel_size"]
 
                         if not isinstance(mask, list):
-                            # generate pyramid of the mask
-                            mask_pyramid = create_img_pyramid(img=mask, nsubres=6)
+                            # generate pyramid of the mask - segmentation masks are 2D (YX)
+                            mask_pyramid = create_img_pyramid(img=mask, axes="YX", nsubres=6)
                         else:
                             mask_pyramid = mask
 
-                        # add masks as labels to napari viewer
-                        viewer.add_labels(mask_pyramid, name=layer_name, scale=(pixel_size,pixel_size))
+                        # Create properties DataFrame with label IDs as index
+                        label_ids = viewer_config.boundaries.seg_mask_value.compute()
+                        cell_names = viewer_config.boundaries.cell_names.compute()
+
+                        # Determine cell names for properties
+                        props_dict = {}
+                        prop_names = ["cell_area", "surface_area"]
+                        if key == "nuclei" and viewer_config.boundaries.nucleus_to_cell_map is not None:
+                            nucleus_to_cell_map = viewer_config.boundaries.nucleus_to_cell_map
+                            # Use list comprehension with dict.get() for efficiency
+                            cell_ids = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
+                            names = [cell_names[ci] if ci is not None else "unmapped" for ci in cell_ids]
+                            # names = [cell_names[nucleus_to_cell_map[label_id - 1]] if (label_id - 1) in nucleus_to_cell_map else "unmapped" for label_id in label_ids]
+                            # names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
+                            for prop_name in prop_names:
+                                if prop_name in viewer_config.adata.obs.columns:
+                                    prop_values = viewer_config.adata.obs[prop_name].values
+                                    props_dict[prop_name] = [prop_values[ci] if ci is not None else None for ci in cell_ids]
+
+                        elif key == "cells":
+                            names = cell_names
+                            cell_ids = label_ids
+
+                            for prop_name in prop_names:
+                                if prop_name in viewer_config.adata.obs.columns:
+                                    props_dict[prop_name] = viewer_config.adata.obs[prop_name].values
+
+                        else:
+                            show_warning(f"Unknown key for boundaries: {key}.")
+                            return
+
+                        # properties = pd.DataFrame({'name': names}, index=label_ids)
+                        properties = {
+                            'index': label_ids,
+                            'name': names
+                            }
+
+                        for prop_name, prop_values in props_dict.items():
+                            properties[prop_name] = prop_values
+
+                        # for prop in ["cell_area", "surface_area"]:
+                        #     if prop in viewer_config.adata.obs.columns:
+                        #         properties[prop] = viewer_config.adata.obs[prop].values
+
+                        # Add masks as labels to napari viewer
+                        layer = viewer.add_labels(
+                            mask_pyramid,
+                            name=layer_name,
+                            scale=(pixel_size, pixel_size),
+                            properties=properties,
+                        )
+
                         if key == "cells":
                             viewer.layers[layer_name].contour = 1
                     else:
@@ -115,10 +344,19 @@ if WITH_NAPARI:
             else:
                 show_boundaries_widget = None
 
+            # Determine available display modes based on boundaries data
+            _display_mode_choices = ["points"]
+            if viewer_config.boundaries is not None:
+                if "cells" in viewer_config.boundaries._data and viewer_config.boundaries["cells"] is not None:
+                    _display_mode_choices.append("cells")
+                if "nuclei" in viewer_config.boundaries._data and viewer_config.boundaries["nuclei"] is not None:
+                    _display_mode_choices.append("nuclei")
+
             @magicgui(
                 call_button='Show',
                 key_type={'choices': ["genes", "obs", "obsm"], 'label': 'Type:'},
                 key={'choices': viewer_config.genes, 'label': "Key:"},
+                display_mode={'choices': _display_mode_choices, 'label': 'Display as:'},
                 size={'label': 'Size [µm]'},
                 recent={'choices': [""], 'label': "Recent:"},
                 add_new_layer={'label': 'Add new layer'}
@@ -126,6 +364,7 @@ if WITH_NAPARI:
             def show_cells_widget(
                 key_type="genes",
                 key=None,
+                display_mode="points",
                 size=8,
                 recent=None,
                 add_new_layer=False,
@@ -158,15 +397,6 @@ if WITH_NAPARI:
                     else:
                         new_layer_name = f"{viewer_config.data_name}-{key} [{viewer_config.layer_name}]"
 
-                    # get layer names from the current data
-                    if viewer_config.layer_name == "main":
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and not elem.name.endswith(f"[{viewer_config.layer_name}]")]
-                    else:
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
-
-                    # select only point layers
-                    layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
-
                     # save last addition to add it to recent in the callback
                     viewer_config.recent_selections.append(f"{key_type}:{key}")
 
@@ -181,6 +411,29 @@ if WITH_NAPARI:
                         colormap = ListedColormap(rgb_colors)
                     else:
                         colormap = None
+
+                    # Handle display as labels (cells or nuclei boundaries)
+                    if display_mode in ["cells", "nuclei"]:
+                        return _create_colored_labels_layer(
+                            viewer=viewer,
+                            viewer_config=viewer_config,
+                            color_values=color_value,
+                            layer_name=new_layer_name,
+                            mask_key=display_mode,
+                            key=key,
+                            colormap=colormap,
+                            add_new_layer=add_new_layer,
+                        )
+
+                    # Display as points (default behavior)
+                    # get layer names from the current data
+                    if viewer_config.layer_name == "main":
+                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and not elem.name.endswith(f"[{viewer_config.layer_name}]")]
+                    else:
+                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
+
+                    # select only point layers
+                    layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
 
                     if len(layer_names_for_current_data) == 0:
 
@@ -645,9 +898,6 @@ if WITH_NAPARI:
 
         if (class_name != "") & (annot_key != ""):
             if key == "Geometric annotations":
-                # print(annot_key)
-                # print(class_name)
-                # print(viewer_config)
                 _test_existance(viewer_config, annot_key, class_name, modality="annotations")
                 # generate name
                 name = name_pattern.format(
@@ -688,7 +938,7 @@ if WITH_NAPARI:
                     {
                         'name': name,
                         'size': 10,
-                        'edge_color': 'black',
+                        'border_color': 'black',
                         'face_color': 'blue',
                         #'scale': (config.pixel_size, config.pixel_size),
                         'properties': {

@@ -14,7 +14,8 @@ from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP)
+                                 DEFAULT_CONTINUOUS_CMAP,
+                                 with_insitupy_style)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
@@ -230,6 +231,7 @@ class LayoutConfig(_UpdatablePlottingConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
+@with_insitupy_style
 def spatial(
     data: Union[InSituData, InSituExperiment],
     keys: Union[str, List[str]],
@@ -569,7 +571,7 @@ def _single_spatial(
         crange = color_config[key]["crange"]
         categorical = color_config[key]["is_categorical"] # True if color_dict is not None
 
-        x_coords, y_coords, plot_config.xlim, plot_config.ylim = _prepare_limits_and_coordinates(
+        x_coords, y_coords, xlim, ylim = _prepare_limits_and_coordinates(
             adata=adata,
             regions_data=regions_data,
             region_tuple=data_config.region_tuple,
@@ -580,7 +582,7 @@ def _single_spatial(
 
         image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = _extract_image_information(
             image_data, image_key=data_config.image_key,
-            xlim=plot_config.xlim, ylim=plot_config.ylim,
+            xlim=xlim, ylim=ylim,
             pixelwidth_per_subplot=plot_config.pixelwidth_per_subplot,
             histogram_setting=plot_config.histogram_setting
         )
@@ -594,7 +596,8 @@ def _single_spatial(
         _configure_axis_and_title(
             ax=ax,
             key=key, idx_key=idx_key, sample_name=name,
-            plot_config=plot_config, layout_config=layout_config
+            plot_config=plot_config, layout_config=layout_config,
+            xlim=xlim, ylim=ylim
         )
 
         # calculate the marker size - must be done AFTER the axes are configured!
@@ -910,12 +913,14 @@ def _configure_axis_and_title(
     idx_key,
     sample_name,
     plot_config,
-    layout_config
+    layout_config,
+    xlim,
+    ylim
     ):
 
     # configure axis
-    ax.set_xlim(plot_config.xlim[0], plot_config.xlim[1])
-    ax.set_ylim(plot_config.ylim[0], plot_config.ylim[1])
+    ax.set_xlim(xlim[0], xlim[1])
+    ax.set_ylim(ylim[0], ylim[1])
     ax.invert_yaxis()
     ax.grid(False)
     ax.set_aspect(1)
@@ -1076,6 +1081,12 @@ def _prepare_limits_and_coordinates(
         y_coords -= y_offset
     else:
         x_offset = y_offset = 0
+
+    if origin_zero:
+        if xlim is not None:
+            xlim = [xlim[0] - x_offset, xlim[1] - x_offset]
+        if ylim is not None:
+            ylim = [ylim[0] - y_offset, ylim[1] - y_offset]
 
     if xlim is None:
         xmin = x_coords.min()

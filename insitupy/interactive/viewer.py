@@ -16,19 +16,35 @@ if WITH_NAPARI:
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
 
+    def _get_current_viewer_config(action: str):
+        viewer = napari.current_viewer()  # get the viewer that was open last
+        if viewer is None:
+            show_warning(
+                f"No napari viewer open to {action}. First, use `.show()` to open a napari viewer."
+            )
+            return None, None
+
+        viewer_id = _get_viewer_uid(viewer)
+        try:
+            config = config_manager[viewer_id]
+        except KeyError:
+            show_warning(
+                "Could not find viewer configuration for the current napari viewer. "
+                "Please reopen the viewer via `.show()` and try again."
+            )
+            return None, None
+
+        return viewer, config
+
     def sync_geometries():
         name_pattern = "{type_symbol} {class_name} ({annot_key})"
 
         # get current viewer config
-        viewer = napari.current_viewer() # get the viewer that was open last
-        viewer_id = viewer.title.rsplit("#", 1)[1]
-        config = config_manager[viewer_id]
+        viewer, config = _get_current_viewer_config("synchronize geometries")
+        if viewer is None:
+            return
 
         data = config.data
-
-        if viewer is None:
-            print("No napari viewer open to synchronize from. First, use `.show()` to open a napari viewer.")
-            return
 
         # iterate through layers and save them as annotation or region if they meet requirements
         layers = viewer.layers
@@ -86,8 +102,9 @@ if WITH_NAPARI:
         ):
         from insitupy.plotting.plots import colorlegend
 
-        viewer = napari.current_viewer()
-        config = config_manager[_get_viewer_uid(viewer)]
+        viewer, _ = _get_current_viewer_config("save color legends")
+        if viewer is None:
+            return
 
         # create output folder path
         output_folder = Path(output_folder)

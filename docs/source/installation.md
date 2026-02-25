@@ -5,7 +5,7 @@ Make sure you have Conda installed on your system before proceeding with these s
 ## Create and activate a conda environment
 
    ```bash
-   conda create --name insitupy python=3.10
+   conda create --name insitupy python=3.13
    conda activate insitupy
    ```
 
@@ -21,12 +21,14 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
    pip install insitupy-spatial
    ```
 
-#### Optional: Install with GUI support (napari viewer)
+This base installation includes napari and related visualization dependencies.
 
-If you want to use the graphical interface features powered by [napari](https://napari.org/dev/index.html), install with the gui extra:
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows will be only partially supported in the future.
+
+### Optional: Install with SpatialData support (`spatialdata>=0.7.2`)
 
    ```bash
-   pip install insitupy-spatial[gui]
+   pip install insitupy-spatial[spatialdata]
    ```
 
 ### Method 2: Installation from Cloned Repository
@@ -61,6 +63,5 @@ If you want to use the graphical interface features powered by [napari](https://
 1. **Install directly from GitHub:**
 
    ```bash
-   # for installation without napari use
    pip install git+https://github.com/SpatialPathology/InSituPy.git
    ```

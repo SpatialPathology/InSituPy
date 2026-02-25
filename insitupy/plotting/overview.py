@@ -8,13 +8,14 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
+from insitupy._constants import with_insitupy_style
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.utils._checks import is_integer_counts
+from insitupy.utils._checks import _calculate_single_metrics
 
 
-def _calculate_max_cell_widths_and_sum(df, multiplier=0.2):
+def _calculate_max_cell_widths_and_sum(df, multiplier=0.13):
     """
     Calculate the maximum cell width for each column based on text length, including the column name in the calculation, and return the sum of them.
 
@@ -35,7 +36,7 @@ def _calculate_max_cell_widths_and_sum(df, multiplier=0.2):
         total_width += max_width
     return max_widths, total_width
 
-def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: dict = {}):
+def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: dict = {}, fontsize: int = 10):
         """
         Custom function to create a horizontal bar plot.
 
@@ -45,6 +46,7 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
             max (float): The maximum value for the x-axis.
             color (str, optional): The color of the bar.
             rect_kw (dict, optional): Additional keyword arguments for the rectangle.
+            fontsize (int, optional): Font size for the value labels. Defaults to 10.
 
         Returns:
             bar: The bar plot.
@@ -60,44 +62,12 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
             r.set(**rect_kw)
         for rect in bar:
             width = rect.get_width()
-            ax.text(width + 1, rect.get_y() + rect.get_height() / 2, f'{width:.0f}', ha='left', va='center')
+            ax.text(width + 1, rect.get_y() + rect.get_height() / 2, f'{width:.0f}',
+                    ha='left', va='center', fontsize=fontsize)
         return bar
 
 
-def _calculate_metrics(adata: AnnData, layer: str = None, force_layer: bool = False):
-        """
-        Calculate quality control metrics for an AnnData object.
-
-        Args:
-            adata (AnnData): Annotated data matrix.
-            layer (str, optional): The layer of the AnnData object to use for calculations. If None, the function will use the main matrix (adata.X) or the 'counts' layer if the main matrix does not contain integer counts.
-
-        Returns:
-            tuple: A tuple containing the median number of genes by counts and the median total counts.
-
-        Notes:
-            - If no raw counts are provided and the main matrix (adata.X) does not contain integer counts, the function will issue a warning and return (0, 0).
-        """
-        if layer is None:
-            if not is_integer_counts(adata.X) and not force_layer:
-                if "counts" not in adata.layers.keys() or ("counts" in adata.layers.keys() and not is_integer_counts(adata.layers["counts"])):
-                    warnings.warn("No raw counts provided, metrics are set to 0.")
-                    return 0, 0
-                else:
-                    df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer="counts")
-            else:
-                df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None)
-        else:
-            if not is_integer_counts(adata.layers[layer]) and not force_layer:
-                warnings.warn(f"No raw counts provided in layer '{layer}', metrics are set to 0.")
-                return 0, 0
-            else:
-                df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer=layer)
-
-        return df_cells["n_genes_by_counts"].median(), df_cells["total_counts"].median()
-
-
-
+@with_insitupy_style
 def overview(
     data: InSituExperiment,
     cells_layer: Optional[str] = None,
@@ -105,7 +75,8 @@ def overview(
     layer: str = None,
     force_layer: bool = False,
     index: bool = True,
-    qc_width: float = 4.0,
+    qc_width: float = 3.0,
+    fontsize: int = 10,
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
     dpi_save: int = 300
@@ -114,12 +85,17 @@ def overview(
     Plots an overview table with metadata and quality control metrics.
 
     Args:
+        data (InSituExperiment): The experiment object containing datasets and metadata.
+        cells_layer (str, optional): The layer of cells to use. Defaults to None.
         columns_to_plot (List[str]): List of column names to include in the plot.
         layer (str, optional): The layer of the AnnData object to use for calculations. If None, the function will use the main matrix (adata.X) or the 'counts' layer if the main matrix does not contain integer counts.
-        force_layer (bool, optional): Whether to use specifies layer even if not integers in count matrix.
+        force_layer (bool, optional): Whether to use specified layer even if not integers in count matrix.
         index (bool, optional): Whether to add extra index or not. Default is True.
-        custom_width (float, optional): Custom width for metadata columns. Default is 1.0.
-        qc_width (float, optional): Width for quality control metric columns. Default is 4.0.
+        qc_width (float, optional): Width for quality control metric columns. Default is 3.0.
+        fontsize (int, optional): Font size for all text in the table. Default is 10.
+        savepath (Union[str, os.PathLike, Path], optional): Path to save the figure. Defaults to None.
+        save_only (bool, optional): If True, only save without displaying. Defaults to False.
+        dpi_save (int, optional): DPI for saved figure. Defaults to 300.
 
     Raises:
         ImportError: If the 'plottable' framework is not installed.
@@ -157,8 +133,9 @@ def overview(
             column_definition.append(
                 ColumnDefinition(name=column_name,
                                  textprops={"ha": "center"},
-                                 width=width_dict[column_name],
-                                 title="Sample", border=border))
+                                 width=0.5,
+                                #  width=width_dict[column_name],
+                                 title="ID", border=border))
         else:
             column_definition.append(
                 ColumnDefinition(name=column_name,
@@ -177,7 +154,7 @@ def overview(
         # get CellData
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
-        m_gene_counts, m_transcript_counts = _calculate_metrics(
+        m_gene_counts, m_transcript_counts = _calculate_single_metrics(
             celldata.table,
             layer=layer,
             force_layer=force_layer)
@@ -195,7 +172,7 @@ def overview(
             "mean_transcript_counts",
             group="qc_metrics",
             plot_fn=_custom_bar,
-            plot_kw={"max": max_transcripts},
+            plot_kw={"max": max_transcripts, "fontsize": fontsize},
             title="Median Transcripts per Cell",
             textprops={"ha": "center"},
             width=qc_width, border="left"),
@@ -203,14 +180,14 @@ def overview(
             "mean_gene_counts",
             group="qc_metrics",
             plot_fn=_custom_bar,
-            plot_kw={"max": max_genes},
+            plot_kw={"max": max_genes, "fontsize": fontsize},
             title="Median Genes per Cell",
             textprops={"ha": "center"},
             width=qc_width
             )
     ]
     # Create the plot
-    fig, ax = plt.subplots(figsize=(total_width + qc_width * 2, len(df) * 0.7 + 1))
+    fig, ax = plt.subplots(figsize=(total_width + qc_width * 2, len(df) * 0.5 + 0.8))
     plt.rcParams["font.family"] = ["DejaVu Sans"]
 
     table = Table(
@@ -220,6 +197,7 @@ def overview(
         row_dividers=True,
         footer_divider=True,
         ax=ax,
+        textprops={"fontsize": fontsize},
         row_divider_kw={"linewidth": 1, "linestyle": (0, (1, 5))},
         col_label_divider_kw={"linewidth": 1, "linestyle": "-"},
         column_border_kw={"linewidth": 1, "linestyle": "-"},

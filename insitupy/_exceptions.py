@@ -170,10 +170,11 @@ class InvalidDataTypeError(Exception):
 
 class InvalidXeniumDirectory(Exception):
     def __init__(self, directory):
-        if (Path(directory) / ".ispy").exists():
+        directory = Path(directory)
+        if (directory / ".ispy").exists():
             self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file, but it contains an InSituPy project file. Try `InSituData.read()` instead."
         else:
-            self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file."
+            self.message = f"The directory '{directory}' is not a valid Xenium directory. It does not contain the required 'experiment.xenium' metadata file."
         super().__init__(self.message)
 
 

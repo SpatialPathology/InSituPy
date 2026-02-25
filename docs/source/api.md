@@ -93,6 +93,66 @@ To concatenate multiple `InSituExperiment` objects:
     InSituExperiment.concat
 ```
 
+Working with saved sample filters (experimental):
+
+```{warning}
+This filter workflow is currently **experimental** and may change in future releases.
+```
+
+```{eval-rst}
+.. code-block:: python
+
+    from insitupy import InSituExperiment
+
+    exp = InSituExperiment.read("path/to/experiment")
+
+    exp.filters.create(
+        by="sample_id",
+        include=["S01", "S02", "S05"],
+        key="general_quality",
+        note="Samples with overall good quality in total counts and morphology"
+    )
+
+    # overview table with selected/excluded counts and notes
+    exp.filters.summary()
+
+    # programmatic access to raw boolean masks
+    exp.filters.masks()
+
+    # full project save (datasets + metadata + colors + filters)
+    exp.save()
+
+    # dedicated partial-save helpers
+    exp.save_metadata()
+    exp.save_colors()
+    exp.save_images(overwrite=False)
+
+    # load later with filter applied
+    exp2 = InSituExperiment.read("path/to/experiment", filter_key="general_quality")
+
+    # detached subset (export workflow): exp_apply.path is None
+    exp_apply = exp.filters.apply("general_quality")
+
+    # linked lightweight view (in-place update workflow)
+    exp_view = exp.filters.view("general_quality")
+    exp_view.is_view            # True
+    exp_view.applied_filters    # ["general_quality"]
+
+    # Add another view filter; chain of applied filters is tracked
+    exp_view2 = exp_view.filters.view("tumor_only")
+    exp_view2.applied_filters   # ["general_quality", "tumor_only"]
+
+    # view.save() updates only selected InSituData objects in-place
+    # and does not overwrite experiment-level metadata/colors/filters
+    exp_view2.save()
+
+Notes:
+
+- `exp.filters.apply(key)` returns a detached `InSituExperiment` subset (safe for `saveas()` export workflows).
+- `exp.filters.view(key)` returns a lightweight linked view (`InSituExperimentView`) with path linkage preserved.
+- Dataset identity is tracked via `uid` in metadata; filtered view indices are view-local and may differ from the parent experiment.
+```
+
 ### Import data objects
 
 Import the data objects like this:

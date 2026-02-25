@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import warnings
 from collections import defaultdict
@@ -15,25 +16,35 @@ import scanpy as sc
 from anndata import AnnData
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
+from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
 
 from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR)
+                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR,
+                                 with_insitupy_style)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
+from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
+logger = logging.getLogger(__name__)
+
 # Feature flag for SpatialData mode
 # Set to True to enable spatialdata mode functionality
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
+_FILTERS_SCHEMA_VERSION = 1
+
+# Sentinel value to detect when 'by' is not explicitly provided
+_UNSET = object()
 
 
 class InSituExperiment:
@@ -99,6 +110,8 @@ class InSituExperiment:
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
+        self._filters = {}
+        self._applied_filters: List[str] = []
         self._data_type = data_type
 
     def __repr__(self):
@@ -129,8 +142,101 @@ class InSituExperiment:
 
         # generate string summary
         sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        return (f"{tf.Bold}InSituExperiment{tf.ResetAll}{mode_str} with {num_samples} samples:\n"
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
+        filters_info = ""
+        if self.applied_filters:
+            filters_info = f"\nApplied filters: {' -> '.join(self.applied_filters)}"
+
+        return (f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str} with {num_samples} samples:{filters_info}\n"
                 f"{sample_summary}")
+
+    @property
+    def is_view(self) -> bool:
+        return False
+
+    @property
+    def applied_filters(self) -> List[str]:
+        return list(self._applied_filters)
+
+    def _subset(
+        self,
+        key,
+        as_view: bool = False,
+        added_filter: Optional[str] = None,
+    ):
+        """
+        Internal helper to subset experiment data and metadata.
+
+        Args:
+            key: Subsetting key (same accepted types as ``__getitem__``).
+            as_view: If True, keep path linkage and return an InSituExperimentView.
+            added_filter: Optional filter key to append to applied filter history.
+        """
+        if isinstance(key, int):
+            if key > (len(self) - 1):
+                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
+            key = slice(key, key + 1)
+
+        elif isinstance(key, list):
+            if all(isinstance(i, bool) for i in key):
+                key = pd.Series(key)
+
+        elif isinstance(key, pd.Series):
+            if key.dtype != bool:
+                key = key.tolist()
+
+        subset_cls = InSituExperimentView if as_view else InSituExperiment
+
+        # Handle boolean mask
+        if isinstance(key, pd.Series) and key.dtype == bool:
+            selected_indices = list(self._metadata.index[key])
+            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment._data = [d for d, k in zip(self._data, key) if k]
+            new_experiment._metadata = self._metadata[key].reset_index(drop=True)
+
+        # Handle slices, list of ints, ndarray, or Series of ints
+        else:
+            selected_indices = list(self._metadata.iloc[key].index)
+            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
+            new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
+
+        # Carry over colors and filters, and subset filters to the new metadata
+        new_experiment._colors = deepcopy(self._colors)
+        new_experiment._filters = {}
+        if self._filters:
+            for name, entry in self._filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(self._metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(self._metadata)}). Skipping filter in subset.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                new_experiment._filters[name] = {
+                    "mask": mask_arr[selected_indices].tolist(),
+                    "note": note,
+                }
+
+        # Keep linkage only for view objects
+        if as_view:
+            new_experiment._path = self._path
+        else:
+            new_experiment._path = None
+
+        if as_view:
+            new_experiment._applied_filters = list(self._applied_filters)
+            if added_filter is not None:
+                new_experiment._applied_filters.append(added_filter)
+        else:
+            new_experiment._applied_filters = []
+
+        return new_experiment
 
     def __getitem__(self, key):
         """
@@ -147,35 +253,7 @@ class InSituExperiment:
             IndexError: If the index is out of range.
             ValueError: If the key is invalid.
         """
-        if isinstance(key, int):
-            if key > (len(self) - 1):
-                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
-            key = slice(key, key + 1)
-
-        elif isinstance(key, list):
-            if all(isinstance(i, bool) for i in key):
-                key = pd.Series(key)
-            # If it's a list of indices, we let it pass to iloc below
-
-        elif isinstance(key, pd.Series):
-            if key.dtype != bool:
-                key = key.tolist()
-
-        # Handle boolean mask
-        if isinstance(key, pd.Series) and key.dtype == bool:
-            new_experiment = InSituExperiment(data_type=self._data_type)
-            new_experiment._data = [d for d, k in zip(self._data, key) if k]
-            new_experiment._metadata = self._metadata[key].reset_index(drop=True)
-
-        # Handle slices, list of ints, ndarray, or Series of ints
-        else:
-            new_experiment = InSituExperiment(data_type=self._data_type)
-            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
-            new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
-
-        # Disconnect object from save path
-        new_experiment._path = None
-        return new_experiment
+        return self._subset(key, as_view=self.is_view)
 
     def __len__(self):
         """Returns the number of datasets in the experiment.
@@ -236,6 +314,26 @@ class InSituExperiment:
         return self._colors
 
     @property
+    def filters(self):
+        """
+        Filter manager exposing filter operations (create, remove, clear, apply, view, rename).
+
+        Returns:
+            FilterManager: Manager object for filter operations and summaries.
+        """
+        return FilterManager(self)
+
+    @property
+    def filter_masks(self):
+        """
+        Raw filter dictionary mapping keys to boolean masks.
+
+        Returns:
+            dict: A dictionary mapping filter keys to boolean-mask lists.
+        """
+        return self.filters.masks()
+
+    @property
     def data(self):
         """
         List of datasets as :class:`~insitupy._core.data.InSituData` or StructuredSpatialData objects.
@@ -247,23 +345,92 @@ class InSituExperiment:
 
     @property
     def metadata(self):
-
         """
-        Returns a copy of the experiment-level metadata.
+        Returns the experiment-level metadata as a pandas DataFrame.
+
+        Returns a copy of the metadata DataFrame. For interactive display, use :attr:`imetadata`.
 
         Note:
-            This is a **copy** of the internal metadata DataFrame.
-            Any modifications to this copy (e.g., adding columns) will **not** affect the actual metadata.
-            To modify metadata, use `add_metadata_column()` instead.
+            This returns a **copy** of the internal metadata :class:`pandas.DataFrame`. Any modifications
+            to this copy will **not** affect the actual metadata. To modify metadata, use
+            `add_metadata_column()` or `append_metadata()`.
 
         Returns:
-            pd.DataFrame: A copy of the metadata DataFrame.
+            pandas.DataFrame: A copy of the metadata DataFrame.
         """
         print(
             f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
             f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
         )
-        return self._metadata.copy() # the copy prevents the metadata from being modified
+        return self._metadata.copy()
+
+    # @property
+    def imetadata(self, fixed=None):
+        """
+        Displays the experiment-level metadata as an interactive table using itables.
+
+        This method provides an interactive view of the metadata with search and filter capabilities.
+        Requires the `itables` package to be installed.
+
+        Parameters:
+            fixed: str, list of str, or None
+                Column name(s) to fix/freeze on the left side when scrolling horizontally.
+                These columns will be reordered to the left of the table.
+                The index column is always included as the first fixed column.
+                If None, no columns are fixed.
+
+        Returns:
+            None: Displays the interactive table in the output.
+
+        Raises:
+            ImportError: If the `itables` package is not installed.
+            ValueError: If any specified fixed column is not found in the metadata.
+        """
+        try:
+            from itables import show
+
+            df = self._metadata.reset_index()
+            index_col = df.columns[0]  # Get the name of the index column
+
+            # Determine columns to fix and reorder
+            if fixed is not None:
+                if isinstance(fixed, str):
+                    fixed = [fixed]
+
+                # Validate that all fixed columns exist
+                missing = [col for col in fixed if col not in df.columns]
+                if missing:
+                    raise ValueError(f"Fixed column(s) not found in metadata: {missing}")
+
+                # Ensure index column is first, then other fixed columns (avoid duplicates)
+                fixed = [index_col] + [col for col in fixed if col != index_col]
+
+                # Reorder columns: fixed columns first, then the rest
+                other_cols = [col for col in df.columns if col not in fixed]
+                df = df[fixed + other_cols]
+
+                fixed_columns = {"start": len(fixed)}
+            else:
+                fixed_columns = None
+
+            show_kwargs = {
+                "layout": {"bottom1": "searchBuilder"},
+                "column_filters": "footer",
+            }
+
+            if fixed_columns:
+                show_kwargs["scrollX"] = True
+                show_kwargs["fixedColumns"] = fixed_columns
+
+            show(df, **show_kwargs)
+            return None
+
+        except ImportError:
+            logger.warning(
+                f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
+                f"Falling back to static display.{tf.ResetAll}"
+            )
+            return self._metadata.copy()
 
     @property
     def path(self):
@@ -338,14 +505,35 @@ class InSituExperiment:
     def add_metadata_column(
         self,
         column_name: str,
-        values: Union[List, str, pd.Series, np.ndarray]
+        values: Union[List, str, pd.Series, np.ndarray],
+        overwrite: bool = False
         ):
-        """Add a metadata column."""
+        """
+        Add a metadata column to the experiment.
+
+        Args:
+            column_name (str): Name of the column to add.
+            values (Union[List, str, pd.Series, np.ndarray]): Values for the new column.
+            overwrite (bool, optional): Whether to overwrite the column if it already exists.
+                Defaults to False.
+
+        Warns:
+            UserWarning: If the column already exists and overwrite is False.
+        """
+        if column_name in self._metadata.columns and not overwrite:
+            warnings.warn(
+                f"Column '{column_name}' already exists in metadata. "
+                f"Set overwrite=True to replace it.",
+                UserWarning,
+                stacklevel=2
+            )
+            return
+
         self._metadata[column_name] = values
 
     def append_metadata(self,
                         new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],
-                        by: Optional[str],
+                        by: Optional[str] = _UNSET,
                         overwrite: bool = False
                         ):
         """
@@ -354,14 +542,28 @@ class InSituExperiment:
         Args:
             new_metadata (Union[pd.DataFrame, dict, str, os.PathLike, Path]): The new metadata to be added.
                 Can be a DataFrame, a dictionary, or a path to a CSV/Excel file.
-            by (str, optional): The column name to use for pairing metadata. If None, metadata is paired by order.
+            by (str, optional): The column name to use for pairing metadata. If not provided, a warning is
+                raised prompting the user to specify a column. Set `by=None` explicitly to pair by row order.
             overwrite (bool, optional): Whether to overwrite existing columns in the metadata. Defaults to False.
 
         Raises:
+            TypeError: If new_metadata is not a supported type.
             ValueError: If the 'by' column is not unique or missing in either the existing or new metadata.
         """
+        # If 'by' was not explicitly provided, warn and default to None (order-based)
+        if by is _UNSET:
+            warnings.warn(
+                "'by' was not specified. Metadata will be paired by row order, which may lead to "
+                "incorrect alignment if the rows are not in the same order. Pass `by='column_name'` "
+                "to merge on a key column, or `by=None` to explicitly confirm order-based pairing.",
+                UserWarning,
+                stacklevel=2
+            )
+            by = None
         # Convert new_metadata to a DataFrame if it is not already one
-        if isinstance(new_metadata, dict):
+        if isinstance(new_metadata, pd.DataFrame):
+            pass  # already a DataFrame
+        elif isinstance(new_metadata, dict):
             new_metadata = pd.DataFrame(new_metadata)
         elif isinstance(new_metadata, (str, os.PathLike, Path)):
             new_metadata = Path(new_metadata)
@@ -371,13 +573,30 @@ class InSituExperiment:
                 new_metadata = pd.read_excel(new_metadata)
             else:
                 raise ValueError("Unsupported file format. Please provide a path to a CSV or Excel file.")
+        else:
+            raise TypeError(
+                f"new_metadata must be a DataFrame, dict, or file path, got {type(new_metadata).__name__}."
+            )
 
         # Create a copy of the existing metadata
         old_metadata = self._metadata.copy()
 
         if by is not None:
-            if not by in new_metadata.columns or not by in old_metadata.columns:
-                raise ValueError(f"Column '{by}' must be present in both existing and new metadata. If you want to append metadata by order, set `by=None`.")
+            if by not in new_metadata.columns or by not in old_metadata.columns:
+                raise ValueError(
+                    f"Column '{by}' must be present in both existing and new metadata. "
+                    f"If you want to append metadata by order, set `by=None`."
+                )
+
+            # Validate that the 'by' column has no NaN values
+            if new_metadata[by].isna().any():
+                raise ValueError(f"Column '{by}' in new_metadata contains NaN values.")
+            if old_metadata[by].isna().any():
+                raise ValueError(f"Column '{by}' in existing metadata contains NaN values.")
+
+            # Validate uniqueness of the 'by' column
+            if not old_metadata[by].is_unique or not new_metadata[by].is_unique:
+                raise ValueError(f"Column '{by}' must be unique in both existing and new metadata.")
 
         if overwrite:
             # preserve only the columns of the old metadata that are not in the new metadata
@@ -389,10 +608,30 @@ class InSituExperiment:
                 # sort them by the original order
                 cols_to_use = [elem for elem in old_metadata.columns if elem in cols_to_use]
 
+            # Warn if new_metadata has no overlapping columns to overwrite
+            overlapping = list(set(old_metadata.columns) & set(new_metadata.columns) - ({by} if by is not None else set()))
+            if len(overlapping) == 0:
+                warnings.warn(
+                    "No overlapping columns found to overwrite. No changes will be made.",
+                    UserWarning,
+                    stacklevel=2
+                )
+                return
+
             old_metadata = old_metadata[cols_to_use]
         else:
             # preserve only such columns of the new metadata that are not yet in the old metadata
             cols_to_use = list(new_metadata.columns.difference(old_metadata.columns))
+
+            # Warn if new_metadata has no new columns to add
+            if len(cols_to_use) == 0:
+                warnings.warn(
+                    "All columns in new_metadata already exist in the current metadata. "
+                    "No new columns to add. Set `overwrite=True` to replace existing columns.",
+                    UserWarning,
+                    stacklevel=2
+                )
+                return
 
             if by is not None:
                 cols_to_use = [by] + cols_to_use
@@ -402,25 +641,155 @@ class InSituExperiment:
         if by is None:
             if len(new_metadata) != len(old_metadata):
                 raise ValueError("Length of new metadata does not match the existing metadata.")
-            warnings.warn("No 'by' column provided. Metadata will be paired by order.")
+            warnings.warn(
+                "No 'by' column provided. Metadata will be paired by order.",
+                UserWarning,
+                stacklevel=2
+            )
             updated_metadata = pd.merge(left=old_metadata, right=new_metadata,
                                         left_index=True, right_index=True, how="left")
         else:
-            if by not in old_metadata.columns or by not in new_metadata.columns:
-                raise ValueError(f"Column '{by}' must be present in both existing and new metadata.")
-
-            if not old_metadata[by].is_unique or not new_metadata[by].is_unique:
-                raise ValueError(f"Column '{by}' must be unique in both existing and new metadata.")
+            # Warn about unmatched rows in new_metadata
+            unmatched = set(new_metadata[by]) - set(old_metadata[by])
+            if unmatched:
+                warnings.warn(
+                    f"{len(unmatched)} entries in new_metadata['{by}'] have no match in existing metadata "
+                    f"and will be ignored.",
+                    UserWarning,
+                    stacklevel=2
+                )
 
             updated_metadata = pd.merge(left=old_metadata, right=new_metadata,
                                         on=by, how="left")
 
-        # Ensure the metadata is paired with the correct data
-        if len(updated_metadata) != len(self._data):
-            raise ValueError("The number of metadata entries does not match the number of data entries.")
+        # Ensure the metadata row count is preserved
+        if len(updated_metadata) != len(self._metadata):
+            raise ValueError(
+                f"Merge changed the number of metadata rows from {len(self._metadata)} to "
+                f"{len(updated_metadata)}. This indicates a problem with the merge key."
+            )
 
         # Update the object's metadata only if the check passes
         self._metadata = updated_metadata
+
+    def set_metadata_values(
+        self,
+        index: Union[int, List[int], List[bool], slice, range, np.ndarray, pd.Series],
+        column_name: str,
+        values: Union[Any, List, pd.Series, np.ndarray]
+    ):
+        """
+        Set metadata values for one or more indices.
+
+        Args:
+            index: Row index/indices to update. Can be:
+                - int: Single row index (e.g., 0)
+                - List[int]: Multiple specific indices (e.g., [0, 2, 5])
+                - List[bool]: Boolean mask (e.g., [True, False, True])
+                - slice: Range of indices (e.g., slice(0, 5))
+                - range: Range object (e.g., range(0, 5))
+                - np.ndarray: Array of indices or boolean mask
+                - pd.Series: Boolean Series for filtering
+            column_name: Name of the metadata column to update
+            values: Value(s) to set. Can be:
+                - Single value: Applied to all specified indices (broadcast)
+                - List/Series/array: Must have same length as number of indices
+
+        Raises:
+            ValueError: If values is a sequence with mismatched length to indices,
+                or if boolean mask length doesn't match metadata length
+            KeyError: If column_name doesn't exist in metadata
+            IndexError: If any index is out of bounds
+
+        Examples:
+            >>> # Single value at single index
+            >>> exp.set_metadata_values(0, "type", "tumor")
+
+            >>> # Same value for multiple indices (broadcast)
+            >>> exp.set_metadata_values([0, 1, 2], "type", "tumor")
+
+            >>> # Different values for multiple indices
+            >>> exp.set_metadata_values([0, 1, 2], "type", ["tumor", "normal", "tumor"])
+
+            >>> # Using slice notation
+            >>> exp.set_metadata_values(slice(0, 5), "Localisation", "head")
+
+            >>> # Using range
+            >>> exp.set_metadata_values(range(0, 3), "type", ["tumor", "normal", "tumor"])
+
+            >>> # Using boolean mask
+            >>> exp.set_metadata_values(exp.metadata["type"] == "normal", "Localisation", "body")
+
+            >>> # Using boolean list
+            >>> exp.set_metadata_values([True, False, True, False], "type", "tumor")
+        """
+        # Normalize index to list
+        if isinstance(index, int):
+            indices = [index]
+        elif isinstance(index, pd.Series):
+            # Handle pandas Series (typically boolean masks)
+            if index.dtype == bool:
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = list(self._metadata.index[index])
+            else:
+                indices = index.tolist()
+        elif isinstance(index, slice):
+            indices = list(range(*index.indices(len(self._metadata))))
+        elif isinstance(index, range):
+            indices = list(index)
+        elif isinstance(index, np.ndarray):
+            # Handle numpy arrays (could be indices or boolean masks)
+            if index.dtype == bool:
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = list(np.where(index)[0])
+            else:
+                indices = index.tolist()
+        elif isinstance(index, list):
+            # Check if it's a boolean list
+            if index and isinstance(index[0], (bool, np.bool_)):
+                if len(index) != len(self._metadata):
+                    raise ValueError(
+                        f"Boolean mask length ({len(index)}) must match metadata length ({len(self._metadata)})"
+                    )
+                indices = [i for i, mask in enumerate(index) if mask]
+            else:
+                indices = list(index)
+        else:
+            indices = list(index)
+
+        # Validate column exists
+        if column_name not in self._metadata.columns:
+            raise KeyError(f"Column '{column_name}' does not exist in metadata")
+
+        # Validate indices are in bounds
+        max_idx = len(self._metadata) - 1
+        out_of_bounds = [i for i in indices if i > max_idx or i < -len(self._metadata)]
+        if out_of_bounds:
+            raise IndexError(
+                f"Indices out of bounds: {out_of_bounds}. "
+                f"Valid range: 0 to {max_idx}"
+            )
+
+        # Handle values: check if sequence and validate length
+        is_sequence = isinstance(values, (list, pd.Series, np.ndarray, tuple))
+
+        if is_sequence:
+            values_list = list(values) if not isinstance(values, list) else values
+            if len(values_list) != len(indices):
+                raise ValueError(
+                    f"Length mismatch: {len(indices)} index/indices specified but "
+                    f"{len(values_list)} value(s) provided. They must match."
+                )
+            self._metadata.loc[indices, column_name] = values_list
+        else:
+            # Single value - broadcast to all indices
+            self._metadata.loc[indices, column_name] = values
 
     def remove_metadata_columns(self, columns):
         """
@@ -720,10 +1089,11 @@ class InSituExperiment:
         label_col: str = "uid",
         obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
         varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = True,
     ) -> anndata.AnnData:
         """
@@ -738,6 +1108,7 @@ class InSituExperiment:
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
+            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
             make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
 
         Returns:
@@ -769,18 +1140,42 @@ class InSituExperiment:
                 layer_keys=layer_keys
             )
 
+            # Add metadata columns to obs
+            if metadata_keys is not None:
+                if metadata_keys == "all":
+                    keys_to_add = list(meta.index)
+                else:
+                    # make sure keys are a list
+                    keys_to_add = convert_to_list(metadata_keys)
+
+                for key in keys_to_add:
+                    if key in meta.index:
+                        adata.obs[key] = meta[key]
+                    else:
+                        raise ValueError(
+                            f"Column '{key}' not found in metadata. "
+                            f"Available columns: {list(self._metadata.columns)}"
+                        )
+
             if make_obs_names_unique:
                 adata.obs_names = f"{str(i)}-" + adata.obs_names
 
             adatas[meta[label_col]] = adata
 
-        return anndata.concat(
+        adata_concat = anndata.concat(
             adatas,
             axis='obs',
             join='inner',
             label=label_col,
             merge="unique"
         )
+
+        # Move label_col to first position in obs columns
+        if label_col in adata_concat.obs.columns:
+            cols = [label_col] + [col for col in adata_concat.obs.columns if col != label_col]
+            adata_concat.obs = adata_concat.obs[cols]
+
+        return adata_concat
 
 
     def load_all(self,
@@ -817,16 +1212,18 @@ class InSituExperiment:
 
     def load_images(self,
                     names: Union[Literal["all", "nuclei"], str] = "all",
-                    nuclei_type: Literal["focus", "mip", ""] = "mip",
-                    load_cell_segmentation_images: bool = True
+                    overwrite: bool = False,
+                    verbose: bool = False
                     ):
         """Load images for all datasets."""
         self._check_mode_compatibility("load_images")
 
         for xd in tqdm(self._data):
-            xd.load_images(names=names,
-                           nuclei_type=nuclei_type,
-                           load_cell_segmentation_images=load_cell_segmentation_images)
+            xd.load_images(
+                names=names,
+                overwrite=overwrite,
+                verbose=verbose
+                )
 
     def load_regions(self):
         """Load regions for all datasets."""
@@ -842,6 +1239,7 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.load_transcripts()
 
+    @with_insitupy_style
     def plot_embedding(
         self,
         basis: str,
@@ -904,6 +1302,7 @@ class InSituExperiment:
             return fig, axes
 
 
+    @with_insitupy_style
     def plot_umaps(
         self,
         cells_layer: Optional[str] = None,
@@ -977,39 +1376,201 @@ class InSituExperiment:
 
     def save(self,
              verbose: bool = False,
-             overwrite_metadata: bool = True,
-             overwrite_colors: bool = True,
-             metadata_only: bool = False,
+             collect_warnings_mode: bool = True,
              **kwargs
              ):
-        """Save the experiment."""
+        """Save the full experiment to its existing project path.
+
+        This method has a single responsibility: perform a full project save
+        (datasets + metadata + colors + filters).
+
+        For partial save workflows, use dedicated methods:
+        ``save_metadata()``, ``save_colors()``, ``save_images()``, and ``save_filters()``.
+
+        Args:
+            verbose: If True, print verbose output for dataset-level save operations.
+            collect_warnings_mode: If True, collect warnings and print a summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
+        """
         self._check_mode_compatibility("save")
 
-        if metadata_only and not overwrite_metadata:
-            raise ValueError("If `metadata_only` is True, `overwrite_metadata` must also be True.")
-
-        if not metadata_only:
-            if self.path is None:
-                print("No save path found in `.path`. First save the InSituExperiment using '.saveas()'.")
-                return
-            else:
-                parent_path_identical = [Path(d.path).parent == self.path for d in self.data]
-                if not np.all(parent_path_identical):
-                    print(f"Saving process failed. Save path of some InSituData objects did not lie inside the InSituExperiment save path: {self._metadata['uid'][parent_path_identical].values}")
-                else:
+        if self.is_view:
+            if collect_warnings_mode:
+                with collect_warnings() as collector:
                     for xd in tqdm(self._data):
-                        xd.save(
-                            verbose=verbose,
-                            **kwargs
-                            )
+                        xd.save(verbose=verbose, **kwargs)
+                collector.print_summary()
+            else:
+                for xd in tqdm(self._data):
+                    xd.save(verbose=verbose, **kwargs)
+            return
 
-            if overwrite_colors:
-                with open(self.path / "colors.json", 'w') as f:
-                    json.dump(self.colors, f)
+        if self.path is None:
+            raise ValueError(
+                "No save path available. First save the InSituExperiment using `saveas()` "
+                "or set `self.path` by reading an existing experiment."
+            )
 
-        if overwrite_metadata:
-            # Optionally, save the metadata as a CSV file
-            self._metadata.to_csv(self.path / "metadata.csv", index=True)
+        parent_path_identical = [
+            (d.path is not None) and (Path(d.path).parent == self.path)
+            for d in self.data
+        ]
+        if not np.all(parent_path_identical):
+            invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+            raise ValueError(
+                "Saving failed: save path of some InSituData objects does not lie inside "
+                f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+            )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(verbose=verbose, **kwargs)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(verbose=verbose, **kwargs)
+
+        self.save_metadata(overwrite=True)
+        self.save_colors(overwrite=True)
+        self.save_filters(path=self.path)
+
+    def save_metadata(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment metadata to ``metadata.csv``.
+
+        Args:
+            path: Directory where ``metadata.csv`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``metadata.csv``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``metadata.csv`` exists and ``overwrite`` is False.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        metadata_path = path / "metadata.csv"
+
+        if metadata_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {metadata_path}. Set `overwrite=True` to replace it."
+            )
+
+        self._metadata.to_csv(metadata_path, index=True)
+
+    def save_colors(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = True,
+    ):
+        """Save only experiment colors to ``colors.json``.
+
+        Args:
+            path: Directory where ``colors.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``colors.json``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``colors.json`` exists and ``overwrite`` is False.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        colors_path = path / "colors.json"
+
+        if colors_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
+            )
+
+        with open(colors_path, 'w') as f:
+            json.dump(self.colors, f)
+
+    def save_images(
+        self,
+        overwrite: bool = False,
+        collect_warnings_mode: bool = True,
+        **kwargs,
+    ):
+        """Save only image data for datasets in the experiment.
+
+        This method syncs images only by forwarding ``sync_images=True`` and
+        ``images_only=True`` to each dataset save call.
+
+        Args:
+            overwrite: If True, overwrite existing images on disk.
+                Default is False (skip images that already exist).
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to ``InSituData.save()``.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_images")
+
+        dataset_verbose = kwargs.pop("verbose", False)
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
+                )
+
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving images failed: save path of some InSituData objects does not lie inside "
+                    f"the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save(
+                        verbose=dataset_verbose,
+                        sync_images=True,
+                        images_only=True,
+                        overwrite_images=overwrite,
+                        **kwargs,
+                    )
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save(
+                    verbose=dataset_verbose,
+                    sync_images=True,
+                    images_only=True,
+                    overwrite_images=overwrite,
+                    **kwargs,
+                )
 
 
 
@@ -1017,8 +1578,22 @@ class InSituExperiment:
         self,
         path: Union[str, os.PathLike, Path],
         overwrite: bool = False,
-        verbose: bool = False, **kwargs):
-        """Save all datasets to a specified folder."""
+        verbose: bool = False,
+        collect_warnings_mode: bool = True,
+        **kwargs):
+        """Save experiment to a new location (initial full write).
+
+        This method writes all datasets to ``path`` and then saves metadata,
+        colors, and filters using dedicated helper methods.
+
+        Args:
+            path: Path to save the InSituExperiment.
+            overwrite: If True, overwrite existing files.
+            verbose: If True, print verbose output.
+            collect_warnings_mode: If True, collect warnings and print summary at end
+                instead of displaying them inline (prevents progress bar disruption).
+            **kwargs: Additional keyword arguments passed to dataset.saveas().
+        """
         self._check_mode_compatibility("saveas")
 
         # Create the main directory if it doesn't exist
@@ -1029,18 +1604,55 @@ class InSituExperiment:
 
         print(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
-        # Iterate over the datasets and save each one in a numbered subfolder
-        for index, dataset in enumerate(tqdm(self._data)):
-            subfolder_path = path / f"data-{str(index).zfill(3)}"
-            dataset.saveas(subfolder_path, verbose=False, **kwargs)
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                # Iterate over the datasets and save each one in a numbered subfolder
+                for index, dataset in enumerate(tqdm(self._data)):
+                    subfolder_path = path / f"data-{str(index).zfill(3)}"
+                    dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
-        # Optionally, save the metadata as a CSV file
-        self._metadata.to_csv(path / "metadata.csv", index=True)
+            # Print collected warnings at the end
+            collector.print_summary()
+        else:
+            # Original behavior - warnings shown inline
+            for index, dataset in enumerate(tqdm(self._data)):
+                subfolder_path = path / f"data-{str(index).zfill(3)}"
+                dataset.saveas(subfolder_path, verbose=False, **kwargs)
 
-        with open(path / "colors.json", 'w') as f:
-            json.dump(self.colors, f)
+        self._path = path
+        self.save_metadata(path=path, overwrite=True)
+        self.save_colors(path=path, overwrite=True)
+        self.save_filters(path=path)
 
         print("Saved.") if verbose else None
+
+    def save_filters(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+    ):
+        """
+        Save only experiment filters to ``filters.json``.
+
+        Args:
+            path: Directory where ``filters.json`` should be written.
+                If None, uses ``self.path``.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set.
+        """
+        if path is None:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. Provide `path` or set `self.path` first (e.g. via `saveas`)."
+                )
+            path = self.path
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        filters_payload = self._build_filters_payload()
+        with open(path / "filters.json", 'w') as f:
+            json.dump(filters_payload, f)
 
     def show(
         self,
@@ -1086,7 +1698,7 @@ class InSituExperiment:
         cells_layer: Optional[str] = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         overwrite: bool = False,
-        verbose: bool = True
+        verbose: bool = False
     ):
         """
         Synchronize color dictionaries for categorical metadata across datasets.
@@ -1104,6 +1716,21 @@ class InSituExperiment:
         keys = convert_to_list(keys)
 
         for obs_col in keys:
+            # Skip numeric columns to avoid treating continuous values as categorical
+            is_numeric = False
+            for _, xd in self.iterdata():
+                celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+                if obs_col in celldata.table.obs.columns:
+                    series = celldata.table.obs[obs_col]
+                    if is_numeric_dtype(series) and not is_bool_dtype(series):
+                        is_numeric = True
+                        break
+
+            if is_numeric:
+                if verbose:
+                    print(f"Skipping sync_colors for numeric column '{obs_col}'.")
+                continue
+
             if obs_col not in self.colors or overwrite:
                 # create a color dictionary with all categories
                 color_dict = self._create_categorical_color_dict(
@@ -1198,14 +1825,19 @@ class InSituExperiment:
     @classmethod
     def from_config(cls,
                     config_path: Union[str, os.PathLike, Path],
-                    mode: Literal["insitupy", "xenium"] = "insitupy",
+                    mode: Literal["insitupy", "xenium"],
+                    collect_warnings_mode: bool = True,
                     **kwargs
                     ):
         """Create an InSituExperiment object from a configuration file.
 
         Args:
             config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
-            mode (Literal["insitupy", "xenium"], optional): The mode to use for loading the datasets. Defaults to "insitupy".
+            mode (Literal["insitupy", "xenium"]): The mode to use for loading the datasets.
+                - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
+                - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
+            collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
+                This keeps the progress bar clean while still showing important warnings. Defaults to True.
         """
         config_path = Path(config_path)
 
@@ -1227,6 +1859,9 @@ class InSituExperiment:
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
 
+        # Create a warning collector if collect_warnings_mode is enabled
+        warning_collector = WarningCollector() if collect_warnings_mode else None
+
         # Iterate over each row in the configuration file
         for i in tqdm(range(len(config))):
             row = config.iloc[i, :]
@@ -1240,12 +1875,22 @@ class InSituExperiment:
             if not dataset_path.exists():
                 raise FileNotFoundError(f"No such directory found: {str(dataset_path)}")
 
-            if mode == "insitupy":
-                dataset = InSituData.read(dataset_path)
-            elif mode == "xenium":
-                dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+            # Use collect_warnings context manager to capture warnings without disrupting progress bar
+            if collect_warnings_mode:
+                with collect_warnings(warning_collector):
+                    if mode == "insitupy":
+                        dataset = InSituData.read(dataset_path)
+                    elif mode == "xenium":
+                        dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+                    else:
+                        raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
             else:
-                raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
+                if mode == "insitupy":
+                    dataset = InSituData.read(dataset_path)
+                elif mode == "xenium":
+                    dataset = read_xenium(dataset_path, verbose=False, **kwargs)
+                else:
+                    raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
             experiment._data.append(dataset)
 
@@ -1257,6 +1902,10 @@ class InSituExperiment:
 
             # Append the metadata to the experiment's metadata DataFrame
             experiment._metadata = pd.concat([experiment._metadata, pd.DataFrame([metadata])], ignore_index=True)
+
+        # Print collected warnings summary at the end
+        if warning_collector and len(warning_collector) > 0:
+            warning_collector.print_summary()
 
         return experiment
 
@@ -1305,7 +1954,8 @@ class InSituExperiment:
     @classmethod
     def read(cls,
              path: Union[str, os.PathLike, Path],
-             mode: Literal["insitupy", "spatialdata"] = "insitupy") -> "InSituExperiment":
+               mode: Literal["insitupy", "spatialdata"] = "insitupy",
+               filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
@@ -1326,7 +1976,7 @@ class InSituExperiment:
                 )
             return cls._read_spatialdata(path)
         elif mode == "insitupy":
-            return cls._read_insitupy(path)
+            return cls._read_insitupy(path, filter_key=filter_key)
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'insitupy' or 'spatialdata'")
 
@@ -1560,7 +2210,8 @@ class InSituExperiment:
         return loaded
 
     @classmethod
-    def _read_insitupy(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+    def _read_insitupy(cls, path: Union[str, os.PathLike, Path],
+                       filter_key: Optional[str] = None) -> "InSituExperiment":
         """
         Read an InSituExperiment in InSituPy format (original implementation).
 
@@ -1583,6 +2234,37 @@ class InSituExperiment:
         except FileNotFoundError:
             colors = {}
 
+        # Load filters (optional)
+        filters = {}
+        filters_path = path / "filters.json"
+        if filters_path.exists():
+            try:
+                with open(filters_path, 'r') as f:
+                    filters_payload = json.load(f)
+            except Exception as err:
+                raise ValueError(
+                    f"Could not load filters.json at '{filters_path}': {err}"
+                ) from err
+
+            if not isinstance(filters_payload, dict):
+                raise ValueError(
+                    "Invalid filters schema: expected a JSON object with keys 'version' and 'filters'."
+                )
+
+            version = filters_payload.get("version", None)
+            filters = filters_payload.get("filters", None)
+
+            if version != _FILTERS_SCHEMA_VERSION:
+                raise ValueError(
+                    f"Unsupported filters schema version: {version}. "
+                    f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                )
+
+            if not isinstance(filters, dict):
+                raise ValueError(
+                    "Invalid filters schema: 'filters' must be a dictionary mapping filter keys to filter entries."
+                )
+
         # Load each dataset
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
@@ -1596,8 +2278,49 @@ class InSituExperiment:
         experiment._data = data
         experiment._path = path
         experiment._colors = colors
+        experiment._filters = {}
+
+        # Validate and store filters
+        if filters:
+            for name, entry in filters.items():
+                spec = FilterSpec.from_entry(name, entry)
+                mask = spec.mask
+                note = spec.note
+                mask_arr = np.asarray(mask, dtype=bool)
+                if len(mask_arr) != len(metadata):
+                    warnings.warn(
+                        f"Filter '{name}' length ({len(mask_arr)}) does not match metadata length "
+                        f"({len(metadata)}). Skipping this filter.",
+                        UserWarning,
+                        stacklevel=2
+                    )
+                    continue
+                experiment._filters[name] = {
+                    "mask": mask_arr.tolist(),
+                    "note": note,
+                }
+
+        if filter_key is not None:
+            if filter_key not in experiment._filters:
+                raise KeyError(
+                    f"Filter '{filter_key}' not found. Available filters: {list(experiment._filters.keys())}"
+                )
+            experiment = experiment.filters.apply(filter_key)
 
         return experiment
+
+    def _build_filters_payload(self) -> Dict[str, Any]:
+        """Build versioned JSON payload for ``filters.json``."""
+        payload: Dict[str, Any] = {
+            "version": _FILTERS_SCHEMA_VERSION,
+            "filters": {},
+        }
+
+        for key, entry in self._filters.items():
+            spec = FilterSpec.from_entry(key, entry)
+            payload["filters"][key] = spec.to_dict()
+
+        return payload
 
     def _check_mode_compatibility(self, method_name: str):
         """
@@ -1609,7 +2332,6 @@ class InSituExperiment:
                 f"Method '{method_name}' is not yet implemented for SpatialData mode. "
                 f"This will be added in a future update."
             )
-
     def _check_obs_uniqueness(
         self,
         cells_layer: Optional[str] = None
@@ -1658,3 +2380,71 @@ class InSituExperiment:
             return color_dict
         else:
             return None
+
+    def calculate_qc_metrics(
+        self,
+        cells_layer: Optional[str] = None,
+        layer: str = None,
+        force_layer: bool = False,
+        add_to_metadata: bool = True,
+        return_metrics: bool = False,
+    ) -> Optional[Dict]:
+        """
+        Calculate quality control metrics for the InSituExperiment.
+
+        Args:
+            cells_layer: The layer of cells to use. Defaults to None.
+            layer: The layer of the AnnData object to use for calculations.
+                If None, uses adata.X or 'counts' layer if X is not integer counts.
+            force_layer: Whether to use specified layer even if not integer counts.
+            add_to_metadata: Whether to add metrics to exp._metadata. Default True.
+            return_metrics: Whether to return metrics as dict. Default False.
+
+        Returns:
+            If return_metrics is True, returns dict with 'median_genes_per_cell'
+            and 'median_transcripts_per_cell' lists. Otherwise returns None.
+        """
+        from insitupy.utils._checks import _calculate_single_metrics
+
+        median_genes = []
+        median_transcripts = []
+        num_cells = []
+
+        for _, dataset in self.iterdata():
+            if dataset.cells.is_empty:
+                warnings.warn("Cells were not loaded. Loading cells.")
+                dataset.load_cells()
+
+            celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
+            m_genes, m_transcripts = _calculate_single_metrics(
+                celldata.table, layer=layer, force_layer=force_layer
+            )
+            median_genes.append(m_genes)
+            median_transcripts.append(m_transcripts)
+            num_cells.append(celldata.table.n_obs)
+
+        # Create column names with optional cells_layer suffix
+        suffix = f" ('{cells_layer}')" if cells_layer else ""
+        genes_col = f"median_genes_per_cell{suffix}"
+        transcripts_col = f"median_transcripts_per_cell{suffix}"
+        cells_col = f"num_cells{suffix}"
+
+        if add_to_metadata:
+            self._metadata[genes_col] = median_genes
+            self._metadata[transcripts_col] = median_transcripts
+            self._metadata[cells_col] = num_cells
+
+        if return_metrics:
+            return {
+                genes_col: median_genes,
+                transcripts_col: median_transcripts,
+                cells_col: num_cells,
+            }
+
+
+class InSituExperimentView(InSituExperiment):
+    """Lightweight linked view of an InSituExperiment subset."""
+
+    @property
+    def is_view(self) -> bool:
+        return True

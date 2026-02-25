@@ -1,3 +1,4 @@
+import warnings
 from typing import List, Literal, Tuple, Union
 
 import anndata
@@ -137,6 +138,10 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         obs_keys = convert_to_list(obs_keys)
+        missing_keys = [key for key in obs_keys if key not in adata.obs.columns]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.obs: {missing_keys}")
+        obs_keys = [key for key in obs_keys if key in adata.obs.columns]
         adata.obs = adata.obs[obs_keys]
 
     # .var
@@ -146,6 +151,10 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         var_keys = convert_to_list(var_keys)
+        missing_keys = [key for key in var_keys if key not in adata.var.columns]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.var: {missing_keys}")
+        var_keys = [key for key in var_keys if key in adata.var.columns]
         adata.var = adata.var[var_keys]
 
     # .obsm
@@ -157,6 +166,9 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         obsm_keys = convert_to_list(obsm_keys)
+        missing_keys = [key for key in obsm_keys if key not in adata.obsm.keys()]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.obsm: {missing_keys}")
         keys_to_remove = set(adata.obsm.keys()) - set(obsm_keys)
         for key in keys_to_remove:
             del adata.obsm[key]
@@ -170,6 +182,9 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         varm_keys = convert_to_list(varm_keys)
+        missing_keys = [key for key in varm_keys if key not in adata.varm.keys()]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.varm: {missing_keys}")
         keys_to_remove = set(adata.varm.keys()) - set(varm_keys)
         for key in keys_to_remove:
             del adata.varm[key]
@@ -183,6 +198,9 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         uns_keys = convert_to_list(uns_keys)
+        missing_keys = [key for key in uns_keys if key not in adata.uns.keys()]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.uns: {missing_keys}")
         keys_to_remove = set(adata.uns.keys()) - set(uns_keys)
         for key in keys_to_remove:
             del adata.uns[key]
@@ -196,6 +214,9 @@ def _select_anndata_elements(
         pass  # Keep all keys
     else:
         layer_keys = convert_to_list(layer_keys)
+        missing_keys = [key for key in layer_keys if key not in adata.layers.keys()]
+        if missing_keys:
+            warnings.warn(f"Keys not found in adata.layers: {missing_keys}")
         keys_to_remove = set(adata.layers.keys()) - set(layer_keys)
         for key in keys_to_remove:
             del adata.layers[key]

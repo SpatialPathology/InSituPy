@@ -11,6 +11,7 @@ import pandas as pd
 from adjustText import adjust_text
 from matplotlib.font_manager import FontProperties
 
+from insitupy._constants import with_insitupy_style
 from insitupy.dataclasses.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.plotting.config import _add_config_table
@@ -30,6 +31,7 @@ COLOR_NOT_SIGNIFICANT = 'black'
 MIN_PVALUE = 1e-300
 
 
+@with_insitupy_style
 def single_volcano(
     data: pd.DataFrame,
     logfoldchanges_column: str = 'log2foldchange',
@@ -342,6 +344,7 @@ def single_volcano(
     )
 
 
+@with_insitupy_style
 def volcano(
     results: DiffExprResults,
     significance_threshold: Number = 0.05,

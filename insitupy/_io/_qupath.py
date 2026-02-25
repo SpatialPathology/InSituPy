@@ -4,7 +4,6 @@ from pathlib import Path
 
 import anndata
 import pandas as pd
-from parse import *
 
 from insitupy import __version__
 from insitupy._io.geo import parse_geopandas

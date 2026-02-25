@@ -10,12 +10,11 @@ import dask.array as da
 import numpy as np
 import xmltodict
 import zarr
-from parse import *
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy import __version__
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy.images.axes import ImageAxes
+from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
 from insitupy.utils.utils import convert_to_list
 
@@ -28,6 +27,219 @@ if ZARR_V3:
     logger.info("Using Zarr v3.")
 else:
     logger.info("Using Zarr v2.")
+
+
+def get_zarr_source_path(arr) -> Optional[Path]:
+    """
+    Extract the source Zarr store path from a dask array loaded via ``da.from_zarr()``.
+
+    For image pyramids (list of dask arrays), inspects each level and returns
+    the first path found.
+
+    Args:
+        arr: A dask array, list of dask arrays, or any other object.
+
+    Returns:
+        The resolved :class:`~pathlib.Path` to the source Zarr store, or
+        ``None`` if the source cannot be determined (e.g. because the array
+        was created from in-memory data or was ``.persist()``-ed).
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        for a in arr:
+            result = get_zarr_source_path(a)
+            if result is not None:
+                return result
+        return None
+
+    if not isinstance(arr, da.Array):
+        return None
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return None
+
+    # Dask stores a zarr.Array object in a MaterializedLayer named
+    # 'original-from-zarr-*'.  We look for zarr.Array values and
+    # extract the store path from them.
+    for layer_name, layer in graph.layers.items():
+        mapping = getattr(layer, 'mapping', None)
+        if mapping is None:
+            if hasattr(layer, 'items'):
+                mapping = layer
+            else:
+                continue
+
+        try:
+            items = list(mapping.items())
+        except Exception:
+            continue
+
+        for _key, val in items:
+            path = _extract_path_from_zarr_array(val)
+            if path is not None:
+                return path
+            # Also check inside tuples (some dask versions)
+            if isinstance(val, tuple):
+                for v in val:
+                    path = _extract_path_from_zarr_array(v)
+                    if path is not None:
+                        return path
+
+    return None
+
+
+def _extract_path_from_zarr_array(v) -> Optional[Path]:
+    """Return the filesystem path of a ``zarr.Array``'s store, or ``None``."""
+    if isinstance(v, zarr.Array):
+        store = v.store
+        return _extract_path_from_zarr_store(store)
+    return None
+
+
+def _extract_path_from_zarr_store(store) -> Optional[Path]:
+    """Return the filesystem path backing a Zarr store, or ``None``."""
+    if ZARR_V3:
+        if isinstance(store, zarr.storage.LocalStore):
+            root = getattr(store, 'root', None)
+            if root is not None:
+                return Path(str(root)).resolve()
+            return Path(str(store)).resolve()
+    else:
+        if isinstance(store, zarr.storage.DirectoryStore):
+            return Path(store.path).resolve()
+
+    # Generic fallback
+    if hasattr(store, 'path'):
+        try:
+            return Path(store.path).resolve()
+        except Exception:
+            pass
+    if hasattr(store, 'root'):
+        try:
+            return Path(str(store.root)).resolve()
+        except Exception:
+            pass
+    return None
+
+
+def is_from_disk(arr) -> bool:
+    """
+    Check whether a dask array (or pyramid of dask arrays) is lazily loaded
+    from disk (e.g. Zarr, HDF5, npy, TIFF).
+
+    For non-dask objects (e.g. plain numpy arrays) this always returns
+    ``False``.
+
+    Args:
+        arr: A dask array, list of dask arrays, numpy array, or any object.
+
+    Returns:
+        ``True`` if the array is lazily backed by an on-disk source.
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        return any(is_from_disk(a) for a in arr)
+
+    if not isinstance(arr, da.Array):
+        return False
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return False
+
+    # Check layer names for well-known disk-backed prefixes
+    disk_indicators = (
+        "from-zarr", "original-from-zarr",
+        "from-npy", "from-hdf5", "from-tiff",
+    )
+    for layer_name in graph.layers:
+        if any(layer_name.startswith(ind) for ind in disk_indicators):
+            return True
+
+    # Fallback: inspect leaf values for zarr arrays (v2 and v3)
+    try:
+        for layer_name, layer in graph.layers.items():
+            mapping = getattr(layer, 'mapping', None)
+            if mapping is None:
+                if hasattr(layer, 'items'):
+                    mapping = layer
+                else:
+                    continue
+            try:
+                items = list(mapping.items())
+            except Exception:
+                continue
+            for _key, val in items:
+                if isinstance(val, zarr.Array):
+                    return True
+                if isinstance(val, tuple):
+                    for v in val:
+                        if isinstance(v, zarr.Array):
+                            return True
+                        if hasattr(v, 'store') and hasattr(v, 'shape'):
+                            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def is_from_zarr_disk(arr) -> bool:
+    """
+    Check whether a dask array (or pyramid) is lazily loaded specifically
+    from a **Zarr** store on disk.
+
+    Returns ``False`` for arrays backed by other on-disk formats (TIFF,
+    HDF5, npy) as well as for in-memory arrays.
+
+    Args:
+        arr: A dask array, list of dask arrays, or any other object.
+
+    Returns:
+        ``True`` if the array is lazily backed by a Zarr store.
+    """
+    # Handle list of dask arrays (pyramids)
+    if isinstance(arr, list):
+        return any(is_from_zarr_disk(a) for a in arr)
+
+    if not isinstance(arr, da.Array):
+        return False
+
+    graph = arr.__dask_graph__()
+    if not hasattr(graph, 'layers'):
+        return False
+
+    # Check layer names for zarr-specific prefixes
+    zarr_indicators = ("from-zarr", "original-from-zarr")
+    for layer_name in graph.layers:
+        if any(layer_name.startswith(ind) for ind in zarr_indicators):
+            return True
+
+    # Fallback: inspect leaf values for zarr arrays
+    try:
+        for layer_name, layer in graph.layers.items():
+            mapping = getattr(layer, 'mapping', None)
+            if mapping is None:
+                if hasattr(layer, 'items'):
+                    mapping = layer
+                else:
+                    continue
+            try:
+                items = list(mapping.items())
+            except Exception:
+                continue
+            for _key, val in items:
+                if isinstance(val, zarr.Array):
+                    return True
+                if isinstance(val, tuple):
+                    for v in val:
+                        if isinstance(v, zarr.Array):
+                            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
@@ -102,6 +314,8 @@ def read_zarr(path):
         if len(img) == 0:
             raise ValueError(f"No image data read from zarr file: {path}")
 
+        img, axes = normalize_axes_and_shape(img, axes)
+
     return img, ome_meta, axes, pixel_size
 
 
@@ -152,14 +366,7 @@ def read_image(
                     # in case of .tif image
                     pixel_size = float(ome_meta['OME:Image']['OME:Pixels']['PhysicalSizeX'])
 
-        if axes == "CYX":
-            if isinstance(img, list):
-                shape = img[0].shape
-            else:
-                shape = img.shape
-            if not len(shape) == 3:
-                warn(f"Axes information ({axes}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.")
-                axes = "YX"
+        img, axes = normalize_axes_and_shape(img, axes)
 
     return img, ome_meta, axes, pixel_size
 

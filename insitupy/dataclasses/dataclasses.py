@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import zarr
 from anndata import AnnData
-from parse import *
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy import WITH_NAPARI, __version__
@@ -26,10 +25,11 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true,
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy.dataclasses._segmentations import _read_proseg
+from insitupy.dataclasses._segmentations import _read_baysor, _read_proseg
 from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
                                   get_height_and_width)
-from insitupy.images.io import read_image, write_ome_tiff, write_zarr
+from insitupy.images.io import (get_zarr_source_path, is_from_zarr_disk,
+                                read_image, write_ome_tiff, write_zarr)
 from insitupy.images.utils import (_efficiently_resize_array,
                                    _get_scale_factor_from_max_res,
                                    create_img_pyramid,
@@ -417,6 +417,8 @@ class BoundariesData(DeepCopyMixin):
     def __init__(self,
                  cell_names: Union[np.ndarray, List],
                  seg_mask_value: Optional[Union[np.ndarray, List]],
+                 nucleus_to_cell_map: Optional[Dict[int, int]] = None,
+                 nucleus_count: Optional[np.ndarray] = None,
                  ):
         """
         Initialize the BoundariesData object.
@@ -425,6 +427,12 @@ class BoundariesData(DeepCopyMixin):
             cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.table` of `CellData`.
             seg_mask_value (Optional[Union[np.ndarray, List]]): Segmentation mask values. Required to have the same length as `cell_names`.
                 Specifies which values in the "cells" segmentation mask correspond to which cell name.
+            nucleus_to_cell_map (Optional[Dict[int, int]]): Mapping from nucleus index (0-indexed) to cell index (0-indexed).
+                For Xenium v2.0+ with multinucleated cells, this allows mapping each nucleus to its parent cell.
+                To look up a nucleus mask value N, use: `nucleus_to_cell_map[N - 1]` (since mask values are 1-indexed).
+                If None, assumes 1:1 mapping between nuclei and cells (Xenium v1.x behavior).
+            nucleus_count (Optional[np.ndarray]): Array with the number of nuclei per cell.
+                Useful for identifying multinucleated cells. If None, not available.
 
         For more details on how these values are saved in case of Xenium In Situ, see:
         https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/tutorials/outputs/xoa-output-zarr
@@ -444,7 +452,12 @@ class BoundariesData(DeepCopyMixin):
         else:
             raise ValueError("Argument 'seg_mask_value' is None. This argument is required to be set.")
 
+        # Store nucleus-to-cell mapping for multinucleated cell support (Xenium v2.0+)
+        self._nucleus_to_cell_map = nucleus_to_cell_map
+        self._nucleus_count = nucleus_count
+
         self._data = dict()
+        self._store = None  # zarr store reference for lifecycle management
 
     def __repr__(self):
         if len(self._data) > 0:
@@ -460,6 +473,18 @@ class BoundariesData(DeepCopyMixin):
         else:
             repr = "empty"
         return repr
+
+    def close(self):
+        """Close the underlying zarr store if one is attached."""
+        if self._store is not None:
+            try:
+                self._store.close()
+            except Exception:
+                pass
+            self._store = None
+
+    def __del__(self):
+        self.close()
 
     def __len__(self):
         return len(self._data)
@@ -493,8 +518,125 @@ class BoundariesData(DeepCopyMixin):
         return self._seg_mask_value
 
     @property
+    def nucleus_to_cell_map(self):
+        """Mapping from nucleus label ID to cell index. None if not available (v1.x data)."""
+        return self._nucleus_to_cell_map
+
+    @property
+    def nucleus_count(self):
+        """Array with number of nuclei per cell. None if not available."""
+        return self._nucleus_count
+
+    @property
     def is_empty(self):
         return len(self._data) == 0
+
+    def update_nucleus_metadata_from_xenium(
+        self,
+        xenium_path: Union[str, os.PathLike, Path],
+        overwrite: bool = False,
+    ) -> None:
+        """
+        Update nucleus_to_cell_map and nucleus_count from raw Xenium data if they are None.
+
+        This method reads the nucleus metadata from the Xenium cells.zarr.zip file
+        and updates the BoundariesData object in-place if the properties are missing.
+        Useful for updating older saved data that lacks multinucleated cell support.
+
+        Parameters
+        ----------
+        xenium_path : Union[str, os.PathLike, Path]
+            Path to the raw Xenium output directory containing cells.zarr.zip
+        overwrite : bool, default False
+            If True, update the metadata even if it already exists.
+            If False, only update metadata that is currently None.
+
+        Returns
+        -------
+        None
+            Updates the object in-place
+
+        Examples
+        --------
+        >>> boundaries = read_celldata("path/to/celldata").boundaries
+        >>> if boundaries.nucleus_to_cell_map is None:
+        ...     boundaries.update_nucleus_metadata_from_xenium("path/to/xenium/output")
+        >>>
+        >>> # Force update even if metadata exists
+        >>> boundaries.update_nucleus_metadata_from_xenium("path/to/xenium/output", overwrite=True)
+        """
+        from pathlib import Path
+        from warnings import warn
+
+        import dask.array as da
+        import zarr
+        from zarr.errors import ArrayNotFoundError
+
+        xenium_path = Path(xenium_path)
+        cells_zarr_file = xenium_path / "cells.zarr.zip"
+
+        if not cells_zarr_file.exists():
+            raise FileNotFoundError(f"Could not find cells.zarr.zip at {cells_zarr_file}")
+
+        # Check if we need to update anything
+        needs_nucleus_map = self._nucleus_to_cell_map is None or overwrite
+        needs_nucleus_count = self._nucleus_count is None or overwrite
+
+        if not needs_nucleus_map and not needs_nucleus_count:
+            print("nucleus_to_cell_map and nucleus_count are already set. No update needed.")
+            return
+
+        # Count unique cell and nucleus IDs in current boundaries (excluding background=0)
+        cells_data = self._data["cells"][0] if isinstance(self._data["cells"], list) else self._data["cells"]
+        ncells_current = len(da.unique(cells_data).compute()) - 1
+
+        nnuclei_current = None
+        if "nuclei" in self._data and self._data["nuclei"] is not None:
+            nuclei_data = self._data["nuclei"][0] if isinstance(self._data["nuclei"], list) else self._data["nuclei"]
+            nnuclei_current = len(da.unique(nuclei_data).compute()) - 1
+
+        # Import helper functions from _io module
+        from insitupy._io._xenium import (_read_nucleus_count_from_store,
+                                          _read_nucleus_to_cell_map_from_store)
+
+        # Open the Xenium zarr store
+        store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
+
+        # Read nucleus_to_cell_map if needed
+        if needs_nucleus_map:
+            try:
+                nucleus_to_cell_map = _read_nucleus_to_cell_map_from_store(store, self._cell_names.compute())
+
+                # Validate that the number of nuclei matches
+                if nnuclei_current is not None and len(nucleus_to_cell_map) != nnuclei_current:
+                    warn(f"Number of nuclei in nucleus_to_cell_map ({len(nucleus_to_cell_map)}) does not match "
+                         f"the number of unique nuclei in boundaries mask ({nnuclei_current}). This may indicate "
+                         f"a mismatch between the saved boundaries and the source Xenium data.")
+
+                self._nucleus_to_cell_map = nucleus_to_cell_map
+                print(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
+            except Exception as e:
+                warn(f"Could not read nucleus_to_cell_map from Xenium data: {e}")
+
+        # Read nucleus_count if needed
+        if needs_nucleus_count:
+            try:
+                nucleus_count = _read_nucleus_count_from_store(store)
+                if nucleus_count is not None:
+                    # Validate that the number of cells matches
+                    if len(nucleus_count) != ncells_current:
+                        warn(f"Number of cells in nucleus_count ({len(nucleus_count)}) does not match "
+                             f"the number of unique cells in boundaries mask ({ncells_current}). This may indicate "
+                             f"a mismatch between the saved boundaries and the source Xenium data.")
+
+                    self._nucleus_count = nucleus_count
+                    print(f"Updated nucleus_count for {len(nucleus_count)} cells.")
+                else:
+                    warn("nucleus_count not available in Xenium data.")
+            except Exception as e:
+                warn(f"Could not read nucleus_count from Xenium data: {e}")
+
+        store.close()
 
     def add_boundaries(self,
                        cell_boundaries: Union[da.core.Array, np.ndarray],
@@ -690,11 +832,25 @@ class BoundariesData(DeepCopyMixin):
             # save paths in insitupy metadata
             #metadata["boundaries"]["path"] = Path(relpath(bound_file, path)).as_posix()
 
-            #self._cell_ids.to_zarr(dirstore, component="cell_id")
-            self.cell_names.to_zarr(dirstore, component="cell_names", overwrite=True)
+            # save cell names
+            self.cell_names.to_zarr(
+                dirstore,
+                component="cell_names",
+                overwrite=True
+                )
 
             if self._seg_mask_value is not None:
                 self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
+
+            # Save nucleus_to_cell_map if available (for multinucleated cell support)
+            if self._nucleus_to_cell_map is not None:
+                # Store as 2D array with columns [nucleus_index, cell_index]
+                nucleus_map_arr = np.array([[k, v] for k, v in self._nucleus_to_cell_map.items()], dtype=np.int64)
+                da.from_array(nucleus_map_arr).to_zarr(dirstore, component="nucleus_to_cell_map", overwrite=True)
+
+            # Save nucleus_count if available
+            if self._nucleus_count is not None:
+                da.from_array(self._nucleus_count).to_zarr(dirstore, component="nucleus_count", overwrite=True)
 
         # # add version to metadata
         # metadata_to_save = self.metadata.copy()
@@ -771,9 +927,7 @@ class CellData(DeepCopyMixin):
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead."
         )
-        if not isinstance(value, AnnData):
-            raise ValueError(f"Matrix must be an AnnData object. Instead: {type(value)}.")
-        self._table = value
+        self._set_table(value=value, allow_partial_overlap=False)
 
     @property
     def table(self):
@@ -783,9 +937,51 @@ class CellData(DeepCopyMixin):
     @table.setter
     def table(self, value: AnnData):
         """Alias for matrix setter. This is the preferred name going forward."""
+        self._set_table(value=value, allow_partial_overlap=False)
+
+    def set_table(self,
+                  value: AnnData,
+                  allow_partial_overlap: bool = False):
+        """
+        Safely set table data while keeping table and boundaries consistent.
+
+        Args:
+            value: New AnnData table.
+            allow_partial_overlap: If True and boundaries exist, keep only cells present
+                in both table and boundaries. If False, fail when table contains cell IDs
+                that are not present in boundaries.
+        """
+        self._set_table(value=value, allow_partial_overlap=allow_partial_overlap)
+
+    def _set_table(self,
+                   value: AnnData,
+                   allow_partial_overlap: bool = False):
         if not isinstance(value, AnnData):
             raise ValueError(f"Table must be an AnnData object. Instead: {type(value)}.")
+
+        if self._boundaries is not None:
+            table_cell_ids = pd.Index(value.obs_names.astype(str))
+
+            if len(table_cell_ids.unique()) != len(table_cell_ids):
+                raise ValueError("Table .obs_names must be unique when boundaries are present.")
+
+            boundary_cell_ids = pd.Index(self._boundaries.cell_names.compute().astype(str))
+            missing_in_boundaries = table_cell_ids.difference(boundary_cell_ids)
+
+            if len(missing_in_boundaries) > 0 and not allow_partial_overlap:
+                missing_preview = ", ".join(map(str, missing_in_boundaries[:5]))
+                if len(missing_in_boundaries) > 5:
+                    missing_preview += ", ..."
+                raise ValueError(
+                    "New table contains cell IDs that are not present in boundaries "
+                    f"({len(missing_in_boundaries)} missing; examples: {missing_preview}). "
+                    "Use `set_table(..., allow_partial_overlap=True)` to keep only overlapping cells."
+                )
+
         self._table = value
+
+        if self._boundaries is not None:
+            self.sync(verbose=False)
 
     @property
     def config(self):
@@ -805,6 +1001,13 @@ class CellData(DeepCopyMixin):
         '''
 
         return deepcopy(self)
+
+    def close(self):
+        """Close underlying resources owned by this CellData object."""
+        if self._boundaries is not None:
+            close_method = getattr(self._boundaries, "close", None)
+            if callable(close_method):
+                close_method()
 
     def crop(self,
             xlim: Optional[Tuple[int, int]] = None,
@@ -859,14 +1062,15 @@ class CellData(DeepCopyMixin):
             mask = xmask & ymask
 
         # select
-        _self.table = _self.table[mask, :].copy()
+        _self._table = _self.table[mask, :].copy()
 
         # crop boundaries
-        _self.boundaries.crop(
-            cell_ids=_self.table.obs_names,
-            xlim=xlim, ylim=ylim,
-            inplace=True
-            )
+        if _self.boundaries is not None:
+            _self.boundaries.crop(
+                cell_ids=_self.table.obs_names,
+                xlim=xlim, ylim=ylim,
+                inplace=True
+                )
 
         # shift coordinates to correct for change of coordinates during cropping
         if shape is not None:
@@ -941,31 +1145,42 @@ class CellData(DeepCopyMixin):
             - if not all are in boundaries, throw error saying that those will also be removed
         3. Select only table cell IDs which are also in boundaries and filter for them
         '''
-        # get cell IDs from table
-        table_cell_ids_hex = self._table.obs_names.astype(str)
-
         if self._boundaries is None:
-            print('No `boundaries` attribute found in CellData found.')
+            return
         else:
+            # get cell IDs from table
+            table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+
+            if len(table_cell_ids.unique()) != len(table_cell_ids):
+                raise ValueError("Table .obs_names must be unique to synchronize with boundaries.")
+
             boundaries = self._boundaries
 
             # create pandas series from seg_mask values and cell_names
             ds = pd.Series(
-                data=boundaries.seg_mask_value,
-                index=boundaries.cell_names
+                data=boundaries.seg_mask_value.compute(),
+                index=boundaries.cell_names.compute().astype(str)
                 )
 
-            filter_mask_in = ds.index.isin(table_cell_ids_hex)
+            # filter table for IDs that are available in boundaries
+            table_mask_in_boundaries = table_cell_ids.isin(ds.index)
 
-            if not np.any(filter_mask_in):
-                raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All boundaries would get filtered out.")
+            if not np.any(table_mask_in_boundaries):
+                raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All table entries would get filtered out.")
 
-            # filter cell names and seg_mask_values
-            boundaries._seg_mask_value = da.from_array(np.array(ds[filter_mask_in]))
-            boundaries._cell_names = da.from_array(np.array(ds.index[filter_mask_in], dtype=str))
+            n_removed_table = int(np.sum(~table_mask_in_boundaries))
+            if n_removed_table > 0:
+                self._table = self._table[table_mask_in_boundaries, :].copy()
+                table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+
+            # align boundary metadata to table order
+            ds_aligned_to_table = ds.reindex(table_cell_ids)
+
+            boundaries._seg_mask_value = da.from_array(np.array(ds_aligned_to_table.values, dtype=np.uint32))
+            boundaries._cell_names = da.from_array(np.array(ds_aligned_to_table.index, dtype=str))
 
             # find the seg_mask_values which are not anymore present
-            seg_mask_values_not_in_table = ds[~filter_mask_in].values
+            seg_mask_values_not_in_table = ds[~ds.index.isin(table_cell_ids)].values
 
             # extract boundaries
             cell_bounds = boundaries["cells"]
@@ -992,7 +1207,10 @@ class CellData(DeepCopyMixin):
                 warnings.warn(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
 
             if verbose:
-                print(f"Filtered out {np.sum(~filter_mask_in)} boundaries.", flush=True)
+                n_removed_boundaries = int(np.sum(~ds.index.isin(table_cell_ids)))
+                if n_removed_table > 0:
+                    print(f"Filtered out {n_removed_table} table entries not present in boundaries.", flush=True)
+                print(f"Filtered out {n_removed_boundaries} boundaries.", flush=True)
 
     def shift(self,
               x: Union[int, float],
@@ -1075,9 +1293,20 @@ class MultiCellData(DeepCopyMixin):
         if key in self._layers.keys():
             if key == self._main_key:
                 raise KeyError(f"Cannot delete the main key '{self._main_key}'. Please use `set_main()` to set another key as main first.")
+            layer = self._layers[key]
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
             del self._layers[key]
         else:
             raise KeyError(f"Key '{key}' not found in MultiCellData.")
+
+    def close(self):
+        """Close underlying resources owned by all contained CellData layers."""
+        for layer in self._layers.values():
+            close_method = getattr(layer, "close", None)
+            if callable(close_method):
+                close_method()
 
     @property
     def layers(self):
@@ -1138,12 +1367,18 @@ class MultiCellData(DeepCopyMixin):
     def add_celldata(self,
                      cd: CellData,
                      key: str,
-                     is_main: bool = False):
+                     is_main: bool = False,
+                     overwrite: bool = False):
         if not isinstance(cd, CellData):
             raise ValueError(f"cd must be of type CellData. Instead: {type(cd)}.")
 
         if key in self._layers.keys():
-            print(f"Overwriting {key}.")
+            if not overwrite:
+                raise KeyError(
+                    f"Key '{key}' already exists in MultiCellData. "
+                    f"Set overwrite=True to replace it."
+                )
+            print(f"Overwriting '{key}' in MultiCellData.")
         self._layers[key] = cd
         if is_main:
             self._main_key = key
@@ -1155,26 +1390,110 @@ class MultiCellData(DeepCopyMixin):
                    polygons_file: Optional[str] = None,
                    pixel_size: Number = 1,
                    key: str = "proseg",
-                   is_main: bool = False
+                   is_main: bool = False,
+                   overwrite: bool = False
                    ):
         """
             Adds output of Proseg https://github.com/dcjones/proseg segmentation to the object.
 
             Args:
-                path_counts (Union[str, os.PathLike, Path]): Path to the counts file (.parquet, .csv or csv.gz).
-                path_metadata (Union[str, os.PathLike, Path]): Path to the metadata file (.parquet, .csv or csv.gz).
-                path_baysor_polygons (Union[str, os.PathLike, Path]): Path to the Baysor-like polygons file.
+                path (Union[str, os.PathLike, Path]): Path to proseg output. Can be either:
+                    - A directory containing individual files (counts, metadata, and polygon files) for legacy proseg output
+                    - A .zarr directory containing a SpatialData object with proseg results.
+                      The SpatialData object should contain:
+                      * tables['table']: AnnData with counts and cell metadata
+                      * shapes['cell_boundaries']: GeoDataFrame with cell polygons
+                counts_file (Optional[str]): Name of the counts file. Only used with legacy directory input.
+                cell_metadata_file (Optional[str]): Name of the cell metadata file. Only used with legacy directory input.
+                polygons_file (Optional[str]): Name of the polygons file. Only used with legacy directory input.
                 pixel_size (float): Size of the pixel for scaling.
                 key (str, optional): Key to store the data. Defaults to "proseg".
                 is_main (bool, optional): Flag to indicate if this is the main data. Defaults to False.
+                overwrite (bool, optional): If True, allow overwriting an existing key. Defaults to False.
         """
+        from ._segmentations import _read_proseg, _read_proseg_from_spatialdata
 
-
-        # generate data paths
+        # Convert to Path object
         path = Path(path)
 
-        adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
-            path, counts_file=counts_file, cell_metadata_file=cell_metadata_file, polygons_file=polygons_file, pixel_size=pixel_size
+        # Check if this is a zarr file containing spatialdata
+        if path.suffix == '.zarr' or path.name.endswith('.zarr'):
+            # Read SpatialData from zarr
+            try:
+                import spatialdata
+            except ImportError:
+                raise ImportError(
+                    "Reading proseg output from zarr requires the spatialdata package. "
+                    "Please install with `pip install spatialdata`."
+                )
+
+            # File-specific parameters are ignored for spatialdata input
+            if any([counts_file, cell_metadata_file, polygons_file]):
+                import warnings
+                warnings.warn(
+                    "File-specific parameters (counts_file, cell_metadata_file, polygons_file) "
+                    "are ignored when reading from .zarr (SpatialData) format.",
+                    UserWarning
+                )
+
+            # Read spatialdata from zarr
+            sdata = spatialdata.read_zarr(path)
+
+            # Process spatialdata object
+            adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg_from_spatialdata(
+                sdata,
+                pixel_size=pixel_size
+            )
+            del sdata  # free spatialdata object before heavy allocations
+        else:
+            # Legacy path-based input (directory with individual files)
+            adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
+                path, counts_file=counts_file, cell_metadata_file=cell_metadata_file,
+                polygons_file=polygons_file, pixel_size=pixel_size
+            )
+
+        # generate boundaries data object
+        boundaries = BoundariesData(
+            cell_names=cell_names,
+            seg_mask_value=seg_mask_value
+            )
+
+        # add cellular boundaries
+        boundaries.add_boundaries(
+            cell_boundaries=boundaries_mask,
+            pixel_size=pixel_size
+            )
+        del boundaries_mask  # no longer needed after add_boundaries
+
+        # Create cell data and add to object
+        celldata = CellData(table=adata, boundaries=boundaries)
+        del adata, boundaries  # now owned by celldata
+
+        self.add_celldata(cd=celldata, key=key, is_main=is_main, overwrite=overwrite)
+
+
+    def add_baysor(
+                    self,
+                    xd: Union[str, os.PathLike, Path], # XeniumRanger output
+                    path: Union[str, os.PathLike, Path], # baysor output
+                    counts_file: Optional[str] = None,
+                    cell_metadata_file: Optional[str] = None,
+                    polygons_file: Optional[str] = None,
+                    pixel_size: Number = 1,
+                    key: str = "baysor",
+                    is_main: bool = False,
+                    overwrite: bool = False
+                    ):
+
+        from ._segmentations import _read_baysor
+
+        # Convert to Path object
+        path = Path(path)
+        print(path)
+        # Legacy path-based input (directory with individual files)
+        adata, boundaries_mask, cell_names, seg_mask_value = _read_baysor(path, xd,
+            counts_file=counts_file, cell_metadata_file=cell_metadata_file,
+            polygons_file=polygons_file, pixel_size=pixel_size
             )
 
         # generate boundaries data object
@@ -1189,11 +1508,13 @@ class MultiCellData(DeepCopyMixin):
             cell_boundaries=boundaries_mask,
             pixel_size=pixel_size
             )
+        del boundaries_mask  # no longer needed after add_boundaries
 
         # Create cell data and add to object
         celldata = CellData(table=adata, boundaries=boundaries)
+        del adata, boundaries  # now owned by celldata
 
-        self.add_celldata(cd=celldata, key=key, is_main=is_main)
+        self.add_celldata(cd=celldata, key=key, is_main=is_main, overwrite=overwrite)
 
 
     def crop(self,
@@ -1326,6 +1647,9 @@ class ImageData(DeepCopyMixin):
         del self._data[key]
         self._names.remove(key)
         self._metadata.pop(key, None)
+
+    def __contains__(self, key):
+        return key in self.keys()
 
     def keys(self):
         return self._data.keys()
@@ -1794,7 +2118,7 @@ class ImageData(DeepCopyMixin):
             Optional[Dict[str, Path]]: A dictionary mapping image keys to their save paths if `return_savepaths` is True. Otherwise, returns None.
 
         Raises:
-            FileExistsError: If `overwrite` is False and the output folder already contains files.
+            FileExistsError: If `overwrite` is False and a file with the same name already exists.
 
         """
         output_folder = Path(output_folder)
@@ -1804,10 +2128,7 @@ class ImageData(DeepCopyMixin):
         else:
             keys_to_save = convert_to_list(keys_to_save)
 
-        # check overwrite
-        check_overwrite_and_remove_if_true(path=output_folder, overwrite=overwrite)
-
-        # create output directory
+        # create output directory (allow saving to existing directories)
         output_folder.mkdir(parents=True, exist_ok=True)
 
         if return_savepaths:
@@ -1863,15 +2184,63 @@ class ImageData(DeepCopyMixin):
 
                     # write to zarr
                     img_path = output_folder / filename
+
+                    # check if file exists and handle overwrite
+                    if img_path.exists() and not overwrite:
+                        logger.warning(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
+                        continue
+
+                    # Safety check: prevent overwriting a zarr store that the
+                    # dask array is lazily reading from.  Writing to the same
+                    # store would destroy the source data before it is read,
+                    # resulting in zeros / corrupted data.
+                    #
+                    # The check is only relevant for arrays that are lazily
+                    # backed by a *Zarr* store on disk.  In-memory arrays
+                    # (numpy-backed dask arrays) and arrays loaded from
+                    # non-Zarr formats (TIFF, HDF5, npy) are safe to save
+                    # into a Zarr target because the source is either
+                    # entirely in memory or in a different format/location.
+                    if overwrite and img_path.exists() and is_from_zarr_disk(img):
+                        source_path = get_zarr_source_path(img)
+                        target_path = img_path.resolve()
+                        if source_path is not None and source_path == target_path:
+                            logger.warning(
+                                f"Skipping image '{name}': the dask array is lazily backed by the "
+                                f"same Zarr store at {img_path}. Writing would destroy the source "
+                                f"data before it is read. To update this image, first load it into "
+                                f"memory (e.g. via `.persist()` or `.compute()`), or save it under "
+                                f"a different name."
+                            )
+                            continue
+                        elif source_path is None:
+                            logger.warning(
+                                f"Skipping image '{name}': the dask array appears to be backed "
+                                f"by a Zarr store but the source path could not be determined. "
+                                f"Cannot verify it differs from the target path {img_path}. "
+                                f"Overwriting could destroy the source data. To update this image, "
+                                f"first load it into memory (e.g. via `.persist()` or `.compute()`), "
+                                f"or save it under a different name."
+                            )
+                            continue
+
                     write_zarr(image=img, file=img_path,
                                img_metadata=new_img_metadata,
                                save_pyramid=save_pyramid,
-                               axes=axes, verbose=verbose
+                               axes=axes, verbose=verbose,
+                               overwrite=overwrite
                                )
                 else:
                     # get file name for saving
                     #filename = Path(img_metadata["file"]).name.split(".")[0] + ".ome.tif"
                     filename = name + ".ome.tif"
+
+                    # check if file exists and handle overwrite
+                    img_path = output_folder / filename
+                    if img_path.exists() and not overwrite:
+                        warnings.warn(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
+                        continue
+
                     # retrieve image metadata for saving
                     photometric = 'rgb' if new_img_metadata['rgb'] else 'minisblack'
 
@@ -1888,10 +2257,10 @@ class ImageData(DeepCopyMixin):
                     selected_metadata = {key: pixel_meta[key] for key in ome_meta_to_retrieve if key in pixel_meta}
 
                     # write images as OME-TIFF
-                    write_ome_tiff(image=img, file=output_folder / filename,
+                    write_ome_tiff(image=img, file=img_path,
                                 photometric=photometric, axes=axes,
                                 compression=compression,
-                                metadata=selected_metadata, overwrite=False,
+                                metadata=selected_metadata, overwrite=overwrite,
                                 verbose=verbose
                                 )
 
@@ -2202,7 +2571,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
             if has_data:
                 repr_str += (
-                    f"{tf.SPACER}.data: {self._data.n_obs} obs × "
+                    f"{tf.SPACER}.table: {self._data.n_obs} obs × "
                     f"{self._data.n_vars} vars\n"
                     f"{tf.SPACER}.shapes: {n_units} geometries"
                 )
@@ -2249,17 +2618,17 @@ class SpatialUnitsData(DeepCopyMixin):
             raise TypeError(f"`.shapes` must be GeoDataFrame, not {type(value)}")
         self._shapes = value
 
-    @property
-    def data(self) -> Optional[AnnData]:
-        """Alias for table property."""
-        return self._data
+    # @property
+    # def data(self) -> Optional[AnnData]:
+    #     """Alias for table property."""
+    #     return self._data
 
-    @data.setter
-    def data(self, value: Optional[AnnData]):
-        """Alias for table setter."""
-        if value is not None and not isinstance(value, AnnData):
-            raise TypeError(f"data must be AnnData object, not {type(value)}")
-        self._data = value
+    # @data.setter
+    # def data(self, value: Optional[AnnData]):
+    #     """Alias for table setter."""
+    #     if value is not None and not isinstance(value, AnnData):
+    #         raise TypeError(f"data must be AnnData object, not {type(value)}")
+    #     self._data = value
 
     @property
     def table(self) -> Optional[AnnData]:

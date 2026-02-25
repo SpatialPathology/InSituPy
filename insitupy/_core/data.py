@@ -5,7 +5,7 @@ import shutil
 from copy import deepcopy
 from datetime import datetime
 from numbers import Number
-from os.path import abspath
+from os.path import abspath, relpath
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
@@ -17,13 +17,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from parse import *
+from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
 from insitupy import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_COLOR_DICT)
+                                 MODALITIES, MODALITIES_COLOR_DICT,
+                                 with_insitupy_style)
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
                                   ModalityNotFoundWarning)
@@ -131,9 +132,9 @@ class InSituData:
     """
 
     # import deprecated functions
-    from ._deprecated import (add_alt, add_baysor, normalize_and_transform,
-                              read_all, read_annotations, read_cells,
-                              read_images, read_regions, read_transcripts,
+    from ._deprecated import (add_alt, normalize_and_transform, read_all,
+                              read_annotations, read_cells, read_images,
+                              read_regions, read_transcripts,
                               reduce_dimensions, save_colorlegends,
                               save_current_colorlegend, store_geometries,
                               sync_geometries)
@@ -899,6 +900,7 @@ class InSituData:
             if verbose:
                 print("Images aligned and added to InSituData object.")
 
+    @with_insitupy_style
     def plot_dimred(self, save: Optional[str] = None):
         '''
         Read dimensionality reduction plots.
@@ -1069,11 +1071,12 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
-    def load_images(self,
-                    names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
-                    overwrite: bool = False,
-                    verbose: bool = False
-                    ):
+    def load_images(
+        self,
+        names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
+        overwrite: bool = True,
+        verbose: bool = False
+        ):
         # load image into ImageData object
         if verbose:
             print("Loading images...", flush=True)
@@ -1098,23 +1101,10 @@ class InSituData:
                     if not np.all([elem in img_names for elem in names]):
                         not_available = [elem for elem in names if elem not in img_names]
                         raise ValueError(f"Following 'names' are not available: {not_available}")
+                    # filter paths to match the requested names
+                    img_paths = [p for p in img_paths if p.stem in names]
                     img_names = names
 
-                # if names == "all":
-                #     img_names = list(images_dict.keys())
-                # else:
-                #     img_names = convert_to_list(names)
-
-                # # get file paths and names
-                # img_files = [v for k,v in images_dict.items() if k in img_names]
-                # img_names = [k for k,v in images_dict.items() if k in img_names]
-
-                # # create imageData object
-                # img_paths = [self._path / elem for elem in img_files]
-
-                # if self._images is None:
-                #     self._images = ImageData(img_paths, img_names)
-                # else:
                 for im, n in zip(img_paths, img_names):
                     self._images.add_image(im, n, overwrite=overwrite, verbose=verbose)
 
@@ -1367,7 +1357,10 @@ class InSituData:
              path: Optional[Union[str, os.PathLike, Path]] = None,
              zarr_zipped: bool = False,
              verbose: bool = True,
-             keep_history: bool = False
+             keep_history: bool = False,
+             sync_images: bool = False,
+             images_only: bool = False,
+             overwrite_images: bool = False
              ):
 
         # check path
@@ -1383,6 +1376,10 @@ class InSituData:
                     f"Use `saveas()` instead to save the data to a new project folder."
                     )
                 return
+
+        # if images_only is True, sync_images must also be True
+        if images_only:
+            sync_images = True
 
         if path.exists():
             if verbose:
@@ -1405,11 +1402,17 @@ class InSituData:
                 if current_uid == project_uid:
                     self._update_to_existing_project(path=path,
                                                      zarr_zipped=zarr_zipped,
-                                                     verbose=verbose
+                                                     verbose=verbose,
+                                                     sync_images=sync_images,
+                                                     images_only=images_only,
+                                                     overwrite_images=overwrite_images
                                                      )
 
                     # reload the modalities
                     self.reload(verbose=False, skip=["transcripts", "images"])
+
+                    if sync_images:
+                        self.reload(verbose=False, skip=["transcripts"])
 
                     if not keep_history:
                         self.remove_history(verbose=False)
@@ -1551,7 +1554,7 @@ class InSituData:
             "note": []
         }
         for d in self._quicksave_dir.glob("[!.]*"):
-            parse_res = parse(pattern, d.stem).named
+            parse_res = parse_string(pattern, d.stem).named
             for key, value in parse_res.items():
                 res[key].append(value)
 
@@ -1594,8 +1597,29 @@ class InSituData:
         unit: str = "µm",
         return_viewer: bool = False,
         widgets_max_width: int = 500,
-        verbose: bool = False
+        verbose: bool = False,
+        show_transcripts: bool = True,
+        transcript_lazy_loading: bool = True,
+        transcript_config = None,
         ):
+        """Visualize the data using a napari viewer.
+
+        Args:
+            keys: Gene or observation keys to display as point layers.
+            key_type: Type of key ('genes', 'obs', or 'obsm').
+            cells_layer: Name of the cell layer to use.
+            point_size: Size of the cell points in pixels.
+            scalebar: Whether to show the scale bar.
+            unit: Unit for the scale bar.
+            return_viewer: Whether to return the napari viewer instance.
+            widgets_max_width: Maximum width of widgets in pixels.
+            verbose: Whether to enable verbose output.
+            show_transcripts: Whether to show the transcript viewer widget.
+            transcript_lazy_loading: If True, use lazy loading for transcripts
+                (recommended for datasets > 50M transcripts).
+            transcript_config: TranscriptViewerConfig object for customizing
+                the transcript viewer. Import from insitupy.interactive.
+        """
         # check whether napari is installed
         try:
             import napari
@@ -1614,7 +1638,10 @@ class InSituData:
             unit=unit,
             return_viewer=return_viewer,
             widgets_max_width=widgets_max_width,
-            verbose=verbose
+            verbose=verbose,
+            show_transcripts=show_transcripts,
+            transcript_lazy_loading=transcript_lazy_loading,
+            transcript_config=transcript_config,
         )
 
     def reload(
@@ -1638,7 +1665,21 @@ class InSituData:
             print(f"Reloading following modalities: {', '.join(loaded_modalities)}") if verbose else None
             for cm in loaded_modalities:
                 func = getattr(self, f"load_{cm}")
-                func(verbose=verbose)
+                # For images, pass overwrite=True so that in-memory arrays are
+                # replaced with fresh lazy dask arrays from disk.  This prevents
+                # memory accumulation when reload is called in a loop (e.g. after
+                # register_images + save).
+                if cm == "images":
+                    func(verbose=verbose, overwrite=True)
+                else:
+                    func(verbose=verbose)
+
+            # Force garbage collection to free memory from old modality data
+            # that was replaced during reload.  Without this, large arrays
+            # (e.g. boundary masks) may linger until the next automatic GC
+            # cycle, causing memory to accumulate across loop iterations.
+            import gc
+            gc.collect()
         else:
             print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
 
@@ -1690,49 +1731,78 @@ class InSituData:
         else:
             print(f"No modality '{modality}' found. Nothing removed.")
 
-    def _update_to_existing_project(self,
-                                    path: Optional[Union[str, os.PathLike, Path]],
-                                    zarr_zipped: bool = False,
-                                    verbose: bool = True
-                                    ):
+    def _update_to_existing_project(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]],
+        zarr_zipped: bool = False,
+        verbose: bool = True,
+        sync_images: bool = False,
+        images_only: bool = False,
+        overwrite_images: bool = False
+        ):
         if verbose:
             print(f"Updating project in {path}")
 
-        # save cells
-        if not self._cells.is_empty:
-            cells = self._cells
+        # save images
+        if sync_images and not self._images.is_empty:
             if verbose:
-                print("\tUpdating cells...", flush=True)
-            _save_cells(
-                cells=cells,
-                path=path,
-                metadata=self._metadata,
-                boundaries_zipped=zarr_zipped,
-                overwrite=True
+                if overwrite_images:
+                    print("\tSyncing images (overwriting existing)...", flush=True)
+                else:
+                    print("\tSyncing images (saving new images only)...", flush=True)
+            img_path = path / "images"
+            savepaths = self._images.save(
+                output_folder=img_path,
+                as_zarr=True,
+                zipped=zarr_zipped,
+                return_savepaths=True,
+                overwrite=overwrite_images,
+                verbose=verbose
             )
 
+            # update metadata for any newly saved images
+            if "images" not in self._metadata["data"]:
+                self._metadata["data"]["images"] = {}
+            for n, s in savepaths.items():
+                self._metadata["data"]["images"][n] = Path(relpath(s, path)).as_posix()
 
-        # save annotations
-        if not self._annotations.is_empty:
-            annotations = self._annotations
-            if verbose:
-                print("\tUpdating annotations...", flush=True)
-            _save_annotations(
-                annotations=annotations,
-                path=path,
-                metadata=self._metadata
-            )
+        # skip other modalities if images_only is True
+        if not images_only:
+            # save cells
+            if not self._cells.is_empty:
+                cells = self._cells
+                if verbose:
+                    print("\tUpdating cells...", flush=True)
+                _save_cells(
+                    cells=cells,
+                    path=path,
+                    metadata=self._metadata,
+                    boundaries_zipped=zarr_zipped,
+                    overwrite=True
+                )
 
-        # save regions
-        if not self._regions.is_empty:
-            regions = self._regions
-            if verbose:
-                print("\tUpdating regions...", flush=True)
-            _save_regions(
-                regions=regions,
-                path=path,
-                metadata=self._metadata
-            )
+
+            # save annotations
+            if not self._annotations.is_empty:
+                annotations = self._annotations
+                if verbose:
+                    print("\tUpdating annotations...", flush=True)
+                _save_annotations(
+                    annotations=annotations,
+                    path=path,
+                    metadata=self._metadata
+                )
+
+            # save regions
+            if not self._regions.is_empty:
+                regions = self._regions
+                if verbose:
+                    print("\tUpdating regions...", flush=True)
+                _save_regions(
+                    regions=regions,
+                    path=path,
+                    metadata=self._metadata
+                )
 
         # save version of InSituPy
         self._metadata["version"] = __version__

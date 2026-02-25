@@ -217,7 +217,7 @@ def scale_to_max_width(image: np.ndarray,
 
     # resizing - caution: order of dimensions is reversed in OpenCV compared to numpy
     image_scaled = resize_image(img=image, dim=(new_shape[1], new_shape[0]), axes=axes)
-    print(f"{print_spacer}Rescaled from {image.shape} to following dimensions: {image_scaled.shape}") if verbose else None
+    print(f"{print_spacer}{image.shape} \u2192 {image_scaled.shape}") if verbose else None
 
     return image_scaled
 

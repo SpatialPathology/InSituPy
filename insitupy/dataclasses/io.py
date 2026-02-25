@@ -12,7 +12,6 @@ import numpy as np
 import scanpy as sc
 import toml
 import zarr
-from parse import *
 from zarr.errors import ArrayNotFoundError
 
 from insitupy import __version__
@@ -95,22 +94,49 @@ def read_baysor_cells(
     return celldata
 
 
-def read_celldata(
-    path: Union[str, os.PathLike, Path],
-    ) -> CellData:
-    # read metadata
-    path = Path(path)
-    celldata_metadata = read_json(path / ".celldata")
+def _read_table_from_celldata(
+    path: Path,
+    metadata: dict
+) -> sc.AnnData:
+    """
+    Read the AnnData table from CellData directory.
 
-    # read table data
+    Parameters
+    ----------
+    path : Path
+        Path to the CellData directory
+    metadata : dict
+        Metadata dictionary from .celldata file
+
+    Returns
+    -------
+    sc.AnnData
+        The loaded AnnData table
+    """
     try:
-        table = sc.read_h5ad(path / celldata_metadata["table"])
+        table = sc.read_h5ad(path / metadata["table"])
     except KeyError:
-        table = sc.read_h5ad(path / celldata_metadata["matrix"]) # previously it was called matrix
+        # backward compatibility: previously it was called matrix
+        table = sc.read_h5ad(path / metadata["matrix"])
+    return table
 
-    # get path of boundaries data
-    bound_path = path / celldata_metadata["boundaries"]
 
+def _read_boundaries_from_celldata_zarr(
+    bound_path: Path,
+) -> BoundariesData:
+    """
+    Read BoundariesData from a zarr store.
+
+    Parameters
+    ----------
+    bound_path : Path
+        Path to the boundaries zarr store
+
+    Returns
+    -------
+    BoundariesData
+        The boundaries object with cells and nuclei masks
+    """
     # check whether it is zipped or not
     suffix = bound_path.name.split(".", maxsplit=1)[-1]
 
@@ -134,8 +160,27 @@ def read_celldata(
         warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.table`.")
         seg_mask_value = None
 
+    # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+)
+    # Stored as a 2D array with columns [nucleus_index, cell_index]
+    try:
+        nucleus_map_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
+        nucleus_to_cell_map = {int(row[0]): int(row[1]) for row in nucleus_map_arr}
+    except (ArrayNotFoundError, TypeError):
+        nucleus_to_cell_map = None  # Not available in older datasets
+
+    # Read nucleus_count (number of nuclei per cell)
+    try:
+        nucleus_count = da.from_zarr(bound_path, component="nucleus_count").compute()
+    except (ArrayNotFoundError, TypeError):
+        nucleus_count = None  # Not available in older datasets
+
     # initialize boundaries data object
-    boundaries = BoundariesData(cell_names=cell_names, seg_mask_value=seg_mask_value)
+    boundaries = BoundariesData(
+        cell_names=cell_names,
+        seg_mask_value=seg_mask_value,
+        nucleus_to_cell_map=nucleus_to_cell_map,
+        nucleus_count=nucleus_count
+    )
 
     # retrieve the boundaries data
     bound_data = {}
@@ -164,7 +209,7 @@ def read_celldata(
 
                 if ".zarray" in subresolutions:
                     if zipped:
-                        bound_data[k] = da.from_zarr(dirstore).persist() # persist is only needed in case of zipped zarrs
+                        bound_data[k] = da.from_zarr(dirstore).persist()  # persist is only needed in case of zipped zarrs
                     else:
                         bound_data[k] = da.from_zarr(dirstore)
                 else:
@@ -176,35 +221,58 @@ def read_celldata(
                             if zipped:
                                 bound_data[k].append(
                                     da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
-                                    )
+                                )
                             else:
                                 bound_data[k].append(
                                     da.from_zarr(dirstore, component=f"{comp}/{subres}")
-                                    )
+                                )
 
                 # retrieve boundaries metadata
                 store = zarr.open(dirstore)
                 meta[k] = store[f"masks/{k}"].attrs.asdict()
 
-    cell_boundaries = bound_data["cells"]
-    if "nuclei" in bound_data:
-        nuclei_boundaries = bound_data["nuclei"]
-    else:
-        nuclei_boundaries = None
+    cell_boundaries = bound_data.get("cells")
+    nuclei_boundaries = bound_data.get("nuclei")
 
     # add boundaries
     boundaries.add_boundaries(
-        #data=bound_data,
         cell_boundaries=cell_boundaries,
         nuclei_boundaries=nuclei_boundaries,
         pixel_size=meta[list(meta.keys())[0]]["pixel_size"]
-        )
+    )
 
-    # try to extract configuration
-    try:
-        config = celldata_metadata["config"]
-    except KeyError:
-        config = {}
+    return boundaries
+
+
+def read_celldata(
+    path: Union[str, os.PathLike, Path],
+) -> CellData:
+    """
+    Read CellData from a saved directory.
+
+    Parameters
+    ----------
+    path : Union[str, os.PathLike, Path]
+        Path to the CellData directory
+
+    Returns
+    -------
+    CellData
+        The loaded CellData object
+    """
+    # read metadata
+    path = Path(path)
+    celldata_metadata = read_json(path / ".celldata")
+
+    # read table (AnnData)
+    table = _read_table_from_celldata(path, celldata_metadata)
+
+    # read boundaries
+    bound_path = path / celldata_metadata["boundaries"]
+    boundaries = _read_boundaries_from_celldata_zarr(bound_path)
+
+    # extract configuration
+    config = celldata_metadata.get("config", {})
 
     # create CellData object
     celldata = CellData(table=table, boundaries=boundaries, config=config)
@@ -237,7 +305,7 @@ def read_shapesdata(
     elif mode == "shapes":
         data = ShapesData()
     else:
-        ValueError(f"Unknown `mode`: {mode}")
+        raise ValueError(f"Unknown `mode`: {mode}")
 
     # make sure files and keys are a list
     # files = convert_to_list(files)

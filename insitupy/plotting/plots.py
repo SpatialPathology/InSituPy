@@ -17,6 +17,7 @@ from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
+from insitupy._constants import with_insitupy_style
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
@@ -133,6 +134,7 @@ def _generate_experiment_subplots(
     return fig, axs
 
 
+@with_insitupy_style
 def colorlegend(
     viewer: Optional["napari.Viewer"] = None,
     mapping: Optional[None] = None,
@@ -378,6 +380,7 @@ def calc_cellular_composition(
     return compositions_df
 
 
+@with_insitupy_style
 def cellular_composition(
     data: Union[InSituData, InSituExperiment],
     cell_type_col: str,

@@ -6,21 +6,6 @@ from shapely import MultiPolygon, Polygon
 from shapely.geometry import Polygon, box
 from shapely.strtree import STRtree
 
-# def calculate_optimal_grid_size(polygon, num_points):
-#     # Get the bounds of the polygon
-#     minx, miny, maxx, maxy = polygon.bounds
-
-#     # Calculate the area of the bounding box
-#     bbox_area = (maxx - minx) * (maxy - miny)
-
-#     # Calculate a factor based on the number of points
-#     factor = max(1, num_points / 1000)  # Adjust the divisor as needed
-
-#     # Calculate the optimal grid size
-#     optimal_grid_size = (bbox_area / factor) ** 0.5
-#     #print(optimal_grid_size)
-
-#     return optimal_grid_size
 
 def create_strtree_from_polygon(polygon, max_grid_width):
     # Calculate the optimal grid size

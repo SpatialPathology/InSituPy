@@ -82,12 +82,14 @@ When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwis
    pip install insitupy-spatial
    ```
 
-## Optional: Install with GUI support (napari viewer):
+This base installation includes napari and related visualization dependencies.
 
-If you want to use the graphical interface features powered by [napari](https://napari.org/dev/index.html), install with the gui extra:
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
+
+**Optional: install with SpatialData support (`spatialdata>=0.7.2`):**
 
    ```bash
-   pip install insitupy-spatial[gui]
+   pip install insitupy-spatial[spatialdata]
    ```
 
 To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).

@@ -6,7 +6,6 @@ from typing import Dict, Literal, Optional, Union
 
 import dask.dataframe as dd
 import pandas as pd
-from parse import *
 from shapely import affinity
 
 from insitupy import __version__
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
-def _handle_image_names(im_path):
+def _handle_xenium_image_names(im_path):
     im_path = Path(im_path)
     if im_path.name.startswith("ch"):
         ch, ch_name = im_path.name.split(".")[0].split("_", maxsplit=1)
@@ -34,6 +33,13 @@ def _handle_image_names(im_path):
     elif im_path.name.startswith("morphology_"):
         _, _, ch = im_path.name.split(".")[0].split("_")
         ch_name = f"cellseg_{ch}"
+
+    else:
+        raise ValueError(
+            f"Unexpected Xenium image filename '{im_path.name}'. "
+            f"Expected filename starting with 'ch' or 'morphology_'. "
+            f"If this is a valid Xenium image, please open an issue."
+        )
 
     return ch, ch_name
 
@@ -90,6 +96,14 @@ def read_xenium(
 
     metadata_filename: str = "experiment.xenium"
 
+    # Check if the directory exists first
+    if not path.exists():
+        raise FileNotFoundError(f"The directory '{path}' does not exist.")
+
+    if not path.is_dir():
+        raise NotADirectoryError(f"The path '{path}' is not a directory.")
+
+    # Check if the required metadata file exists
     if not (path / metadata_filename).exists():
         raise InvalidXeniumDirectory(directory=path)
 
@@ -111,8 +125,8 @@ def read_xenium(
         data = convert_from_spatialdata(
             sdata=sdata,
             image_data={
-                "nuclei": ("morphology_mip", pixel_size),
-                "mip": ("morphology_focus", pixel_size)
+                "nuclei": ("morphology_focus", pixel_size),
+                "mip": ("morphology_mip", pixel_size)
             },
             cells_key="cell_circles",
             table_key="table",
@@ -175,7 +189,7 @@ def read_xenium(
         image_dir = path / "morphology_focus/"
         if image_dir.is_dir():
             for im_path in image_dir.glob("*.ome.tif"):
-                ch, ch_name = _handle_image_names(im_path)
+                ch, ch_name = _handle_xenium_image_names(im_path)
 
                 if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
                     continue
@@ -302,8 +316,8 @@ def read_visium(
     data = convert_from_spatialdata(
         sdata=sdata,
         image_data={
-            "hires": (f"{dataset_id}_hires_image", hires_pixel_size),
-            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size)
+            "hires": (f"{dataset_id}_hires_image", hires_pixel_size, True),
+            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True)
         },
         units_key=dataset_id,
         unit_type="visium",
