@@ -15,10 +15,6 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 For the latest developments check out the [releases](https://github.com/SpatialPathology/InSituPy/releases).
 
-### Comming soon: Interface to SpatialData
-
-A interface to convert data from and to [SpatialData](https://github.com/scverse/spatialdata) is currently implemented and will be released soon. If you are interested in this, feel free to contact us to get early access.
-
 ## Getting started
 
 ### Overall data structure
