@@ -1,0 +1,1041 @@
+"""
+MCP server for exploring and understanding the InSituPy API and codebase.
+
+Provides both generic introspection tools (search, read source, list modules)
+and InSituPy-specific tools that reflect the package's architecture.
+
+Usage:
+    python -m tools.mcp_server.server
+    # or
+    python tools/mcp_server/server.py
+"""
+
+from __future__ import annotations
+
+import ast
+import importlib
+import inspect
+import pkgutil
+import re
+import textwrap
+from pathlib import Path
+from typing import Optional
+
+from mcp.server.fastmcp import FastMCP
+
+# ---------------------------------------------------------------------------
+# Bootstrap: locate the insitupy package and repo root
+# ---------------------------------------------------------------------------
+
+import insitupy as _ispy
+
+_PACKAGE_DIR = Path(_ispy.__file__).resolve().parent  # .../insitupy/
+_REPO_ROOT = _PACKAGE_DIR.parent  # one level up
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_MAX_OUTPUT = 2000  # character limit for source / docstring outputs
+
+
+def _truncate(text: str, limit: int = _MAX_OUTPUT) -> str:
+    """Truncate text and append a notice if it exceeds *limit* characters."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n\n... [truncated — full text is {} chars]".format(len(text))
+
+
+def _resolve_object(dotted_path: str):
+    """Import and return the Python object at *dotted_path*.
+
+    Tries progressively shorter module prefixes so that
+    ``insitupy._core.data.InSituData.read`` resolves correctly.
+    """
+    parts = dotted_path.split(".")
+    obj = None
+    for i in range(len(parts), 0, -1):
+        module_path = ".".join(parts[:i])
+        try:
+            obj = importlib.import_module(module_path)
+            break
+        except ImportError:
+            continue
+    if obj is None:
+        raise ImportError(f"Cannot import any prefix of '{dotted_path}'")
+    for attr_name in parts[i:]:
+        obj = getattr(obj, attr_name)
+    return obj
+
+
+def _short_doc(obj) -> str:
+    """Return the first non-empty line of an object's docstring."""
+    doc = inspect.getdoc(obj)
+    if not doc:
+        return ""
+    for line in doc.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _format_signature(obj) -> str:
+    """Return a string representation of a callable's signature."""
+    try:
+        sig = inspect.signature(obj)
+        return str(sig)
+    except (ValueError, TypeError):
+        return "(...)"
+
+
+def _is_public(name: str) -> bool:
+    return not name.startswith("_")
+
+
+def _safe_get_members(obj, predicate=None):
+    """Like inspect.getmembers but swallows errors from lazy imports."""
+    members = []
+    for name in dir(obj):
+        if name.startswith("__"):
+            continue
+        try:
+            value = getattr(obj, name)
+            if predicate is None or predicate(value):
+                members.append((name, value))
+        except Exception:
+            continue
+    return members
+
+
+# ---------------------------------------------------------------------------
+# MCP Server
+# ---------------------------------------------------------------------------
+
+mcp = FastMCP(
+    "InSituPy",
+    instructions=(
+        "MCP server for exploring the InSituPy spatial transcriptomics package. "
+        "Use the generic introspection tools to browse modules, classes, and source code. "
+        "Use the InSituPy-specific tools for curated overviews of the data model, "
+        "I/O formats, plotting API, and typical workflows."
+    ),
+)
+
+
+# ===========================
+# Generic Introspection Tools
+# ===========================
+
+
+@mcp.tool()
+def list_modules(subpackage: Optional[str] = None) -> str:
+    """List all submodules and subpackages of insitupy.
+
+    Args:
+        subpackage: Dotted subpackage name relative to insitupy
+                    (e.g. "plotting" or "utils"). If omitted, lists
+                    the top-level contents of insitupy.
+
+    Returns:
+        A formatted list of module names with one-line descriptions.
+    """
+    if subpackage:
+        full_path = f"insitupy.{subpackage}"
+    else:
+        full_path = "insitupy"
+
+    try:
+        pkg = importlib.import_module(full_path)
+    except ImportError:
+        return f"Error: Cannot import '{full_path}'. Check the subpackage name."
+
+    pkg_path = getattr(pkg, "__path__", None)
+    lines: list[str] = []
+
+    if pkg_path is not None:
+        # It's a package — iterate submodules
+        for importer, modname, ispkg in pkgutil.iter_modules(pkg_path):
+            child_full = f"{full_path}.{modname}"
+            try:
+                child = importlib.import_module(child_full)
+                desc = _short_doc(child)
+            except Exception:
+                desc = "(could not import)"
+            kind = "pkg" if ispkg else "mod"
+            lines.append(f"  {modname}  [{kind}]  — {desc}" if desc else f"  {modname}  [{kind}]")
+    else:
+        # It's a plain module — list its public names
+        for name, obj in _safe_get_members(pkg):
+            if _is_public(name):
+                kind = type(obj).__name__
+                desc = _short_doc(obj) if callable(obj) else ""
+                lines.append(f"  {name}  ({kind})  — {desc}" if desc else f"  {name}  ({kind})")
+
+    header = f"Contents of {full_path} ({len(lines)} items):\n"
+    return _truncate(header + "\n".join(lines))
+
+
+@mcp.tool()
+def list_classes(module_path: str) -> str:
+    """List all classes defined in a given module.
+
+    Args:
+        module_path: Fully qualified module path (e.g. "insitupy.dataclasses.dataclasses")
+                     or relative to insitupy (e.g. "dataclasses.dataclasses").
+
+    Returns:
+        A list of classes with their base classes and one-line descriptions.
+    """
+    if not module_path.startswith("insitupy"):
+        module_path = f"insitupy.{module_path}"
+
+    try:
+        mod = importlib.import_module(module_path)
+    except ImportError:
+        return f"Error: Cannot import '{module_path}'."
+
+    lines: list[str] = []
+    for name, obj in _safe_get_members(mod, inspect.isclass):
+        if obj.__module__ != mod.__name__:
+            continue  # skip re-exports
+        bases = ", ".join(b.__name__ for b in obj.__bases__ if b is not object)
+        base_str = f"({bases})" if bases else ""
+        desc = _short_doc(obj)
+        lines.append(f"  {name}{base_str}  — {desc}" if desc else f"  {name}{base_str}")
+
+    if not lines:
+        return f"No classes defined in {module_path}."
+    header = f"Classes in {module_path} ({len(lines)}):\n"
+    return _truncate(header + "\n".join(lines))
+
+
+@mcp.tool()
+def list_functions(module_path: str) -> str:
+    """List all public functions in a given module with their signatures.
+
+    Args:
+        module_path: Fully qualified module path (e.g. "insitupy.preprocessing.anndata")
+                     or relative to insitupy (e.g. "preprocessing.anndata").
+
+    Returns:
+        A list of function names, signatures, and one-line descriptions.
+    """
+    if not module_path.startswith("insitupy"):
+        module_path = f"insitupy.{module_path}"
+
+    try:
+        mod = importlib.import_module(module_path)
+    except ImportError:
+        return f"Error: Cannot import '{module_path}'."
+
+    lines: list[str] = []
+    for name, obj in _safe_get_members(mod, inspect.isfunction):
+        if not _is_public(name):
+            continue
+        if obj.__module__ != mod.__name__:
+            continue  # skip re-exports
+        sig = _format_signature(obj)
+        desc = _short_doc(obj)
+        lines.append(f"  {name}{sig}  — {desc}" if desc else f"  {name}{sig}")
+
+    if not lines:
+        return f"No public functions in {module_path}."
+    header = f"Functions in {module_path} ({len(lines)}):\n"
+    return _truncate(header + "\n".join(lines))
+
+
+@mcp.tool()
+def get_class_info(class_path: str) -> str:
+    """Get detailed information about a class.
+
+    Args:
+        class_path: Dotted path to the class (e.g. "insitupy._core.data.InSituData"
+                    or "_core.data.InSituData").
+
+    Returns:
+        Docstring, __init__ signature, public methods with signatures,
+        properties, and base classes.
+    """
+    if not class_path.startswith("insitupy"):
+        class_path = f"insitupy.{class_path}"
+
+    try:
+        cls = _resolve_object(class_path)
+    except (ImportError, AttributeError) as exc:
+        return f"Error: {exc}"
+
+    if not inspect.isclass(cls):
+        return f"Error: '{class_path}' is not a class."
+
+    parts: list[str] = []
+
+    # Header
+    bases = ", ".join(b.__name__ for b in cls.__bases__ if b is not object)
+    parts.append(f"class {cls.__name__}({bases})" if bases else f"class {cls.__name__}")
+    parts.append(f"Defined in: {cls.__module__}\n")
+
+    # Docstring
+    doc = inspect.getdoc(cls)
+    if doc:
+        parts.append("Docstring:")
+        parts.append(_truncate(textwrap.indent(doc, "  "), 800))
+        parts.append("")
+
+    # __init__
+    init = getattr(cls, "__init__", None)
+    if init and init is not object.__init__:
+        parts.append(f"__init__{_format_signature(init)}\n")
+
+    # Properties
+    props = []
+    for name in sorted(dir(cls)):
+        if name.startswith("_"):
+            continue
+        try:
+            attr = getattr(cls, name)
+        except Exception:
+            continue
+        if isinstance(attr, property):
+            desc = _short_doc(attr.fget) if attr.fget else ""
+            props.append(f"  .{name}  — {desc}" if desc else f"  .{name}")
+    if props:
+        parts.append(f"Properties ({len(props)}):")
+        parts.extend(props)
+        parts.append("")
+
+    # Methods
+    methods = []
+    for name in sorted(dir(cls)):
+        if name.startswith("_") and name != "__getitem__":
+            continue
+        try:
+            attr = getattr(cls, name)
+        except Exception:
+            continue
+        if callable(attr) and not isinstance(attr, property):
+            sig = _format_signature(attr)
+            desc = _short_doc(attr)
+            is_cls = isinstance(inspect.getattr_static(cls, name), classmethod)
+            prefix = "@classmethod " if is_cls else ""
+            methods.append(
+                f"  {prefix}{name}{sig}  — {desc}" if desc else f"  {prefix}{name}{sig}"
+            )
+    if methods:
+        parts.append(f"Methods ({len(methods)}):")
+        parts.extend(methods)
+
+    return _truncate("\n".join(parts))
+
+
+@mcp.tool()
+def get_function_source(dotted_path: str) -> str:
+    """Get the source code of a function, method, or class.
+
+    Args:
+        dotted_path: Dotted path (e.g. "insitupy._core.data.InSituData.crop"
+                     or "_core.data.InSituData.crop").
+
+    Returns:
+        The source code (truncated to 2000 characters if needed).
+    """
+    if not dotted_path.startswith("insitupy"):
+        dotted_path = f"insitupy.{dotted_path}"
+
+    try:
+        obj = _resolve_object(dotted_path)
+    except (ImportError, AttributeError) as exc:
+        return f"Error: {exc}"
+
+    try:
+        source = inspect.getsource(obj)
+    except (OSError, TypeError):
+        return f"Error: Source code not available for '{dotted_path}'."
+
+    return _truncate(source)
+
+
+@mcp.tool()
+def get_docstring(dotted_path: str) -> str:
+    """Get the full docstring of a module, class, or function.
+
+    Args:
+        dotted_path: Dotted path (e.g. "insitupy.plotting" or
+                     "insitupy._core.data.InSituData.crop").
+
+    Returns:
+        The full docstring text.
+    """
+    if not dotted_path.startswith("insitupy"):
+        dotted_path = f"insitupy.{dotted_path}"
+
+    try:
+        obj = _resolve_object(dotted_path)
+    except (ImportError, AttributeError) as exc:
+        return f"Error: {exc}"
+
+    doc = inspect.getdoc(obj)
+    if not doc:
+        return f"No docstring found for '{dotted_path}'."
+    return _truncate(doc)
+
+
+@mcp.tool()
+def search_codebase(pattern: str, file_glob: str = "*.py", max_results: int = 30) -> str:
+    """Search across all Python files in the InSituPy source tree.
+
+    Args:
+        pattern: Regex pattern to search for in file contents.
+        file_glob: Glob pattern to filter files (default: "*.py").
+        max_results: Maximum number of matching lines to return (default: 30).
+
+    Returns:
+        Matching file paths with line numbers and content.
+    """
+    regex = re.compile(pattern, re.IGNORECASE)
+    results: list[str] = []
+    count = 0
+
+    for py_file in sorted(_PACKAGE_DIR.rglob(file_glob)):
+        try:
+            text = py_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        rel = py_file.relative_to(_REPO_ROOT)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if regex.search(line):
+                results.append(f"  {rel}:{lineno}  {line.rstrip()}")
+                count += 1
+                if count >= max_results:
+                    results.append(f"\n... (stopped at {max_results} results)")
+                    return "\n".join(results)
+
+    if not results:
+        return f"No matches for pattern '{pattern}' in {file_glob} files."
+    return "\n".join(results)
+
+
+@mcp.tool()
+def read_source_file(
+    file_path: str,
+    start_line: int = 1,
+    end_line: Optional[int] = None,
+) -> str:
+    """Read a source file from the InSituPy repository.
+
+    Args:
+        file_path: Path relative to the repo root (e.g. "insitupy/_core/data.py")
+                   or a dotted module path (e.g. "insitupy._core.data").
+        start_line: First line to include (1-based, default: 1).
+        end_line: Last line to include (default: start_line + 200).
+
+    Returns:
+        The file contents with line numbers.
+    """
+    # Resolve dotted module path to file
+    if not file_path.endswith(".py") and "/" not in file_path and "\\" not in file_path:
+        candidate = _REPO_ROOT / Path(file_path.replace(".", "/") + ".py")
+        if not candidate.exists():
+            candidate = _REPO_ROOT / Path(file_path.replace(".", "/")) / "__init__.py"
+        resolved = candidate
+    else:
+        resolved = _REPO_ROOT / Path(file_path)
+
+    resolved = resolved.resolve()
+
+    # Security: ensure the file is within the repo
+    try:
+        resolved.relative_to(_REPO_ROOT)
+    except ValueError:
+        return f"Error: Path '{file_path}' is outside the repository."
+
+    if not resolved.exists():
+        return f"Error: File not found: {file_path}"
+
+    try:
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return f"Error reading file: {exc}"
+
+    lines = text.splitlines()
+    if end_line is None:
+        end_line = min(start_line + 200, len(lines))
+
+    start_line = max(1, start_line)
+    end_line = min(end_line, len(lines))
+
+    selected = lines[start_line - 1 : end_line]
+    numbered = [f"{i:>5}  {line}" for i, line in enumerate(selected, start_line)]
+    header = f"File: {resolved.relative_to(_REPO_ROOT)} (lines {start_line}-{end_line} of {len(lines)})\n"
+    return _truncate(header + "\n".join(numbered), 4000)
+
+
+# ============================
+# InSituPy-Specific Tools
+# ============================
+
+
+@mcp.tool()
+def get_data_model() -> str:
+    """Get a structured overview of the InSituPy data model.
+
+    Returns:
+        The hierarchy of core classes, their relationships, key fields,
+        and how they compose into InSituData and InSituExperiment.
+    """
+    return textwrap.dedent("""\
+    # InSituPy Data Model
+
+    ## Core Containers
+
+    InSituExperiment
+    ├── data: list[InSituData]          # Multiple samples/slides
+    ├── metadata: pd.DataFrame          # Sample-level metadata (slide_id, sample_id, custom cols)
+    ├── colors: dict                    # Color schemes for visualization
+    └── filters: FilterManager          # Filtering subsystem
+
+    InSituData
+    ├── metadata: dict                  # Experiment metadata, history, method info
+    ├── slide_id / sample_id: str       # Identifiers
+    ├── images: ImageData               # Image modalities (DAPI, IF, H&E, ...)
+    ├── cells: MultiCellData            # Cell segmentations (supports multiple)
+    ├── transcripts: DataFrame          # Per-transcript coordinates (dask or pandas)
+    ├── annotations: AnnotationsData    # User-drawn geometric annotations
+    ├── regions: RegionsData            # Tissue region polygons
+    └── units: SpatialUnitsData         # Spatial units (Visium spots, niches)
+
+    ## Data Classes
+
+    MultiCellData
+    ├── layers: dict[str, CellData]     # Named cell segmentation layers
+    └── main_key: str                   # Which layer is the "primary" one
+
+    CellData
+    ├── table: AnnData                  # cells × genes matrix + obs/var/obsm
+    │   ├── .X                          # Expression matrix
+    │   ├── .obs                        # Cell metadata (area, cluster, ...)
+    │   ├── .obsm["spatial"]            # (x, y) coordinates
+    │   └── .var                        # Gene metadata
+    └── boundaries: BoundariesData      # Segmentation masks
+
+    BoundariesData
+    ├── cell_names: dask.Array          # Cell identifiers
+    ├── seg_mask_value: dask.Array      # Mask value → cell mapping
+    ├── nucleus_to_cell_map: dict       # For multinucleated cells (Xenium v2+)
+    └── nucleus_count: np.ndarray       # Nuclei per cell (optional)
+
+    ImageData
+    ├── Internal dict: name → dask.Array  # Lazy-loaded image arrays
+    └── metadata: dict                    # Per-image: shape, axes, pixel_size, OME
+
+    AnnotationsData / RegionsData
+    ├── Internal dict: key → GeoDataFrame   # Polygon/point geometries
+    └── metadata: dict                       # Per-key metadata
+
+    SpatialUnitsData
+    ├── shapes: GeoDataFrame            # Unit geometries
+    ├── table: AnnData                  # Associated omics data
+    └── unit_type: str                  # E.g. "Visium_spot", "niche"
+
+    ## Key Relationships
+    - InSituExperiment[i] → InSituData (subscript access)
+    - InSituData.cells.table → AnnData (scanpy-compatible)
+    - InSituData.cells.boundaries → segmentation masks as dask arrays
+    - Annotations/Regions are GeoDataFrames assignable to cells via .assign_annotations()
+    - Images are dask arrays, supporting lazy loading and zarr-backed pyramids
+    """)
+
+
+@mcp.tool()
+def get_io_formats() -> str:
+    """List all supported I/O formats and reader functions.
+
+    Returns:
+        Supported formats with their reader functions, required input files,
+        and output types.
+    """
+    return textwrap.dedent("""\
+    # InSituPy I/O Formats
+
+    ## Reading Raw Data (insitupy.io)
+
+    | Function            | Format     | Key Input Files                          | Output       |
+    |---------------------|------------|------------------------------------------|--------------|
+    | read_xenium()       | 10x Xenium | cell_feature_matrix.h5, cells.parquet,   | InSituData   |
+    |                     |            | cells.zarr.zip, morphology images        |              |
+    | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData   |
+    |                     |            | spatial/tissue_positions.csv, images     |              |
+    | read_qupath()       | QuPath     | QuPath project directory                 | InSituData   |
+    | read_qupath_project() | QuPath   | QuPath project file                      | InSituData   |
+    | read_any()          | Generic    | Varies                                   | InSituData   |
+
+    ## InSituPy Native Format
+
+    | Function             | Direction | Format                                   |
+    |----------------------|-----------|------------------------------------------|
+    | InSituData.saveas()  | Write     | InSituPy project folder (.ispy metadata) |
+    | InSituData.save()    | Write     | Update existing project                  |
+    | InSituData.read()    | Read      | InSituPy project folder                  |
+    | InSituExperiment.saveas() | Write | Experiment folder with sub-projects     |
+
+    ## Annotation / Region Import
+
+    | Method                        | Supported Formats                        |
+    |-------------------------------|------------------------------------------|
+    | InSituData.import_annotations() | GeoJSON, Shapefile, QuPath GeoJSON     |
+    | InSituData.import_regions()     | GeoJSON, Shapefile, QuPath GeoJSON     |
+
+    ## Alternative Segmentation Import
+
+    | Method                         | Source                                   |
+    |--------------------------------|------------------------------------------|
+    | MultiCellData.add_baysor()     | Baysor output (segmentation_polygons.json) |
+    | MultiCellData.add_proseg()     | Proseg output (transcript assignments)    |
+
+    ## SpatialData Integration (insitupy.spatialdata)
+
+    | Function                   | Direction | Description                         |
+    |----------------------------|-----------|-------------------------------------|
+    | convert_to_spatialdata()   | Export    | InSituData → SpatialData object     |
+    | convert_from_spatialdata() | Import    | SpatialData → InSituData            |
+
+    ## On-Disk Storage Structure
+
+    project_folder/
+    ├── .ispy                    # JSON metadata (slide_id, paths, history)
+    ├── cells/                   # MultiCellData layers
+    │   └── <timestamp_uid>/
+    │       ├── .celldata        # Layer metadata
+    │       ├── table.h5ad       # AnnData (scanpy format)
+    │       └── boundaries.zarr.zip  # Segmentation masks (zarr)
+    ├── images/                  # ImageData
+    │   └── <name>.zarr/         # Pyramidal zarr arrays
+    ├── transcripts/
+    │   └── transcripts.parquet  # Per-transcript coordinates
+    ├── units/                   # SpatialUnitsData
+    │   ├── shapes.parquet
+    │   ├── data.h5ad
+    │   └── metadata.json
+    ├── annotations/             # AnnotationsData
+    │   └── <timestamp_uid>/
+    │       └── <key>.geojson
+    └── regions/                 # RegionsData
+        └── <timestamp_uid>/
+            └── <key>.geojson
+    """)
+
+
+@mcp.tool()
+def get_plotting_api() -> str:
+    """List all plotting functions grouped by category.
+
+    Returns:
+        Plotting functions with their key parameters and descriptions.
+    """
+    lines: list[str] = ["# InSituPy Plotting API (insitupy.pl)\n"]
+
+    # Try to get live info from the plotting module
+    try:
+        import insitupy.plotting as pl_mod
+
+        categories = {
+            "Spatial": ["spatial", "plot_spatial"],
+            "Embedding / UMAP": ["embedding", "umap"],
+            "Overview": ["overview", "plot_overview"],
+            "Cell Composition": ["cellular_composition", "plot_cellular_composition"],
+            "QC": ["plot_qc_metrics"],
+            "DGE / Volcano": ["volcano", "dual_foldchange_plot"],
+            "Expression Along Axis": ["cell_abundance_along_axis", "cell_expression_along_axis"],
+            "Utility": ["colorlegend", "plot_colorlegend", "test_transformations"],
+            "Configuration": ["DataConfig", "LayoutConfig", "PlotConfig"],
+        }
+
+        for cat_name, func_names in categories.items():
+            lines.append(f"## {cat_name}")
+            for fname in func_names:
+                obj = getattr(pl_mod, fname, None)
+                if obj is None:
+                    continue
+                if inspect.isclass(obj):
+                    lines.append(f"  {fname}  (config class)  — {_short_doc(obj)}")
+                else:
+                    sig = _format_signature(obj)
+                    desc = _short_doc(obj)
+                    lines.append(f"  {fname}{sig}")
+                    if desc:
+                        lines.append(f"    {desc}")
+            lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect plotting module: {exc})")
+
+    return _truncate("\n".join(lines), 3000)
+
+
+@mcp.tool()
+def get_preprocessing_api() -> str:
+    """List all preprocessing functions with signatures.
+
+    Returns:
+        Preprocessing functions grouped by target (AnnData vs Experiment).
+    """
+    lines: list[str] = ["# InSituPy Preprocessing API (insitupy.pp)\n"]
+
+    try:
+        # AnnData-level preprocessing
+        import insitupy.preprocessing.anndata as pp_adata
+
+        lines.append("## AnnData-level (insitupy.preprocessing.anndata)")
+        for name, obj in _safe_get_members(pp_adata, inspect.isfunction):
+            if _is_public(name) and obj.__module__ == pp_adata.__name__:
+                sig = _format_signature(obj)
+                desc = _short_doc(obj)
+                lines.append(f"  {name}{sig}")
+                if desc:
+                    lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect anndata preprocessing: {exc})\n")
+
+    try:
+        # Experiment-level preprocessing
+        import insitupy.preprocessing.experiment as pp_exp
+
+        lines.append("## Experiment-level (insitupy.preprocessing.experiment)")
+        for name, obj in _safe_get_members(pp_exp, inspect.isfunction):
+            if _is_public(name) and obj.__module__ == pp_exp.__name__:
+                sig = _format_signature(obj)
+                desc = _short_doc(obj)
+                lines.append(f"  {name}{sig}")
+                if desc:
+                    lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect experiment preprocessing: {exc})\n")
+
+    try:
+        # Filtering
+        import insitupy.preprocessing.filtering as pp_filt
+
+        lines.append("## Filtering (insitupy.preprocessing.filtering)")
+        for name, obj in _safe_get_members(pp_filt, inspect.isfunction):
+            if _is_public(name) and obj.__module__ == pp_filt.__name__:
+                sig = _format_signature(obj)
+                desc = _short_doc(obj)
+                lines.append(f"  {name}{sig}")
+                if desc:
+                    lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect filtering: {exc})\n")
+
+    return _truncate("\n".join(lines), 3000)
+
+
+@mcp.tool()
+def get_tools_api() -> str:
+    """List all analysis tools with signatures and descriptions.
+
+    Returns:
+        Analysis tools (DGE, distance, neighbors, permutation, pseudobulk,
+        registration) with their signatures.
+    """
+    lines: list[str] = ["# InSituPy Analysis Tools (insitupy.tl)\n"]
+
+    tool_modules = [
+        ("Differential Gene Expression", "insitupy.tools.dge"),
+        ("Distance Calculations", "insitupy.tools.distance"),
+        ("Neighbor Detection", "insitupy.tools.neighbors"),
+        ("Permutation Tests", "insitupy.tools.permutation"),
+        ("Pseudobulk", "insitupy.tools.pseudobulk"),
+        ("Image Registration", "insitupy.tools.registration"),
+    ]
+
+    for section_name, mod_path in tool_modules:
+        lines.append(f"## {section_name}")
+        try:
+            mod = importlib.import_module(mod_path)
+            for name, obj in _safe_get_members(mod):
+                if not _is_public(name):
+                    continue
+                if inspect.isfunction(obj) and obj.__module__ == mod.__name__:
+                    sig = _format_signature(obj)
+                    desc = _short_doc(obj)
+                    lines.append(f"  {name}{sig}")
+                    if desc:
+                        lines.append(f"    {desc}")
+                elif inspect.isclass(obj) and obj.__module__ == mod.__name__:
+                    desc = _short_doc(obj)
+                    lines.append(f"  {name}  (class)  — {desc}" if desc else f"  {name}  (class)")
+        except Exception as exc:
+            lines.append(f"  (Could not introspect: {exc})")
+        lines.append("")
+
+    return _truncate("\n".join(lines), 3000)
+
+
+@mcp.tool()
+def get_public_api() -> str:
+    """Get everything exported from the top-level insitupy namespace.
+
+    Returns:
+        All public names from ``import insitupy`` and the submodule
+        shorthands (pl, pp, tl, io, im, utils).
+    """
+    lines: list[str] = ["# InSituPy Public API\n"]
+    lines.append("## Top-level exports (from insitupy import ...)\n")
+
+    all_names = getattr(_ispy, "__all__", [])
+    for name in sorted(all_names):
+        try:
+            obj = getattr(_ispy, name)
+            kind = type(obj).__name__
+            desc = _short_doc(obj) if callable(obj) or inspect.isclass(obj) else ""
+            lines.append(f"  {name}  ({kind})  — {desc}" if desc else f"  {name}  ({kind})")
+        except Exception:
+            lines.append(f"  {name}  (unavailable)")
+
+    lines.append("\n## Submodule shorthands\n")
+    shorthands = {
+        "insitupy.io": "I/O — read_xenium, read_visium, read_qupath, etc.",
+        "insitupy.pl (plotting)": "Plotting — spatial, umap, volcano, overview, etc.",
+        "insitupy.pp (preprocessing)": "Preprocessing — normalize, filter, pseudobulk, etc.",
+        "insitupy.tl (tools)": "Analysis — DGE, distance, neighbors, registration, etc.",
+        "insitupy.im (images)": "Image utilities — read, transform, etc.",
+        "insitupy.utils": "Utilities — XeniumPanels, mock data, DGE helpers, etc.",
+        "insitupy.datasets": "Example datasets — download and load sample data.",
+        "insitupy.interactive": "Interactive napari-based visualization widgets.",
+        "insitupy.spatialdata": "SpatialData conversion — to/from SpatialData format.",
+    }
+    for key, desc in shorthands.items():
+        lines.append(f"  {key}: {desc}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_workflow_guide() -> str:
+    """Get typical user workflows for InSituPy.
+
+    Returns:
+        Step-by-step workflow examples for common tasks.
+    """
+    return textwrap.dedent("""\
+    # InSituPy Workflow Guide
+
+    ## 1. Read Raw Xenium Data and Create a Project
+
+    ```python
+    import insitupy as ispy
+
+    # Read from 10x Xenium output directory
+    data = ispy.io.read_xenium("path/to/xenium_output/")
+
+    # Optionally load transcripts (lazy by default)
+    data.load_transcripts()
+
+    # Save as InSituPy project for fast future loading
+    data.saveas("path/to/my_project/")
+    ```
+
+    ## 2. Load an Existing Project
+
+    ```python
+    data = ispy.InSituData.read("path/to/my_project/")
+
+    # Load specific modalities (lazy loading)
+    data.load_images()
+    data.load_cells()
+    data.load_annotations()
+    ```
+
+    ## 3. Standard Single-Cell Analysis
+
+    ```python
+    adata = data.cells.table  # Access the AnnData object
+
+    # Standard scanpy workflow
+    import scanpy as sc
+    sc.pp.normalize_total(adata)
+    sc.pp.log1p(adata)
+    sc.pp.highly_variable_genes(adata)
+    sc.pp.pca(adata)
+    sc.pp.neighbors(adata)
+    sc.tl.umap(adata)
+    sc.tl.leiden(adata)
+
+    # Or use InSituPy preprocessing shortcuts
+    ispy.pp.normalize_log1p(adata)
+    ispy.pp.cluster(adata)
+    ```
+
+    ## 4. Spatial Visualization
+
+    ```python
+    # Interactive napari viewer
+    data.show(keys=["DAPI"], cells_layer="main")
+
+    # Static matplotlib plots
+    ispy.pl.spatial(data, color="leiden", image_key="DAPI")
+    ispy.pl.umap(data, color="leiden")
+    ```
+
+    ## 5. Annotations and Regions
+
+    ```python
+    # Import annotations from GeoJSON / QuPath
+    data.import_annotations(files="path/to/annotations.geojson", keys="tumor")
+    data.import_regions(files="path/to/regions.geojson", keys="tissue")
+
+    # Assign annotations to cells (spatial join)
+    data.assign_annotations(keys="all")
+    data.assign_regions(keys="all")
+    # → Adds columns to data.cells.table.obs
+    ```
+
+    ## 6. Crop to a Region of Interest
+
+    ```python
+    cropped = data.crop(xlim=(1000, 3000), ylim=(2000, 5000))
+    cropped.saveas("path/to/cropped_project/")
+    ```
+
+    ## 7. Multi-Sample Experiment
+
+    ```python
+    exp = ispy.InSituExperiment()
+    exp.add("sample1/", metadata={"condition": "tumor", "patient": "P1"})
+    exp.add("sample2/", metadata={"condition": "normal", "patient": "P1"})
+
+    exp.load_cells()
+
+    # Differential gene expression between conditions
+    result = exp.dge(target_id=0, ref_id=1)
+
+    # Combined AnnData for batch analysis
+    combined = exp.to_anndata()
+    ```
+
+    ## 8. Image Registration (Multi-Modal Alignment)
+
+    ```python
+    reg = ispy.tl.register_images(
+        source=data_he,
+        target=data_xenium,
+        source_image="H&E",
+        target_image="DAPI"
+    )
+    # Apply transformation
+    data_he.transform(reg.transformation_matrix, ...)
+    ```
+
+    ## 9. Alternative Segmentations
+
+    ```python
+    # Add Baysor segmentation as an additional layer
+    data.cells.add_baysor("path/to/baysor_output/", pixel_size=0.2125)
+
+    # Switch between segmentation layers
+    data.cells.set_main("baysor")
+    ```
+    """)
+
+
+@mcp.tool()
+def get_storage_format() -> str:
+    """Describe the on-disk storage architecture of InSituPy projects.
+
+    Returns:
+        Directory structure, metadata JSON schema (.ispy), zarr layout,
+        parquet files, and GeoJSON conventions.
+    """
+    return textwrap.dedent("""\
+    # InSituPy Storage Format
+
+    ## Directory Layout
+
+    ```
+    project_folder/
+    ├── .ispy                           # Project metadata (JSON)
+    ├── cells/
+    │   └── <timestamp>_<uid>/          # Versioned cell data
+    │       ├── .celldata               # CellData metadata (JSON)
+    │       ├── .multicelldata          # MultiCellData metadata (JSON, if multiple layers)
+    │       ├── table.h5ad              # AnnData (cells × genes, obs, var, obsm)
+    │       └── boundaries.zarr.zip     # Segmentation masks
+    │           ├── cell_names/         # Zarr array of cell IDs
+    │           ├── seg_mask_value/     # Zarr array mapping mask values → cells
+    │           ├── data/0/             # Cell mask pyramid level 0 (full res)
+    │           ├── data/1/             # Cell mask pyramid level 1 (downsampled)
+    │           └── nuclei/0/           # Nucleus mask (optional)
+    ├── images/
+    │   └── <image_name>.zarr/          # OME-Zarr pyramidal image
+    │       ├── 0/                      # Full resolution
+    │       ├── 1/                      # 2× downsampled
+    │       └── .zattrs                 # OME metadata, axes, pixel_size
+    ├── transcripts/
+    │   └── transcripts.parquet         # Columns: x, y, gene, qv, ...
+    ├── units/
+    │   ├── shapes.parquet              # GeoDataFrame with geometries
+    │   ├── data.h5ad                   # Associated AnnData
+    │   └── metadata.json               # Unit type, pixel size, etc.
+    ├── annotations/
+    │   └── <timestamp>_<uid>/
+    │       └── <key>.geojson           # Annotation polygons/points
+    └── regions/
+        └── <timestamp>_<uid>/
+            └── <key>.geojson           # Region polygons
+    ```
+
+    ## .ispy Metadata Schema
+
+    ```json
+    {
+      "slide_id": "string",
+      "sample_id": "string",
+      "version": "0.11.0",
+      "method": "Xenium",
+      "method_params": {
+        "pixel_size": 0.2125,
+        "xenium_version": "2.0"
+      },
+      "data": {
+        "cells": "cells/<timestamp>_<uid>",
+        "images": {
+          "morphology_focus": "images/morphology_focus.zarr",
+          "DAPI": "images/DAPI.zarr"
+        },
+        "transcripts": "transcripts/transcripts.parquet",
+        "units": "units",
+        "annotations": "annotations/<timestamp>_<uid>",
+        "regions": "regions/<timestamp>_<uid>"
+      },
+      "history": {
+        "cells": ["cells/<old_timestamp>_<old_uid>"],
+        "annotations": [],
+        "regions": []
+      },
+      "uids": ["<uid_history>"],
+      "cropping_history": {
+        "xlim": [[0, 5000]],
+        "ylim": [[0, 5000]]
+      }
+    }
+    ```
+
+    ## Key Conventions
+    - All spatial coordinates are in pixels at the native resolution
+    - pixel_size is in µm/pixel (e.g. 0.2125 for Xenium)
+    - Boundaries are stored as label masks (integer arrays where pixel value = cell ID)
+    - Images use OME-Zarr with multiscale pyramids for efficient access
+    - Timestamps use format YYYYMMDD_HHMMSS for versioning
+    - UIDs are short hex strings for uniqueness
+    - Paths in .ispy are relative to the project folder
+    """)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

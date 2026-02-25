@@ -47,6 +47,7 @@ spatialdata = [
     "spatialdata[extra]>=0.7.2",
     "spatialdata-io"
 ]
+mcp = ["mcp[cli]>=1.0.0"]
 
 [tool.poetry]
 packages =[
