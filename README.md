@@ -82,6 +82,10 @@ When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwis
    pip install insitupy-spatial
    ```
 
+This base installation includes napari and related visualization dependencies.
+
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
+
 **Optional: install with SpatialData support (`spatialdata>=0.7.2`):**
 
    ```bash

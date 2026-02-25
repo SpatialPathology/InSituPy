@@ -51,4 +51,4 @@ def test_transpose_handles_legacy_cyx_2d_without_crashing():
 
     assert axes == "YX"
     assert transposed_img.shape == (32, 48)
-    assert transposed_img.shape == (32, 48)
+

@@ -21,6 +21,16 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
    pip install insitupy-spatial
    ```
 
+This base installation includes napari and related visualization dependencies.
+
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows will be only partially supported in the future.
+
+### Optional: Install with SpatialData support (`spatialdata>=0.7.2`)
+
+   ```bash
+   pip install insitupy-spatial[spatialdata]
+   ```
+
 ### Method 2: Installation from Cloned Repository
 
 1. **Clone the repository to your local machine:**

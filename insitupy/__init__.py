@@ -8,11 +8,9 @@ try:
     WITH_NAPARI = True
 except ImportError:
     print((
-        f"Napari is not installed. Interactive visualization using `.show()` will not be possible. "
-        f"If you want to use these features, install InSituPy with dependencies (e.g., `pip install insitupy-spatial`) "
-        f"or install napari directly with `pip install napari[all]`."
-    )
-        )
+        "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
+        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`)."
+    ))
     WITH_NAPARI = False
 
 from . import _core, dataclasses, datasets, experiment
