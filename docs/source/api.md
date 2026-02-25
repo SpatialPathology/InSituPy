@@ -93,7 +93,11 @@ To concatenate multiple `InSituExperiment` objects:
     InSituExperiment.concat
 ```
 
-Working with saved sample filters (including optional notes):
+Working with saved sample filters (experimental):
+
+```{warning}
+This filter workflow is currently **experimental** and may change in future releases.
+```
 
 ```{eval-rst}
 .. code-block:: python
