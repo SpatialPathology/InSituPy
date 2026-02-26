@@ -95,7 +95,11 @@ def _get_color_values(
     """
     if key in adata.obs.columns:
         values = adata.obs[key]
-        if isinstance(values.dtype, pd.CategoricalDtype) or values.dtype == object:
+        if (
+            isinstance(values.dtype, pd.CategoricalDtype)
+            or values.dtype == object
+            or pd.api.types.is_bool_dtype(values)
+        ):
             return values.astype("category"), "categorical"
         else:
             return values.values, "continuous"
@@ -167,6 +171,10 @@ def _get_vmin_vmax(
     vmax_percentile: float | None = None
 ) -> tuple[float, float]:
     """Determine vmin and vmax for continuous color scale."""
+    values = np.asarray(values)
+    if np.issubdtype(values.dtype, np.bool_):
+        values = values.astype(np.float32)
+
     if vmin is None:
         vmin = float(np.nanmin(values))
 
