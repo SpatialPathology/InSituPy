@@ -149,7 +149,7 @@ def test_if_positive_path_smoke(dummy_data, image_file, monkeypatch):
             self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
             self.registered = None
 
-        def load_and_scale_images(self):
+        def load_and_scale_images(self, *args, **kwargs):
             return None
 
         def extract_features(self, *args, **kwargs):
@@ -210,7 +210,7 @@ def test_if_positive_path_with_pyramid_list_input(dummy_data, image_file, monkey
             self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
             self.registered = None
 
-        def load_and_scale_images(self):
+        def load_and_scale_images(self, *args, **kwargs):
             return None
 
         def extract_features(self, *args, **kwargs):
@@ -257,7 +257,7 @@ def test_pixel_size_overrides_are_used(dummy_data, image_file, monkeypatch):
             self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
             self.registered = None
 
-        def load_and_scale_images(self):
+        def load_and_scale_images(self, *args, **kwargs):
             return None
 
         def extract_features(self, *args, **kwargs):
@@ -295,3 +295,61 @@ def test_pixel_size_overrides_are_used(dummy_data, image_file, monkeypatch):
     assert len(dummy_data.images.added_images) == 1
     added = dummy_data.images.added_images[0]["kwargs"]
     assert added["pixel_size"] == 0.8
+
+
+def test_image_path_alias_is_accepted(dummy_data, image_file, monkeypatch):
+    class _DummyImageRegistration:
+        def __init__(self, image, template, *args, **kwargs):
+            self.image = image
+            self.template = template
+            self.image_resized = None
+            self.image_scaled = np.zeros((1, 1), dtype=np.uint8)
+            self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
+            self.registered = None
+
+        def load_and_scale_images(self, *args, **kwargs):
+            return None
+
+        def extract_features(self, *args, **kwargs):
+            return None
+
+        def calculate_transformation_matrix(self):
+            return None
+
+        def perform_registration(self):
+            if hasattr(self.image, "compute"):
+                self.registered = self.image.compute()
+            else:
+                self.registered = np.asarray(self.image)
+
+        def save(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        registration,
+        "read_image",
+        lambda _p: (da.from_array(np.zeros((2, 8, 8), dtype=np.uint8)), {}, "CYX", 1.0),
+    )
+    monkeypatch.setattr(registration, "ImageRegistration", _DummyImageRegistration)
+
+    registration.register_images(
+        data=dummy_data,
+        image_path=image_file,
+        channel_names=["DAPI", "FITC"],
+        channel_name_for_registration="DAPI",
+        save_registered_images=False,
+    )
+
+    assert len(dummy_data.images.added_images) == 1
+    added = dummy_data.images.added_images[0]["kwargs"]
+    assert added["channel_names"] == "FITC"
+
+
+def test_image_path_and_legacy_name_together_raises(dummy_data, image_file):
+    with pytest.raises(ValueError, match="Provide only one of `image_to_be_registered` or `image_path`"):
+        registration.register_images(
+            data=dummy_data,
+            image_to_be_registered=image_file,
+            image_path=image_file,
+            channel_names=["HE"],
+        )
