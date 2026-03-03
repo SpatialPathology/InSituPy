@@ -33,6 +33,33 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
 from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
 
 
+def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 95.0) -> np.ndarray:
+    """Clip to upper percentile and scale intensities to [0, 1] for visualization export."""
+    arr = np.asarray(img)
+    if arr.size == 0:
+        return arr
+
+    def _scale_channel(channel: np.ndarray) -> np.ndarray:
+        c = channel.astype(np.float32, copy=False)
+        c_min = np.nanmin(c)
+        c_max = np.nanpercentile(c, upper_percentile)
+        if not np.isfinite(c_min) or not np.isfinite(c_max) or c_max <= c_min:
+            return np.zeros_like(c, dtype=np.float32)
+        c = np.clip(c, c_min, c_max)
+        return (c - c_min) / (c_max - c_min)
+
+    if arr.ndim == 2:
+        return _scale_channel(arr)
+
+    if arr.ndim == 3:
+        scaled = np.empty(arr.shape, dtype=np.float32)
+        for channel_idx in range(arr.shape[2]):
+            scaled[..., channel_idx] = _scale_channel(arr[..., channel_idx])
+        return scaled
+
+    return arr
+
+
 class ImageRegistration:
     '''
     Object to perform image registration.
@@ -989,7 +1016,7 @@ def register_images(
     deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
     physicalsize: str = 'µm',
     debug: bool = False,
-    rank_matches_for_qc: bool = False,
+    rank_matches_for_qc: bool = True,
     identifier: Optional[str] = None,
     force_failure_qc: bool = False,  # if True, simulate a failure even when enough matches are found (for QC testing)
     *,
@@ -1015,7 +1042,8 @@ def register_images(
             Set to True when the template is an H&E RGB image. Defaults to False.
         physicalsize (str, optional): Unit of physical size. Defaults to 'µm'.
         debug (bool, optional): If True, save registration QC/diagnostic files for successful runs.
-            For histology registrations, also saves the deconvolved target image to CACHE/registration_debug.
+            For histology registrations, also saves the deconvolved target image to
+            ``registered_images/registration_qc``.
             If ``deconvolve_template=True``, also saves the deconvolved template image there.
             If False, skip routine QC file generation to speed up processing. Defaults to False.
         rank_matches_for_qc (bool, optional): If True, apply additional QC ranking before
@@ -1238,12 +1266,13 @@ def register_images(
         del eo, dab  # free memory - deconvolution intermediates no longer needed
 
         if debug:
-            debug_outdir = CACHE / "registration_debug"
-            debug_outdir.mkdir(parents=True, exist_ok=True)
             debug_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
-            debug_decon_path = debug_outdir / f"{debug_id}__deconvolved_target.png"
-            plt.imsave(debug_decon_path, nuclei_img, cmap="gray")
-            print(f"{_prefix}{_VLINE}     Debug: saved deconvolved target -> {debug_decon_path}", flush=True)
+            reg_qc_dir = Path(output_dir) / "registration_qc"
+            reg_qc_dir.mkdir(parents=True, exist_ok=True)
+            debug_decon_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_target.png"
+            nuclei_img_scaled = _percentile_scale_for_saving(nuclei_img, upper_percentile=95.0)
+            plt.imsave(debug_decon_qc_path, nuclei_img_scaled, cmap="gray")
+            print(f"{_prefix}{_VLINE}     Debug: saved deconvolved target -> {debug_decon_qc_path}", flush=True)
 
         # set nuclei_channel and nuclei_axis to None
         channel_name_for_registration = channel_axis = None
@@ -1280,12 +1309,13 @@ def register_images(
     imreg_complete.load_and_scale_images(scaling_log_label="Scaling (full image prep)")
 
     if debug and deconvolve_template:
-        debug_outdir = CACHE / "registration_debug"
-        debug_outdir.mkdir(parents=True, exist_ok=True)
         debug_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
-        debug_decon_template_path = debug_outdir / f"{debug_id}__deconvolved_template.png"
-        plt.imsave(debug_decon_template_path, imreg_complete.template, cmap="gray")
-        print(f"{_prefix}{_VLINE}     Debug: saved deconvolved template -> {debug_decon_template_path}", flush=True)
+        reg_qc_dir = Path(output_dir) / "registration_qc"
+        reg_qc_dir.mkdir(parents=True, exist_ok=True)
+        debug_decon_template_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_template.png"
+        template_scaled_for_save = _percentile_scale_for_saving(imreg_complete.template, upper_percentile=95.0)
+        plt.imsave(debug_decon_template_qc_path, template_scaled_for_save, cmap="gray")
+        print(f"{_prefix}{_VLINE}     Debug: saved deconvolved template -> {debug_decon_template_qc_path}", flush=True)
 
     # Determine the axes_template for the selected registration object
     # If template was deconvolved, it's now grayscale (YX)
