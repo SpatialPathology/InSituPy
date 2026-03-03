@@ -33,7 +33,7 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
 from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
 
 
-def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 95.0) -> np.ndarray:
+def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 99.0) -> np.ndarray:
     """Clip to upper percentile and scale intensities to [0, 1] for visualization export."""
     arr = np.asarray(img)
     if arr.size == 0:
@@ -570,31 +570,6 @@ class ImageRegistration:
                 ranked_idx = list(range(n_total))
         rank_by_match_idx = {match_idx: rank for rank, match_idx in enumerate(ranked_idx, start=1)}
 
-        def _minmax_scale_for_display(img: np.ndarray) -> np.ndarray:
-            """Scale image intensities to [0, 1] for visualization only."""
-            arr = np.asarray(img)
-            if arr.size == 0:
-                return arr
-
-            def _scale_channel(channel: np.ndarray) -> np.ndarray:
-                c = channel.astype(np.float32, copy=False)
-                c_min = np.nanmin(c)
-                c_max = np.nanmax(c)
-                if not np.isfinite(c_min) or not np.isfinite(c_max) or c_max <= c_min:
-                    return np.zeros_like(c, dtype=np.float32)
-                return (c - c_min) / (c_max - c_min)
-
-            if arr.ndim == 2:
-                return _scale_channel(arr)
-
-            if arr.ndim == 3:
-                scaled = np.empty(arr.shape, dtype=np.float32)
-                for channel_idx in range(arr.shape[2]):
-                    scaled[..., channel_idx] = _scale_channel(arr[..., channel_idx])
-                return scaled
-
-            return arr
-
         def _create_top5_detail_figure() -> plt.Figure:
             """Create 5x2 zoomed view for globally ranked matches 1-5."""
             n_rows = 5
@@ -643,8 +618,8 @@ class ImageRegistration:
             top5_idx = ranked_idx[:min(5, n_total)]
             img_h, img_w = self.image_scaled.shape[:2]
             tmpl_h, tmpl_w = self.template_scaled.shape[:2]
-            image_scaled_disp = _minmax_scale_for_display(self.image_scaled)
-            template_scaled_disp = _minmax_scale_for_display(self.template_scaled)
+            image_scaled_disp = _percentile_scale_for_saving(self.image_scaled)
+            template_scaled_disp = _percentile_scale_for_saving(self.template_scaled)
 
             for row in range(n_rows):
                 ax_img_row, ax_tmpl_row = axes[row, 0], axes[row, 1]
@@ -704,8 +679,8 @@ class ImageRegistration:
 
         fig, (ax_img, ax_tmpl) = plt.subplots(1, 2, figsize=figsize)
 
-        image_scaled_disp = _minmax_scale_for_display(self.image_scaled)
-        template_scaled_disp = _minmax_scale_for_display(self.template_scaled)
+        image_scaled_disp = _percentile_scale_for_saving(self.image_scaled)
+        template_scaled_disp = _percentile_scale_for_saving(self.template_scaled)
         ax_img.imshow(image_scaled_disp, cmap="gray" if self.image_scaled.ndim == 2 else None)
         ax_tmpl.imshow(template_scaled_disp, cmap="gray" if self.template_scaled.ndim == 2 else None)
         has_transform = hasattr(self, "T") and self.T is not None and hasattr(self, "ptsA") and hasattr(self, "ptsB")
@@ -1270,7 +1245,7 @@ def register_images(
             reg_qc_dir = Path(output_dir) / "registration_qc"
             reg_qc_dir.mkdir(parents=True, exist_ok=True)
             debug_decon_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_target.png"
-            nuclei_img_scaled = _percentile_scale_for_saving(nuclei_img, upper_percentile=95.0)
+            nuclei_img_scaled = _percentile_scale_for_saving(nuclei_img)
             plt.imsave(debug_decon_qc_path, nuclei_img_scaled, cmap="gray")
             print(f"{_prefix}{_VLINE}     Debug: saved deconvolved target -> {debug_decon_qc_path}", flush=True)
 
@@ -1313,7 +1288,7 @@ def register_images(
         reg_qc_dir = Path(output_dir) / "registration_qc"
         reg_qc_dir.mkdir(parents=True, exist_ok=True)
         debug_decon_template_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_template.png"
-        template_scaled_for_save = _percentile_scale_for_saving(imreg_complete.template, upper_percentile=95.0)
+        template_scaled_for_save = _percentile_scale_for_saving(imreg_complete.template)
         plt.imsave(debug_decon_template_qc_path, template_scaled_for_save, cmap="gray")
         print(f"{_prefix}{_VLINE}     Debug: saved deconvolved template -> {debug_decon_template_qc_path}", flush=True)
 
