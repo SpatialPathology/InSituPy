@@ -121,24 +121,6 @@ def test_decon_scale_factor_non_positive_raises(dummy_data, image_file):
         )
 
 
-def test_pixel_size_overrides_non_positive_raise(dummy_data, image_file):
-    with pytest.raises(ValueError, match="`pixel_size_image_override` must be > 0"):
-        registration.register_images(
-            data=dummy_data,
-            image_to_be_registered=image_file,
-            channel_names=["HE"],
-            pixel_size_image_override=0,
-        )
-
-    with pytest.raises(ValueError, match="`pixel_size_template_override` must be > 0"):
-        registration.register_images(
-            data=dummy_data,
-            image_to_be_registered=image_file,
-            channel_names=["HE"],
-            pixel_size_template_override=-1,
-        )
-
-
 def test_if_positive_path_smoke(dummy_data, image_file, monkeypatch):
     class _DummyImageRegistration:
         def __init__(self, image, template, *args, **kwargs):
@@ -247,7 +229,7 @@ def test_if_positive_path_with_pyramid_list_input(dummy_data, image_file, monkey
     assert added["image"].shape == (8, 8)
 
 
-def test_pixel_size_overrides_are_used(dummy_data, image_file, monkeypatch):
+def test_template_metadata_pixel_size_is_used(dummy_data, image_file, monkeypatch):
     class _DummyImageRegistration:
         def __init__(self, image, template, *args, **kwargs):
             self.image = image
@@ -288,13 +270,11 @@ def test_pixel_size_overrides_are_used(dummy_data, image_file, monkeypatch):
         channel_names=["DAPI", "FITC"],
         channel_name_for_registration="DAPI",
         save_registered_images=False,
-        pixel_size_image_override=2.5,
-        pixel_size_template_override=0.8,
     )
 
     assert len(dummy_data.images.added_images) == 1
     added = dummy_data.images.added_images[0]["kwargs"]
-    assert added["pixel_size"] == 0.8
+    assert added["pixel_size"] == dummy_data.images.metadata["nuclei"]["pixel_size"]
 
 
 def test_image_path_alias_is_accepted(dummy_data, image_file, monkeypatch):
