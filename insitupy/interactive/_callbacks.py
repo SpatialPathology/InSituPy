@@ -17,10 +17,58 @@ if WITH_NAPARI:
                                      REGIONS_SYMBOL)
     from insitupy.utils._colors import continuous_data_to_rgba
 
+    def _resolve_legend_layer(viewer, layer):
+        if isinstance(layer, napari.layers.labels.labels.Labels):
+            source_layer_name = layer.metadata.get("legend_source_layer")
+            if source_layer_name is not None and source_layer_name in viewer.layers:
+                return viewer.layers[source_layer_name]
+        return layer
+
+    def _get_label_layer_colors(layer):
+        label_ids = layer.properties.get("index")
+        if label_ids is None:
+            return None
+
+        color_dict = getattr(layer.colormap, "color_dict", None)
+        if color_dict is None:
+            return None
+
+        colors = []
+        for label_id in label_ids:
+            color = color_dict.get(int(label_id), color_dict.get(None))
+            if color is None:
+                color = np.array([0.5, 0.5, 0.5, 0.5])
+            colors.append(tuple(color))
+
+        return np.array(colors)
+
+    def _categorical_mapping_without_missing(values, color_values):
+        pairs = [
+            (value, color)
+            for value, color in zip(values, color_values)
+            if not pd.isna(value)
+        ]
+        if len(pairs) == 0:
+            return {}
+
+        mapping = {}
+        for value, color in pairs:
+            mapping.setdefault(str(value), tuple(color))
+
+        return {elem: mapping[elem] for elem in sorted(mapping.keys())}
+
     # show cells widget
     def _update_key_on_type_change(widget, viewer_config):
         current_key_type = widget.key_type.value
-        widget.key.choices = viewer_config.key_dict[current_key_type]
+        choices = list(viewer_config.key_dict[current_key_type])
+        widget.key.choices = choices
+
+        # MagicGUI may reset ComboBox choices from its stored defaults.
+        # Keep those defaults aligned with the currently selected key type.
+        if hasattr(widget.key, "_default_choices"):
+            widget.key._default_choices = choices
+        if hasattr(widget, "_param_options") and "key" in widget._param_options:
+            widget._param_options["key"]["choices"] = choices
 
     # geometry widget
     def _update_keys_based_on_geom_type(widget, xdata):
@@ -112,6 +160,11 @@ if WITH_NAPARI:
     def _update_colorlegend(viewer, viewer_config):
         layer = viewer.layers.selection.active
 
+        if layer is None:
+            return
+
+        layer = _resolve_legend_layer(viewer, layer)
+
         if isinstance(layer, napari.layers.points.points.Points):
             try:
                 # get values
@@ -154,12 +207,40 @@ if WITH_NAPARI:
                 else:
                     # substitute pd.NA with np.nan
                     values = pd.Series(values).fillna(np.nan).values
-                    # assume the data is categorical
-                    #mapping = {category: tuple(rgba) for category, rgba in zip(values, color_values)}
-                    unique_values = list(set(values))
-                    mapping = {str(v): tuple(color_values[list(values).index(v)]) for v in unique_values}
-                    # sort mapping dict
-                    mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
+                    mapping = _categorical_mapping_without_missing(values, color_values)
+
+                    _update_categorical_legend(
+                        static_canvas=viewer_config.static_canvas,
+                        mapping=mapping,
+                        label=layer.name
+                        )
+
+        elif isinstance(layer, napari.layers.labels.labels.Labels):
+            try:
+                values = layer.properties["value"]
+                color_values = _get_label_layer_colors(layer)
+            except KeyError:
+                pass
+            else:
+                if color_values is None:
+                    return
+
+                if is_numeric_dtype(values):
+                    _, mapping = continuous_data_to_rgba(
+                        data=values,
+                        cmap=layer.metadata.get("legend_continuous_cmap", DEFAULT_CONTINUOUS_CMAP),
+                        upper_climit_pct=layer.metadata.get("legend_upper_climit_pct", 99),
+                        return_mapping=True
+                    )
+
+                    _update_continuous_legend(
+                        static_canvas=viewer_config.static_canvas,
+                        mapping=mapping,
+                        label=layer.name)
+
+                else:
+                    values = pd.Series(values).fillna(np.nan).values
+                    mapping = _categorical_mapping_without_missing(values, color_values)
 
                     _update_categorical_legend(
                         static_canvas=viewer_config.static_canvas,
@@ -246,7 +327,7 @@ if WITH_NAPARI:
             show_cells_widget.key.value = None
 
             # update choices for key
-            show_cells_widget.key.choices = viewer_config.key_dict[show_cells_widget.key_type.value]
+            _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
 
             # add last addition to recent
             show_cells_widget.recent.choices = sorted(viewer_config.recent_selections)

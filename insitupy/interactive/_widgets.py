@@ -19,7 +19,8 @@ if WITH_NAPARI:
                                 QVBoxLayout, QWidget)
     from scipy.sparse import issparse
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
+    from insitupy._constants import (ANNOTATIONS_SYMBOL,
+                                     DEFAULT_CATEGORICAL_CMAP, POINTS_SYMBOL,
                                      REGION_CMAP, REGIONS_SYMBOL)
     from insitupy.images.utils import create_img_pyramid
     from insitupy.interactive._callbacks import (
@@ -39,6 +40,100 @@ if WITH_NAPARI:
 
     # Maximum number of unique colors for labels (napari limitation)
     MAX_LABEL_COLORS = 500
+
+    def _as_positional_array(values) -> np.ndarray:
+        """Convert array-like input to a NumPy array for position-based indexing."""
+        if isinstance(values, np.ndarray):
+            return values
+        return np.asarray(values)
+
+    def _is_missing_label_value(value) -> bool:
+        """Return True for missing values used in cell coloring."""
+        try:
+            return bool(pd.isna(value))
+        except TypeError:
+            return False
+
+    def _unique_non_missing_categories(values: np.ndarray) -> list:
+        """Collect categorical values without sorting mixed Python types."""
+        valid_values = [value for value in values if not _is_missing_label_value(value)]
+        if len(valid_values) == 0:
+            return []
+        return list(pd.unique(np.asarray(valid_values, dtype=object)))
+
+    def _has_non_missing_label_values(values: np.ndarray) -> bool:
+        """Return True if at least one value is present for coloring."""
+        return any(not _is_missing_label_value(value) for value in values)
+
+    def _build_labels_properties(
+        viewer_config: "ViewerConfig",
+        label_ids: np.ndarray,
+        cell_names_boundary: np.ndarray,
+        mask_key: str,
+        key: Optional[str] = None,
+        color_values: Optional[np.ndarray] = None,
+    ) -> dict:
+        """Build per-label properties used by napari status and tooltips."""
+        boundaries = viewer_config.boundaries
+        prop_names = ["cell_area", "surface_area"]
+        cell_names_boundary = _as_positional_array(cell_names_boundary)
+
+        if color_values is not None:
+            color_values = _as_positional_array(color_values)
+
+        if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
+            nucleus_to_cell_map = boundaries.nucleus_to_cell_map
+            cell_indices = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
+        else:
+            cell_indices = [i for i in range(len(label_ids))]
+
+        names = [
+            cell_names_boundary[cell_idx]
+            if cell_idx is not None and cell_idx < len(cell_names_boundary)
+            else "unmapped"
+            for cell_idx in cell_indices
+        ]
+
+        properties = {
+            'index': label_ids,
+            'name': names,
+        }
+
+        for prop_name in prop_names:
+            if prop_name in viewer_config.adata.obs.columns:
+                prop_values = viewer_config.adata.obs[prop_name].values
+                properties[prop_name] = [
+                    prop_values[cell_idx] if cell_idx is not None and cell_idx < len(prop_values) else None
+                    for cell_idx in cell_indices
+                ]
+
+        if key is not None and color_values is not None:
+            value_list = [
+                color_values[cell_idx] if cell_idx is not None and cell_idx < len(color_values) and not _is_missing_label_value(color_values[cell_idx]) else None
+                for cell_idx in cell_indices
+            ]
+            properties['value'] = value_list
+            properties[key] = value_list
+
+        return properties
+
+    def _create_outline_colormap(
+        label_ids: np.ndarray,
+        hidden_label_ids: Optional[set[int]] = None,
+    ) -> DirectLabelColormap:
+        """Create a direct colormap that renders every non-background label in black."""
+        if hidden_label_ids is None:
+            hidden_label_ids = set()
+
+        color_dict = {
+            None: np.array([0.0, 0.0, 0.0, 1.0]),
+            0: np.array([0.0, 0.0, 0.0, 0.0]),
+        }
+        color_dict.update({
+            int(label_id): np.array([0.0, 0.0, 0.0, 0.0]) if int(label_id) in hidden_label_ids else np.array([0.0, 0.0, 0.0, 1.0])
+            for label_id in label_ids
+        })
+        return DirectLabelColormap(color_dict=color_dict)
 
     def _create_colored_labels_layer(
         viewer: napari.Viewer,
@@ -94,6 +189,11 @@ if WITH_NAPARI:
         # Get label IDs and cell names
         label_ids = boundaries.seg_mask_value.compute()
         cell_names_boundary = boundaries.cell_names.compute()
+        color_values = _as_positional_array(color_values)
+
+        if not _has_non_missing_label_values(color_values):
+            show_warning(f"All values for '{key}' are missing. No labels layer was added.")
+            return None
 
         # Handle nuclei mapping if needed
         if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
@@ -116,18 +216,22 @@ if WITH_NAPARI:
             None: np.array([0.5, 0.5, 0.5, 0.5]),  # Default for unmapped labels
             0: np.array([0.0, 0.0, 0.0, 0.0]),      # Background transparent
         }
+        hidden_label_ids = set()
 
         if is_categorical:
             # Categorical coloring
             if colormap is not None:
                 # Use provided colormap
-                unique_categories = np.unique(color_values)
-                n_categories = len(unique_categories)
+                unique_categories = _unique_non_missing_categories(color_values)
                 cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
 
                 for label_id, cell_idx in zip(label_ids, cell_indices):
                     if cell_idx is not None and cell_idx < len(color_values):
                         cat = color_values[cell_idx]
+                        if _is_missing_label_value(cat):
+                            hidden_label_ids.add(int(label_id))
+                            color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
+                            continue
                         cat_idx = cat_to_idx.get(cat, 0)
                         # Limit color index to avoid exceeding colormap
                         color_idx = cat_idx % min(len(colormap.colors), MAX_LABEL_COLORS)
@@ -136,16 +240,19 @@ if WITH_NAPARI:
                             color = np.append(color, 1.0)  # Add alpha
                         color_dict[int(label_id)] = color
             else:
-                # Use default categorical colormap (tab20)
-                unique_categories = np.unique(color_values)
-                n_categories = min(len(unique_categories), MAX_LABEL_COLORS)
+                # Use the same default categorical colormap as points mode.
+                unique_categories = _unique_non_missing_categories(color_values)
                 cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
-                cmap_mpl = plt.cm.get_cmap("tab20")
+                cmap_mpl = DEFAULT_CATEGORICAL_CMAP
                 n_colors = cmap_mpl.N if hasattr(cmap_mpl, 'N') else 20
 
                 for label_id, cell_idx in zip(label_ids, cell_indices):
                     if cell_idx is not None and cell_idx < len(color_values):
                         cat = color_values[cell_idx]
+                        if _is_missing_label_value(cat):
+                            hidden_label_ids.add(int(label_id))
+                            color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
+                            continue
                         cat_idx = cat_to_idx.get(cat, 0)
                         color_idx = cat_idx % n_colors
                         norm_idx = color_idx / (n_colors - 1) if n_colors > 1 else 0
@@ -165,8 +272,9 @@ if WITH_NAPARI:
             for label_id, cell_idx in zip(label_ids, cell_indices):
                 if cell_idx is not None and cell_idx < len(color_values):
                     value = color_values[cell_idx]
-                    if np.isnan(value):
-                        color_dict[int(label_id)] = np.array([0.5, 0.5, 0.5, 0.5])
+                    if _is_missing_label_value(value):
+                        hidden_label_ids.add(int(label_id))
+                        color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
                     else:
                         norm_val = np.clip((value - vmin) / (vmax - vmin), 0, 1)
                         color_dict[int(label_id)] = np.array(cmap_mpl(norm_val))
@@ -176,11 +284,27 @@ if WITH_NAPARI:
 
         # Determine layer name with mask type suffix
         full_layer_name = f"{layer_name} ({mask_key})"
+        outline_layer_name = f"{full_layer_name} outline"
 
         # Build properties
-        properties = {
-            'index': label_ids,
-            'name': list(cell_names_boundary),
+        properties = _build_labels_properties(
+            viewer_config=viewer_config,
+            label_ids=label_ids,
+            cell_names_boundary=cell_names_boundary,
+            mask_key=mask_key,
+            key=key,
+            color_values=color_values,
+        )
+        outline_cmap = _create_outline_colormap(label_ids, hidden_label_ids=hidden_label_ids)
+        legend_metadata = {
+            "legend_key": key,
+            "legend_is_categorical": is_categorical,
+            "legend_continuous_cmap": "viridis",
+            "legend_upper_climit_pct": 99,
+        }
+        outline_metadata = {
+            "legend_source_layer": full_layer_name,
+            "is_outline_layer": True,
         }
 
         # Check if layer exists and handle accordingly
@@ -188,6 +312,8 @@ if WITH_NAPARI:
             # Update existing layer's colormap
             layer = viewer.layers[full_layer_name]
             layer.colormap = direct_cmap
+            layer.properties = properties
+            layer.metadata.update(legend_metadata)
             # Move to top
             viewer.layers.move(viewer.layers.index(full_layer_name), len(viewer.layers))
         else:
@@ -201,8 +327,32 @@ if WITH_NAPARI:
                 name=full_layer_name,
                 scale=(pixel_size, pixel_size),
                 properties=properties,
+                metadata=legend_metadata,
                 colormap=direct_cmap,
             )
+
+        if outline_layer_name in viewer.layers and not add_new_layer:
+            outline_layer = viewer.layers[outline_layer_name]
+            outline_layer.colormap = outline_cmap
+            outline_layer.properties = properties
+            outline_layer.metadata.update(outline_metadata)
+            outline_layer.contour = 1
+            viewer.layers.move(viewer.layers.index(outline_layer_name), len(viewer.layers))
+        else:
+            if outline_layer_name in viewer.layers:
+                show_warning(f"Layer '{outline_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                return None
+
+            outline_layer = viewer.add_labels(
+                mask_pyramid,
+                name=outline_layer_name,
+                scale=(pixel_size, pixel_size),
+                properties=properties,
+                metadata=outline_metadata,
+                colormap=outline_cmap,
+                opacity=1.0,
+            )
+            outline_layer.contour = 1
 
         return None
 
@@ -289,45 +439,16 @@ if WITH_NAPARI:
                         label_ids = viewer_config.boundaries.seg_mask_value.compute()
                         cell_names = viewer_config.boundaries.cell_names.compute()
 
-                        # Determine cell names for properties
-                        props_dict = {}
-                        prop_names = ["cell_area", "surface_area"]
-                        if key == "nuclei" and viewer_config.boundaries.nucleus_to_cell_map is not None:
-                            nucleus_to_cell_map = viewer_config.boundaries.nucleus_to_cell_map
-                            # Use list comprehension with dict.get() for efficiency
-                            cell_ids = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
-                            names = [cell_names[ci] if ci is not None else "unmapped" for ci in cell_ids]
-                            # names = [cell_names[nucleus_to_cell_map[label_id - 1]] if (label_id - 1) in nucleus_to_cell_map else "unmapped" for label_id in label_ids]
-                            # names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
-                            for prop_name in prop_names:
-                                if prop_name in viewer_config.adata.obs.columns:
-                                    prop_values = viewer_config.adata.obs[prop_name].values
-                                    props_dict[prop_name] = [prop_values[ci] if ci is not None else None for ci in cell_ids]
-
-                        elif key == "cells":
-                            names = cell_names
-                            cell_ids = label_ids
-
-                            for prop_name in prop_names:
-                                if prop_name in viewer_config.adata.obs.columns:
-                                    props_dict[prop_name] = viewer_config.adata.obs[prop_name].values
-
-                        else:
+                        if key not in {"cells", "nuclei"}:
                             show_warning(f"Unknown key for boundaries: {key}.")
                             return
 
-                        # properties = pd.DataFrame({'name': names}, index=label_ids)
-                        properties = {
-                            'index': label_ids,
-                            'name': names
-                            }
-
-                        for prop_name, prop_values in props_dict.items():
-                            properties[prop_name] = prop_values
-
-                        # for prop in ["cell_area", "surface_area"]:
-                        #     if prop in viewer_config.adata.obs.columns:
-                        #         properties[prop] = viewer_config.adata.obs[prop].values
+                        properties = _build_labels_properties(
+                            viewer_config=viewer_config,
+                            label_ids=label_ids,
+                            cell_names_boundary=cell_names,
+                            mask_key=key,
+                        )
 
                         # Add masks as labels to napari viewer
                         layer = viewer.add_labels(
@@ -575,10 +696,6 @@ if WITH_NAPARI:
             # connect key change with update function
             @select_data_widget.data_name.changed.connect
             @select_data_widget.layer_name.changed.connect
-            @show_cells_widget.key_type.changed.connect
-            @show_cells_widget.call_button.changed.connect
-            @viewer.layers.events.removed.connect
-            @viewer.layers.events.inserted.connect
             def update_widgets_on_data_change(event=None):
                 # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data_widget.data_name.value
@@ -594,6 +711,11 @@ if WITH_NAPARI:
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
                     )
+
+            @show_cells_widget.key_type.changed.connect
+            def update_show_cells_key_choices(event=None):
+                show_cells_widget.key.value = None
+                _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
 
             def callback_refresh(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer

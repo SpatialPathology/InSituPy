@@ -11,17 +11,24 @@ import seaborn as sns
 from matplotlib.colors import ListedColormap
 
 from insitupy import WITH_NAPARI
-from insitupy._constants import DEFAULT_CATEGORICAL_CMAP
+from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, with_insitupy_style
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
-from insitupy._constants import with_insitupy_style
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+
+def _resolve_colorlegend_layer(viewer, layer):
+    if WITH_NAPARI and isinstance(layer, napari.layers.labels.labels.Labels):
+        source_layer_name = layer.metadata.get("legend_source_layer")
+        if source_layer_name is not None and source_layer_name in viewer.layers:
+            return viewer.layers[source_layer_name]
+    return layer
 
 if WITH_NAPARI:
     import napari
@@ -168,17 +175,29 @@ def colorlegend(
                 raise ValueError("No layer with cellular transcriptomic data found. First add a layer using the 'Show Data' widget.")
 
         # extract layer
-        layer = viewer.layers[layer_name]
+        layer = _resolve_colorlegend_layer(viewer, viewer.layers[layer_name])
 
-        # get values
         try:
             values = layer.properties["value"]
-        except AttributeError:
+        except (AttributeError, KeyError):
             show_warning("The selected layer does not contain any plottable data.")
             do_plotting = False
         else:
             # create color mapping
-            rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
+            if isinstance(layer, napari.layers.labels.labels.Labels):
+                label_ids = layer.properties.get("index")
+                color_dict = getattr(layer.colormap, "color_dict", None)
+                if label_ids is None or color_dict is None:
+                    show_warning("The selected labels layer does not expose enough metadata for a color legend.")
+                    do_plotting = False
+                else:
+                    rgba_values = np.array([
+                        color_dict.get(int(label_id), color_dict.get(None, (0.5, 0.5, 0.5, 0.5)))
+                        for label_id in label_ids
+                    ])
+                    rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=rgba_values, nan_val=None)
+            else:
+                rgba_list, mapping, cmap = _data_to_rgba(values, rgba_values=layer.face_color, nan_val=None)
 
             # set title
             title = layer_name
