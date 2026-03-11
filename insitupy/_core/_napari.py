@@ -1,3 +1,4 @@
+import logging
 from typing import TYPE_CHECKING, List, Literal, Optional, Union
 from uuid import uuid4
 from warnings import warn
@@ -14,6 +15,22 @@ from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.utils._helpers import _get_expression_values
 from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger("insitupy")
+
+
+def _sync_cells_for_viewer_if_needed(
+    data: Union["InSituData"],
+) -> bool:
+    cells = getattr(data, "cells", None)
+    if cells is None or cells.is_empty:
+        return False
+
+    if cells.is_synced:
+        return False
+
+    logger.warning("Cell table and boundaries are out of sync. Visualization may show incomplete metadata until `data.cells.sync()` is run.")
+    return False
 
 # Type checking imports (not executed at runtime)
 if TYPE_CHECKING:
@@ -468,6 +485,8 @@ if WITH_NAPARI:
         transcript_lazy_loading: bool = True,
         transcript_config: Optional[TranscriptViewerConfig] = None,
         ):
+
+        _sync_cells_for_viewer_if_needed(data)
 
         # initialize a config class manager with new ID
         uid_viewer = config_manager.add_config(data=data)
