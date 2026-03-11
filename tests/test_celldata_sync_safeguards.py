@@ -1,9 +1,13 @@
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
 
-from insitupy.dataclasses.dataclasses import BoundariesData, CellData
+from insitupy._core._napari import _sync_cells_for_viewer_if_needed
+from insitupy.dataclasses.dataclasses import (BoundariesData, CellData,
+                                              MultiCellData)
 
 
 def _create_table(obs_names):
@@ -80,11 +84,22 @@ def test_sync_zeros_removed_cells_in_array_masks_and_filters_table():
     table = _create_table(["c1", "c3", "x1"])
     celldata = CellData(table=table, boundaries=boundaries)
 
-    celldata.sync()
+    with patch("insitupy.dataclasses.dataclasses.logger.info") as mock_info:
+        summary = celldata.sync(return_summary=True)
 
     assert list(celldata.table.obs_names) == ["c1", "c3"]
     assert list(celldata.boundaries.cell_names.compute()) == ["c1", "c3"]
     assert list(celldata.boundaries.seg_mask_value.compute()) == [1, 3]
+    assert summary == {
+        "had_boundaries": True,
+        "changed": True,
+        "removed_table": 1,
+        "removed_boundaries": 1,
+        "reordered_boundaries": False,
+    }
+    mock_info.assert_called_with(
+        "CellData.sync(): synchronized table and boundaries (removed 1 table entries, removed 1 boundary entries)."
+    )
 
     cells = _to_numpy(celldata.boundaries["cells"])
     nuclei = _to_numpy(celldata.boundaries["nuclei"])
@@ -115,9 +130,78 @@ def test_sync_is_noop_without_boundaries_even_with_duplicate_obs_names():
     table = _create_table(["c1", "c1", "c2"])
     celldata = CellData(table=table, boundaries=None)
 
-    celldata.sync()
+    with patch("insitupy.dataclasses.dataclasses.logger.info") as mock_info:
+        summary = celldata.sync(return_summary=True)
 
     assert list(celldata.table.obs_names) == ["c1", "c1", "c2"]
+    assert summary == {
+        "had_boundaries": False,
+        "changed": False,
+        "removed_table": 0,
+        "removed_boundaries": 0,
+        "reordered_boundaries": False,
+    }
+    mock_info.assert_called_with("CellData.sync(): no boundaries present; nothing to synchronize.")
+
+
+def test_sync_reports_noop_when_already_aligned():
+    boundaries = _create_boundaries()
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    with patch("insitupy.dataclasses.dataclasses.logger.info") as mock_info:
+        summary = celldata.sync(return_summary=True)
+
+    assert summary == {
+        "had_boundaries": True,
+        "changed": False,
+        "removed_table": 0,
+        "removed_boundaries": 0,
+        "reordered_boundaries": False,
+    }
+    mock_info.assert_called_with("CellData.sync(): no synchronization needed; table and boundaries are already aligned.")
+
+
+def test_is_synced_true_when_table_and_boundaries_match():
+    boundaries = _create_boundaries()
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    assert celldata.is_synced is True
+
+
+def test_is_synced_false_when_order_differs():
+    boundaries = _create_boundaries()
+    table = _create_table(["c3", "c2", "c1"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    assert celldata.is_synced is False
+
+
+def test_multicelldata_is_synced_reflects_all_layers():
+    synced = CellData(table=_create_table(["c1", "c2", "c3"]), boundaries=_create_boundaries())
+    unsynced = CellData(table=_create_table(["c3", "c2", "c1"]), boundaries=_create_boundaries())
+
+    cells = MultiCellData()
+    cells.add_celldata(synced, key="main", is_main=True)
+    cells.add_celldata(unsynced, key="other")
+
+    assert cells.is_synced is False
+
+
+def test_viewer_preflight_warns_without_syncing_unsynced_cells():
+    unsynced = CellData(table=_create_table(["c3", "c2", "c1"]), boundaries=_create_boundaries())
+    cells = MultiCellData()
+    cells.add_celldata(unsynced, key="main", is_main=True)
+
+    data = type("DataStub", (), {"cells": cells})()
+
+    synced = _sync_cells_for_viewer_if_needed(data)
+
+    assert synced is False
+    assert data.cells.is_synced is False
+    assert list(data.cells.table.obs_names) == ["c3", "c2", "c1"]
+    assert list(data.cells.boundaries.cell_names.compute()) == ["c1", "c2", "c3"]
 
 
 def test_crop_works_without_boundaries():
@@ -128,5 +212,11 @@ def test_crop_works_without_boundaries():
 
     assert cropped is not None
     assert cropped.boundaries is None
+    assert list(cropped.table.obs_names) == ["c2", "c3"]
+    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
+    assert list(cropped.table.obs_names) == ["c2", "c3"]
+    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
+    assert list(cropped.table.obs_names) == ["c2", "c3"]
+    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
     assert list(cropped.table.obs_names) == ["c2", "c3"]
     assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
