@@ -95,7 +95,11 @@ def _get_color_values(
     """
     if key in adata.obs.columns:
         values = adata.obs[key]
-        if isinstance(values.dtype, pd.CategoricalDtype) or values.dtype == object:
+        if (
+            isinstance(values.dtype, pd.CategoricalDtype)
+            or values.dtype == object
+            or pd.api.types.is_bool_dtype(values)
+        ):
             return values.astype("category"), "categorical"
         else:
             return values.values, "continuous"
@@ -167,6 +171,10 @@ def _get_vmin_vmax(
     vmax_percentile: float | None = None
 ) -> tuple[float, float]:
     """Determine vmin and vmax for continuous color scale."""
+    values = np.asarray(values)
+    if np.issubdtype(values.dtype, np.bool_):
+        values = values.astype(np.float32)
+
     if vmin is None:
         vmin = float(np.nanmin(values))
 
@@ -187,14 +195,18 @@ def _plot_static_categorical(
 ) -> None:
     """Plot categorical data with datashader."""
     import datashader as ds
+    import datashader.transfer_functions as tf
     from datashader.mpl_ext import dsshow
 
     df["color"] = df[color_key].map(color_dict)
+    spread_px = max(1, int(round(point_size)))
+    shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
     dsshow(
         df,
         ds.Point("x", "y"),
         ds.count_cat(color_key),
         color_key=color_dict,
+        shade_hook=shade_hook,
         ax=ax
     )
 
@@ -210,17 +222,21 @@ def _plot_static_continuous(
 ) -> None:
     """Plot continuous data with datashader."""
     import datashader as ds
+    import datashader.transfer_functions as tf
     from datashader.mpl_ext import dsshow
 
     # Clip values to vmin/vmax range for proper color mapping
     df = df.copy()
     df[color_key] = df[color_key].clip(lower=vmin, upper=vmax)
+    spread_px = max(1, int(round(point_size)))
+    shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
 
     dsshow(
         df,
         ds.Point("x", "y"),
         ds.mean(color_key),
         cmap=cmap,
+        shade_hook=shade_hook,
         ax=ax
     )
 
@@ -293,6 +309,7 @@ def _plot_plotly(
     width: int,
     height: int,
     point_size: float,
+    show_tick_labels: bool,
     vmin: float | None = None,
     vmax: float | None = None,
     plotly_renderer: str | None = None
@@ -331,8 +348,20 @@ def _plot_plotly(
         yaxis_title="UMAP2",
         plot_bgcolor="white"
     )
-    fig.update_xaxes(showgrid=False, zeroline=False)
-    fig.update_yaxes(showgrid=False, zeroline=False, scaleanchor="x", scaleratio=1)
+    fig.update_xaxes(
+        showgrid=False,
+        zeroline=False,
+        showticklabels=show_tick_labels,
+        ticks="" if not show_tick_labels else None
+    )
+    fig.update_yaxes(
+        showgrid=False,
+        zeroline=False,
+        showticklabels=show_tick_labels,
+        ticks="" if not show_tick_labels else None,
+        scaleanchor="x",
+        scaleratio=1
+    )
 
     if plotly_renderer is not None:
         pio.renderers.default = plotly_renderer
@@ -388,7 +417,8 @@ def _plot_interactive_bokeh(
     cmap: str | None,
     title: str,
     width: int,
-    height: int
+    height: int,
+    point_size: float
 ) -> "hv.Element":
     """Create interactive plot with bokeh backend."""
     import datashader as ds
@@ -406,7 +436,7 @@ def _plot_interactive_bokeh(
         shaded = datashade(points, aggregator=ds.mean(color_key), cmap=cmap or "viridis",
                           width=width, height=height)
 
-    shaded = spread(shaded, px=1)
+    shaded = spread(shaded, px=max(1, int(round(point_size))))
     return shaded.opts(width=width, height=height, title=title)
 
 
@@ -418,12 +448,13 @@ def _plot_interactive_matplotlib(
     cmap: str | None,
     title: str,
     width: int,
-    height: int
+    height: int,
+    point_size: float
 ) -> "hv.Element":
     """Create interactive plot with matplotlib backend."""
     import datashader as ds
     import holoviews as hv
-    from holoviews.operation.datashader import datashade
+    from holoviews.operation.datashader import datashade, spread
 
     hv.extension("matplotlib")
 
@@ -436,6 +467,7 @@ def _plot_interactive_matplotlib(
         shaded = datashade(points, aggregator=ds.mean(color_key), cmap=cmap or "viridis",
                           width=width, height=height)
 
+    shaded = spread(shaded, px=max(1, int(round(point_size))))
     return shaded.opts(fig_size=200, title=title)
 
 
@@ -463,7 +495,9 @@ def embedding(
     ncols: int = 3,
     wspace: float | None = None,
     hspace: float | None = None,
+    show_tick_labels: bool = False,
     save: str | Path | None = None,
+    save_dpi: int = 150,
     show: bool | None = None,
     return_fig: bool = False
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
@@ -490,7 +524,9 @@ def embedding(
         Percentile (0-100) to use for vmax. Useful for clipping outliers.
         E.g., 95 uses the 95th percentile as vmax. Overrides vmax if set.
     point_size
-        Point size. For jscatter, values 1-10 work well.
+        Point size control.
+        For plotly/jscatter it sets marker size directly.
+        For datashader modes it controls pixel spreading (larger values make points appear thicker).
     interactive
         If True, return interactive plot.
     interactive_backend
@@ -531,8 +567,12 @@ def embedding(
     hspace
         Vertical spacing between subplots (fraction of subplot height).
         Default: None (uses matplotlib default).
+    show_tick_labels
+        Whether to show x/y tick labels. Default: False.
     save
         Path to save figure. If None, not saved.
+    save_dpi
+        DPI used when saving figures. Default: 150.
     show
         Whether to show figure. Default: True if save is None.
     return_fig
@@ -614,6 +654,7 @@ def embedding(
                 fig = _plot_plotly(
                     df, c, color_type, color_dict, cmap_use,
                     plot_title, interactive_resolution, interactive_resolution, point_size,
+                    show_tick_labels,
                     vmin_use, vmax_use, plotly_renderer
                 )
                 figs.append(fig)
@@ -709,10 +750,10 @@ def embedding(
 
             if interactive_backend == "bokeh":
                 p = _plot_interactive_bokeh(df, c, color_type, color_dict, cmap_use, plot_title,
-                                           interactive_resolution, interactive_resolution)
+                                           interactive_resolution, interactive_resolution, point_size)
             else:
                 p = _plot_interactive_matplotlib(df, c, color_type, color_dict, cmap_use, plot_title,
-                                                interactive_resolution, interactive_resolution)
+                                                interactive_resolution, interactive_resolution, point_size)
 
             plots.append(p)
 
@@ -730,14 +771,21 @@ def embedding(
     import matplotlib.pyplot as plt
     from datashader.mpl_ext import dsshow
 
+    user_provided_figsize = figsize is not None
+    ncols_plot = min(ncols, n_panels)
+
     if figsize is None:
         panel_size = 5
-        nrows = (n_panels + ncols - 1) // ncols
-        figsize = (min(n_panels, ncols) * panel_size + 2, nrows * panel_size)
+        nrows = (n_panels + ncols_plot - 1) // ncols_plot
+        figsize = (ncols_plot * panel_size + 2, nrows * panel_size)
 
-    nrows = (n_panels + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    nrows = (n_panels + ncols_plot - 1) // ncols_plot
+    fig, axes = plt.subplots(nrows, ncols_plot, figsize=figsize, squeeze=False)
     axes = axes.flatten()
+
+    panel_box_aspect = None
+    if user_provided_figsize:
+        panel_box_aspect = (figsize[1] / nrows) / (figsize[0] / ncols_plot)
 
     legend_figs = []
 
@@ -764,13 +812,25 @@ def embedding(
                 )
                 plt.colorbar(sm, ax=ax, shrink=0.6)
         else:
-            dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", ax=ax)
+            import datashader.transfer_functions as tf
+
+            spread_px = max(1, int(round(point_size)))
+            shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+            dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
             c = "density"
 
         ax.set_title(title or c)
         ax.set_xlabel(f"{basis.replace('X_', '').upper()}1")
         ax.set_ylabel(f"{basis.replace('X_', '').upper()}2")
-        ax.set_aspect("equal")
+        if show_tick_labels:
+            ax.tick_params(axis="both", which="both", labelbottom=True, labelleft=True,
+                           bottom=True, left=True)
+        else:
+            ax.tick_params(axis="both", which="both", labelbottom=False, labelleft=False,
+                           bottom=False, left=False)
+        ax.set_aspect("auto" if user_provided_figsize else "equal")
+        if panel_box_aspect is not None and hasattr(ax, "set_box_aspect"):
+            ax.set_box_aspect(panel_box_aspect)
 
         x_range = df["x"].max() - df["x"].min()
         y_range = df["y"].max() - df["y"].min()
@@ -788,11 +848,11 @@ def embedding(
 
     if save is not None:
         save = Path(save)
-        fig.savefig(save, dpi=150, bbox_inches="tight")
+        fig.savefig(save, dpi=save_dpi, bbox_inches="tight")
 
         for j, leg_fig in enumerate(legend_figs):
             leg_path = save.parent / f"{save.stem}_legend_{j}{save.suffix}"
-            leg_fig.savefig(leg_path, dpi=150, bbox_inches="tight")
+            leg_fig.savefig(leg_path, dpi=save_dpi, bbox_inches="tight")
             plt.close(leg_fig)
 
     if show:

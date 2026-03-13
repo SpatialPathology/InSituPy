@@ -1,5 +1,6 @@
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from numbers import Number
 from pathlib import Path
@@ -17,19 +18,49 @@ from .._io.files import read_json
 
 def find_xenium_outputs(
     path: Union[str, os.PathLike, Path],
-    startswith: str = 'output-XET'
-    ) -> List:
-    print(f"Searching for directories starting with '{startswith}' in {str(path)}")
-    search_results = []
-    for root, dirs, files in os.walk(path):
-        root = Path(root)
-        for d in dirs:
-            if d.startswith(startswith):
-                p = root / d
-                search_results.append(p)
+    startswith: str = 'output-XET',
+    max_depth: int = None,
+    threads: int = 4,
+) -> List[Path]:
+    """
+    Search for Xenium output directories more efficiently by:
+    - Using iterdir() instead of os.walk to avoid unnecessary recursion
+    - Pruning subtrees that cannot contain matches
+    - Optionally parallelizing directory scanning with threads
+    """
+    path = Path(path)
+    print(f"Searching for directories starting with '{startswith}' in {path}")
 
-    print(f"Found {len(search_results)} Xenium output directories.")
-    return search_results
+    results = []
+
+    def _scan(directory: Path, depth: int) -> List[Path]:
+        found = []
+        try:
+            entries = list(directory.iterdir())
+        except PermissionError:
+            return found
+
+        subdirs = []
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            if entry.name.startswith(startswith):
+                found.append(entry)
+                # Xenium output dirs don't nest - no need to recurse into them
+            elif max_depth is None or depth < max_depth:
+                subdirs.append(entry)
+
+        if subdirs:
+            with ThreadPoolExecutor(max_workers=threads) as executor:
+                futures = {executor.submit(_scan, d, depth + 1): d for d in subdirs}
+                for future in as_completed(futures):
+                    found.extend(future.result())
+
+        return found
+
+    results = _scan(path, depth=0)
+    print(f"Found {len(results)} Xenium output directories.")
+    return results
 
 def collect_qc_data(
     data_folders: List[Union[str, os.PathLike, Path]]

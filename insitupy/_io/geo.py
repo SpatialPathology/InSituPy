@@ -1,4 +1,5 @@
 import ast
+import json
 import os
 import warnings
 from pathlib import Path
@@ -57,8 +58,16 @@ def _read_file_helper(file, engine):
         def safe_literal_eval(val):
             if isinstance(val, dict):
                 return val
+
+            print(val)
             if isinstance(val, str):
-                return ast.literal_eval(val)
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        return ast.literal_eval(val)
+                    except (ValueError, SyntaxError):
+                        return val
             return val
         dataframe['classification'] = dataframe['classification'].apply(safe_literal_eval)
     return dataframe
@@ -89,19 +98,14 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
                     f"This behavior might change in the future."
                 )
                 )
-        try:
-            dataframe["name"] = [elem["name"] if pd.notnull(elem) else "unclassified" for elem in dataframe["classification"]]
-        except KeyError:
-            pass
-        try:
-            dataframe["color"] = [elem["color"] if pd.notnull(elem) else [0,0,0] for elem in dataframe["classification"]]
-        except KeyError:
-            pass
+        def _extract_classification_value(entry, key, default):
+            if isinstance(entry, dict):
+                return entry.get(key, default)
+            return default
 
-        try:
-            dataframe["scale"] = [elem["scale"] if pd.notnull(elem) else (1,1) for elem in dataframe["classification"]]
-        except KeyError:
-            pass
+        dataframe["name"] = [_extract_classification_value(elem, "name", "unclassified") for elem in dataframe["classification"]]
+        dataframe["color"] = [_extract_classification_value(elem, "color", [0,0,0]) for elem in dataframe["classification"]]
+        dataframe["scale"] = [_extract_classification_value(elem, "scale", (1,1)) for elem in dataframe["classification"]]
 
         # Remove the redundant "classification" column
         dataframe = dataframe.drop(["classification"], axis=1)

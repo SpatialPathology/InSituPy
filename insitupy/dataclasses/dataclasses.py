@@ -992,6 +992,24 @@ class CellData(DeepCopyMixin):
         return self._boundaries
 
     @property
+    def is_synced(self) -> bool:
+        if self._boundaries is None:
+            return True
+
+        table_cell_ids = pd.Index(self._table.obs_names.astype(str))
+        boundary_cell_ids = pd.Index(self._boundaries.cell_names.compute().astype(str))
+        seg_mask_values = self._boundaries.seg_mask_value.compute()
+
+        if len(table_cell_ids.unique()) != len(table_cell_ids):
+            return False
+        if len(boundary_cell_ids.unique()) != len(boundary_cell_ids):
+            return False
+        if len(boundary_cell_ids) != len(seg_mask_values):
+            return False
+
+        return table_cell_ids.equals(boundary_cell_ids)
+
+    @property
     def entries(self):
         return self._entries
 
@@ -1135,7 +1153,8 @@ class CellData(DeepCopyMixin):
 
 
     def sync(self,
-             verbose: bool = False):
+             verbose: bool = False,
+             return_summary: bool = False):
         '''
         Function to synchronize table and boundaries of CellData.
 
@@ -1144,9 +1163,23 @@ class CellData(DeepCopyMixin):
         2. Check if all table cell IDs are in boundaries
             - if not all are in boundaries, throw error saying that those will also be removed
         3. Select only table cell IDs which are also in boundaries and filter for them
+
+        Args:
+            verbose: Print synchronization changes to stdout.
+            return_summary: If True, return a dict describing synchronization actions.
         '''
         if self._boundaries is None:
-            return
+            summary = {
+                "had_boundaries": False,
+                "changed": False,
+                "removed_table": 0,
+                "removed_boundaries": 0,
+                "reordered_boundaries": False,
+            }
+            logger.info("CellData.sync(): no boundaries present; nothing to synchronize.")
+            if return_summary:
+                return summary
+            return None
         else:
             # get cell IDs from table
             table_cell_ids = pd.Index(self._table.obs_names.astype(str))
@@ -1164,6 +1197,8 @@ class CellData(DeepCopyMixin):
 
             # filter table for IDs that are available in boundaries
             table_mask_in_boundaries = table_cell_ids.isin(ds.index)
+            overlapping_table_ids = table_cell_ids[table_mask_in_boundaries]
+            boundary_overlap_ids = ds.index[ds.index.isin(overlapping_table_ids)]
 
             if not np.any(table_mask_in_boundaries):
                 raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All table entries would get filtered out.")
@@ -1181,6 +1216,9 @@ class CellData(DeepCopyMixin):
 
             # find the seg_mask_values which are not anymore present
             seg_mask_values_not_in_table = ds[~ds.index.isin(table_cell_ids)].values
+            n_removed_boundaries = int(np.sum(~ds.index.isin(table_cell_ids)))
+            was_reordered = not overlapping_table_ids.equals(boundary_overlap_ids)
+            changed = any([n_removed_table > 0, n_removed_boundaries > 0, was_reordered])
 
             # extract boundaries
             cell_bounds = boundaries["cells"]
@@ -1206,11 +1244,34 @@ class CellData(DeepCopyMixin):
             else:
                 warnings.warn(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
 
+            summary = {
+                "had_boundaries": True,
+                "changed": changed,
+                "removed_table": n_removed_table,
+                "removed_boundaries": n_removed_boundaries,
+                "reordered_boundaries": was_reordered,
+            }
+
+            if changed:
+                changes = []
+                if n_removed_table > 0:
+                    changes.append(f"removed {n_removed_table} table entries")
+                if n_removed_boundaries > 0:
+                    changes.append(f"removed {n_removed_boundaries} boundary entries")
+                if was_reordered:
+                    changes.append("reordered boundary metadata to match table order")
+                logger.info(f"CellData.sync(): synchronized table and boundaries ({', '.join(changes)}).")
+            else:
+                logger.info("CellData.sync(): no synchronization needed; table and boundaries are already aligned.")
+
             if verbose:
-                n_removed_boundaries = int(np.sum(~ds.index.isin(table_cell_ids)))
                 if n_removed_table > 0:
                     print(f"Filtered out {n_removed_table} table entries not present in boundaries.", flush=True)
                 print(f"Filtered out {n_removed_boundaries} boundaries.", flush=True)
+
+            if return_summary:
+                return summary
+            return None
 
     def shift(self,
               x: Union[int, float],
@@ -1349,6 +1410,13 @@ class MultiCellData(DeepCopyMixin):
         except AttributeError:
             print("No boundaries available.")
             return None
+
+    @property
+    def is_synced(self) -> bool:
+        if self.is_empty:
+            return True
+
+        return all(layer.is_synced for layer in self._layers.values())
 
     @property
     def main_key(self):
@@ -1576,10 +1644,29 @@ class MultiCellData(DeepCopyMixin):
         if key in self.keys():
             self._main_key = key
 
-    def sync(self):
+    def sync(self, return_summary: bool = False):
         current_keys = self._layers.keys()
+        summaries = {}
         for key in current_keys:
-            self._layers[key].sync()
+            summary = self._layers[key].sync(return_summary=True)
+            summaries[key] = summary
+            if summary["had_boundaries"]:
+                if summary["changed"]:
+                    logger.info(
+                        "MultiCellData.sync(): layer '%s' updated (%s table entries removed, %s boundary entries removed, reordered=%s).",
+                        key,
+                        summary["removed_table"],
+                        summary["removed_boundaries"],
+                        summary["reordered_boundaries"],
+                    )
+                else:
+                    logger.info("MultiCellData.sync(): layer '%s' already aligned.", key)
+            else:
+                logger.info("MultiCellData.sync(): layer '%s' has no boundaries.", key)
+
+        if return_summary:
+            return summaries
+        return None
 
 
 class ImageData(DeepCopyMixin):
