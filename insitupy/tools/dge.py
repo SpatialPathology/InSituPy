@@ -50,21 +50,23 @@ def dge(
         target_annotation_tuple (Optional[Tuple[str, str]]): Tuple containing the annotation key and name for the target data.
         target_cell_type_tuple (Optional[Tuple[str, str]]): Tuple specifying an observation key and value to filter the target data by cell type.
         target_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the target data.
+        target_name (Optional[str]): Label for the target group used in result output. Defaults to None.
+        target_metadata (Optional[dict]): Additional metadata to attach to the target group. Defaults to None.
         ref (Optional[Union[InSituData, List[InSituData]]]): Reference in situ data object(s) for comparison. Defaults to None.
         ref_annotation_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple containing the reference annotation key and name, or "rest" to use the rest of the data as reference, or "same" to use the same annotation as the target. Defaults to "same".
         ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data by cell type, or "rest" to use the rest of the data, or "same" to use the same cell type as the target. Defaults to "same".
-        ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to None.
-        significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 1).
-        show_volcano (bool): Whether to generate a volcano plot of the results. Defaults to True.
-        return_results (bool): Whether to return the results as dictionary including the dataframe differentially expressed genes and the parameters.
-        method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
+        ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to "same".
+        ref_name (Optional[str]): Label for the reference group used in result output. Defaults to None.
+        ref_metadata (Optional[dict]): Additional metadata to attach to the reference group. Defaults to None.
+        cells_layer (Optional[str]): Name of the cell segmentation layer to use. Defaults to None (main layer).
+        consider_neighbors (bool): If True, only cells that are spatial neighbors of the target group are included in the reference. Defaults to False.
+        method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data. Defaults to False.
-        force_assignment (bool): Whether to force assignment of annotations and regions even if it has been done before already. Defaults to False.
+        force_assignment (bool): Whether to force re-assignment of annotations and regions even if already done. Defaults to False.
         verbose (bool): Whether to print detailed information during the analysis. Defaults to False.
 
     Returns:
-        Union[None, Dict[str, Any]]: If `plot_volcano` is True, returns None. Otherwise, returns a dictionary with the results DataFrame and parameters used for the analysis.
+        DiffExprResults: Object containing the differential expression results including the DEG dataframe and analysis parameters.
 
     Raises:
         ValueError: If `ref_annotation_tuple` is neither 'rest' nor a 2-tuple.

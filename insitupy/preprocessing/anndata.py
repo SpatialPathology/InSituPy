@@ -18,6 +18,35 @@ def normalize_and_transform_anndata(
     scale: bool = False,
     assert_integer_counts: bool = True,
     verbose: bool = True) -> None:
+    """
+    Normalize and transform a single AnnData object in place.
+
+    Stores raw counts in ``adata.layers['counts']``, normalizes to ``target_sum``,
+    saves normalized counts in ``adata.layers['norm_counts']``, then applies the
+    requested transformation. Optionally scales the data to unit variance.
+
+    Args:
+        adata: AnnData object to process. Modified in place.
+        layer (Optional[str], optional): Name of the layer containing raw integer counts.
+            If None, ``adata.X`` is used. Defaults to None.
+        transformation_method (Literal['log1p', 'sqrt'], optional):
+            Transformation applied after normalization. ``'log1p'`` applies
+            ``sc.pp.log1p``; ``'sqrt'`` applies the Freeman-Tukey transform
+            (``sqrt(x) + sqrt(x+1)``). Defaults to ``'log1p'``.
+        target_sum (int, optional): Total counts to normalize each cell to.
+            Defaults to None (normalizes to the median total count across cells).
+        scale (bool, optional): If True, scale each gene to zero mean and unit
+            variance after transformation. Defaults to False.
+        assert_integer_counts (bool, optional): If True, raise an error when the
+            count matrix does not contain integer values. Defaults to True.
+        verbose (bool, optional): If True, print progress messages. Defaults to True.
+
+    Raises:
+        ValueError: If ``transformation_method`` is not one of ``['log1p', 'sqrt']``.
+
+    Returns:
+        None: Modifies ``adata`` in place.
+    """
 
     if layer is None:
         if assert_integer_counts:
@@ -83,28 +112,29 @@ def reduce_dimensions_anndata(
     **kwargs
     ) -> None:
     """
-    Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques, optionally performing batch correction.
+    Reduce the dimensionality of data using PCA followed by UMAP or t-SNE.
+
+    Computes a PCA, builds a nearest-neighbor graph, then runs the chosen
+    embedding method. All results are stored in ``adata`` in place.
 
     Args:
-        umap (bool, optional):
-            If True, perform UMAP dimensionality reduction. Default is True.
-        tsne (bool, optional):
-            If True, perform t-SNE dimensionality reduction. Default is True.
+        adata: AnnData object to reduce. Modified in place.
+        method (Literal['umap', 'tsne'], optional):
+            Dimensionality reduction method to apply after PCA and neighbor
+            graph computation. Defaults to ``'umap'``.
+        n_neighbors (int, optional):
+            Number of neighbors for ``sc.pp.neighbors``. Defaults to 16.
+        n_pcs (int, optional):
+            Number of principal components to use when computing the neighbor
+            graph. 0 means use all PCs. Defaults to 0.
         verbose (bool, optional):
-            If True, print progress messages during dimensionality reduction. Default is True.
-        tsne_lr (int, optional):
-            Learning rate for t-SNE. Default is 1000.
-        tsne_jobs (int, optional):
-            Number of CPU cores to use for t-SNE computation. Default is 8.
+            If True, print progress messages. Defaults to True.
         **kwargs:
-            Additional keyword arguments to be passed to scanorama function if batch correction is performed.
-
-    Raises:
-        ValueError: If an invalid `batch_correction_key` is provided.
+            Additional keyword arguments forwarded to ``sc.tl.umap()`` or
+            ``sc.tl.tsne()``.
 
     Returns:
-        None: This method modifies the input matrix in place, reducing its dimensionality using specified techniques and
-            batch correction if applicable. It does not return any value.
+        None: Modifies ``adata`` in place.
     """
     # dimensionality reduction
     print("Calculate PCA...") if verbose else None
@@ -126,6 +156,25 @@ def cluster_anndata(
     method: Literal["leiden", "louvain"] = "leiden",
     verbose: bool = True
 ):
+    """
+    Cluster cells in an AnnData object using Leiden or Louvain community detection.
+
+    Requires a precomputed neighbor graph (e.g. from ``reduce_dimensions_anndata``).
+    Cluster labels are stored in ``adata.obs['leiden']`` or ``adata.obs['louvain']``.
+
+    Args:
+        adata: AnnData object with a precomputed neighbor graph. Modified in place.
+        method (Literal['leiden', 'louvain'], optional):
+            Clustering algorithm. Defaults to ``'leiden'``.
+        verbose (bool, optional):
+            If True, print progress messages. Defaults to True.
+
+    Raises:
+        ValueError: If ``method`` is not one of ``['leiden', 'louvain']``.
+
+    Returns:
+        None: Modifies ``adata`` in place.
+    """
     # clustering
     if method.lower() == "leiden":
         print("Leiden clustering...") if verbose else None

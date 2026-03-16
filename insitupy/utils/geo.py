@@ -7,7 +7,7 @@ from shapely.geometry import Polygon, box
 from shapely.strtree import STRtree
 
 
-def create_strtree_from_polygon(polygon, max_grid_width):
+def _create_strtree_from_polygon(polygon, max_grid_width):
     # Calculate the optimal grid size
     #grid_size = calculate_optimal_grid_size(polygon, num_points)
 
@@ -44,8 +44,8 @@ def create_strtree_from_polygon(polygon, max_grid_width):
 
 def fast_query_points_within_polygon(polygon: Polygon, points: gpd.GeoSeries):
     # create STRtree
-    #tree = create_strtree_from_polygon(polygon=polygon, num_points=len(points))
-    tree = create_strtree_from_polygon(polygon=polygon, max_grid_width=150)
+    #tree = _create_strtree_from_polygon(polygon=polygon, num_points=len(points))
+    tree = _create_strtree_from_polygon(polygon=polygon, max_grid_width=150)
     #print(len(tree.geometries))
 
     if tree is None:

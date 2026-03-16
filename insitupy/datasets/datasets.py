@@ -147,6 +147,7 @@ def xenium_human_breast_cancer(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE breast cancer Xenium data (v1.0.1, ~160k cells, 10x Genomics preview dataset)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.0.1/Xenium_FFPE_Human_Breast_Cancer_Rep1/Xenium_FFPE_Human_Breast_Cancer_Rep1_outs.zip"
@@ -195,6 +196,7 @@ def xenium_human_kidney_nondiseased(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human non-diseased FFPE kidney Xenium data (v1.5.0, 10x Genomics multi-tissue and cancer panel)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.5.0/Xenium_V1_hKidney_nondiseased_section/Xenium_V1_hKidney_nondiseased_section_outs.zip"
@@ -237,6 +239,7 @@ def xenium_human_pancreatic_cancer(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE pancreatic cancer Xenium data (v1.6.0, add-on panel, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.6.0/Xenium_V1_hPancreas_Cancer_Add_on_FFPE/Xenium_V1_hPancreas_Cancer_Add_on_FFPE_outs.zip"
@@ -286,6 +289,7 @@ def xenium_human_skin_melanoma(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE skin melanoma Xenium data (v1.7.0, skin gene expression panel, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.7.0/Xeniumranger_V1_hSkin_Melanoma_Add_on_FFPE/Xeniumranger_V1_hSkin_Melanoma_Add_on_FFPE_outs.zip"
@@ -328,6 +332,7 @@ def xenium_human_brain_cancer(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE GBM brain cancer Xenium data (v2.0.0, immuno-oncology profiling panel, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://s3-us-west-2.amazonaws.com/10x.files/samples/xenium/2.0.0/Xenium_V1_Human_Brain_GBM_FFPE/Xenium_V1_Human_Brain_GBM_FFPE_outs.zip"
@@ -370,6 +375,7 @@ def xenium_human_lung_cancer(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE lung cancer Xenium data (v2.0.0, multimodal cell segmentation, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_humanLung_Cancer_FFPE/Xenium_V1_humanLung_Cancer_FFPE_outs.zip"
@@ -412,6 +418,7 @@ def xenium_human_lymph_node_5k(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human reactive FFPE lymph node Xenium Prime data (v3.0.0, 5k gene panel, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://s3-us-west-2.amazonaws.com/10x.files/samples/xenium/3.0.0/Xenium_Prime_Human_Lymph_Node_Reactive_FFPE/Xenium_Prime_Human_Lymph_Node_Reactive_FFPE_outs.zip"
@@ -454,6 +461,7 @@ def xenium_human_lymph_node(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human non-diseased FFPE lymph node Xenium data (v1.5.0, multi-tissue and cancer panel, 10x Genomics)."""
 
     # URLs for download
     data_url = "https://cf.10xgenomics.com/samples/xenium/1.5.0/Xenium_V1_hLymphNode_nondiseased_section/Xenium_V1_hLymphNode_nondiseased_section_outs.zip"
@@ -487,6 +495,7 @@ def xenium_test_dataset_v2_mm(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE breast cancer 2-FOV Xenium test data (v2.0.0, multimodal cell segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Breast_2fov/Xenium_V1_human_Breast_2fov_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v2_mm"
@@ -507,6 +516,7 @@ def xenium_test_dataset_v2_nucex(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE lung 2-FOV Xenium test data (v2.0.0, nuclear expansion segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/2.0.0/Xenium_V1_human_Lung_2fov/Xenium_V1_human_Lung_2fov_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v2_nucex"
@@ -527,6 +537,7 @@ def xenium_test_dataset_v3_mm(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load mouse ileum tiny Xenium Prime test data (v3.0.0, multimodal cell segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny/Xenium_Prime_MultiCellSeg_Mouse_Ileum_tiny_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v3_mm"
@@ -547,6 +558,7 @@ def xenium_test_dataset_v3_nucex(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load mouse ileum tiny Xenium Prime test data (v3.0.0, nuclear expansion segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v3_nucex"
@@ -567,6 +579,7 @@ def xenium_test_dataset_v4_nucex(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human ovary tiny Xenium test data (v4.0.0, nuclear expansion segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Human_Ovary_tiny/Xenium_V1_Human_Ovary_tiny_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v4_nucex"
@@ -586,6 +599,7 @@ def xenium_test_dataset_v4_mm(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human ovary tiny Xenium test data (v4.0.0, multimodal cell segmentation, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_MultiCellSeg_Human_Ovary_tiny/Xenium_V1_MultiCellSeg_Human_Ovary_tiny_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v4_mm"
@@ -606,6 +620,7 @@ def xenium_test_dataset_v4_protein(
         overwrite: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human kidney tiny Xenium test data (v4.0.0, gene and protein expression with cell segmentation staining, 10x Genomics)."""
     data_url = "https://cf.10xgenomics.com/samples/xenium/4.0.0/Xenium_V1_Protein_Human_Kidney_tiny/Xenium_V1_Protein_Human_Kidney_tiny_outs.zip"
     base_dir = _resolve_output_dir(output_dir)
     named_data_dir = base_dir / "xenium_test_dataset_v4_protein"
@@ -626,6 +641,7 @@ def visium_human_breast_cancer(
         download_fullres: bool = False,
         output_dir = None
 ) -> InSituData:
+    """Load human FFPE breast cancer CytAssist Visium data (v2.0.0, ~3000 spots, 10x Genomics)."""
 
     # URLs for download
     h5_url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0/CytAssist_FFPE_Human_Breast_Cancer/CytAssist_FFPE_Human_Breast_Cancer_filtered_feature_bc_matrix.h5"

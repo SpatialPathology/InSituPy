@@ -21,6 +21,35 @@ def facs_plot(data,
               threshold_gene2: Number =1,
               layer: str = 'main'
               ):
+    """
+    Create a FACS-style scatter plot of two genes and classify double-positive cells.
+
+    Plots expression of ``gene1`` (x-axis) against ``gene2`` (y-axis) as a scatter
+    plot, with dashed threshold lines. Points can optionally be colored by a
+    cluster annotation column.
+
+    **Side effect:** Adds a boolean column named ``'{gene1}/{gene2} double pos.'``
+    to ``data.cells[layer].table.obs`` marking cells that exceed both thresholds.
+
+    Args:
+        data (InSituData): The data object containing cell expression tables.
+        gene1 (str, optional): Name of the gene to plot on the x-axis.
+            Defaults to ``'gene1'``.
+        gene2 (str, optional): Name of the gene to plot on the y-axis.
+            Defaults to ``'gene2'``.
+        cluster_key (str, optional): Name of the ``obs`` column to use for
+            coloring points. Pass ``None`` to plot all points in a single color.
+            Defaults to ``'None'``.
+        threshold_gene1 (Number, optional): Expression threshold for ``gene1``.
+            Cells above this value are counted as gene1-positive. Defaults to 1.
+        threshold_gene2 (Number, optional): Expression threshold for ``gene2``.
+            Cells above this value are counted as gene2-positive. Defaults to 1.
+        layer (str, optional): Name of the cell segmentation layer to use.
+            Defaults to ``'main'``.
+
+    Returns:
+        None: Displays the plot and modifies ``data.cells[layer].table.obs`` in place.
+    """
 
     adata=data.cells[layer].table
 

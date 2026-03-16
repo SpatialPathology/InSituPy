@@ -178,17 +178,35 @@ def convert_to_spatialdata(
     ):
 
     """
-    Converts an InSituData object to a SpatialData object.
+    Convert an InSituData or InSituExperiment object to a SpatialData object.
 
-    This function integrates various data elements such as images, labels, transcripts, and annotations
-    into a SpatialData object. It requires the spatialdata framework to be installed.
+    Integrates images, cell tables, cell shapes, transcripts, annotations, regions,
+    and cell boundary labels into a single SpatialData object. Automatically detects
+    and resolves case-insensitive key conflicts that would cause problems when writing
+    to disk.
 
-    The function automatically checks for and fixes case-insensitive key conflicts that could cause
-    issues when writing to disk.
+    Requires the ``spatialdata`` package (``pip install spatialdata``).
+
+    Args:
+        data (Union[InSituData, InSituExperiment]): Source data object to convert.
+            For an ``InSituExperiment``, all samples are merged into one SpatialData
+            object with sample-prefixed element keys.
+        n_pyramids (int, optional): Number of resolution pyramid levels to generate
+            for image elements. Defaults to 5.
 
     Returns:
-        SpatialData: A SpatialData object containing the integrated data elements.
+        SpatialData: A SpatialData object whose elements are keyed as follows
+            (all keys are prefixed with ``'<sample_uid>/'`` when converting an
+            ``InSituExperiment``):
 
+            - **images**: one entry per image channel (e.g. ``'nuclei'``, ``'morphology_focus'``).
+            - **labels**: cell boundary label images (e.g. ``'cell_boundaries'``).
+            - **shapes**: cell polygon shapes (e.g. ``'cells'``) and annotation/region shapes.
+            - **tables**: cell expression table under key ``'table'``.
+            - **points**: transcript coordinates under key ``'transcripts'`` (if available).
+
+    Raises:
+        ImportError: If the ``spatialdata`` package is not installed.
     """
     # is_experiment = _is_experiment(data)
 

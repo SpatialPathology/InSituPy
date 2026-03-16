@@ -42,6 +42,27 @@ def generate_mock_reference(
     annotation_column: str = "Annotation",
     gene_column: str = "Gene"
     ):
+    """
+    Generate a mock single-cell reference AnnData from a marker-gene table.
+
+    Creates a synthetic AnnData where each cell type has idealized expression:
+    all marker genes for a given cell type are set to 1000 counts and all
+    other genes are set to 0. Useful for testing cell-type annotation pipelines.
+
+    Args:
+        dataframe (pd.DataFrame): DataFrame with at least two columns: one for
+            cell type / annotation labels and one for gene names. Each row
+            associates one gene with one annotation.
+        annotation_column (str, optional): Name of the column containing
+            cell type / annotation labels. Defaults to ``'Annotation'``.
+        gene_column (str, optional): Name of the column containing gene names.
+            Defaults to ``'Gene'``.
+
+    Returns:
+        AnnData: A synthetic reference AnnData with shape
+            ``(n_cell_types, n_genes)``. ``obs`` contains an ``'Annotation'``
+            column with cell type labels; ``var_names`` are gene names.
+    """
 
     # Initialize an empty dictionary to store marker genes for each annotation
     annotation_genes = {}

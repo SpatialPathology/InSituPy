@@ -62,7 +62,27 @@ def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 99.0
 
 class ImageRegistration:
     '''
-    Object to perform image registration.
+    Object to perform feature-based image registration using SIFT/SURF and affine or perspective transforms.
+
+    The typical workflow is:
+
+    1. Instantiate with ``image`` (the image to align) and ``template`` (the fixed reference).
+    2. Call :meth:`run` to execute the full pipeline (load, feature extraction, transformation
+       matrix estimation, warping).
+    3. Access results via instance attributes:
+
+    Attributes:
+        T (np.ndarray): Estimated transformation matrix. Shape ``(2, 3)`` for affine
+            transforms or ``(3, 3)`` for perspective (homography) transforms.
+        T_to_register (np.ndarray): Transformation matrix actually applied during warping
+            (may differ from ``T`` when the image was resized before registration).
+        registered (np.ndarray): The warped (registered) image array with shape matching
+            the template dimensions.
+        kpsA (list): Detected keypoints in the source image.
+        kpsB (list): Detected keypoints in the template image.
+        good_matches (list): Feature matches that passed the ratio test and RANSAC.
+        inlier_mask (np.ndarray or None): Boolean mask of RANSAC inliers aligned with
+            ``good_matches``.
     '''
     # Tree drawing characters
     _TSIGN = "\u251c"   # ├
@@ -1010,6 +1030,9 @@ def register_images(
         channel_name_for_registration (Optional[str], optional): Name of the channel used for registration. Required for IF images. Defaults to None.
         template_image_name (str, optional): Name of the template image. Defaults to "nuclei".
         save_registered_images (bool, optional): Whether to save the registered images. Defaults to True.
+        output_dir (Union[str, os.PathLike, Path], optional): Directory where registered
+            images and QC files are saved when ``save_registered_images=True``.
+            Defaults to None (saves next to the InSituData project directory).
         min_good_matches_per_area (int, optional): Minimum number of good matches per mm² required for registration. Defaults to 5.
         test_flipping (bool): Whether to test flipping of images during registration. Defaults to True.
         decon_scale_factor (float, optional): Scale factor for deconvolution. Defaults to 0.2.
@@ -1046,7 +1069,9 @@ def register_images(
         ValueError: If decon_scale_factor is not strictly positive.
 
     Returns:
-        None
+        None: The registered image(s) are added directly to ``data.images`` in place.
+            If ``save_registered_images=True``, OME-TIFF files are also written to
+            ``output_dir``.
     """
     # Tree drawing characters
     _TSIGN = "\u251c"   # ├

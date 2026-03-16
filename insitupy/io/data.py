@@ -70,8 +70,14 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
-        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id". Only used with spatialdata backend.
-        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id". Only used with spatialdata backend.
+        slide_id (str, optional): Name for the overarching slide/dataset, stored as
+            ``data.dataset_name`` when using the insitupy backend. Has no effect
+            when using the spatialdata backend (``spatialdata_io.xenium()`` has
+            no equivalent parameter). Defaults to ``"slide_id"``.
+        sample_id (str, optional): Name for the individual sample/ROI within the
+            slide, stored as ``data.sample_name`` when using the insitupy backend.
+            Has no effect when using the spatialdata backend. Defaults to
+            ``"sample_id"``.
         backend (Literal["insitupy", "spatialdata"], optional): Backend to use for loading data. Defaults to "insitupy".
             - "insitupy": Uses the native InSituPy loader.
             - "spatialdata": Uses spatialdata-io to load the data and converts to InSituData format.
@@ -252,7 +258,17 @@ def read_visium(
         slide_id (str, optional): Identifier for the slide. Defaults to "slide_id".
         sample_id (str, optional): Identifier for the sample. Defaults to "sample_id".
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
-        **kwargs: Additional keyword arguments passed to spatialdata-io's visium loader.
+        fullres_pixel_size (Optional[Number], optional): Physical size of one full-resolution
+            pixel in micrometers. Used to convert spot geometries to micron coordinates.
+            Defaults to None (falls back to 1.0 with a warning).
+        **kwargs: Additional keyword arguments forwarded to ``spatialdata_io.visium()``.
+            Commonly used arguments include:
+
+            - ``counts_file`` (str): Name of the counts file (e.g.
+              ``'filtered_feature_bc_matrix.h5'``). Defaults to
+              ``'filtered_feature_bc_matrix.h5'``.
+            - ``fullres_image_file`` (Optional[str]): Path to the full-resolution
+              tissue image. Auto-detected if None.
 
     Returns:
         InSituData: An object containing the processed Visium experiment data, including metadata, cells, and images.

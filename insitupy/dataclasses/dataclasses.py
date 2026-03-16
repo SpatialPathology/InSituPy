@@ -1552,6 +1552,38 @@ class MultiCellData(DeepCopyMixin):
                     is_main: bool = False,
                     overwrite: bool = False
                     ):
+        """
+        Add Baysor (https://github.com/kharchenkolab/Baysor) segmentation output to the object.
+
+        Reads Baysor output files (counts, cell metadata, and polygon files)
+        together with the XeniumRanger output directory and registers the
+        resulting cell data as a new segmentation layer named ``key``.
+
+        Args:
+            xd (Union[str, os.PathLike, Path]): Path to the XeniumRanger output
+                directory. Used alongside the Baysor output to reconstruct cell
+                boundaries.
+            path (Union[str, os.PathLike, Path]): Path to the Baysor output
+                directory containing individual result files.
+            counts_file (Optional[str], optional): Name of the counts file
+                within ``path``. Defaults to None (auto-detected).
+            cell_metadata_file (Optional[str], optional): Name of the cell
+                metadata file within ``path``. Defaults to None (auto-detected).
+            polygons_file (Optional[str], optional): Name of the polygons file
+                within ``path``. Defaults to None (auto-detected).
+            pixel_size (Number, optional): Size of one pixel in micrometers,
+                used to scale coordinates. Defaults to 1.
+            key (str, optional): Key under which the segmentation layer is
+                stored. Defaults to ``'baysor'``.
+            is_main (bool, optional): If True, set this layer as the main
+                (active) cell segmentation layer. Defaults to False.
+            overwrite (bool, optional): If True, allow overwriting an existing
+                layer with the same ``key``. Defaults to False.
+
+        Returns:
+            None: Modifies the object in place by adding a new cell segmentation
+                layer accessible via ``self[key]``.
+        """
 
         from ._segmentations import _read_baysor
 

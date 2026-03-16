@@ -31,7 +31,7 @@ class SpeciesToID:
         self.check_species(species)
         return self.species_dict[species]
 
-def find_between(s, first, last ):
+def _find_between(s, first, last ):
     try:
         start = s.index( first ) + len( first )
         end = s.index( last, start )
@@ -354,7 +354,7 @@ class StringDB:
                 if response['Error'] == 'not found':
                     # extract error message and identify missing gene that caused the error
                     ermsg = response['ErrorMessage']
-                    missing_gene = find_between(ermsg, first="called '", last="' in the")
+                    missing_gene = _find_between(ermsg, first="called '", last="' in the")
 
                     # remove missing gene from list
                     genes.remove(missing_gene)
@@ -462,6 +462,34 @@ def get_up_down_genes(
     logfold_col: str = 'log2foldchange',
     gene_col: str = None # assumes genes to be in index
     ):
+    """
+    Split DGE results into upregulated and downregulated gene lists.
+
+    Filters rows in ``dge_results`` by adjusted p-value and log2 fold-change
+    thresholds to produce two gene lists for downstream GO enrichment analysis.
+
+    Args:
+        dge_results: DataFrame containing differential expression results with at
+            least a p-value column and a log-fold-change column. Genes are taken
+            from the index unless ``gene_col`` is specified.
+        pval_threshold (Number, optional): Maximum adjusted p-value for a gene to
+            be considered significant. Defaults to 0.05.
+        logfold_threshold (Number, optional): Minimum absolute log2 fold-change
+            for a gene to be called up- or downregulated. Genes with
+            ``logfold > logfold_threshold`` are upregulated; genes with
+            ``logfold < -logfold_threshold`` are downregulated. Defaults to 1.
+        pval_col (str, optional): Name of the column containing adjusted p-values.
+            Defaults to ``'padj'``.
+        logfold_col (str, optional): Name of the column containing log2 fold-change
+            values. Defaults to ``'log2foldchange'``.
+        gene_col (str, optional): Name of the column containing gene names. If None,
+            gene names are taken from the DataFrame index. Defaults to None.
+
+    Returns:
+        Tuple[List[str], List[str]]: A tuple ``(genes_up, genes_down)`` where
+            ``genes_up`` contains names of significantly upregulated genes and
+            ``genes_down`` contains names of significantly downregulated genes.
+    """
     pval_mask = dge_results[pval_col] < pval_threshold
     lfc_mask_up = dge_results[logfold_col] > logfold_threshold
     lfc_mask_down = dge_results[logfold_col] < -logfold_threshold
