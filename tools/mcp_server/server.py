@@ -108,6 +108,34 @@ def _safe_get_members(obj, predicate=None):
     return members
 
 
+# Submodules to search when a top-level __all__ name is not importable directly.
+# NOTE: The preferred long-term fix is to add missing imports to insitupy/__init__.py
+# so that __all__ is consistent with the top-level namespace.
+_ALL_SUBMODULE_SEARCH_PATHS = [
+    "insitupy.dataclasses.dataclasses",
+    "insitupy.palettes",
+    "insitupy.io.data",
+    "insitupy.tools.dge",
+    "insitupy.tools.distance",
+    "insitupy.tools.registration",
+]
+
+
+def _resolve_all_path(name: str) -> Optional[str]:
+    """Try to find the dotted path of *name* in known insitupy submodules.
+
+    Returns a fully qualified path string, or None if not found.
+    """
+    for mod_path in _ALL_SUBMODULE_SEARCH_PATHS:
+        try:
+            mod = importlib.import_module(mod_path)
+            if getattr(mod, name, None) is not None:
+                return f"{mod_path}.{name}"
+        except Exception:
+            continue
+    return None
+
+
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
@@ -665,10 +693,45 @@ def get_plotting_api() -> str:
                     if desc:
                         lines.append(f"    {desc}")
             lines.append("")
+        # pca / tsne — in insitupy.plotting.scatter but not re-exported at pl top-level
+        try:
+            _scatter_mod = importlib.import_module("insitupy.plotting.scatter")
+            pca_tsne_added = False
+            for fname in ("pca", "tsne"):
+                obj = getattr(_scatter_mod, fname, None)
+                if obj is not None:
+                    if not pca_tsne_added:
+                        lines.append("## Embedding / UMAP (scatter submodule)")
+                        pca_tsne_added = True
+                    sig = _format_signature(obj)
+                    desc = _short_doc(obj)
+                    lines.append(f"  {fname}{sig}")
+                    if desc:
+                        lines.append(f"    {desc}")
+            if pca_tsne_added:
+                lines.append("")
+        except Exception:
+            pass
+
+        # FACS — lives in its own submodule, may not be re-exported at pl top-level
+        try:
+            _facs_mod = importlib.import_module("insitupy.plotting.facs")
+            facs_obj = getattr(_facs_mod, "facs_plot", None)
+            if facs_obj is not None:
+                lines.append("## FACS")
+                sig = _format_signature(facs_obj)
+                desc = _short_doc(facs_obj)
+                lines.append(f"  facs_plot{sig}")
+                if desc:
+                    lines.append(f"    {desc}")
+                lines.append("")
+        except Exception:
+            pass
+
     except Exception as exc:
         lines.append(f"(Could not introspect plotting module: {exc})")
 
-    return _truncate("\n".join(lines), 3000)
+    return _truncate("\n".join(lines), 10000)
 
 
 @mcp.tool()
@@ -728,7 +791,24 @@ def get_preprocessing_api() -> str:
     except Exception as exc:
         lines.append(f"(Could not introspect filtering: {exc})\n")
 
-    return _truncate("\n".join(lines), 3000)
+    try:
+        # Pseudobulk — use importlib to avoid the name collision in __init__.py
+        # (preprocessing/__init__.py imports pseudobulk() function which shadows the module)
+        pp_pseudo = importlib.import_module("insitupy.preprocessing.pseudobulk")
+
+        lines.append("## Pseudobulk (insitupy.preprocessing.pseudobulk)")
+        for name, obj in _safe_get_members(pp_pseudo, inspect.isfunction):
+            if _is_public(name) and obj.__module__ == pp_pseudo.__name__:
+                sig = _format_signature(obj)
+                desc = _short_doc(obj)
+                lines.append(f"  {name}{sig}")
+                if desc:
+                    lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect pseudobulk: {exc})\n")
+
+    return _truncate("\n".join(lines), 5000)
 
 
 @mcp.tool()
@@ -792,7 +872,14 @@ def get_public_api() -> str:
             desc = _short_doc(obj) if callable(obj) or inspect.isclass(obj) else ""
             lines.append(f"  {name}  ({kind})  — {desc}" if desc else f"  {name}  ({kind})")
         except Exception:
-            lines.append(f"  {name}  (unavailable)")
+            # NOTE: preferred long-term fix is to add missing imports to
+            # insitupy/__init__.py so that __all__ is consistent with the
+            # top-level namespace.
+            path = _resolve_all_path(name)
+            if path:
+                lines.append(f"  {name}  → accessible as {path}")
+            else:
+                lines.append(f"  {name}  (not found at top-level; __all__ may be stale)")
 
     lines.append("\n## Submodule shorthands\n")
     shorthands = {
@@ -948,6 +1035,7 @@ def get_storage_format() -> str:
         Directory structure, metadata JSON schema (.ispy), zarr layout,
         parquet files, and GeoJSON conventions.
     """
+    _version = getattr(_ispy, "__version__", "unknown")
     return textwrap.dedent("""\
     # InSituPy Storage Format
 
@@ -992,7 +1080,7 @@ def get_storage_format() -> str:
     {
       "slide_id": "string",
       "sample_id": "string",
-      "version": "0.11.0",
+      "version": "VERSION_PLACEHOLDER",
       "method": "Xenium",
       "method_params": {
         "pixel_size": 0.2125,
@@ -1030,7 +1118,397 @@ def get_storage_format() -> str:
     - Timestamps use format YYYYMMDD_HHMMSS for versioning
     - UIDs are short hex strings for uniqueness
     - Paths in .ispy are relative to the project folder
-    """)
+    """).replace('"VERSION_PLACEHOLDER"', f'"{_version}"')
+
+
+# ============================
+# New InSituPy-Specific Tools
+# ============================
+
+
+@mcp.tool()
+def get_datasets_guide() -> str:
+    """Document sample datasets available in insitupy and how to load them.
+
+    Returns:
+        Available dataset functions with descriptions, usage examples,
+        and guidance on when to use sample data.
+    """
+    lines: list[str] = ["# InSituPy Sample Datasets (insitupy.datasets)\n"]
+    lines.append(
+        "Sample datasets are provided for tutorials, testing, and exploration.\n"
+        "They are downloaded on first call and cached locally.\n"
+    )
+
+    try:
+        import insitupy.datasets.datasets as _ds
+
+        lines.append("## Available Datasets\n")
+        for name, obj in _safe_get_members(_ds, inspect.isfunction):
+            if not _is_public(name) or obj.__module__ != _ds.__name__:
+                continue
+            sig = _format_signature(obj)
+            desc = _short_doc(obj)
+            lines.append(f"  {name}{sig}")
+            if desc:
+                lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect datasets module: {exc})\n")
+
+    lines.append(textwrap.dedent("""\
+    ## Usage
+
+    ```python
+    import insitupy as ispy
+
+    # Download and load a Xenium breast cancer demo dataset
+    data = ispy.datasets.xenium_human_breast_cancer()
+
+    # Load a Visium dataset
+    data = ispy.datasets.visium_human_breast_cancer()
+
+    # Check what's already downloaded
+    ispy.datasets.list_downloaded_datasets()
+
+    # Specify a custom output directory
+    data = ispy.datasets.xenium_human_breast_cancer(output_dir="/path/to/cache")
+
+    # Force re-download if corrupted
+    data = ispy.datasets.xenium_human_breast_cancer(overwrite=True)
+    ```
+
+    ## When to Use
+    - Following tutorials or documentation examples
+    - Writing and testing analysis workflows
+    - Reproducing published results from InSituPy examples
+    - Benchmarking performance on standardized data
+    """))
+
+    return _truncate("\n".join(lines), 3000)
+
+
+@mcp.tool()
+def get_result_types() -> str:
+    """Document output objects returned by key analysis functions.
+
+    Returns:
+        Fields, methods, and usage of DiffExprResults and ImageRegistration.
+    """
+    lines: list[str] = ["# InSituPy Result Types\n"]
+
+    # DiffExprResults
+    lines.append("## DiffExprResults")
+    lines.append("Returned by: ispy.tl.dge(), InSituExperiment.dge()\n")
+    try:
+        from insitupy.dataclasses.results import DiffExprResults as _DER
+
+        doc = inspect.getdoc(_DER)
+        if doc:
+            lines.append(_truncate(textwrap.indent(doc, "  "), 600))
+            lines.append("")
+        lines.append("Fields:")
+        lines.append("  .main                  pd.DataFrame  — DGE results (target vs. reference)")
+        lines.append(
+            "  .target_neighborhood   Optional[pd.DataFrame]"
+            "  — Target neighborhood DGE (if consider_neighbors=True)"
+        )
+        lines.append(
+            "  .ref_neighborhood      Optional[pd.DataFrame]"
+            "  — Reference neighborhood DGE (if consider_neighbors=True)"
+        )
+        lines.append(
+            "  .config                DiffExprConfigCollector  — Analysis metadata and parameters"
+        )
+        lines.append("")
+        lines.append("Methods:")
+        for mname in ("get_all_results", "has_neighbors", "read", "save", "summary"):
+            mobj = getattr(_DER, mname, None)
+            if mobj is not None:
+                sig = _format_signature(mobj)
+                desc = _short_doc(mobj)
+                lines.append(f"  .{mname}{sig}  — {desc}" if desc else f"  .{mname}{sig}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"  (Could not introspect DiffExprResults: {exc})\n")
+
+    # ImageRegistration
+    lines.append("## ImageRegistration")
+    lines.append("Returned by: ispy.tl.register_images()\n")
+    try:
+        from insitupy.tools.registration import ImageRegistration as _IR
+
+        doc = inspect.getdoc(_IR)
+        if doc:
+            lines.append(_truncate(textwrap.indent(doc, "  "), 500))
+            lines.append("")
+        lines.append("Key attributes (set after calling .run()):")
+        lines.append(
+            "  .T                   np.ndarray"
+            "  — Estimated transformation matrix (2×3 affine or 3×3 homography)"
+        )
+        lines.append(
+            "  .T_to_register       np.ndarray"
+            "  — Transformation actually applied (may differ if image was resized)"
+        )
+        lines.append("  .registered          np.ndarray  — Warped (registered) image")
+        lines.append("")
+        lines.append("Key methods:")
+        for mname in (
+            "run",
+            "calculate_transformation_matrix",
+            "extract_features",
+            "load_and_scale_images",
+        ):
+            mobj = getattr(_IR, mname, None)
+            if mobj is not None:
+                sig = _format_signature(mobj)
+                desc = _short_doc(mobj)
+                lines.append(f"  .{mname}{sig}  — {desc}" if desc else f"  .{mname}{sig}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"  (Could not introspect ImageRegistration: {exc})\n")
+
+    lines.append(textwrap.dedent("""\
+    ## Usage Example
+
+    ```python
+    # DGE result
+    result = ispy.tl.dge(data, target_annotation_tuple=("tumor", "region1"))
+    df = result.main           # pd.DataFrame with DGE columns
+    result.summary()           # print a quick summary
+
+    # ImageRegistration
+    reg = ispy.tl.register_images(
+        source=data_he, target=data_xenium,
+        source_image="H&E", target_image="DAPI"
+    )
+    T = reg.T                  # transformation matrix
+    # Apply to another image:
+    data_he.transform(T, ...)
+    ```
+    """))
+
+    return _truncate("\n".join(lines), 4000)
+
+
+@mcp.tool()
+def get_interactive_guide() -> str:
+    """Guide for interactive napari-based visualization in InSituPy.
+
+    Returns:
+        Overview of data.show(), TranscriptViewerWidget, sync_geometries(),
+        napari installation requirements, and typical interactive workflow.
+    """
+    lines: list[str] = ["# InSituPy Interactive Visualization\n"]
+    lines.append('Requires napari: `pip install "napari[all]"`\n')
+
+    # data.show()
+    lines.append("## data.show() — Launch napari viewer")
+    try:
+        show_obj = _resolve_object("insitupy._core.data.InSituData.show")
+        sig = _format_signature(show_obj)
+        doc = inspect.getdoc(show_obj)
+        lines.append(f"  InSituData.show{sig}\n")
+        if doc:
+            lines.append(textwrap.indent(_truncate(doc, 600), "  "))
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"  (Could not introspect InSituData.show: {exc})\n")
+
+    # TranscriptViewerWidget
+    lines.append("## TranscriptViewerWidget — Napari dock widget for transcripts")
+    try:
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        sig = _format_signature(TranscriptViewerWidget.__init__)
+        doc = inspect.getdoc(TranscriptViewerWidget)
+        lines.append(f"  TranscriptViewerWidget.__init__{sig}\n")
+        if doc:
+            lines.append(_truncate(textwrap.indent(doc, "  "), 500))
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"  (Could not introspect TranscriptViewerWidget: {exc})\n")
+
+    # sync_geometries
+    lines.append("## sync_geometries() — Push napari edits back to InSituData")
+    try:
+        from insitupy.interactive.viewer import sync_geometries
+
+        doc = inspect.getdoc(sync_geometries)
+        lines.append("  ispy.interactive.viewer.sync_geometries()")
+        if doc:
+            lines.append(textwrap.indent(doc, "    "))
+        else:
+            lines.append(
+                "    Reads Shapes/Points layers from the current napari viewer and"
+            )
+            lines.append(
+                "    stores them as annotations or regions in the active InSituData."
+            )
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"  (Could not introspect sync_geometries: {exc})\n")
+
+    lines.append(textwrap.dedent("""\
+    ## Installation
+
+    ```bash
+    # Full napari installation (recommended)
+    pip install "napari[all]"
+
+    # Or with PyQt5 backend explicitly
+    pip install "napari[pyqt5]"
+    ```
+
+    ## Typical Interactive Workflow
+
+    ```python
+    import insitupy as ispy
+
+    # 1. Load project
+    data = ispy.InSituData.read("path/to/project/")
+    data.load_images()
+    data.load_cells()
+
+    # 2. Launch napari viewer
+    data.show(
+        keys=["leiden", "EPCAM"],    # cell obs keys or gene names
+        cells_layer="main",
+        show_transcripts=True,        # transcript viewer widget
+        transcript_lazy_loading=True  # recommended for >50M transcripts
+    )
+
+    # 3. Draw annotations in napari (Shapes layer named "@ ClassName (key)")
+    # 4. Sync annotations back to the InSituData object
+    ispy.interactive.viewer.sync_geometries()
+
+    # 5. Assign annotations to cells
+    data.assign_annotations(keys="all")
+    ```
+
+    ## Notes
+    - `data.show()` raises ImportError if napari is not installed.
+    - `transcript_lazy_loading=True` reduces memory (~1.5s delay per gene toggle).
+    - `return_viewer=True` returns the napari viewer instance for programmatic control.
+    """))
+
+    return _truncate("\n".join(lines), 4000)
+
+
+@mcp.tool()
+def get_images_api() -> str:
+    """List image I/O and utility functions in insitupy.images (insitupy.im).
+
+    Returns:
+        Functions from insitupy.images.io and insitupy.images.utils
+        with signatures and descriptions; includes a note on dask-backed
+        lazy loading behavior.
+    """
+    lines: list[str] = ["# InSituPy Images API (insitupy.im)\n"]
+
+    lines.append(textwrap.dedent("""\
+    ## Lazy Loading
+    Images in InSituPy are stored as OME-Zarr pyramids and loaded as dask arrays.
+    - Images are not read into RAM until `.compute()` is called or a region is accessed.
+    - Pyramid levels allow efficient access at multiple resolutions.
+    - `ImageData` stores multiple named images (e.g. "DAPI", "morphology_focus").
+    - Use `is_from_disk()` / `is_from_zarr_disk()` to check if an array is still lazy.
+
+    """))
+
+    try:
+        import insitupy.images.io as _im_io
+
+        lines.append("## I/O (insitupy.images.io)")
+        for name, obj in _safe_get_members(_im_io, inspect.isfunction):
+            if not _is_public(name) or obj.__module__ != _im_io.__name__:
+                continue
+            sig = _format_signature(obj)
+            desc = _short_doc(obj)
+            lines.append(f"  {name}{sig}")
+            if desc:
+                lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect images.io: {exc})\n")
+
+    try:
+        import insitupy.images.utils as _im_utils
+
+        lines.append("## Utilities (insitupy.images.utils)")
+        for name, obj in _safe_get_members(_im_utils, inspect.isfunction):
+            if not _is_public(name) or obj.__module__ != _im_utils.__name__:
+                continue
+            sig = _format_signature(obj)
+            desc = _short_doc(obj)
+            lines.append(f"  {name}{sig}")
+            if desc:
+                lines.append(f"    {desc}")
+        lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect images.utils: {exc})\n")
+
+    return _truncate("\n".join(lines), 3000)
+
+
+@mcp.tool()
+def get_spatialdata_api() -> str:
+    """Document SpatialData integration: convert_to_spatialdata and convert_from_spatialdata.
+
+    Returns:
+        Function signatures, parameter details, and usage patterns for
+        converting between InSituPy and SpatialData formats.
+    """
+    lines: list[str] = ["# InSituPy SpatialData Integration (insitupy.spatialdata)\n"]
+    lines.append("Requires the `spatialdata` package: `pip install spatialdata`\n")
+
+    try:
+        from insitupy.spatialdata.convert import (
+            convert_from_spatialdata,
+            convert_to_spatialdata,
+        )
+
+        for fn_name, fn_obj in [
+            ("convert_to_spatialdata", convert_to_spatialdata),
+            ("convert_from_spatialdata", convert_from_spatialdata),
+        ]:
+            sig = _format_signature(fn_obj)
+            doc = inspect.getdoc(fn_obj)
+            lines.append(f"## {fn_name}{sig}")
+            if doc:
+                lines.append(textwrap.indent(_truncate(doc, 600), "  "))
+            lines.append("")
+    except Exception as exc:
+        lines.append(f"(Could not introspect spatialdata module: {exc})\n")
+
+    lines.append(textwrap.dedent("""\
+    ## Usage
+
+    ```python
+    import insitupy as ispy
+
+    # Export to SpatialData
+    data = ispy.InSituData.read("path/to/project/")
+    sdata = ispy.spatialdata.convert_to_spatialdata(data, n_pyramids=3)
+
+    # Import from SpatialData
+    data = ispy.spatialdata.convert_from_spatialdata(
+        sdata,
+        image_data=("image", 0.2125),   # (image_key, pixel_size_µm)
+        table_key="table",
+        slide_id="my_slide",
+    )
+    ```
+
+    ## Notes
+    - `convert_to_spatialdata` wraps InSituData images, cell tables, and shapes.
+    - `convert_from_spatialdata` reconstructs an InSituData from a SpatialData object.
+    - The `image_data` parameter accepts a tuple or list of tuples: `(key, pixel_size)`.
+    - Use `check_and_fix_case_insensitive_conflicts()` if SpatialData has key conflicts.
+    """))
+
+    return _truncate("\n".join(lines), 3000)
 
 
 # ---------------------------------------------------------------------------
