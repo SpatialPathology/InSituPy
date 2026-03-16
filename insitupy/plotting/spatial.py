@@ -1,6 +1,7 @@
 
 import gc
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
 
@@ -240,6 +241,7 @@ def spatial(
 
     # data attribute keys
     region_tuple: Optional[Tuple[str, str]] = None,
+    annotation_tuple: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
     annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
     image_key: Optional[str] = None,
 
@@ -290,8 +292,13 @@ def spatial(
             AnnData layer to extract values from.
         region_tuple : tuple of (str, str), optional
             Region identifier (dataset key, region name).
+        annotation_tuple : tuple of (str, str or list of str), optional
+            Annotation overlay specifier as ``(key, name)`` where ``key`` is the
+            annotation category and ``name`` is the specific annotation class (or
+            a list of classes) to overlay. Pass just the key as a plain string to
+            overlay all classes in that category.
         annotations_key : tuple or str, optional
-            Key(s) for annotations to overlay.
+            Deprecated. Use ``annotation_tuple`` instead.
         image_key : str, optional
             Key for associated images to overlay.
         filter_mode : str, optional
@@ -354,6 +361,14 @@ def spatial(
     >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
     """
 
+    if annotations_key is not None:
+        warnings.warn(
+            "'annotations_key' is deprecated, use 'annotation_tuple' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        annotation_tuple = annotations_key
+
     # convert arguments to lists
     keys = convert_to_list(keys)
 
@@ -368,7 +383,7 @@ def spatial(
     # update some values depending on function arguments
     data_config.update_values(
         layer=layer,
-        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
+        region_tuple=region_tuple, annotations_key=annotation_tuple, image_key=image_key,
         filter_mode=filter_mode, filter_tuple=filter_tuple
         )
     plot_config.update_values(
