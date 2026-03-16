@@ -17,7 +17,7 @@ def normalize_and_transform_anndata(
     target_sum: int = None, # defaults to median of total counts of cells
     scale: bool = False,
     assert_integer_counts: bool = True,
-    verbose: bool = True) -> None:
+    verbose: bool = False) -> None:
     """
     Normalize and transform a single AnnData object in place.
 
@@ -39,7 +39,7 @@ def normalize_and_transform_anndata(
             variance after transformation. Defaults to False.
         assert_integer_counts (bool, optional): If True, raise an error when the
             count matrix does not contain integer values. Defaults to True.
-        verbose (bool, optional): If True, print progress messages. Defaults to True.
+        verbose (bool, optional): If True, print progress messages. Defaults to False.
 
     Raises:
         ValueError: If ``transformation_method`` is not one of ``['log1p', 'sqrt']``.
@@ -154,7 +154,7 @@ def reduce_dimensions_anndata(
 def cluster_anndata(
     adata,
     method: Literal["leiden", "louvain"] = "leiden",
-    verbose: bool = True
+    verbose: bool = False
 ):
     """
     Cluster cells in an AnnData object using Leiden or Louvain community detection.
@@ -167,7 +167,7 @@ def cluster_anndata(
         method (Literal['leiden', 'louvain'], optional):
             Clustering algorithm. Defaults to ``'leiden'``.
         verbose (bool, optional):
-            If True, print progress messages. Defaults to True.
+            If True, print progress messages. Defaults to False.
 
     Raises:
         ValueError: If ``method`` is not one of ``['leiden', 'louvain']``.

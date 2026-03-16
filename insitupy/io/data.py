@@ -1,5 +1,6 @@
 import logging
 import os
+import warnings
 from numbers import Number
 from pathlib import Path
 from typing import Dict, Literal, Optional, Union
@@ -51,8 +52,10 @@ def read_xenium(
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
     restructure_transcripts: bool = False,
-    slide_id: str = "slide_id",
-    sample_id: str = "sample_id",
+    dataset_name: Optional[str] = None,
+    sample_name: Optional[str] = None,
+    slide_id: Optional[str] = None,
+    sample_id: Optional[str] = None,
     backend: Literal["insitupy", "spatialdata"] = "insitupy",
     ) -> InSituData:
     """
@@ -70,14 +73,15 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
-        slide_id (str, optional): Name for the overarching slide/dataset, stored as
-            ``data.dataset_name`` when using the insitupy backend. Has no effect
-            when using the spatialdata backend (``spatialdata_io.xenium()`` has
-            no equivalent parameter). Defaults to ``"slide_id"``.
-        sample_id (str, optional): Name for the individual sample/ROI within the
-            slide, stored as ``data.sample_name`` when using the insitupy backend.
-            Has no effect when using the spatialdata backend. Defaults to
-            ``"sample_id"``.
+        dataset_name (str, optional): Name for the overarching dataset/slide. For the insitupy
+            backend this is overridden by the value in the Xenium metadata file. For the spatialdata
+            backend it is not used (``spatialdata_io.xenium()`` has no equivalent parameter).
+            Defaults to None.
+        sample_name (str, optional): Name for the individual sample/ROI within the slide. For the
+            insitupy backend this is overridden by the value in the Xenium metadata file. For the
+            spatialdata backend it is not used. Defaults to None.
+        slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
+        sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         backend (Literal["insitupy", "spatialdata"], optional): Backend to use for loading data. Defaults to "insitupy".
             - "insitupy": Uses the native InSituPy loader.
             - "spatialdata": Uses spatialdata-io to load the data and converts to InSituData format.
@@ -98,6 +102,15 @@ def read_xenium(
         - Transcript data can be loaded using either pandas or Dask, depending on the `transcript_mode` parameter.
         - The spatialdata backend provides interoperability with the SpatialData ecosystem.
     """
+    if slide_id is not None:
+        warnings.warn("'slide_id' is deprecated, use 'dataset_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        dataset_name = slide_id
+    if sample_id is not None:
+        warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        sample_name = sample_id
+
     path = Path(path) # make sure the path is a pathlib path
 
     metadata_filename: str = "experiment.xenium"
@@ -125,6 +138,12 @@ def read_xenium(
 
         from insitupy.spatialdata.convert import convert_from_spatialdata
 
+        if dataset_name is not None or sample_name is not None:
+            warnings.warn(
+                "dataset_name and sample_name are not used by the spatialdata backend "
+                "(spatialdata_io.xenium() has no equivalent parameters).",
+                UserWarning, stacklevel=2
+            )
         if verbose:
             logger.info("Reading Xenium data with spatialdata-io backend...")
         sdata = xenium(path)
@@ -139,8 +158,8 @@ def read_xenium(
             cell_boundaries_data=("cell_labels", pixel_size),
             nucleus_boundaries_data=("nucleus_labels", pixel_size),
             transcripts_key="transcripts",
-            slide_id=slide_id,
-            sample_id=sample_id,
+            slide_id=dataset_name,
+            sample_id=sample_name,
             method_name="Xenium"
             )
 
@@ -148,15 +167,15 @@ def read_xenium(
         if verbose:
             logger.info("Reading Xenium data with InSituPy backend...")
 
-        # get slide id and sample id from metadata
-        slide_id = xenium_metadata["slide_id"]
-        sample_id = xenium_metadata["region_name"]
+        # get dataset_name and sample_name from metadata (overrides function parameters)
+        _dataset_name = xenium_metadata["slide_id"]
+        _sample_name = xenium_metadata["region_name"]
 
         data = InSituData(
             path=path,
             metadata=None, # initializes new metadata
-            slide_id=slide_id,
-            sample_id=sample_id,
+            slide_id=_dataset_name,
+            sample_id=_sample_name,
             method_name="Xenium",
             method_params=xenium_metadata,
             )
@@ -241,9 +260,10 @@ def read_xenium(
 
 def read_visium(
     path: Union[str, os.PathLike, Path],
-    dataset_id: Optional[str] = None,
-    slide_id: str = "slide_id",
-    sample_id: str = "sample_id",
+    dataset_name: Optional[str] = None,
+    sample_name: Optional[str] = None,
+    slide_id: Optional[str] = None,
+    sample_id: Optional[str] = None,
     verbose: bool = True,
     fullres_pixel_size: Optional[Number] = None, # microns per pixel
     **kwargs,
@@ -254,9 +274,13 @@ def read_visium(
 
     Args:
         path (Union[str, os.PathLike, Path]): Path to the Visium data bundle.
-        dataset_id (Optional[str], optional): Dataset ID for the Visium data. Defaults to "visium".
-        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id".
-        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id".
+        dataset_name (Optional[str], optional): Name for the overarching dataset/slide. Also used
+            internally as ``dataset_id`` for spatialdata-io element naming (shapes, images, table keys).
+            Defaults to None (falls back to ``"visium"``).
+        sample_name (Optional[str], optional): Name for the individual sample/ROI within the slide.
+            Defaults to None.
+        slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
+        sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
         fullres_pixel_size (Optional[Number], optional): Physical size of one full-resolution
             pixel in micrometers. Used to convert spot geometries to micron coordinates.
@@ -282,14 +306,22 @@ def read_visium(
         - The function loads spatial coordinates, gene expression counts, and optional histology images.
         - Spot positions are stored as features in the InSituData object.
     """
+    if slide_id is not None:
+        warnings.warn("'slide_id' is deprecated, use 'dataset_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        dataset_name = slide_id
+    if sample_id is not None:
+        warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        sample_name = sample_id
+
     from spatialdata_io import visium
 
     from insitupy.spatialdata.convert import convert_from_spatialdata
 
     path = Path(path)
 
-    if dataset_id is None:
-        dataset_id = "visium"
+    dataset_id = dataset_name if dataset_name is not None else "visium"
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
@@ -342,8 +374,8 @@ def read_visium(
         cell_boundaries_data=None,  # Visium uses spots, not boundaries
         nucleus_boundaries_data=None,
         transcripts_key=None,  # Visium doesn't have single-molecule transcripts
-        slide_id=slide_id,
-        sample_id=sample_id,
+        slide_id=dataset_name,
+        sample_id=sample_name,
         method_name="visium",
     )
 

@@ -21,6 +21,7 @@ Optional dependencies (install as needed):
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal, Sequence
 
 if TYPE_CHECKING:
@@ -475,6 +476,7 @@ def _plot_interactive_matplotlib(
 def embedding(
     adata: ad.AnnData,
     basis: str = "X_umap",
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     cmap: str | None = None,
     vmin: float | None = None,
@@ -496,9 +498,10 @@ def embedding(
     wspace: float | None = None,
     hspace: float | None = None,
     show_tick_labels: bool = False,
+    savepath: str | Path | None = None,
     save: str | Path | None = None,
     save_dpi: int = 150,
-    show: bool | None = None,
+    show: bool = True,
     return_fig: bool = False
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
     """
@@ -510,9 +513,11 @@ def embedding(
         Annotated data matrix.
     basis
         Key in adata.obsm for coordinates (e.g., "X_umap", "X_pca").
-    color
+    keys
         Key(s) for color encoding. Searches adata.obs first, then adata.var_names.
         Can be single key or list of keys for multiple panels.
+    color
+        Deprecated. Use ``keys`` instead.
     cmap
         Colormap for continuous values. Default: "viridis".
     vmin
@@ -569,12 +574,14 @@ def embedding(
         Default: None (uses matplotlib default).
     show_tick_labels
         Whether to show x/y tick labels. Default: False.
-    save
+    savepath
         Path to save figure. If None, not saved.
+    save
+        Deprecated. Use ``savepath`` instead.
     save_dpi
         DPI used when saving figures. Default: 150.
     show
-        Whether to show figure. Default: True if save is None.
+        Whether to show figure. Default: True.
     return_fig
         If True, return the figure object.
 
@@ -590,6 +597,15 @@ def embedding(
     ImportError
         If required optional dependencies are not installed.
     """
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    if save is not None:
+        warnings.warn("'save' is deprecated, use 'savepath' instead.",
+                      DeprecationWarning, stacklevel=2)
+        savepath = save
+
     # Validate basis
     if basis not in adata.obsm:
         raise KeyError(f"'{basis}' not found in adata.obsm")
@@ -598,15 +614,15 @@ def embedding(
     if coords.shape[1] < 2:
         raise ValueError(f"'{basis}' must have at least 2 dimensions")
 
-    # Normalize color to list
-    if color is None:
-        color = [None]
-    elif isinstance(color, str):
-        color = [color]
+    # Normalize keys to list
+    if keys is None:
+        keys = [None]
+    elif isinstance(keys, str):
+        keys = [keys]
     else:
-        color = list(color)
+        keys = list(keys)
 
-    n_panels = len(color)
+    n_panels = len(keys)
 
     # Normalize tooltip to list
     tooltip_keys = None
@@ -627,7 +643,7 @@ def embedding(
                 )
 
             figs = []
-            for c in color:
+            for c in keys:
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
@@ -671,7 +687,7 @@ def embedding(
             import jscatter
 
             plots = []
-            for c in color:
+            for c in keys:
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
@@ -789,7 +805,7 @@ def embedding(
 
     legend_figs = []
 
-    for i, c in enumerate(color):
+    for i, c in enumerate(keys):
         ax = axes[i]
         df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
@@ -843,15 +859,12 @@ def embedding(
 
     fig.subplots_adjust(wspace=wspace, hspace=hspace)
 
-    if show is None:
-        show = save is None
-
-    if save is not None:
-        save = Path(save)
-        fig.savefig(save, dpi=save_dpi, bbox_inches="tight")
+    if savepath is not None:
+        savepath = Path(savepath)
+        fig.savefig(savepath, dpi=save_dpi, bbox_inches="tight")
 
         for j, leg_fig in enumerate(legend_figs):
-            leg_path = save.parent / f"{save.stem}_legend_{j}{save.suffix}"
+            leg_path = savepath.parent / f"{savepath.stem}_legend_{j}{savepath.suffix}"
             leg_fig.savefig(leg_path, dpi=save_dpi, bbox_inches="tight")
             plt.close(leg_fig)
 
@@ -868,6 +881,7 @@ def embedding(
 @with_insitupy_style
 def umap(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
@@ -876,12 +890,24 @@ def umap(
 
     Wrapper around embedding() with basis="X_umap".
     See embedding() for full parameter documentation.
+
+    Parameters
+    ----------
+    keys
+        Key(s) for color encoding. Deprecated alias: ``color``.
+    color
+        Deprecated. Use ``keys`` instead.
     """
-    return embedding(adata=adata, basis="X_umap", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_umap", keys=keys, **kwargs)
 
 
 def pca(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | None":
@@ -891,11 +917,16 @@ def pca(
     Wrapper around embedding() with basis="X_pca".
     See embedding() for full parameter documentation.
     """
-    return embedding(adata=adata, basis="X_pca", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_pca", keys=keys, **kwargs)
 
 
 def tsne(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | None":
@@ -905,4 +936,8 @@ def tsne(
     Wrapper around embedding() with basis="X_tsne".
     See embedding() for full parameter documentation.
     """
-    return embedding(adata=adata, basis="X_tsne", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_tsne", keys=keys, **kwargs)

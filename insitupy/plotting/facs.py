@@ -1,4 +1,5 @@
 import os
+import warnings
 from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -10,6 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.font_manager import FontProperties
 
+from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.plotting.save import save_and_show_figure
 
 
@@ -18,8 +20,9 @@ def facs_plot(data,
               gene2: str = 'gene2',
               cluster_key: str = 'None',
               threshold_gene1: Number = 1,
-              threshold_gene2: Number =1,
-              layer: str = 'main'
+              threshold_gene2: Number = 1,
+              cells_layer: str = None,
+              layer: str = None,
               ):
     """
     Create a FACS-style scatter plot of two genes and classify double-positive cells.
@@ -44,14 +47,20 @@ def facs_plot(data,
             Cells above this value are counted as gene1-positive. Defaults to 1.
         threshold_gene2 (Number, optional): Expression threshold for ``gene2``.
             Cells above this value are counted as gene2-positive. Defaults to 1.
-        layer (str, optional): Name of the cell segmentation layer to use.
-            Defaults to ``'main'``.
+        cells_layer (str, optional): Name of the cell segmentation layer to use.
+            Defaults to None (main layer).
+        layer (str, optional): Deprecated. Use ``cells_layer`` instead.
 
     Returns:
-        None: Displays the plot and modifies ``data.cells[layer].table.obs`` in place.
+        None: Displays the plot and modifies the cell table's ``obs`` in place.
     """
+    if layer is not None:
+        warnings.warn("'layer' is deprecated, use 'cells_layer' instead.",
+                      DeprecationWarning, stacklevel=2)
+        cells_layer = layer
 
-    adata=data.cells[layer].table
+    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+    adata = celldata.table
 
     expr1 = adata[:, gene1].X.toarray().flatten()
     expr2 = adata[:, gene2].X.toarray().flatten()

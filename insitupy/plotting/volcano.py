@@ -34,8 +34,10 @@ MIN_PVALUE = 1e-300
 @with_insitupy_style
 def single_volcano(
     data: pd.DataFrame,
-    logfoldchanges_column: str = 'log2foldchange',
-    pval_column: str = 'padj',
+    logfoldchanges_col: str = 'log2foldchange',
+    pval_col: str = 'padj',
+    logfoldchanges_column: str = None,
+    pval_column: str = None,
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 2,
     title: Optional[str] = None,
@@ -65,10 +67,14 @@ def single_volcano(
     data : pd.DataFrame
         DataFrame containing gene expression data with genes as index.
         Must contain columns for log fold changes and p-values.
-    logfoldchanges_column : str, default='log2foldchange'
+    logfoldchanges_col : str, default='log2foldchange'
         Name of the column containing log2 fold change values.
-    pval_column : str, default='padj'
+    pval_col : str, default='padj'
         Name of the column containing adjusted p-values.
+    logfoldchanges_column : str, optional
+        Deprecated. Use ``logfoldchanges_col`` instead.
+    pval_column : str, optional
+        Deprecated. Use ``pval_col`` instead.
     significance_threshold : Number, default=0.05
         Adjusted p-value threshold below which genes are considered significant.
     foldchange_threshold : Number, default=2
@@ -134,15 +140,24 @@ def single_volcano(
     ...     title="Treatment vs Control"
     ... )
     """
+    if logfoldchanges_column is not None:
+        warn("'logfoldchanges_column' is deprecated, use 'logfoldchanges_col' instead.",
+             DeprecationWarning, stacklevel=2)
+        logfoldchanges_col = logfoldchanges_column
+    if pval_column is not None:
+        warn("'pval_column' is deprecated, use 'pval_col' instead.",
+             DeprecationWarning, stacklevel=2)
+        pval_col = pval_column
+
     # Input validation
     if data.empty:
         raise ValueError("Input data is empty")
 
-    if logfoldchanges_column not in data.columns:
-        raise KeyError(f"Column '{logfoldchanges_column}' not found in data")
+    if logfoldchanges_col not in data.columns:
+        raise KeyError(f"Column '{logfoldchanges_col}' not found in data")
 
-    if pval_column not in data.columns:
-        raise KeyError(f"Column '{pval_column}' not found in data")
+    if pval_col not in data.columns:
+        raise KeyError(f"Column '{pval_col}' not found in data")
 
     if significance_threshold <= 0 or significance_threshold >= 1:
         raise ValueError(f"significance_threshold must be between 0 and 1, got {significance_threshold}")
@@ -157,24 +172,24 @@ def single_volcano(
     if label_sortby not in data.columns:
         warn(
             f"The specified label_sortby column '{label_sortby}' does not exist. "
-            f"Using '{logfoldchanges_column}' instead.",
+            f"Using '{logfoldchanges_col}' instead.",
             UserWarning
         )
-        label_sortby = logfoldchanges_column
+        label_sortby = logfoldchanges_col
 
     # Prepare data: clip p-values to avoid log(0)
-    data[pval_column] = data[pval_column].clip(lower=MIN_PVALUE)
+    data[pval_col] = data[pval_col].clip(lower=MIN_PVALUE)
 
     # Transform p-values to -log10 scale
     neg_log_pval_column = "neg_log10_pvals"
-    data[neg_log_pval_column] = -np.log10(data[pval_column])
+    data[neg_log_pval_column] = -np.log10(data[pval_col])
     neg_log_sig_thresh = -np.log10(significance_threshold)
     lfc_threshold = np.log2(foldchange_threshold)
 
     # Determine colors based on significance and fold change
     is_significant = data[neg_log_pval_column] > neg_log_sig_thresh
-    is_upregulated = data[logfoldchanges_column] > lfc_threshold
-    is_downregulated = data[logfoldchanges_column] < -lfc_threshold
+    is_upregulated = data[logfoldchanges_col] > lfc_threshold
+    is_downregulated = data[logfoldchanges_col] < -lfc_threshold
 
     colors = np.where(
         is_significant & is_upregulated,
@@ -194,7 +209,7 @@ def single_volcano(
 
     # Create scatter plot
     ax.scatter(
-        data[logfoldchanges_column],
+        data[logfoldchanges_col],
         data[neg_log_pval_column],
         alpha=DEFAULT_ALPHA,
         color=colors
@@ -213,8 +228,8 @@ def single_volcano(
 
     # Identify significant genes
     sig_mask = data[neg_log_pval_column] > neg_log_sig_thresh
-    up_mask = (data[logfoldchanges_column] > lfc_threshold) & sig_mask
-    down_mask = (data[logfoldchanges_column] < -lfc_threshold) & sig_mask
+    up_mask = (data[logfoldchanges_col] > lfc_threshold) & sig_mask
+    down_mask = (data[logfoldchanges_col] < -lfc_threshold) & sig_mask
 
     up_data = data[up_mask]
     down_data = data[down_mask]
@@ -232,7 +247,7 @@ def single_volcano(
     # Calculate axis limits with margins
     if not down_data.empty:
         xmin = min(
-            down_data[logfoldchanges_column].min() * AXIS_MARGIN_FACTOR,
+            down_data[logfoldchanges_col].min() * AXIS_MARGIN_FACTOR,
             -(lfc_threshold * AXIS_MARGIN_FACTOR)
         )
     else:
@@ -240,7 +255,7 @@ def single_volcano(
 
     if not up_data.empty:
         xmax = max(
-            up_data[logfoldchanges_column].max() * AXIS_MARGIN_FACTOR,
+            up_data[logfoldchanges_col].max() * AXIS_MARGIN_FACTOR,
             lfc_threshold * AXIS_MARGIN_FACTOR
         )
         ymax = max(
@@ -274,7 +289,7 @@ def single_volcano(
     top_genes = pd.concat([top_up_genes, top_down_genes])
     texts = []
     for gene, row in top_genes.iterrows():
-        x = row[logfoldchanges_column]
+        x = row[logfoldchanges_col]
         y = row[neg_log_pval_column]
 
         if x >=xmin and x <= xmax:
@@ -327,10 +342,10 @@ def single_volcano(
 
     # Add configuration table if provided
     if config is not None:
-        n_upreg = np.sum((data[pval_column] <= significance_threshold) &
-                        (data[logfoldchanges_column] > lfc_threshold))
-        n_downreg = np.sum((data[pval_column] <= significance_threshold) &
-                          (data[logfoldchanges_column] < -lfc_threshold))
+        n_upreg = np.sum((data[pval_col] <= significance_threshold) &
+                        (data[logfoldchanges_col] > lfc_threshold))
+        n_downreg = np.sum((data[pval_col] <= significance_threshold) &
+                          (data[logfoldchanges_col] < -lfc_threshold))
 
         _add_config_table(config, n_upreg, n_downreg, ax)
 
@@ -455,8 +470,8 @@ def volcano(
     # Plot main comparison
     single_volcano(
         data=results.main,
-        logfoldchanges_column=logfoldchanges_col,
-        pval_column=pval_col,
+        logfoldchanges_col=logfoldchanges_col,
+        pval_col=pval_col,
         foldchange_threshold=foldchange_threshold,
         significance_threshold=significance_threshold,
         genes_to_label=label_top_n,
@@ -491,8 +506,8 @@ def volcano(
 
             single_volcano(
                 data=filtered_data,
-                logfoldchanges_column='log2foldchange',
-                pval_column='padj',
+                logfoldchanges_col='log2foldchange',
+                pval_col='padj',
                 foldchange_threshold=1,  # No FC threshold for neighborhoods
                 significance_threshold=significance_threshold,
                 genes_to_label=label_top_n,

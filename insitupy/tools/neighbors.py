@@ -1,3 +1,4 @@
+import warnings
 from numbers import Number
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -18,7 +19,7 @@ def _validate_inputs(
     obs_key: str,
     celltype_col: Optional[str],
     celltype: Optional[str],
-    test: str,
+    method: str,
     min_cells: Number,
     strategy: str,
 ) -> None:
@@ -27,8 +28,8 @@ def _validate_inputs(
         raise ValueError("radius must be positive")
     if min_cells < 2:
         raise ValueError("min_cells must be at least 2")
-    if test not in ["wilcoxon", "t-test"]:
-        raise ValueError("test must be 'wilcoxon' or 't-test'")
+    if method not in ["wilcoxon", "t-test"]:
+        raise ValueError("method must be 'wilcoxon' or 't-test'")
     if strategy not in ["mean", "max"]:
         raise ValueError("strategy must be 'mean' or 'max'")
     if obs_key not in adata.obsm:
@@ -237,7 +238,7 @@ def _run_statistical_tests(
     neighbor_expr: np.ndarray,
     target_mask: np.ndarray,
     genes: List[str],
-    test: str,
+    method: str,
     min_cells: int,
     batch_size: Optional[int],
     verbose: bool
@@ -246,9 +247,9 @@ def _run_statistical_tests(
     n_genes = len(genes)
 
     if verbose:
-        print(f"Running paired tests ({test}) per gene and computing effect sizes...")
+        print(f"Running paired tests ({method}) per gene and computing effect sizes...")
 
-    min_samples_needed = max(min_cells, 2 if test == "wilcoxon" else 1)
+    min_samples_needed = max(min_cells, 2 if method == "wilcoxon" else 1)
 
     # Initialize result arrays
     results = {
@@ -320,7 +321,7 @@ def _run_statistical_tests(
             results['log2_fold_change'][g] = np.log2(fc)
 
             try:
-                if test == "t-test":
+                if method == "t-test":
                     tstat, pval = stats.ttest_1samp(
                         d, 0.0,
                         alternative="two-sided",
@@ -328,7 +329,7 @@ def _run_statistical_tests(
                     )
                     results['stat_vals'][g], results['pvals'][g] = tstat, pval
 
-                elif test == "wilcoxon":
+                elif method == "wilcoxon":
                     if n >= 2:
                         wstat, pval = stats.wilcoxon(
                             d, zero_method="wilcox",
@@ -373,7 +374,7 @@ def _create_qc_stats(
     deg: np.ndarray,
     target_mask: np.ndarray,
     finite_pvals: int,
-    test: str,
+    method: str,
     correction_method: str,
     radius: float,
     min_cells: int,
@@ -396,7 +397,7 @@ def _create_qc_stats(
         "mean_neighbors_target": float(target_deg.mean()),
         "max_neighbors_target": int(target_deg.max()) if len(target_deg) > 0 else 0,
         "fraction_testable_genes": float(finite_pvals / n_genes),
-        "test_used": test,
+        "test_used": method,
         "correction_method": correction_method,
         "radius": float(radius),
         "min_cells": int(min_cells),
@@ -439,7 +440,8 @@ def calculate_gex_diff_to_neighbors(
     celltype_tuple: Optional[Tuple[str, str]] = None,
     exclude_self: bool = True,
     strategy: Literal["mean", "max"] = "mean",
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
     genes_subset: Optional[List[str]] = None,
@@ -470,8 +472,10 @@ def calculate_gex_diff_to_neighbors(
         Strategy for computing neighbor expression:
         - "mean": Compare to mean of all neighbors
         - "max": Compare to maximum expression across neighbors per gene
-    test : {"wilcoxon", "t-test"}, default="wilcoxon"
+    method : {"wilcoxon", "t-test"}, default="wilcoxon"
         Statistical test to use.
+    test : {"wilcoxon", "t-test"}, optional
+        Deprecated. Use ``method`` instead.
     correction_method : str, default="fdr_bh"
         Multiple testing correction method.
     min_cells : Number, default=3
@@ -519,9 +523,14 @@ def calculate_gex_diff_to_neighbors(
         exclude_zeros_from_max=True
     )
     """
+    if test is not None:
+        warnings.warn("'test' is deprecated, use 'method' instead.",
+                      DeprecationWarning, stacklevel=2)
+        method = test
+
     # Validate inputs
     celltype_col, celltype = celltype_tuple if celltype_tuple is not None else (None, None)
-    _validate_inputs(adata, radius, obs_key, celltype_col, celltype, test, min_cells, strategy)
+    _validate_inputs(adata, radius, obs_key, celltype_col, celltype, method, min_cells, strategy)
 
     # Prepare data
     coords = np.asarray(adata.obsm[obs_key])
@@ -560,7 +569,7 @@ def calculate_gex_diff_to_neighbors(
     # Run statistical tests
     test_results = _run_statistical_tests(
         gex_diff, target_expr, neighbor_expr, target_mask,
-        genes, test, min_cells, batch_size, verbose
+        genes, method, min_cells, batch_size, verbose
     )
 
     # Apply correction
@@ -594,7 +603,7 @@ def calculate_gex_diff_to_neighbors(
         n_cells, n_target_cells, celltype, celltype_col,
         n_genes, n_genes_total, deg, target_mask,
         np.isfinite(test_results['pvals']).sum(),
-        test, correction_method, radius, min_cells,
+        method, correction_method, radius, min_cells,
         use_distance_weighting, strategy,
         exclude_zeros_from_max=exclude_zeros_from_max if strategy == "max" else None
     )
@@ -614,7 +623,7 @@ def mean_gex_diff_to_neighbors(
     obs_key: str = "spatial",
     celltype_tuple: Optional[Tuple[str, str]] = None,
     exclude_self: bool = True,
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
     genes_subset: Optional[List[str]] = None,
@@ -634,7 +643,7 @@ def mean_gex_diff_to_neighbors(
         celltype_tuple=celltype_tuple,
         exclude_self=exclude_self,
         strategy="mean",
-        test=test,
+        method=method,
         correction_method=correction_method,
         min_cells=min_cells,
         genes_subset=genes_subset,
@@ -650,7 +659,7 @@ def max_gex_diff_to_neighbors(
     obs_key: str = "spatial",
     celltype_tuple: Optional[Tuple[str, str]] = None,
     exclude_self: bool = True,
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
     genes_subset: Optional[List[str]] = None,
@@ -670,7 +679,7 @@ def max_gex_diff_to_neighbors(
         celltype_tuple=celltype_tuple,
         exclude_self=exclude_self,
         strategy="max",
-        test=test,
+        method=method,
         correction_method=correction_method,
         min_cells=min_cells,
         genes_subset=genes_subset,
