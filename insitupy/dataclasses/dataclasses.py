@@ -1677,6 +1677,24 @@ class MultiCellData(DeepCopyMixin):
             self._main_key = key
 
     def sync(self, return_summary: bool = False):
+        """
+        Synchronize table and boundaries across all layers in this MultiCellData object.
+
+        Calls :meth:`CellData.sync` on each layer. You need to call this manually
+        after directly mutating a layer's ``.table`` (e.g. filtering rows by index)
+        without going through the normal InSituPy API, so that the boundaries stay
+        consistent with the table.
+
+        Args:
+            return_summary (bool, optional): If True, return a dict mapping each
+                layer key to the per-layer summary dict returned by
+                :meth:`CellData.sync`. Defaults to False.
+
+        Returns:
+            None | dict: ``None`` normally. When ``return_summary=True``, a dict
+                mapping layer keys to per-layer summary dicts (see
+                :meth:`CellData.sync` for the structure of each summary dict).
+        """
         current_keys = self._layers.keys()
         summaries = {}
         for key in current_keys:

@@ -41,7 +41,7 @@ from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      _save_transcripts, _save_units,
                                      read_multicelldata, read_shapesdata)
 from insitupy.utils._helpers import sort_paths_by_datetime
-from insitupy.utils.geo import fast_query_points_within_polygon
+from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
 
@@ -499,7 +499,7 @@ class InSituData:
                 polygons = geom_df[geom_df["name"] == n]["geometry"].tolist()
 
                 #in_poly = [poly.contains(cells) for poly in polygons]
-                in_poly = [fast_query_points_within_polygon(poly, cells) for poly in polygons]
+                in_poly = [_fast_query_points_within_polygon(poly, cells) for poly in polygons]
 
                 # check if points were in any of the polygons
                 in_poly_res = np.array(in_poly).any(axis=0)

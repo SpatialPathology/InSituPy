@@ -423,12 +423,12 @@ def spatial(
         )
 
     # setup the subplots
-    fig, axs = setup_subplots(
+    fig, axs = _setup_subplots(
         layout_config=layout_config,
         verbose=verbose
     )
 
-    plot_to_subplots(
+    _plot_to_subplots(
         data,
         keys,
         cells_layer,
@@ -456,7 +456,7 @@ def plot_spatial(*args, **kwargs):
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="spatial")
 
-def setup_subplots(
+def _setup_subplots(
     layout_config: LayoutConfig,
     verbose: bool = False
     ):
@@ -490,7 +490,7 @@ def setup_subplots(
 
     return fig, axs
 
-def plot_to_subplots(
+def _plot_to_subplots(
     data,
     keys,
     cells_layer,

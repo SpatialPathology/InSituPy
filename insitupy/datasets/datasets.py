@@ -35,7 +35,7 @@ def _resolve_output_dir(output_dir):
         return output_path
 
 # functions that each download a dataset into  '~/.cache/InSituPy/demo_dataset'
-def md5sum(filePath):
+def _md5sum(filePath):
     with open(filePath, 'rb') as fh:
         m = hashlib.md5()
         while True:
@@ -46,11 +46,11 @@ def md5sum(filePath):
     return m.hexdigest()
 
 # function that checks the md5sum of the images and returns a boolean.
-def md5sum_image_check(file_path : Path, expected_md5sum, overwrite):
+def _md5sum_image_check(file_path : Path, expected_md5sum, overwrite):
     download = False
     if file_path.exists():
         print("Image exists. Checking md5sum...")
-        if md5sum(file_path) == expected_md5sum:
+        if _md5sum(file_path) == expected_md5sum:
             if not overwrite:
                 print(f"The md5sum matches. Download is skipped. To force download set `overwrite=True`.")
                 return
@@ -96,7 +96,7 @@ def list_downloaded_datasets(output_dir=None):
 
 
 # function that checks data for md5sum, downloads and unpacks the data.
-def data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir):
+def _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir):
     # check if the unzipped data exists
     download_data = False
     if data_dir.exists():
@@ -111,7 +111,7 @@ def data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data
         # if unzipped data does not exist, we need to check if a zip file exists, and if yes if its md5sum is correct
         if zip_file.exists():
             print("ZIP file exists. Checking md5sum...")
-            if md5sum(zip_file) == expected_md5sum:
+            if _md5sum(zip_file) == expected_md5sum:
                 if not overwrite:
                     print(f"This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
                     return
@@ -171,13 +171,13 @@ def xenium_human_breast_cancer(
     if_file_name = "slide_id__hbreastcancer__CD20_HER2_DAPI__IF"
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hbreastcancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hbreastcancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    if md5sum_image_check(image_dir/"slide_id__hbreastcancer__CD20_HER2_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hbreastcancer__CD20_HER2_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
         download_url(if_url, out_dir = image_dir, file_name = if_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -218,10 +218,10 @@ def xenium_human_kidney_nondiseased(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hkidney__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hkidney__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -264,13 +264,13 @@ def xenium_human_pancreatic_cancer(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data)
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hPancreas__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hPancreas__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    if md5sum_image_check(image_dir/"slide_id__hPancreas__CD20_TROP2_PPY_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hPancreas__CD20_TROP2_PPY_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
         download_url(if_url, out_dir = image_dir, file_name = if_file_name, overwrite = True )
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -311,10 +311,10 @@ def xenium_human_skin_melanoma(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hskin__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hskin__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -354,10 +354,10 @@ def xenium_human_brain_cancer(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hbraincancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hbraincancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -397,10 +397,10 @@ def xenium_human_lung_cancer(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hlungcancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hlungcancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -440,10 +440,10 @@ def xenium_human_lymph_node_5k(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     # download image data
-    if md5sum_image_check(image_dir/"slide_id__hlymphnode5k__HE__histo.ome.tif", expected_he_md5sum, overwrite):
+    if _md5sum_image_check(image_dir/"slide_id__hlymphnode5k__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
     print(f"Corresponding image data can be found in {image_dir}")
@@ -478,7 +478,7 @@ def xenium_human_lymph_node(
 
     # check if data exists (zipped or unzipped), if yes check md5sum
     # if necessary download data
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
     print('For this dataset no additional images are available.')
 
@@ -503,7 +503,7 @@ def xenium_test_dataset_v2_mm(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "4632914eca973a1d532231ea646e10cc"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -524,7 +524,7 @@ def xenium_test_dataset_v2_nucex(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "bf9c5e6762681b81eab0a19d3d590381"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -545,7 +545,7 @@ def xenium_test_dataset_v3_mm(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "be9d917eaac2ade708c111132f0f379d"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -566,7 +566,7 @@ def xenium_test_dataset_v3_nucex(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "0a7469a005576f2932e4f804dd9bc563"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -587,7 +587,7 @@ def xenium_test_dataset_v4_nucex(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "a1de61c57b468450ba1fbcdcc1d7c811"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -607,7 +607,7 @@ def xenium_test_dataset_v4_mm(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "c0af4c72bed2c7fb4eb6d9f1fdf3b2e1"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -628,7 +628,7 @@ def xenium_test_dataset_v4_protein(
     zip_file = named_data_dir / Path(data_url).name
     expected_md5sum = "50c04dea5e751e1c7508ff24528242e8"
 
-    data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
     print('For this dataset no additional images are available.')
     return data
@@ -669,7 +669,7 @@ def visium_human_breast_cancer(
     download_h5 = False
     if h5_file.exists():
         print("H5 file exists. Checking md5sum...")
-        if md5sum(h5_file) == expected_h5_md5sum:
+        if _md5sum(h5_file) == expected_h5_md5sum:
             if not overwrite:
                 print(f"The h5 file md5sum matches. Download is skipped. To force download set `overwrite=True`.")
             else:
@@ -695,7 +695,7 @@ def visium_human_breast_cancer(
     else:
         if spatial_tar.exists():
             print("Spatial tar file exists. Checking md5sum...")
-            if md5sum(spatial_tar) == expected_spatial_md5sum:
+            if _md5sum(spatial_tar) == expected_spatial_md5sum:
                 if not overwrite:
                     print(f"The spatial tar md5sum matches. Unpacking...")
                     # unpack and move spatial folder
@@ -729,7 +729,7 @@ def visium_human_breast_cancer(
         download_fullres_img = False
         if fullres_file.exists():
             print("Full-resolution image exists. Checking md5sum...")
-            if md5sum(fullres_file) == expected_fullres_md5sum:
+            if _md5sum(fullres_file) == expected_fullres_md5sum:
                 if not overwrite:
                     print(f"The full-resolution image md5sum matches. Download is skipped. To force download set `overwrite=True`.")
                 else:

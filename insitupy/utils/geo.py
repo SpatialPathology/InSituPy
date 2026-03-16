@@ -42,7 +42,7 @@ def _create_strtree_from_polygon(polygon, max_grid_width):
 
     return strtree
 
-def fast_query_points_within_polygon(polygon: Polygon, points: gpd.GeoSeries):
+def _fast_query_points_within_polygon(polygon: Polygon, points: gpd.GeoSeries):
     # create STRtree
     #tree = _create_strtree_from_polygon(polygon=polygon, num_points=len(points))
     tree = _create_strtree_from_polygon(polygon=polygon, max_grid_width=150)

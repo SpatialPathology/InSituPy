@@ -864,8 +864,8 @@ def get_workflow_guide() -> str:
     sc.tl.leiden(adata)
 
     # Or use InSituPy preprocessing shortcuts
-    ispy.pp.normalize_log1p(adata)
-    ispy.pp.cluster(adata)
+    ispy.pp.normalize_and_transform(data)
+    ispy.pp.cluster_cells(data)
     ```
 
     ## 4. Spatial Visualization

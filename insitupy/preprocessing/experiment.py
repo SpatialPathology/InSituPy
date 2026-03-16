@@ -296,7 +296,8 @@ def reduce_dimensions(
 def cluster_cells(
     data: Union[InSituExperiment, InSituData], # type: ignore
     cells_layer: Optional[str] = None,
-    method: Literal["leiden", "louvain"] = "leiden"
+    method: Literal["leiden", "louvain"] = "leiden",
+    verbose: bool = False
     ):
     """
     Performs clustering on the data using the specified method.
@@ -305,7 +306,7 @@ def cluster_cells(
         data (Union[InSituExperiment, InSituData]): The experiment or sample-level data object containing cell information.
         cells_layer (Optional[str]): The specific layer of cells to use for clustering.
         method (Literal["leiden", "louvain"], optional): The clustering method to use. Defaults to "leiden".
-        verbose (bool, optional): If True, enables verbose output. Defaults to True.
+        verbose (bool, optional): If True, enables verbose output. Defaults to False.
 
     Raises:
         ModalityNotFoundError: If the 'cells' modality is not found in the individual samples.
