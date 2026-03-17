@@ -1,3 +1,6 @@
+# TODO: Add tutorial section on reading/writing individual data modalities
+# to make the .read() / .save() pattern more discoverable.
+
 import logging
 import os
 import warnings
@@ -41,6 +44,9 @@ logger = logging.getLogger(__name__)
 
 # Detect Zarr version for compatibility
 ZARR_V3 = hasattr(zarr.storage, 'LocalStore')
+
+# TODO: Add tutorial section on reading/writing individual data modalities
+# to make the .read() / .save() pattern more discoverable.
 
 
 def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
@@ -352,6 +358,20 @@ class ShapesData(DeepCopyMixin):
             geom_df = self[key_to_remove]
             self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
 
+    @classmethod
+    def read(cls, path, scale_factor=None):
+        """Read ShapesData from a saved directory.
+
+        Args:
+            path: Path to the ShapesData directory.
+            scale_factor: Optional scale factor for coordinates.
+
+        Returns:
+            ShapesData: The loaded ShapesData object.
+        """
+        from insitupy.dataclasses.io import _read_shapesdata
+        return _read_shapesdata(path, mode="shapes", scale_factor=scale_factor)
+
     def save(self,
              path: Union[str, os.PathLike, Path],
              overwrite: bool = False
@@ -393,6 +413,20 @@ class AnnotationsData(ShapesData):
             shape_name="annotations",
             )
 
+    @classmethod
+    def read(cls, path, scale_factor=None):
+        """Read AnnotationsData from a saved directory.
+
+        Args:
+            path: Path to the AnnotationsData directory.
+            scale_factor: Optional scale factor for coordinates.
+
+        Returns:
+            AnnotationsData: The loaded AnnotationsData object.
+        """
+        from insitupy.dataclasses.io import _read_shapesdata
+        return _read_shapesdata(path, mode="annotations", scale_factor=scale_factor)
+
 
 class RegionsData(ShapesData):
     def __init__(self,
@@ -411,6 +445,24 @@ class RegionsData(ShapesData):
             forbidden_names=None,
             shape_name="regions",
             )
+
+    @classmethod
+    def read(cls, path, scale_factor=None):
+        """Read RegionsData from a saved directory.
+
+        Args:
+            path: Path to the RegionsData directory.
+            scale_factor: Optional scale factor for coordinates.
+
+        Returns:
+            RegionsData: The loaded RegionsData object.
+        """
+        from insitupy.dataclasses.io import _read_shapesdata
+        return _read_shapesdata(path, mode="regions", scale_factor=scale_factor)
+
+
+# TODO: Add BoundariesData.read() — loading is complex (zarr pyramids) and
+# currently handled through InSituData / CellData.read().
 
 class BoundariesData(DeepCopyMixin):
     '''
@@ -768,13 +820,13 @@ class BoundariesData(DeepCopyMixin):
                 logger.warning(f"Boundaries element `{n}` was no Dataframe. Skipped.")
 
     def save(self,
-             bound_file : Union[str, os.PathLike, Path] = "boundaries.zarr.zip",
+             path : Union[str, os.PathLike, Path] = "boundaries.zarr.zip",
              save_as_pyramid: bool = True,
              max_resolution: Optional[Number] = None,
              verbose: bool = False
              ):
-        bound_file = Path(bound_file)
-        suffix = bound_file.name.split(".", maxsplit=1)[-1]
+        path = Path(path)
+        suffix = path.name.split(".", maxsplit=1)[-1]
 
         if suffix not in ["zarr", "zarr.zip"]:
             raise InvalidFileTypeError(allowed_types=[".zarr", ".zarr.zip"], received_type=suffix)
@@ -783,7 +835,7 @@ class BoundariesData(DeepCopyMixin):
 
         # Use ExitStack to handle context manager differences between Zarr v2 and v3
         with ExitStack() as stack:
-            dirstore = _get_zarr_store(bound_file, mode="w", zipped=zipped)
+            dirstore = _get_zarr_store(path, mode="w", zipped=zipped)
 
             # In Zarr v2, stores are context managers and need to be entered
             if not ZARR_V3:
@@ -879,6 +931,19 @@ class CellData(DeepCopyMixin):
         else:
             self._boundaries = None
             self._entries = ["table"]
+
+    @classmethod
+    def read(cls, path):
+        """Read CellData from a saved directory.
+
+        Args:
+            path: Path to the CellData directory.
+
+        Returns:
+            CellData: The loaded CellData object.
+        """
+        from insitupy.dataclasses.io import _read_celldata
+        return _read_celldata(path)
 
     def __getitem__(self, key):
         """Retrieve a subset of the `CellData` object.
@@ -1112,7 +1177,7 @@ class CellData(DeepCopyMixin):
 
     def save(self,
              path: Union[str, os.PathLike, Path],
-             boundaries_zipped: bool = False,
+             zipped: bool = False,
              #boundaries_as_pyramid: bool = True,
              max_resolution_boundaries: Optional[Number] = None,
              overwrite: bool = False
@@ -1135,7 +1200,7 @@ class CellData(DeepCopyMixin):
         # save boundaries
         if self._boundaries is not None:
             boundaries = self._boundaries
-            if boundaries_zipped:
+            if zipped:
                 bound_file = path / "boundaries.zarr.zip"
             else:
                 bound_file = path / "boundaries.zarr"
@@ -1318,6 +1383,21 @@ class MultiCellData(DeepCopyMixin):
     def __init__(self):
         self._layers: Dict[str, CellData] = dict()
         self._main_key: Optional[str] = None
+
+    @classmethod
+    def read(cls, path, path_upper=None, alt_path_dict=None):
+        """Read MultiCellData from a saved directory.
+
+        Args:
+            path: Path to the MultiCellData directory.
+            path_upper: Optional upper path for alternative segmentations.
+            alt_path_dict: Optional dictionary of alternative paths.
+
+        Returns:
+            MultiCellData: The loaded MultiCellData object.
+        """
+        from insitupy.dataclasses.io import _read_multicelldata
+        return _read_multicelldata(path, path_upper, alt_path_dict)
 
     def __len__(self):
         return len(self._layers)
@@ -1652,7 +1732,7 @@ class MultiCellData(DeepCopyMixin):
 
     def save(self,
              path: Union[str, os.PathLike, Path],
-             boundaries_zipped: bool = False,
+             zipped: bool = False,
              overwrite: bool = False,
              max_resolution_boundaries: Optional[Number] = None
              ):
@@ -1668,7 +1748,7 @@ class MultiCellData(DeepCopyMixin):
             save_path = path / key
             self._layers[key].save(
                 path=save_path,
-                boundaries_zipped=boundaries_zipped,
+                zipped=zipped,
                 max_resolution_boundaries=max_resolution_boundaries,
                 overwrite=overwrite)
 
@@ -1739,6 +1819,9 @@ class ImageData(DeepCopyMixin):
         self._names = []
         self._metadata = {}
         self._data = {}
+
+        # TODO: Add ImageData.read() — loading is complex (zarr pyramids, OME-TIFF)
+        # and currently handled through InSituData.load_images().
 
         if img_files is not None:
             # convert arguments to lists
@@ -2175,7 +2258,7 @@ class ImageData(DeepCopyMixin):
         Load images into memory.
         '''
         if which == "all":
-            which = self._img_names
+            which = self._names
 
         # make sure which is a list
         which = convert_to_list(which)
@@ -2225,7 +2308,7 @@ class ImageData(DeepCopyMixin):
             return _self
 
     def save(self,
-             output_folder: Union[str, os.PathLike, Path],
+             path: Union[str, os.PathLike, Path],
              keys_to_save: Optional[str] = None,
              as_zarr: bool = True,
              zipped: bool = False,
@@ -2240,7 +2323,7 @@ class ImageData(DeepCopyMixin):
         Save images to the specified output folder in either Zarr or OME-TIFF format.
 
         Args:
-            output_folder (Union[str, os.PathLike, Path]): The directory where images will be saved.
+            path (Union[str, os.PathLike, Path]): The directory where images will be saved.
             keys_to_save (Optional[str]): Specific keys of images to save. If None, all images are saved.
             as_zarr (bool): If True, save images in Zarr format. Otherwise, save as OME-TIFF.
             zipped (bool): If True and saving as Zarr, compress the Zarr files into zip archives.
@@ -2256,9 +2339,13 @@ class ImageData(DeepCopyMixin):
 
         Raises:
             FileExistsError: If `overwrite` is False and a file with the same name already exists.
+            ValueError: If OME metadata is missing when saving as OME-TIFF.
+
+        Note:
+            OME-TIFF output is always single-resolution (pyramid format is not supported).
 
         """
-        output_folder = Path(output_folder)
+        path = Path(path)
 
         if keys_to_save is None:
             keys_to_save = list(self._metadata.keys())
@@ -2266,7 +2353,7 @@ class ImageData(DeepCopyMixin):
             keys_to_save = convert_to_list(keys_to_save)
 
         # create output directory (allow saving to existing directories)
-        output_folder.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
 
         if return_savepaths:
             savepaths = {}
@@ -2283,10 +2370,8 @@ class ImageData(DeepCopyMixin):
                 if max_resolution is not None:
                     if max_resolution == pixel_size:
                         logger.warning(f"`max_pixel_size` ({max_resolution}) equal to `pixel_size` ({pixel_size}). Skipped resizing.")
-                        pass
-                    if max_resolution < pixel_size:
+                    elif max_resolution < pixel_size:
                         logger.warning(f"`max_pixel_size` ({max_resolution}) smaller than `pixel_size` ({pixel_size}). Skipped resizing.")
-                        pass
                     else:
                         # downscale image
                         if isinstance(img, list):
@@ -2319,7 +2404,7 @@ class ImageData(DeepCopyMixin):
                         filename = name + ".zarr"
 
                     # write to zarr
-                    img_path = output_folder / filename
+                    img_path = path / filename
 
                     # check if file exists and handle overwrite
                     if img_path.exists() and not overwrite:
@@ -2372,7 +2457,7 @@ class ImageData(DeepCopyMixin):
                     filename = name + ".ome.tif"
 
                     # check if file exists and handle overwrite
-                    img_path = output_folder / filename
+                    img_path = path / filename
                     if img_path.exists() and not overwrite:
                         logger.warning(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
                         continue
@@ -2382,6 +2467,12 @@ class ImageData(DeepCopyMixin):
 
 
                     # retrieve OME metadata
+                    if 'OME' not in new_img_metadata or not new_img_metadata['OME']:
+                        raise ValueError(
+                            f"OME metadata is missing for image '{name}'. "
+                            "OME-TIFF export requires OME metadata. Save as Zarr instead."
+                        )
+
                     ome_meta_to_retrieve = ["SignificantBits", "PhysicalSizeX", "PhysicalSizeY",
                                             "PhysicalSizeXUnit", "PhysicalSizeYUnit"]
 
@@ -2402,7 +2493,7 @@ class ImageData(DeepCopyMixin):
 
                 if return_savepaths:
                     # collect savepaths
-                    savepaths[name] = output_folder / filename
+                    savepaths[name] = path / filename
 
         if return_savepaths:
             return savepaths
@@ -2690,6 +2781,34 @@ class SpatialUnitsData(DeepCopyMixin):
 
             # rename feature index to match data.obs_names
             self._shapes.index = self._data.obs_names
+
+    @classmethod
+    def read(cls, path):
+        """Read SpatialUnitsData from a saved directory.
+
+        Args:
+            path: Path to the SpatialUnitsData directory.
+
+        Returns:
+            SpatialUnitsData: The loaded object.
+        """
+        import json
+        from anndata import read_h5ad
+        path = Path(path)
+
+        # Read metadata
+        meta_file = path / "metadata.json"
+        with open(meta_file, 'r') as f:
+            meta = json.load(f)
+
+        # Read shapes
+        shapes = gpd.read_parquet(path / "shapes.parquet")
+
+        # Read data if exists
+        data_file = path / "data.h5ad"
+        data = read_h5ad(data_file) if data_file.exists() else None
+
+        return cls(shapes=shapes, data=data, unit_type=meta.get("unit_type", "unit"))
 
     def __repr__(self):
         n_units = len(self._shapes)
@@ -3005,7 +3124,7 @@ class SpatialUnitsData(DeepCopyMixin):
         overwrite: bool = False
     ):
         """
-        Save FeatureData to directory.
+        Save SpatialUnitsData to directory.
 
         Args:
             path: Output directory path.
@@ -3032,7 +3151,7 @@ class SpatialUnitsData(DeepCopyMixin):
         # Save metadata
         metadata = {
             "version": __version__,
-            "feature_type": self._feature_type,
+            "unit_type": self._unit_type,
             "n_features": len(self._shapes),
             "has_data": self._data is not None
         }

@@ -42,7 +42,7 @@ from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
 from insitupy.dataclasses.io import (_save_annotations, _save_cells,
                                      _save_images, _save_regions,
                                      _save_transcripts, _save_units,
-                                     read_multicelldata, read_shapesdata)
+                                     _read_multicelldata, _read_shapesdata)
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
@@ -969,7 +969,7 @@ class InSituData:
         else:
             # extract the latest entry
             path = sort_paths_by_datetime(paths)[0]
-            self._annotations = read_shapesdata(path=path, mode="annotations")
+            self._annotations = _read_shapesdata(path=path, mode="annotations")
 
 
     def import_annotations(self,
@@ -1019,7 +1019,7 @@ class InSituData:
         else:
             # extract the latest entry
             path = sort_paths_by_datetime(paths)[0]
-            self._regions = read_shapesdata(path=path, mode="regions")
+            self._regions = _read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
                     files: Optional[Union[str, os.PathLike, Path]],
@@ -1071,7 +1071,7 @@ class InSituData:
             else:
                 # extract the latest entry
                 path = sort_paths_by_datetime(paths)[0]
-                self._cells = read_multicelldata(path=path)
+                self._cells = _read_multicelldata(path=path)
         else:
             NoProjectLoadWarning()
 
@@ -1294,7 +1294,7 @@ class InSituData:
                 cells=cells,
                 path=path,
                 metadata=self._metadata,
-                boundaries_zipped=zarr_zipped,
+                zipped=zarr_zipped,
                 max_resolution_boundaries=images_max_resolution
             )
 
@@ -1377,11 +1377,9 @@ class InSituData:
                 #path = Path(self._metadata["path"])
                 path = self.path
             else:
-                warn(
-                    f"Data is not linked to an InSituPy project folder (link can be lost by copy for example). "
-                    f"Use `saveas()` instead to save the data to a new project folder."
-                    )
-                return
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
 
         # if images_only is True, sync_images must also be True
         if images_only:
@@ -1423,10 +1421,8 @@ class InSituData:
                     if not keep_history:
                         self.remove_history(verbose=False)
                 else:
-                    warn(
-                        f"UID of current object {current_uid} not identical with UID in project path {path}: {project_uid}.\n"
-                        f"Project is neither saved nor updated. Try `saveas()` instead to save the data to a new project folder. "
-                        f"A reason for this could be the data has been cropped in the meantime."
+                    raise RuntimeError(
+                        "Cannot save: dataset UID mismatch. The save target was created by a different dataset."
                     )
             else:
                 warn(
@@ -1581,7 +1577,7 @@ class InSituData:
         files = list(self._quicksave_dir.glob(f"*{uid}*"))
 
         if len(files) == 1:
-            ad = read_shapesdata(files[0] / "annotations", mode="annotations")
+            ad = _read_shapesdata(files[0] / "annotations", mode="annotations")
         elif len(files) == 0:
             logger.warning("No quicksave with uid '%s' found. Use `.list_quicksaves()` to list all available quicksaves.", uid)
         else:
@@ -1761,7 +1757,7 @@ class InSituData:
                     logger.info("Syncing images (saving new images only)...")
             img_path = path / "images"
             savepaths = self._images.save(
-                output_folder=img_path,
+                path=img_path,
                 as_zarr=True,
                 zipped=zarr_zipped,
                 return_savepaths=True,
@@ -1786,7 +1782,7 @@ class InSituData:
                     cells=cells,
                     path=path,
                     metadata=self._metadata,
-                    boundaries_zipped=zarr_zipped,
+                    zipped=zarr_zipped,
                     overwrite=True
                 )
 
