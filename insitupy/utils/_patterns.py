@@ -1,3 +1,4 @@
+import logging
 from numbers import Number
 from typing import Optional
 
@@ -13,6 +14,8 @@ from tqdm.autonotebook import tqdm
 from insitupy._constants import _init_mpl_fontsize
 from insitupy.plotting.expression_along_axis import _bin_data, _select_data
 from insitupy.utils._regression import smooth_fit
+
+logger = logging.getLogger(__name__)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
 
@@ -302,10 +305,10 @@ def plot_evaluation(
                 loess_bootstrap=False, nsteps=100
                 )
             except ValueError as e:
-                print(f"A ValueError occurred during loess regression: {e}")
+                logger.warning(f"A ValueError occurred during loess regression: {e}")
                 res = None
         else:
-            print(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
+            logger.warning(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
             res = None
 
         # Plot the original data
@@ -404,10 +407,10 @@ def loess_regress(
                 loess_bootstrap=False, nsteps=100
                 )
             except ValueError as e:
-                print(f"A ValueError occurred during loess regression: {e}")
+                logger.warning(f"A ValueError occurred during loess regression: {e}")
                 res = None
         else:
-            print(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
+            logger.warning(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
             res = None
 
         # collect results

@@ -1,5 +1,8 @@
+import logging
 from copy import deepcopy
 from dataclasses import fields
+
+logger = logging.getLogger(__name__)
 
 
 class DeepCopyMixin:
@@ -32,8 +35,8 @@ class _UpdatablePlottingConfig:
                 raise AttributeError(f"{key} is not a valid attribute of {self.__class__.__name__}.")
 
     def show_all(self):
-        print(f"Configuration parameters for {self.__class__.__name__}:")
+        logger.info(f"Configuration parameters for {self.__class__.__name__}:")
         for field in fields(self):
             name = field.name
             value = getattr(self, name)
-            print(f"\t{name}: {value}")
+            logger.info(f"\t{name}: {value}")

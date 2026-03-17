@@ -1,3 +1,4 @@
+import logging
 import os
 from contextlib import ExitStack
 from math import ceil
@@ -14,8 +15,10 @@ import toml
 import zarr
 from zarr.errors import ArrayNotFoundError
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._io.files import read_json
+
+logger = logging.getLogger(__name__)
 from insitupy.dataclasses._segmentations import _read_baysor_polygons
 from insitupy.dataclasses.dataclasses import (ZARR_V3, AnnotationsData,
                                               BoundariesData, CellData,
@@ -44,7 +47,7 @@ def read_baysor_cells(
         baysor_config = toml.load(f)
 
     # read table
-    print("Parsing count table...", flush=True)
+    logger.info("Parsing count table...")
     loomfile = baysor_output / "segmentation_counts.loom"
     table = sc.read_loom(loomfile)
 
@@ -63,8 +66,8 @@ def read_baysor_cells(
     table.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
 
     # read polygons
-    print("Reading segmentation masks", flush=True)
-    print("\tRead polygons", flush=True)
+    logger.info("Reading segmentation masks")
+    logger.info("Read polygons")
     jsonfile = baysor_output / "segmentation_polygons.json"
     df = _read_baysor_polygons(jsonfile)
 
@@ -77,7 +80,7 @@ def read_baysor_cells(
     ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
 
     # generate a segmentation mask
-    print("\tConvert polygons to segmentation mask", flush=True)
+    logger.info("Convert polygons to segmentation mask")
     img = rasterize(list(zip(df["geometry"], df["cell"])), out_shape=(ymax,xmax))
 
     # convert to dask array

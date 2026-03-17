@@ -1,7 +1,10 @@
+import logging
 import math
 from numbers import Number
 from typing import List, Literal, Tuple, Union
 from warnings import warn
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -98,15 +101,18 @@ def resize_image(img: NDArray,
     image_axes = ImageAxes(pattern=axes)
     channel_axis = image_axes.C
 
-    assert image_axes.T is None, "Time-series images are not supported in `resize_image`."
+    if image_axes.T is not None:
+        raise ValueError("Time-series images are not supported in `resize_image`.")
 
     if (channel_axis is not None) & (channel_axis != len(img.shape)-1):
         # move channel axis to last position if it is not there already
         img = np.moveaxis(img, channel_axis, -1)
 
-    assert img.dtype in [np.dtype('uint16'), np.dtype('uint8')], \
-        "Image must have one of the following numpy data types: `dtype('uint8)` or `dtype('uint16)`. \
-        Otherwise cv2.resize shows an error."
+    if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
+        raise ValueError(
+            "Image must have one of the following numpy data types: `dtype('uint8)` or `dtype('uint16)`. "
+            "Otherwise cv2.resize shows an error."
+        )
 
     if isinstance(img, da.Array):
         img = img.compute() # load into memory
@@ -173,7 +179,7 @@ def convert_to_8bit_func(img, save_mem=True, verbose=False):
         img = np.uint8(img)
     else:
         if verbose:
-            print("Image is already 8-bit. Not changed.", flush=True)
+            logger.info("Image is already 8-bit. Not changed.")
     return img
 
 def scale_to_max_width(image: np.ndarray,
@@ -217,7 +223,7 @@ def scale_to_max_width(image: np.ndarray,
 
     # resizing - caution: order of dimensions is reversed in OpenCV compared to numpy
     image_scaled = resize_image(img=image, dim=(new_shape[1], new_shape[0]), axes=axes)
-    print(f"{print_spacer}{image.shape} \u2192 {image_scaled.shape}") if verbose else None
+    logger.info(f"{print_spacer}{image.shape} \u2192 {image_scaled.shape}") if verbose else None
 
     return image_scaled
 

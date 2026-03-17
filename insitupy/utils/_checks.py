@@ -1,3 +1,4 @@
+import logging
 from typing import Optional
 
 import anndata
@@ -5,7 +6,9 @@ import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
     from napari.layers import Points
@@ -21,7 +24,7 @@ def check_batch(batch, obs, verbose=False):
     if batch not in obs:
         raise ValueError(f'column {batch} is not in obs')
     elif verbose:
-        print(f'Object contains {obs[batch].nunique()} batches.')
+        logger.info(f'Object contains {obs[batch].nunique()} batches.')
 
 
 def check_hvg(hvg, hvg_key, adata_var):
@@ -193,7 +196,11 @@ def _calculate_single_metrics(adata, layer=None, force_layer=False):
     # Validate counts
     data = adata.layers.get(use_layer) if use_layer else adata.X
     if data is None or (not is_integer_counts(data) and not force_layer):
-        warnings.warn(f"No raw counts provided{f' in layer {use_layer!r}' if use_layer else ''}, metrics are set to 0.")
+        warnings.warn(
+            f"No raw counts provided{f' in layer {use_layer!r}' if use_layer else ''}, metrics are set to 0.",
+            UserWarning,
+            stacklevel=2,
+        )
         return 0, 0
 
     df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer=use_layer)

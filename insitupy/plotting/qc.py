@@ -1,3 +1,4 @@
+import logging
 import warnings
 from numbers import Number
 from typing import Optional, Union
@@ -15,6 +16,8 @@ from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.preprocessing.filtering import _compute_mad_threshold
 from insitupy.utils._checks import check_integer_counts
+
+logger = logging.getLogger(__name__)
 
 
 @with_insitupy_style
@@ -102,7 +105,7 @@ def plot_qc_metrics(
 
     # Warn user about MAD computation on log1p scale when log1p=False
     if mad_thresh is not None and not log1p:
-        print(
+        logger.info(
             "Note: MAD thresholds are computed on log1p-transformed values for statistical "
             "validity (as recommended by sc-best-practices), then back-transformed to raw "
             "scale for display."
@@ -124,14 +127,14 @@ def plot_qc_metrics(
     if plot_obs:
         obs_metrics = [metric for metric in obs_metrics if metric in adata.obs]
         if len(obs_metrics) == 0:
-            print("Warning: No .obs metrics found in adata.obs")
+            logger.warning("No .obs metrics found in adata.obs")
     else:
         obs_metrics = []
 
     if plot_var:
         var_metrics = [metric for metric in var_metrics if metric in adata.var]
         if len(var_metrics) == 0:
-            print("Warning: No .var metrics found in adata.var")
+            logger.warning("No .var metrics found in adata.var")
     else:
         var_metrics = []
 
@@ -142,9 +145,9 @@ def plot_qc_metrics(
         additional_obs_metrics = []
         for metric in additional_obs:
             if metric not in adata.obs:
-                print(f"Warning: '{metric}' not found in adata.obs")
+                logger.warning(f"'{metric}' not found in adata.obs")
             elif not pd.api.types.is_numeric_dtype(adata.obs[metric]):
-                print(f"Warning: '{metric}' is not numeric and will be skipped")
+                logger.warning(f"'{metric}' is not numeric and will be skipped")
             else:
                 additional_obs_metrics.append(metric)
     else:
@@ -157,9 +160,9 @@ def plot_qc_metrics(
         additional_var_metrics = []
         for metric in additional_var:
             if metric not in adata.var:
-                print(f"Warning: '{metric}' not found in adata.var")
+                logger.warning(f"'{metric}' not found in adata.var")
             elif not pd.api.types.is_numeric_dtype(adata.var[metric]):
-                print(f"Warning: '{metric}' is not numeric and will be skipped")
+                logger.warning(f"'{metric}' is not numeric and will be skipped")
             else:
                 additional_var_metrics.append(metric)
     else:
@@ -201,7 +204,7 @@ def plot_qc_metrics(
 
                 # Check if raw metric exists
                 if raw_metric not in adata_subset.obs:
-                    print(f"Warning: '{raw_metric}' not found in adata.obs, cannot compute MAD threshold")
+                    logger.warning(f"'{raw_metric}' not found in adata.obs, cannot compute MAD threshold")
                     return None
 
                 raw_values = adata_subset.obs[raw_metric].values

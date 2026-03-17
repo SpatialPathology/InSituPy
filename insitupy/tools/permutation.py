@@ -1,3 +1,4 @@
+import logging
 from numbers import Number
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -8,6 +9,8 @@ from scipy import sparse, stats
 from sklearn.neighbors import radius_neighbors_graph
 from statsmodels.stats import multitest
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CORE COMPUTATION FUNCTIONS
@@ -371,13 +374,13 @@ def permutation_test_gex_diff(
     celltype_col, celltype = celltype_tuple
 
     if verbose:
-        print(f"Running permutation test ({strategy} strategy) with {n_permutations} permutations...")
+        logger.info("Running permutation test (%s strategy) with %d permutations...", strategy, n_permutations)
         if n_jobs == -1:
             import os
             n_cores = os.cpu_count()
-            print(f"Using all {n_cores} cores for parallel processing")
+            logger.info("Using all %d cores for parallel processing", n_cores)
         else:
-            print(f"Using {n_jobs} cores for parallel processing")
+            logger.info("Using %d cores for parallel processing", n_jobs)
 
     # Prepare data
     coords = np.asarray(adata.obsm[obs_key])
@@ -404,7 +407,7 @@ def permutation_test_gex_diff(
             raise ValueError("None of the genes in genes_to_test found in genes list")
 
         if verbose:
-            print(f"Testing only {n_genes_to_test}/{n_genes} genes (speed optimization)")
+            logger.info("Testing only %d/%d genes (speed optimization)", n_genes_to_test, n_genes)
     else:
         n_genes_to_test = n_genes
 
@@ -413,17 +416,17 @@ def permutation_test_gex_diff(
 
     # PRE-COMPUTE BASE SPATIAL GRAPH
     if verbose:
-        print("Pre-computing base spatial graph...")
+        logger.info("Pre-computing base spatial graph...")
 
     mode = "distance" if (strategy == "mean" and use_distance_weighting) else "connectivity"
     A_base = radius_neighbors_graph(coords, radius=radius, mode=mode, include_self=not exclude_self)
 
     if verbose:
-        print(f"Base graph computed: {A_base.nnz} edges for {A_base.shape[0]} cells")
+        logger.info("Base graph computed: %d edges for %d cells", A_base.nnz, A_base.shape[0])
 
     # Run permutations in parallel
     if verbose:
-        print("Running permutations...")
+        logger.info("Running permutations...")
 
     if show_progress:
         perm_results = []
@@ -470,7 +473,7 @@ def permutation_test_gex_diff(
     perm_matrix = np.array(perm_results)
 
     if verbose:
-        print("Computing empirical p-values...")
+        logger.info("Computing empirical p-values...")
 
     # Compute empirical p-values (two-sided test)
     perm_pvalues = np.full(n_genes, np.nan)
@@ -532,12 +535,12 @@ def permutation_test_gex_diff(
     if verbose:
         n_sig = (perm_padj < 0.05).sum()
         n_tested = finite_pvals.sum()
-        print(f"\nPermutation test complete!")
-        print(f"Genes tested: {n_tested}/{n_genes}")
-        print(f"Significant genes (FDR < 0.05): {n_sig}/{n_tested}")
+        logger.info("Permutation test complete!")
+        logger.info("Genes tested: %d/%d", n_tested, n_genes)
+        logger.info("Significant genes (FDR < 0.05): %d/%d", n_sig, n_tested)
         if n_tested > 0:
-            print(f"Mean null distribution mean: {np.nanmean(perm_means):.4f}")
-            print(f"Mean null distribution std: {np.nanmean(perm_stds):.4f}")
+            logger.info("Mean null distribution mean: %.4f", np.nanmean(perm_means))
+            logger.info("Mean null distribution std: %.4f", np.nanmean(perm_stds))
 
     return results
 
@@ -600,18 +603,18 @@ def quick_permutation_summary(
     top_n : int, default=20
         Number of top genes to display
     """
-    print(f"\n{'='*70}")
-    print("PERMUTATION TEST SUMMARY")
-    print(f"{'='*70}")
+    logger.info("=" * 70)
+    logger.info("PERMUTATION TEST SUMMARY")
+    logger.info("=" * 70)
 
     # Overall statistics
     total_genes = len(results)
     tested_genes = results['perm_pvalue'].notna().sum()
     sig_genes = (results['perm_padj'] < alpha).sum()
 
-    print(f"Total genes: {total_genes}")
-    print(f"Genes tested: {tested_genes}")
-    print(f"Significant genes (FDR < {alpha}): {sig_genes} ({sig_genes/tested_genes*100:.1f}%)")
+    logger.info("Total genes: %d", total_genes)
+    logger.info("Genes tested: %d", tested_genes)
+    logger.info("Significant genes (FDR < %s): %d (%.1f%%)", alpha, sig_genes, sig_genes / tested_genes * 100)
 
     # Top significant genes
     sig_results = results[results['perm_padj'] < alpha].copy()
@@ -619,17 +622,18 @@ def quick_permutation_summary(
     if len(sig_results) > 0:
         sig_results = sig_results.sort_values('perm_zscore')
 
-        print(f"\nTop {min(top_n, len(sig_results))} significant genes:")
-        print(f"{'Gene':<15} {'log2FC':>10} {'z-score':>10} {'perm_p':>10} {'perm_padj':>10}")
-        print("-" * 70)
+        logger.info("Top %d significant genes:", min(top_n, len(sig_results)))
+        logger.info("%-15s %10s %10s %10s %10s", "Gene", "log2FC", "z-score", "perm_p", "perm_padj")
+        logger.info("-" * 70)
 
         for idx, (gene, row) in enumerate(sig_results.head(top_n).iterrows()):
-            print(f"{gene:<15} {row['log2foldchange']:>10.3f} {row['perm_zscore']:>10.2f} "
-                  f"{row['perm_pvalue']:>10.4f} {row['perm_padj']:>10.4f}")
+            logger.info("%-15s %10.3f %10.2f %10.4f %10.4f",
+                         gene, row['log2foldchange'], row['perm_zscore'],
+                         row['perm_pvalue'], row['perm_padj'])
     else:
-        print("\nNo significant genes found.")
+        logger.info("No significant genes found.")
 
-    print(f"{'='*70}\n")
+    logger.info("=" * 70)
 
 
 def calculate_contamination_threshold(

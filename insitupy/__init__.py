@@ -1,17 +1,5 @@
-__author__ = "Johannes Wirth"
-__email__ = "j.wirth@tum.de"
-__version__ = "0.11.1"
-
-# check if napari is available
-try:
-    import napari
-    WITH_NAPARI = True
-except ImportError:
-    print((
-        "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
-        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`)."
-    ))
-    WITH_NAPARI = False
+from ._version import __author__, __email__, __version__
+from ._constants import WITH_NAPARI
 
 from . import _core, dataclasses, datasets, experiment
 from . import images as im
@@ -25,39 +13,24 @@ from ._core.data import InSituData
 from .experiment.data import InSituExperiment
 
 __all__ = [
+    "__version__",
+    "__author__",
+    "__email__",
     "InSituData",
     "InSituExperiment",
-    "CustomPalettes",
-    "AnnotationsData",
-    "BoundariesData",
-    "CellData",
-    "ImageData",
-    "MultiCellData",
-    "RegionsData",
-    "read_xenium",
-    "differential_gene_expression",
-    "calc_distance_of_cells_from",
-    "register_images",
+    "_core",
+    "dataclasses",
+    "datasets",
+    "experiment",
     "im",
     "io",
     "pl",
     "pp",
     "tl",
-    "utils"
+    "utils",
 ]
 
 # configure logging
-import logging
-
-from insitupy._logging import TqdmLoggingHandler
-
-logger = logging.getLogger('insitupy')
-logger.setLevel(logging.INFO)
-logger.propagate = False
-
-# Only add handler if one doesn't exist yet
-# Use TqdmLoggingHandler to prevent progress bar disruption from log messages
-if not logger.handlers:
-    handler = TqdmLoggingHandler()
-    handler.setFormatter(logging.Formatter('%(asctime)s | [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
-    logger.addHandler(handler)
+from ._logging import setup_logging as _setup_logging
+_setup_logging()
+del _setup_logging

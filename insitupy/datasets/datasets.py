@@ -1,9 +1,12 @@
 import hashlib
+import logging
 import os
 import shutil
 from pathlib import Path
 
 from insitupy._constants import CACHE
+
+logger = logging.getLogger(__name__)
 from insitupy._core.data import InSituData
 from insitupy.datasets.download import download_url
 from insitupy.io.data import read_visium, read_xenium
@@ -49,16 +52,16 @@ def _md5sum(filePath):
 def _md5sum_image_check(file_path : Path, expected_md5sum, overwrite):
     download = False
     if file_path.exists():
-        print("Image exists. Checking md5sum...")
+        logger.info("Image exists. Checking md5sum...")
         if _md5sum(file_path) == expected_md5sum:
             if not overwrite:
-                print(f"The md5sum matches. Download is skipped. To force download set `overwrite=True`.")
+                logger.info("The md5sum matches. Download is skipped. To force download set `overwrite=True`.")
                 return
             else:
                 # if the md5sum matches but overwrite=True, the image is still downloaded
                 download = True
         else:
-            print(f"The md5sum doesn't match. Image is downloaded.")
+            logger.info("The md5sum doesn't match. Image is downloaded.")
             download = True
     else:
         download = True
@@ -84,15 +87,15 @@ def list_downloaded_datasets(output_dir=None):
         folders = [item for item in items if os.path.isdir(os.path.join(check_dir, item))]
 
         if folders:
-            print(f"Following demo datasets were found in {check_dir}:\n")
+            logger.info(f"Following demo datasets were found in {check_dir}:\n")
             for folder in folders:
-                print(f"- {folder}")
+                logger.info(f"- {folder}")
         else:
-            print(f"No folders found in the directory: {check_dir}")
+            logger.info(f"No folders found in the directory: {check_dir}")
     except FileNotFoundError:
-        print(f"The directory '{check_dir}' does not exist.")
+        logger.warning(f"The directory '{check_dir}' does not exist.")
     except PermissionError:
-        print(f"Permission denied to access the directory '{check_dir}'.")
+        logger.warning(f"Permission denied to access the directory '{check_dir}'.")
 
 
 # function that checks data for md5sum, downloads and unpacks the data.
@@ -102,24 +105,24 @@ def _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, dat
     if data_dir.exists():
         # if it exists, everything is fine and it is assumed that the dataset was downloaded correctly. Overwrite is still checked.
         if not overwrite:
-            print(f"This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
+            logger.info("This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
             return
         else:
-            print(f"This dataset exists already but is overwritten because of `overwrite=True`.")
+            logger.info("This dataset exists already but is overwritten because of `overwrite=True`.")
             download_data = True
     else:
         # if unzipped data does not exist, we need to check if a zip file exists, and if yes if its md5sum is correct
         if zip_file.exists():
-            print("ZIP file exists. Checking md5sum...")
+            logger.info("ZIP file exists. Checking md5sum...")
             if _md5sum(zip_file) == expected_md5sum:
                 if not overwrite:
-                    print(f"This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
+                    logger.info("This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
                     return
                 else:
                     # if the md5sum matches but overwrite=True, the data is still downloaded
                     download_data = True
             else:
-                print("The dataset exists already but the md5sum is not as expected. Dataset is downloaded again.")
+                logger.warning("The dataset exists already but the md5sum is not as expected. Dataset is downloaded again.")
                 download_data = True
         else:
             download_data = True
@@ -180,10 +183,10 @@ def xenium_human_breast_cancer(
     if _md5sum_image_check(image_dir/"slide_id__hbreastcancer__CD20_HER2_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
         download_url(if_url, out_dir = image_dir, file_name = if_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following images are available:")
-    print(f"{he_file_name}.ome.tiff")
-    print(f"{if_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following images are available:")
+    logger.info(f"{he_file_name}.ome.tiff")
+    logger.info(f"{if_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -224,9 +227,9 @@ def xenium_human_kidney_nondiseased(
     if _md5sum_image_check(image_dir/"slide_id__hkidney__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following image is available:")
-    print(f"{he_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following image is available:")
+    logger.info(f"{he_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -273,10 +276,10 @@ def xenium_human_pancreatic_cancer(
     if _md5sum_image_check(image_dir/"slide_id__hPancreas__CD20_TROP2_PPY_DAPI__IF.ome.tif", expected_if_md5sum, overwrite):
         download_url(if_url, out_dir = image_dir, file_name = if_file_name, overwrite = True )
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following images are available:")
-    print(f"{he_file_name}.ome.tiff")
-    print(f"{if_file_name}IF_image_name.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following images are available:")
+    logger.info(f"{he_file_name}.ome.tiff")
+    logger.info(f"{if_file_name}IF_image_name.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -317,9 +320,9 @@ def xenium_human_skin_melanoma(
     if _md5sum_image_check(image_dir/"slide_id__hskin__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following image is available:")
-    print(f"{he_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following image is available:")
+    logger.info(f"{he_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -360,9 +363,9 @@ def xenium_human_brain_cancer(
     if _md5sum_image_check(image_dir/"slide_id__hbraincancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following image is available:")
-    print(f"{he_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following image is available:")
+    logger.info(f"{he_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -403,9 +406,9 @@ def xenium_human_lung_cancer(
     if _md5sum_image_check(image_dir/"slide_id__hlungcancer__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following image is available:")
-    print(f"{he_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following image is available:")
+    logger.info(f"{he_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -446,9 +449,9 @@ def xenium_human_lymph_node_5k(
     if _md5sum_image_check(image_dir/"slide_id__hlymphnode5k__HE__histo.ome.tif", expected_he_md5sum, overwrite):
         download_url(he_url, out_dir = image_dir, file_name = he_file_name, overwrite = True)
 
-    print(f"Corresponding image data can be found in {image_dir}")
-    print("For this dataset following image is available:")
-    print(f"{he_file_name}.ome.tiff")
+    logger.info(f"Corresponding image data can be found in {image_dir}")
+    logger.info("For this dataset following image is available:")
+    logger.info(f"{he_file_name}.ome.tiff")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -480,7 +483,7 @@ def xenium_human_lymph_node(
     # if necessary download data
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
 
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
 
     # load data into InSituData object
     data = read_xenium(data_dir)
@@ -505,7 +508,7 @@ def xenium_test_dataset_v2_mm(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -526,7 +529,7 @@ def xenium_test_dataset_v2_nucex(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -547,7 +550,7 @@ def xenium_test_dataset_v3_mm(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -568,7 +571,7 @@ def xenium_test_dataset_v3_nucex(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -589,7 +592,7 @@ def xenium_test_dataset_v4_nucex(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 # xenium onboard analysis 4.0.0
@@ -609,7 +612,7 @@ def xenium_test_dataset_v4_mm(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -630,7 +633,7 @@ def xenium_test_dataset_v4_protein(
 
     _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
     data = read_xenium(data_dir)
-    print('For this dataset no additional images are available.')
+    logger.info("For this dataset no additional images are available.")
     return data
 
 
@@ -668,15 +671,15 @@ def visium_human_breast_cancer(
     # check and download h5 file
     download_h5 = False
     if h5_file.exists():
-        print("H5 file exists. Checking md5sum...")
+        logger.info("H5 file exists. Checking md5sum...")
         if _md5sum(h5_file) == expected_h5_md5sum:
             if not overwrite:
-                print(f"The h5 file md5sum matches. Download is skipped. To force download set `overwrite=True`.")
+                logger.info("The h5 file md5sum matches. Download is skipped. To force download set `overwrite=True`.")
             else:
-                print(f"The h5 file exists but is overwritten because of `overwrite=True`.")
+                logger.info("The h5 file exists but is overwritten because of `overwrite=True`.")
                 download_h5 = True
         else:
-            print(f"The h5 file md5sum doesn't match. File is downloaded.")
+            logger.warning("The h5 file md5sum doesn't match. File is downloaded.")
             download_h5 = True
     else:
         download_h5 = True
@@ -688,16 +691,16 @@ def visium_human_breast_cancer(
     download_spatial = False
     if spatial_dir.exists():
         if not overwrite:
-            print(f"Spatial directory exists. Download is skipped. To force download set `overwrite=True`.")
+            logger.info("Spatial directory exists. Download is skipped. To force download set `overwrite=True`.")
         else:
-            print(f"Spatial directory exists but is overwritten because of `overwrite=True`.")
+            logger.info("Spatial directory exists but is overwritten because of `overwrite=True`.")
             download_spatial = True
     else:
         if spatial_tar.exists():
-            print("Spatial tar file exists. Checking md5sum...")
+            logger.info("Spatial tar file exists. Checking md5sum...")
             if _md5sum(spatial_tar) == expected_spatial_md5sum:
                 if not overwrite:
-                    print(f"The spatial tar md5sum matches. Unpacking...")
+                    logger.info("The spatial tar md5sum matches. Unpacking...")
                     # unpack and move spatial folder
                     shutil.unpack_archive(spatial_tar, named_data_dir)
                     # move spatial folder to data_dir
@@ -707,7 +710,7 @@ def visium_human_breast_cancer(
                 else:
                     download_spatial = True
             else:
-                print(f"The spatial tar md5sum doesn't match. File is downloaded.")
+                logger.warning("The spatial tar md5sum doesn't match. File is downloaded.")
                 download_spatial = True
         else:
             download_spatial = True
@@ -728,15 +731,15 @@ def visium_human_breast_cancer(
     if download_fullres:
         download_fullres_img = False
         if fullres_file.exists():
-            print("Full-resolution image exists. Checking md5sum...")
+            logger.info("Full-resolution image exists. Checking md5sum...")
             if _md5sum(fullres_file) == expected_fullres_md5sum:
                 if not overwrite:
-                    print(f"The full-resolution image md5sum matches. Download is skipped. To force download set `overwrite=True`.")
+                    logger.info("The full-resolution image md5sum matches. Download is skipped. To force download set `overwrite=True`.")
                 else:
-                    print(f"The full-resolution image exists but is overwritten because of `overwrite=True`.")
+                    logger.info("The full-resolution image exists but is overwritten because of `overwrite=True`.")
                     download_fullres_img = True
             else:
-                print(f"The full-resolution image md5sum doesn't match. File is downloaded.")
+                logger.warning("The full-resolution image md5sum doesn't match. File is downloaded.")
                 download_fullres_img = True
         else:
             download_fullres_img = True
@@ -744,12 +747,12 @@ def visium_human_breast_cancer(
         if download_fullres_img:
             download_url(fullres_url, out_dir=data_dir, file_name="CytAssist_FFPE_Human_Breast_Cancer_tissue_image", overwrite=True)
 
-    print(f"Visium data structure is ready at {data_dir}")
-    print("Dataset contains:")
-    print(f"- filtered_feature_bc_matrix.h5")
-    print(f"- spatial/ directory")
+    logger.info(f"Visium data structure is ready at {data_dir}")
+    logger.info("Dataset contains:")
+    logger.info("- filtered_feature_bc_matrix.h5")
+    logger.info("- spatial/ directory")
     if download_fullres:
-        print(f"- CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif")
+        logger.info("- CytAssist_FFPE_Human_Breast_Cancer_tissue_image.tif")
 
     # load data into InSituData object
     # Note: You'll need to implement read_visium if not already available

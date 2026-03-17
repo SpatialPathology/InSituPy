@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 import numpy as np
 from matplotlib import colormaps
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 if TYPE_CHECKING:
     import dask.dataframe as dd

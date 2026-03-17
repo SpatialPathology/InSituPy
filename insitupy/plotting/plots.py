@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 from numbers import Number
@@ -10,7 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, with_insitupy_style
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
@@ -21,6 +22,8 @@ from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_colorlegend_layer(viewer, layer):
@@ -472,7 +475,7 @@ def cellular_composition(
     cell_type_names = compositions_df.index.values
 
     if len(data_names) == 1:
-        print("Since only one dataset is given, all regions are plotted into one figure.")
+        logger.info("Since only one dataset is given, all regions are plotted into one figure.")
         compositions_df = compositions_df.swaplevel(axis=1)
         geom_names, data_names = data_names, geom_names # swap values of the two variables
 
@@ -492,7 +495,7 @@ def cellular_composition(
         # Check and convert to category if needed
         if not pd.api.types.is_categorical_dtype(celldata.table.obs[cell_type_col]):
             celldata.table.obs[cell_type_col] = celldata.table.obs[cell_type_col].astype('category')
-            print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
+            logger.info(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
 
         if palette_is_dict:
             color_dict = palette

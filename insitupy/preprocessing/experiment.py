@@ -6,7 +6,7 @@ import pandas as pd
 import scanpy as sc
 from tqdm import tqdm
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError

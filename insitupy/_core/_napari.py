@@ -7,7 +7,8 @@ import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI, __version__
+from insitupy._version import __version__
+from insitupy._constants import WITH_NAPARI
 from insitupy._constants import FLUO_CMAP
 from insitupy._exceptions import InSituDataMissingObject
 from insitupy.dataclasses._utils import _get_cell_layer
@@ -349,7 +350,7 @@ if WITH_NAPARI:
             global uids_before_removal
             if event is not None:
                 layer = event.source
-                print(event.action) if viewer_config.verbose else None
+                logger.debug(event.action) if viewer_config.verbose else None
                 if event.action == "added" and viewer_config._auto_set_uid:
                     if isinstance(layer, Shapes):
                         type_last = layer.shape_type[-1]
@@ -363,7 +364,7 @@ if WITH_NAPARI:
                         geom_type = "point"
                     #if 'uid' in layer.properties:
                     uid = str(uuid4())
-                    print(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
+                    logger.debug(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
                     try:
                         layer.properties['uid'][-1] = uid
                         layer.properties['type'][-1] = geom_type
@@ -375,7 +376,7 @@ if WITH_NAPARI:
                     uids_before_removal = set(layer.properties['uid'])
                 elif event.action == "removed":
                     removed_uids = uids_before_removal ^ set(layer.properties['uid'])
-                    print(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
+                    logger.debug(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
                     viewer_config._removal_tracker += list(removed_uids)
                 else:
                     pass

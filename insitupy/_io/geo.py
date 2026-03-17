@@ -1,5 +1,6 @@
 import ast
 import json
+import logging
 import os
 import warnings
 from pathlib import Path
@@ -11,6 +12,8 @@ import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 
 from ..utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 # force geopandas to use shapely. Default in future versions of geopandas.
 os.environ['USE_PYGEOS'] = '0'
@@ -59,7 +62,7 @@ def _read_file_helper(file, engine):
             if isinstance(val, dict):
                 return val
 
-            print(val)
+            logger.debug(val)
             if isinstance(val, str):
                 try:
                     return json.loads(val)
@@ -92,12 +95,12 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
         # Flatten the "classification" column into separate "name" and "color" columns
         if "name" in dataframe.columns:
             warnings.warn(
-                (
-                    f"The geometries contain both a 'name' (set e.g. by 'Set properties' in QuPath) and a 'classification name'.\n"
-                    f"Currently, the `read_qupath_geojson` function overwrites the name with the classification name and saves it in a column named just 'name'.\n"
-                    f"This behavior might change in the future."
-                )
-                )
+                "The geometries contain both a 'name' (set e.g. by 'Set properties' in QuPath) and a 'classification name'.\n"
+                "Currently, the `read_qupath_geojson` function overwrites the name with the classification name and saves it in a column named just 'name'.\n"
+                "This behavior might change in the future.",
+                UserWarning,
+                stacklevel=2,
+            )
         def _extract_classification_value(entry, key, default):
             if isinstance(entry, dict):
                 return entry.get(key, default)

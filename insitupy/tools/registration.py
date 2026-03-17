@@ -1,4 +1,5 @@
 import gc
+import logging
 import os
 import time
 import tracemalloc
@@ -19,7 +20,7 @@ import numpy as np
 # from dask_image.imread import imread
 from matplotlib.patches import ConnectionPatch
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._constants import CACHE, SHRT_MAX
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
@@ -31,6 +32,8 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
 from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
+
+logger = logging.getLogger(__name__)
 
 
 def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 99.0) -> np.ndarray:
@@ -114,7 +117,7 @@ class ImageRegistration:
                  ):
 
         # check verbose mode
-        self.verboseprint = print if verbose else lambda *a, **k: None
+        self.verboseprint = logger.info if verbose else lambda *a, **k: None
         self.print_prefix = print_prefix
 
         # add arguments to object
@@ -147,7 +150,7 @@ class ImageRegistration:
             prefix = f"{self.print_prefix}{self._LSIGN}{self._HLINE}{self._HLINE} "
         else:
             prefix = f"{self.print_prefix}{self._TSIGN}{self._HLINE}{self._HLINE} "
-        self.verboseprint(f"{prefix}{message}", flush=flush)
+        self.verboseprint("%s%s", prefix, message)
 
     def _deconvolve_he_image(self, img: np.ndarray, axes: str, name: str = "image") -> np.ndarray:
         """
@@ -1146,7 +1149,7 @@ def register_images(
         )
 
     # read images
-    print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Loading images", flush=True)
+    logger.info("%s%s%s%s Loading images", _prefix, _TSIGN, _HLINE, _HLINE)
     image, ome_meta, axes_image, pixel_size_image = read_image(image_to_be_registered)
     image = _unwrap_first_level_image(image, str(image_to_be_registered))
 
@@ -1178,9 +1181,9 @@ def register_images(
     # Print header
     _header_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
     _header_channels = ", ".join(channel_names)
-    print(f"{_SEP * 80}", flush=True)
-    print(f"Registration: {tf.Bold}{_header_id}{tf.ResetAll} {_HLINE}{_HLINE} {_header_channels} ({image_type})", flush=True)
-    print(f"{_SEP * 80}", flush=True)
+    logger.info("%s", _SEP * 80)
+    logger.info("Registration: %s%s%s %s%s %s (%s)", tf.Bold, _header_id, tf.ResetAll, _HLINE, _HLINE, _header_channels, image_type)
+    logger.info("%s", _SEP * 80)
 
     # if image type is IF, the channel name for registration needs to be given
     if image_type == "IF" and channel_name_for_registration is None:
@@ -1223,8 +1226,8 @@ def register_images(
     # # read images in InSituData object
     template = data.images[template_image_name][0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
     template = _unwrap_first_level_image(template, template_image_name)
-    print(f"{_prefix}{_VLINE}     Image:    {image.shape}", flush=True)
-    print(f"{_prefix}{_VLINE}     Template: {template.shape}", flush=True)
+    logger.info("%s%s     Image:    %s", _prefix, _VLINE, image.shape)
+    logger.info("%s%s     Template: %s", _prefix, _VLINE, template.shape)
 
     # extract OME metadata
     #ome_metadata_template = data.images.metadata[template_image_name]["OME"]
@@ -1255,7 +1258,7 @@ def register_images(
 
     # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
     if image_type == "histo":
-        print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Color deconvolution (scale factor: {decon_scale_factor})", flush=True)
+        logger.info("%s%s%s%s Color deconvolution (scale factor: %s)", _prefix, _TSIGN, _HLINE, _HLINE, decon_scale_factor)
         # deconvolve HE - performed on resized image to save memory
         # TODO: Scale to max width instead of using a fixed scale factor before deconvolution (`scale_to_max_width`)
         nuclei_img, eo, dab = deconvolve_he(img=resize_image(image, scale_factor=decon_scale_factor, axes="YXS"),
@@ -1272,7 +1275,7 @@ def register_images(
             debug_decon_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_target.png"
             nuclei_img_scaled = _percentile_scale_for_saving(nuclei_img)
             plt.imsave(debug_decon_qc_path, nuclei_img_scaled, cmap="gray")
-            print(f"{_prefix}{_VLINE}     Debug: saved deconvolved target -> {debug_decon_qc_path}", flush=True)
+            logger.debug("%s%s     Debug: saved deconvolved target -> %s", _prefix, _VLINE, debug_decon_qc_path)
 
         # set nuclei_channel and nuclei_axis to None
         channel_name_for_registration = channel_axis = None
@@ -1281,7 +1284,7 @@ def register_images(
         # get index of nuclei channel
         channel_id_for_registration = channel_names.index(channel_name_for_registration)
 
-        print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Selecting nuclei channel (index: {channel_id_for_registration})", flush=True)
+        logger.info("%s%s%s%s Selecting nuclei channel (index: %s)", _prefix, _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
         # # select nuclei channel from IF image
         # if channel_name_for_registration is None:
         #     raise TypeError("Argument `nuclei_channel` should be an integer and not NoneType.")
@@ -1315,7 +1318,7 @@ def register_images(
         debug_decon_template_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_template.png"
         template_scaled_for_save = _percentile_scale_for_saving(imreg_complete.template)
         plt.imsave(debug_decon_template_qc_path, template_scaled_for_save, cmap="gray")
-        print(f"{_prefix}{_VLINE}     Debug: saved deconvolved template -> {debug_decon_template_qc_path}", flush=True)
+        logger.debug("%s%s     Debug: saved deconvolved template -> %s", _prefix, _VLINE, debug_decon_template_qc_path)
 
     # Determine the axes_template for the selected registration object
     # If template was deconvolved, it's now grayscale (YX)
@@ -1353,7 +1356,7 @@ def register_images(
             else:
                 _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
             if hasattr(imreg_selected, "matchedVis"):
-                print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Saving failure QC images", flush=True)
+                logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
                 imreg_selected.save_qc(
                     output_dir=output_dir,
                     identifier=_failed_identifier,
@@ -1418,7 +1421,7 @@ def register_images(
             if n == channel_name_for_registration:
                 continue
 
-            print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Registering channel: {n}", flush=True)
+            logger.info("%s%s%s%s Registering channel: %s", _prefix, _TSIGN, _HLINE, _HLINE, n)
             if imreg_complete.image_resized is None:
                 # select one channel from non-resized original image
                 imreg_selected.image = np.take(imreg_complete.image, i, channel_axis)
@@ -1471,7 +1474,7 @@ def register_images(
     _, _peak_mem = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
-    print(f"{_prefix}{_LSIGN}{_HLINE}{_HLINE} Done ({_elapsed:.1f} s, peak memory: {_peak_mem_str})", flush=True)
+    logger.info("%s%s%s%s Done (%.1f s, peak memory: %s)", _prefix, _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
     gc.collect()
 
 

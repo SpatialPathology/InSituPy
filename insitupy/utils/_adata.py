@@ -1,5 +1,8 @@
+import logging
 import warnings
 from typing import List, Literal, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import anndata
 import numpy as np
@@ -67,7 +70,7 @@ def _extract_groups(
             adata = adata.loc[mask, :].copy()
 
         if len(adata) == 0:
-            print("Subset variables '{}' not in groupby '{}'. Object not returned.".format(groups, groupby))
+            logger.warning("Subset variables '{}' not in groupby '{}'. Object not returned.".format(groups, groupby))
             return
         elif filtering:
             # check if all groups are in groupby category
@@ -75,7 +78,7 @@ def _extract_groups(
             groups_notfound = [group for group in groups if group not in groups_found]
 
             if len(groups_found) != len(groups):
-                print("Following groups were not found in column {}: {}".format(groupby, groups_notfound))
+                logger.warning("Following groups were not found in column {}: {}".format(groupby, groups_notfound))
 
             if extract_uns or uns_exclusion_pattern is not None:
                 new_uns = {key:value for (key,value) in adata.uns[uns_key].items() if np.any([group in key for group in groups])}
@@ -98,7 +101,7 @@ def _extract_groups(
             return adata
 
     else:
-        print("Subset category '{}' not found".format(groupby))
+        logger.warning("Subset category '{}' not found".format(groupby))
         return
 
 
@@ -140,7 +143,7 @@ def _select_anndata_elements(
         obs_keys = convert_to_list(obs_keys)
         missing_keys = [key for key in obs_keys if key not in adata.obs.columns]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.obs: {missing_keys}")
+            logger.warning(f"Keys not found in adata.obs: {missing_keys}")
         obs_keys = [key for key in obs_keys if key in adata.obs.columns]
         adata.obs = adata.obs[obs_keys]
 
@@ -153,7 +156,7 @@ def _select_anndata_elements(
         var_keys = convert_to_list(var_keys)
         missing_keys = [key for key in var_keys if key not in adata.var.columns]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.var: {missing_keys}")
+            logger.warning(f"Keys not found in adata.var: {missing_keys}")
         var_keys = [key for key in var_keys if key in adata.var.columns]
         adata.var = adata.var[var_keys]
 
@@ -168,7 +171,7 @@ def _select_anndata_elements(
         obsm_keys = convert_to_list(obsm_keys)
         missing_keys = [key for key in obsm_keys if key not in adata.obsm.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.obsm: {missing_keys}")
+            logger.warning(f"Keys not found in adata.obsm: {missing_keys}")
         keys_to_remove = set(adata.obsm.keys()) - set(obsm_keys)
         for key in keys_to_remove:
             del adata.obsm[key]
@@ -184,7 +187,7 @@ def _select_anndata_elements(
         varm_keys = convert_to_list(varm_keys)
         missing_keys = [key for key in varm_keys if key not in adata.varm.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.varm: {missing_keys}")
+            logger.warning(f"Keys not found in adata.varm: {missing_keys}")
         keys_to_remove = set(adata.varm.keys()) - set(varm_keys)
         for key in keys_to_remove:
             del adata.varm[key]
@@ -200,7 +203,7 @@ def _select_anndata_elements(
         uns_keys = convert_to_list(uns_keys)
         missing_keys = [key for key in uns_keys if key not in adata.uns.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.uns: {missing_keys}")
+            logger.warning(f"Keys not found in adata.uns: {missing_keys}")
         keys_to_remove = set(adata.uns.keys()) - set(uns_keys)
         for key in keys_to_remove:
             del adata.uns[key]
@@ -216,7 +219,7 @@ def _select_anndata_elements(
         layer_keys = convert_to_list(layer_keys)
         missing_keys = [key for key in layer_keys if key not in adata.layers.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.layers: {missing_keys}")
+            logger.warning(f"Keys not found in adata.layers: {missing_keys}")
         keys_to_remove = set(adata.layers.keys()) - set(layer_keys)
         for key in keys_to_remove:
             del adata.layers[key]

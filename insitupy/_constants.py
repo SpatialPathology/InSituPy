@@ -1,3 +1,17 @@
+# check if napari is available
+try:
+    import napari
+    WITH_NAPARI = True
+except ImportError:
+    import warnings
+    warnings.warn(
+        "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
+        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`).",
+        ImportWarning,
+        stacklevel=1,
+    )
+    WITH_NAPARI = False
+
 import functools
 import string
 from pathlib import Path

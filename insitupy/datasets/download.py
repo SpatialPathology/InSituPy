@@ -1,9 +1,12 @@
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Union
 
 import requests
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 
 def download_url(
@@ -58,7 +61,7 @@ def download_url(
 
     if outfile.exists():
         if not overwrite:
-            print(f"File {outfile} exists already. Download is skipped. To force download set `overwrite=True`.")
+            logger.info(f"File {outfile} exists already. Download is skipped. To force download set `overwrite=True`.")
             return
         else:
             pass

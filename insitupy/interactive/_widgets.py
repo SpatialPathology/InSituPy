@@ -1,4 +1,8 @@
-from insitupy import WITH_NAPARI
+import logging
+
+from insitupy._constants import WITH_NAPARI
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
     from typing import List, Optional
@@ -461,7 +465,7 @@ if WITH_NAPARI:
                         if key == "cells":
                             viewer.layers[layer_name].contour = 1
                     else:
-                        print(f"Layer '{layer_name}' already in layer list.", flush=True)
+                        logger.info(f"Layer '{layer_name}' already in layer list.")
             else:
                 show_boundaries_widget = None
 
@@ -690,7 +694,7 @@ if WITH_NAPARI:
                                 border_width=0.1
                             )
                 else:
-                    print(f"Cell '{cell}' not found.")
+                    logger.warning(f"Cell '{cell}' not found.")
 
             # ---CALLBACKS---
             # connect key change with update function

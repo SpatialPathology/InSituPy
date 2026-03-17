@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from numbers import Number
 from pathlib import Path
@@ -12,6 +13,8 @@ from matplotlib import colormaps
 from scipy.cluster.hierarchy import (dendrogram, fcluster, linkage,
                                      set_link_color_palette)
 from scipy.spatial.distance import squareform
+
+logger = logging.getLogger(__name__)
 
 #from .adata import create_deg_df
 
@@ -358,7 +361,7 @@ class StringDB:
 
                     # remove missing gene from list
                     genes.remove(missing_gene)
-                    print("Gene '{}' was not found by STRING and was removed from query.".format(missing_gene))
+                    logger.warning("Gene '{}' was not found by STRING and was removed from query.".format(missing_gene))
             else:
                 break
 
@@ -424,7 +427,7 @@ class StringDB:
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
             output_file = os.path.join(output_dir, "{}_network{}".format(prefix, output_ext))
-            print("Saving interaction network to {}".format(output_file))
+            logger.info("Saving interaction network to {}".format(output_file))
 
             with open(output_file, 'wb') as fh:
                 fh.write(self.result)

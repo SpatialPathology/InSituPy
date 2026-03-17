@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import os
 import sys
 from datetime import datetime
@@ -9,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import issparse
 from shapely import MultiPolygon, Polygon
+
+logger = logging.getLogger(__name__)
 
 
 def _get_expression_values(adata, X, key_type, key):
@@ -39,7 +42,7 @@ def _get_expression_values(adata, X, key_type, key):
             warn("Data in `obsm` needs to be either pandas DataFrame or numpy array to be parsed.")
         pass
     else:
-        print("Unknown key selected.", flush=True)
+        logger.warning("Unknown key selected.")
 
     return color_value
 

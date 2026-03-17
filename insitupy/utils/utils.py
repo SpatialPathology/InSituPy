@@ -1,9 +1,12 @@
+import logging
 import math
 import os
 from datetime import datetime
 from typing import Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
+
+logger = logging.getLogger(__name__)
 
 import dask.dataframe as dd
 import geopandas as gpd
@@ -87,7 +90,8 @@ def get_nrows_maxcols(n_keys, max_cols):
     return n_keys, n_rows, max_cols
 
 def remove_empty_subplots(axes, nplots, nrows, ncols):
-    assert len(axes.shape) == 1, "Axis object must have only one dimension."
+    if len(axes.shape) != 1:
+        raise ValueError("Axis object must have only one dimension.")
     if nplots > 1:
         # check if there are empty plots remaining
         i = nplots
@@ -109,7 +113,7 @@ def check_list(List, list_to_compare):
     List = [elem for elem in List if elem is not None]
 
     if len(not_in) > 0:
-        print("Following elements not found: {}".format(", ".join(not_in)), flush=True)
+        logger.warning("Following elements not found: {}".format(", ".join(not_in)))
 
     return List
 
@@ -298,7 +302,7 @@ def _crop_transcripts(
                 warn("Filtering transcripts based on a shape may take longer if `dask-geopandas` is not installed.")
 
                 # load the dataframe into memory to generate points
-                print("Load transcript dataframe into memory...")
+                logger.info("Load transcript dataframe into memory...")
                 transcript_df = transcript_df.compute()
                 # generate points without dask_geopandas
                 points = gpd.points_from_xy(

@@ -1,6 +1,6 @@
 from warnings import warn
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
                                  REGIONS_SYMBOL)
 

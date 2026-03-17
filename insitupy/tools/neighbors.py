@@ -1,3 +1,4 @@
+import logging
 import warnings
 from numbers import Number
 from typing import Dict, List, Literal, Optional, Tuple
@@ -8,6 +9,8 @@ from scipy import sparse, stats
 from sklearn.neighbors import radius_neighbors_graph
 from statsmodels.stats import multitest
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -62,7 +65,7 @@ def _prepare_data(
         genes = [g for g in all_genes if g in genes_subset]
         gene_indices = np.where(gene_mask)[0]
         if verbose:
-            print(f"Testing subset of {len(genes)} genes (out of {len(all_genes)} total)")
+            logger.info("Testing subset of %d genes (out of %d total)", len(genes), len(all_genes))
     else:
         genes = all_genes
         gene_indices = np.arange(len(all_genes))
@@ -87,7 +90,7 @@ def _build_spatial_graph(
 
     if verbose:
         weighted_str = f", weighted={use_distance_weighting}" if strategy == "mean" else ""
-        print(f"Building spatial graph (radius={radius}{weighted_str})...")
+        logger.info("Building spatial graph (radius=%s%s)...", radius, weighted_str)
 
     # Build radius-based adjacency
     # For mean with distance weighting, use distance mode; otherwise connectivity
@@ -99,11 +102,11 @@ def _build_spatial_graph(
         target_mask = (adata.obs[celltype_col] == celltype).values
         n_target_cells = target_mask.sum()
         if verbose:
-            print(f"Selected {n_target_cells} '{celltype}' cells as targets")
+            logger.info("Selected %d '%s' cells as targets", n_target_cells, celltype)
 
         # Exclude same-type neighbors
         if verbose:
-            print("Excluding same-celltype neighbors from adjacency matrix...")
+            logger.info("Excluding same-celltype neighbors from adjacency matrix...")
         A_ct = A.copy()
         A_ct = A_ct.tocoo()
 
@@ -157,7 +160,7 @@ def _compute_neighbor_mean(
     will have all-zero rows even after normalization.
     """
     if verbose:
-        print("Computing mean neighbor expression...")
+        logger.info("Computing mean neighbor expression...")
 
     is_sparse = sparse.issparse(X)
     if gene_indices is not None and len(gene_indices) < X.shape[1]:
@@ -194,7 +197,7 @@ def _compute_neighbor_max(
     n_genes = len(gene_indices) if gene_indices is not None else X.shape[1]
 
     if verbose:
-        print("Computing max neighbor expression (per-gene maximum)...")
+        logger.info("Computing max neighbor expression (per-gene maximum)...")
 
     is_sparse = sparse.issparse(X)
     neighbor_expr = np.full((n_cells, n_genes), np.nan)
@@ -247,7 +250,7 @@ def _run_statistical_tests(
     n_genes = len(genes)
 
     if verbose:
-        print(f"Running paired tests ({method}) per gene and computing effect sizes...")
+        logger.info("Running paired tests (%s) per gene and computing effect sizes...", method)
 
     min_samples_needed = max(min_cells, 2 if method == "wilcoxon" else 1)
 
@@ -273,7 +276,7 @@ def _run_statistical_tests(
 
     for batch_start, batch_end in batch_ranges:
         if verbose and len(batch_ranges) > 1:
-            print(f"Processing batch {batch_start}-{batch_end} of {n_genes} genes...")
+            logger.info("Processing batch %d-%d of %d genes...", batch_start, batch_end, n_genes)
 
         iterator = tqdm(range(batch_start, batch_end), desc="genes") if verbose else range(batch_start, batch_end)
 
@@ -339,7 +342,7 @@ def _run_statistical_tests(
 
             except Exception as e:
                 if verbose:
-                    print(f"Warning: Test failed for gene {genes[g]}: {e}")
+                    logger.warning("Test failed for gene %s: %s", genes[g], e)
                 pass
 
     return results
@@ -352,7 +355,7 @@ def _apply_multiple_testing_correction(
 ) -> np.ndarray:
     """Apply multiple testing correction."""
     if verbose:
-        print("Applying multiple-testing correction...")
+        logger.info("Applying multiple-testing correction...")
 
     finite = np.isfinite(pvals)
     p_adj = np.full_like(pvals, np.nan)
@@ -412,21 +415,23 @@ def _print_summary(qc_stats: Dict, verbose: bool) -> None:
     if not verbose:
         return
 
-    print(f"\n{'='*60}")
-    print("ANALYSIS SUMMARY")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("ANALYSIS SUMMARY")
+    logger.info("=" * 60)
     if qc_stats['target_celltype'] is not None:
-        print(f"Target cell type: '{qc_stats['target_celltype']}'")
-        print(f"Target cells: {qc_stats['n_cells_target']}/{qc_stats['n_cells_total']} "
-              f"({qc_stats['n_cells_target']/qc_stats['n_cells_total']:.1%})")
+        logger.info("Target cell type: '%s'", qc_stats['target_celltype'])
+        logger.info("Target cells: %d/%d (%.1f%%)",
+                     qc_stats['n_cells_target'], qc_stats['n_cells_total'],
+                     qc_stats['n_cells_target'] / qc_stats['n_cells_total'] * 100)
     else:
-        print(f"Cells analyzed: {qc_stats['n_cells_total']}")
-    print(f"Strategy: {qc_stats['strategy']}")
-    print(f"Genes tested: {qc_stats['n_genes_tested']}")
-    print(f"Target cells without neighbors: {qc_stats['target_cells_without_neighbors']} "
-          f"({qc_stats['fraction_target_cells_without_neighbors']:.1%})")
-    print(f"Median neighbors per target cell: {qc_stats['median_neighbors_target']:.1f}")
-    print(f"{'='*60}\n")
+        logger.info("Cells analyzed: %d", qc_stats['n_cells_total'])
+    logger.info("Strategy: %s", qc_stats['strategy'])
+    logger.info("Genes tested: %d", qc_stats['n_genes_tested'])
+    logger.info("Target cells without neighbors: %d (%.1f%%)",
+                 qc_stats['target_cells_without_neighbors'],
+                 qc_stats['fraction_target_cells_without_neighbors'] * 100)
+    logger.info("Median neighbors per target cell: %.1f", qc_stats['median_neighbors_target'])
+    logger.info("=" * 60)
 
 
 # ============================================================================
@@ -556,7 +561,7 @@ def calculate_gex_diff_to_neighbors(
     # Compute differences
     if verbose:
         suffix = "_max" if strategy == "max" else ""
-        print(f"Computing gex_diff = gex_target - gex_neighbor{suffix} ...")
+        logger.info("Computing gex_diff = gex_target - gex_neighbor%s ...", suffix)
 
     X_dense = X.toarray() if sparse.issparse(X) else X
     if gene_indices is not None and len(gene_indices) < X.shape[1]:

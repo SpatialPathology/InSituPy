@@ -16,9 +16,9 @@ import zarr
 from anndata import AnnData
 from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
-from insitupy import WITH_NAPARI, __version__
+from insitupy._version import __version__
 from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
-                                 FORBIDDEN_ANNOTATION_NAMES, RED)
+                                 FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI)
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._io.files import (check_overwrite_and_remove_if_true,
                                 write_dict_to_json)
@@ -98,12 +98,15 @@ class ShapesData(DeepCopyMixin):
 
         if files is not None:
             # make sure files and keys are a list
-            assert keys is not None, "If `files` are given, also corresponding `keys` need to be given."
+            if keys is None:
+                raise ValueError("If `files` are given, also corresponding `keys` need to be given.")
             files = convert_to_list(files)
             keys = convert_to_list(keys)
-            assert len(files) == len(keys), "Number of files does not match number of keys."
+            if len(files) != len(keys):
+                raise ValueError("Number of files does not match number of keys.")
 
-            assert pixel_size is not None, "If files and `keys` are given, also `pixel_size` needs to be specified"
+            if pixel_size is None:
+                raise ValueError("If files and `keys` are given, also `pixel_size` needs to be specified")
 
             if files is not None:
                 for key, file in zip(keys, files):
@@ -173,17 +176,16 @@ class ShapesData(DeepCopyMixin):
 
         if len(annot_df.index.unique()) != len(annot_df.name.unique()):
             warnings.warn(
-                message=
-                (
                     f"The names of the {self._shape_name} for key '{key}' were not unique and thus "
                     f"the key was skipped. In regions only one geometry per class is allowed."
-                    f"To achieve this in the napari viewer select one layer per region and give each layer a unique name."
-                    )
+                    f"To achieve this in the napari viewer select one layer per region and give each layer a unique name.",
+                    UserWarning,
+                    stacklevel=2
                 )
             return False
         else:
             if verbose:
-                print(f"Names of {self._shape_name} for key '{key}' are unique.")
+                logger.info(f"Names of {self._shape_name} for key '{key}' are unique.")
             return True
 
     def add_data(self,
@@ -198,13 +200,13 @@ class ShapesData(DeepCopyMixin):
         new_df = parse_geopandas(data)
 
         if new_df is None:
-            print(f"Data for key '{key}' was empty. Skipped import.", flush=True)
+            logger.warning(f"Data for key '{key}' was empty. Skipped import.")
         else:
             if "name" not in new_df.columns:
                 new_df["name"] = ["None"] * len(new_df)
 
             if "color" not in new_df.columns:
-                warnings.warn("No 'color' column found in the imported data. Setting all colors to red.", stacklevel=2)
+                warnings.warn("No 'color' column found in the imported data. Setting all colors to red.", UserWarning, stacklevel=2)
                 new_df["color"] = [RED] * len(new_df)
 
             if self._forbidden_names is not None:
@@ -277,7 +279,7 @@ class ShapesData(DeepCopyMixin):
                     if in_napari:
                         _show_func = show_info
                     else:
-                        _show_func = print
+                        _show_func = logger.info
                     if new_geometries_added:
                         _show_func(f"Added {new_n - old_n} new {self._shape_name} to {existing_str}key '{key}'")
                     else:
@@ -304,7 +306,7 @@ class ShapesData(DeepCopyMixin):
         else:
             if (xlim is not None) and (ylim is not None):
                 if verbose:
-                    warnings.warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
+                    logger.warning("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
         keys_to_remove = []
         for key in list(_self._data.keys()):
@@ -344,7 +346,7 @@ class ShapesData(DeepCopyMixin):
             try:
                 del self._data[key_to_remove]
             except KeyError:
-                print(f"Key '{key_to_remove}' not found in ShapesData object. Nothing to remove.")
+                logger.warning(f"Key '{key_to_remove}' not found in ShapesData object. Nothing to remove.")
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
             geom_df = self[key_to_remove]
@@ -583,7 +585,7 @@ class BoundariesData(DeepCopyMixin):
         needs_nucleus_count = self._nucleus_count is None or overwrite
 
         if not needs_nucleus_map and not needs_nucleus_count:
-            print("nucleus_to_cell_map and nucleus_count are already set. No update needed.")
+            logger.info("nucleus_to_cell_map and nucleus_count are already set. No update needed.")
             return
 
         # Count unique cell and nucleus IDs in current boundaries (excluding background=0)
@@ -614,7 +616,7 @@ class BoundariesData(DeepCopyMixin):
                          f"a mismatch between the saved boundaries and the source Xenium data.")
 
                 self._nucleus_to_cell_map = nucleus_to_cell_map
-                print(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
+                logger.info(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
             except Exception as e:
                 warn(f"Could not read nucleus_to_cell_map from Xenium data: {e}")
 
@@ -630,7 +632,7 @@ class BoundariesData(DeepCopyMixin):
                              f"a mismatch between the saved boundaries and the source Xenium data.")
 
                     self._nucleus_count = nucleus_count
-                    print(f"Updated nucleus_count for {len(nucleus_count)} cells.")
+                    logger.info(f"Updated nucleus_count for {len(nucleus_count)} cells.")
                 else:
                     warn("nucleus_count not available in Xenium data.")
             except Exception as e:
@@ -747,7 +749,7 @@ class BoundariesData(DeepCopyMixin):
 
     def convert_to_shapely_objects(self):
         for n in self._metadata.keys():
-            print(f"Converting `{n}` to GeoPandas DataFrame with shapely objects.")
+            logger.info(f"Converting `{n}` to GeoPandas DataFrame with shapely objects.")
             # retrief dataframe with boundary coordinates
             df = self[n]
 
@@ -763,7 +765,7 @@ class BoundariesData(DeepCopyMixin):
                 # add to object
                 self._data[n] = pd.DataFrame(df)
             else:
-                print(f"Boundaries element `{n} was no Dataframe. Skipped.")
+                logger.warning(f"Boundaries element `{n}` was no Dataframe. Skipped.")
 
     def save(self,
              bound_file : Union[str, os.PathLike, Path] = "boundaries.zarr.zip",
@@ -915,17 +917,21 @@ class CellData(DeepCopyMixin):
 
     @property
     def matrix(self):
-        logger.warning(
+        warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
-            "Please use 'table' instead."
+            "Please use 'table' instead.",
+            DeprecationWarning,
+            stacklevel=2,
         )
         return self._table
 
     @matrix.setter
     def matrix(self, value: AnnData):
-        logger.warning(
+        warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
-            "Please use 'table' instead."
+            "Please use 'table' instead.",
+            DeprecationWarning,
+            stacklevel=2,
         )
         self._set_table(value=value, allow_partial_overlap=False)
 
@@ -1053,7 +1059,7 @@ class CellData(DeepCopyMixin):
         if shape is not None:
             if xlim is not None and ylim is not None:
                 if verbose:
-                    warnings.warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
+                    logger.warning("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
             # create shapely objects from cell coordinates
             cells = gpd.points_from_xy(cell_coords[:, 0], cell_coords[:, 1])
@@ -1226,7 +1232,8 @@ class CellData(DeepCopyMixin):
 
             if isinstance(cell_bounds, list):
                 if nuc_bounds is not None:
-                    assert isinstance (nuc_bounds, list), "Cellular boundaries are a image pyramid but nuclear boundaries are not. Both need to be of the same type for the synchronization to work."
+                    if not isinstance(nuc_bounds, list):
+                        raise TypeError("Cellular boundaries are a image pyramid but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
                 for i, cell_bound in enumerate(cell_bounds):
                     removed_cells_mask = da.isin(cell_bound, seg_mask_values_not_in_table)
                     cell_bound[removed_cells_mask] = 0 # set all removed cells 0
@@ -1234,7 +1241,8 @@ class CellData(DeepCopyMixin):
                         nuc_bounds[i][removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
             elif isinstance(cell_bounds, da.core.Array):
                 if nuc_bounds is not None:
-                    assert isinstance (nuc_bounds, da.core.Array), "Cellular boundaries are a dask array but nuclear boundaries are not. Both need to be of the same type for the synchronization to work."
+                    if not isinstance(nuc_bounds, da.core.Array):
+                        raise TypeError("Cellular boundaries are a dask array but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
                 # set all non existent cell ids to zero
                 removed_cells_mask = da.isin(cell_bounds, seg_mask_values_not_in_table)
                 cell_bounds[removed_cells_mask] = 0 # set all removed cells 0
@@ -1242,7 +1250,7 @@ class CellData(DeepCopyMixin):
                 if nuc_bounds is not None:
                     nuc_bounds[removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
             else:
-                warnings.warn(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
+                logger.warning(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
 
             summary = {
                 "had_boundaries": True,
@@ -1266,8 +1274,8 @@ class CellData(DeepCopyMixin):
 
             if verbose:
                 if n_removed_table > 0:
-                    print(f"Filtered out {n_removed_table} table entries not present in boundaries.", flush=True)
-                print(f"Filtered out {n_removed_boundaries} boundaries.", flush=True)
+                    logger.info(f"Filtered out {n_removed_table} table entries not present in boundaries.")
+                logger.info(f"Filtered out {n_removed_boundaries} boundaries.")
 
             if return_summary:
                 return summary
@@ -1288,7 +1296,7 @@ class CellData(DeepCopyMixin):
         self._table.obsm['spatial'] = cell_coords
 
         if self._boundaries is None:
-            print('No `boundaries` attribute found in CellData found.')
+            logger.warning('No `boundaries` attribute found in CellData found.')
         else:
             boundaries = self._boundaries
             for n in boundaries.metadata.keys():
@@ -1382,10 +1390,10 @@ class MultiCellData(DeepCopyMixin):
         try:
             return self._layers[self._main_key].table
         except KeyError:
-            print("MultiCellData object is empty.")
+            logger.warning("MultiCellData object is empty.")
             return None
         except AttributeError:
-            print("No matrix available.")
+            logger.warning("No matrix available.")
             return None
 
     @property
@@ -1394,10 +1402,10 @@ class MultiCellData(DeepCopyMixin):
         try:
             return self._layers[self._main_key].table
         except KeyError:
-            print("MultiCellData object is empty.")
+            logger.warning("MultiCellData object is empty.")
             return None
         except AttributeError:
-            print("No table available.")
+            logger.warning("No table available.")
             return None
 
     @property
@@ -1405,10 +1413,10 @@ class MultiCellData(DeepCopyMixin):
         try:
             return self._layers[self._main_key].boundaries
         except KeyError:
-            print("MultiCellData object is empty.")
+            logger.warning("MultiCellData object is empty.")
             return None
         except AttributeError:
-            print("No boundaries available.")
+            logger.warning("No boundaries available.")
             return None
 
     @property
@@ -1446,7 +1454,7 @@ class MultiCellData(DeepCopyMixin):
                     f"Key '{key}' already exists in MultiCellData. "
                     f"Set overwrite=True to replace it."
                 )
-            print(f"Overwriting '{key}' in MultiCellData.")
+            logger.info(f"Overwriting '{key}' in MultiCellData.")
         self._layers[key] = cd
         if is_main:
             self._main_key = key
@@ -1497,11 +1505,9 @@ class MultiCellData(DeepCopyMixin):
 
             # File-specific parameters are ignored for spatialdata input
             if any([counts_file, cell_metadata_file, polygons_file]):
-                import warnings
-                warnings.warn(
+                logger.warning(
                     "File-specific parameters (counts_file, cell_metadata_file, polygons_file) "
-                    "are ignored when reading from .zarr (SpatialData) format.",
-                    UserWarning
+                    "are ignored when reading from .zarr (SpatialData) format."
                 )
 
             # Read spatialdata from zarr
@@ -1589,7 +1595,7 @@ class MultiCellData(DeepCopyMixin):
 
         # Convert to Path object
         path = Path(path)
-        print(path)
+        logger.debug(path)
         # Legacy path-based input (directory with individual files)
         adata, boundaries_mask, cell_names, seg_mask_value = _read_baysor(path, xd,
             counts_file=counts_file, cell_metadata_file=cell_metadata_file,
@@ -1870,8 +1876,10 @@ class ImageData(DeepCopyMixin):
         """
         # Load image data
         if isinstance(image, da.core.Array) or isinstance(image, np.ndarray):
-            assert axes is not None, "If `image` is numpy or dask array, `axes` needs to be set."
-            assert pixel_size is not None, "If `image` is numpy or dask array, `pixel_size` needs to be set."
+            if axes is None:
+                raise ValueError("If `image` is numpy or dask array, `axes` needs to be set.")
+            if pixel_size is None:
+                raise ValueError("If `image` is numpy or dask array, `pixel_size` needs to be set.")
 
             try:
                 # convert to dask array before addition
@@ -1916,18 +1924,15 @@ class ImageData(DeepCopyMixin):
                         else:
                             channel_names = [ch.get('Name', f'Channel_{i}') for i, ch in enumerate(channels_info)]
 
-                        if verbose:
-                            print(f"Extracted channel names from OME metadata: {channel_names}")
+                        logger.info(f"Extracted channel names from OME metadata: {channel_names}")
                     except (KeyError, TypeError):
                         # Fallback to numbered channels
                         channel_names = [f'Channel_{i}' for i in range(n_channels)]
-                        if verbose:
-                            print(f"Could not extract channel names from OME metadata. Using: {channel_names}")
+                        logger.info(f"Could not extract channel names from OME metadata. Using: {channel_names}")
                 else:
                     # Fallback to numbered channels
                     channel_names = [f'Channel_{i}' for i in range(n_channels)]
-                    if verbose:
-                        print(f"No OME metadata available. Using channel names: {channel_names}")
+                    logger.info(f"No OME metadata available. Using channel names: {channel_names}")
 
             elif isinstance(channel_names, str):
                 raise ValueError(
@@ -1948,8 +1953,7 @@ class ImageData(DeepCopyMixin):
                 raise TypeError(f"`name` must be a string, list of strings, or None. Got: {type(channel_names)}")
 
             # Split channels and add each separately
-            if verbose:
-                print(f"Splitting multi-channel image into {n_channels} separate channels...")
+            logger.info(f"Splitting multi-channel image into {n_channels} separate channels...")
 
             for i, ch_name in enumerate(channel_names):
                 # Extract single channel
@@ -1990,8 +1994,7 @@ class ImageData(DeepCopyMixin):
                 if ome_meta and 'Image' in ome_meta:
                     try:
                         channel_names = ome_meta['Image'].get('Name', 'Image_0')
-                        if verbose:
-                            print(f"Extracted image name from OME metadata: {channel_names}")
+                        logger.info(f"Extracted image name from OME metadata: {channel_names}")
                     except (KeyError, TypeError):
                         channel_names = 'Image_0'
                 else:
@@ -2031,7 +2034,7 @@ class ImageData(DeepCopyMixin):
         # Check if name already exists
         if name in self._names:
             if not overwrite:
-                print(f"`ImageData` object contains already an image with name '{name}'. Image is not added.") if verbose else None
+                logger.info(f"`ImageData` object contains already an image with name '{name}'. Image is not added.")
                 return
             else:
                 # remove attribute with current name
@@ -2042,8 +2045,7 @@ class ImageData(DeepCopyMixin):
 
         # Apply transformation if provided
         if transformation_matrix is not None:
-            if verbose:
-                print(f"Applying transformation to image '{name}'...")
+            logger.info(f"Applying transformation to image '{name}'...")
 
             # Determine reference_pixel_size and output_size from reference_image if provided
             reference_pixel_size = None
@@ -2072,9 +2074,8 @@ class ImageData(DeepCopyMixin):
                     ref_width * reference_pixel_size
                 )
 
-                if verbose:
-                    print(f"Using reference image '{reference_image}' (pixel size: {reference_pixel_size} µm/pixel, "
-                          f"shape: {ref_height}x{ref_width} pixels = {output_size[0]:.1f}x{output_size[1]:.1f} µm)")
+                logger.info(f"Using reference image '{reference_image}' (pixel size: {reference_pixel_size} µm/pixel, "
+                            f"shape: {ref_height}x{ref_width} pixels = {output_size[0]:.1f}x{output_size[1]:.1f} µm)")
 
             # Create a temporary ImageData object to use the transform method
             temp_img_data = ImageData()
@@ -2165,8 +2166,7 @@ class ImageData(DeepCopyMixin):
 
             del self[name]  # Uses __delitem__
 
-            if verbose:
-                print(f"Removed image '{name}'")
+            logger.info(f"Removed image '{name}'")
 
     def load(self,
              which: Union[List[str], str] = "all"
@@ -2282,10 +2282,10 @@ class ImageData(DeepCopyMixin):
 
                 if max_resolution is not None:
                     if max_resolution == pixel_size:
-                        warnings.warn(f"`max_pixel_size` ({max_resolution}) equal to `pixel_size` ({pixel_size}). Skipped resizing.")
+                        logger.warning(f"`max_pixel_size` ({max_resolution}) equal to `pixel_size` ({pixel_size}). Skipped resizing.")
                         pass
                     if max_resolution < pixel_size:
-                        warnings.warn(f"`max_pixel_size` ({max_resolution}) smaller than `pixel_size` ({pixel_size}). Skipped resizing.")
+                        logger.warning(f"`max_pixel_size` ({max_resolution}) smaller than `pixel_size` ({pixel_size}). Skipped resizing.")
                         pass
                     else:
                         # downscale image
@@ -2293,8 +2293,7 @@ class ImageData(DeepCopyMixin):
                             img = img[0]
                         downscale_factor = max_resolution / pixel_size
 
-                        if verbose:
-                            print(f"Downscale image to {max_resolution} µm per pixel by factor {downscale_factor}")
+                        logger.info(f"Downscale image to {max_resolution} µm per pixel by factor {downscale_factor}")
                         img = resize_image(img, scale_factor=1/downscale_factor, axes=axes)
                         img = da.from_array(img)
 
@@ -2375,7 +2374,7 @@ class ImageData(DeepCopyMixin):
                     # check if file exists and handle overwrite
                     img_path = output_folder / filename
                     if img_path.exists() and not overwrite:
-                        warnings.warn(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
+                        logger.warning(f"Image '{name}' already exists at {img_path}. Skipping. Set `overwrite=True` to overwrite.")
                         continue
 
                     # retrieve image metadata for saving
@@ -2522,12 +2521,10 @@ class ImageData(DeepCopyMixin):
 
             M[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
             M[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
-            if verbose:
-                print(f"Converted transformation matrix from pixel coordinates "
-                      f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
+            logger.info(f"Converted transformation matrix from pixel coordinates "
+                        f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
 
-        if verbose:
-            print(f"Applying transformation matrix (in physical coordinates):\n{M}")
+        logger.info(f"Applying transformation matrix (in physical coordinates):\n{M}")
 
         # Apply transformation to each image
         for name in list(_self._metadata.keys()):
@@ -2565,8 +2562,7 @@ class ImageData(DeepCopyMixin):
                 h = img_to_transform.shape[img_axes.Y]
                 w = img_to_transform.shape[img_axes.X]
 
-            if verbose:
-                print(f"Transforming image '{name}' with shape {img_to_transform.shape} -> output size ({w}, {h})")
+            logger.info(f"Transforming image '{name}' with shape {img_to_transform.shape} -> output size ({w}, {h})")
 
             # Apply transformation based on image type (grayscale, RGB, or multichannel)
             if len(img_to_transform.shape) == 2:
@@ -2627,11 +2623,9 @@ class ImageData(DeepCopyMixin):
             else:
                 _self._metadata[name]["shape"] = transformed.shape
 
-            if verbose:
-                print(f"Transformed image '{name}'")
+            logger.info(f"Transformed image '{name}'")
 
-        if verbose:
-            print(f"Transformed {len(_self._metadata)} images.")
+        logger.info(f"Transformed {len(_self._metadata)} images.")
 
         if not inplace:
             return _self
@@ -2841,7 +2835,7 @@ class SpatialUnitsData(DeepCopyMixin):
             ])
         else:
             if xlim is not None and ylim is not None and verbose:
-                warnings.warn("Both shape and xlim/ylim provided. Using shape.")
+                logger.warning("Both shape and xlim/ylim provided. Using shape.")
             xlim = shape.bounds[0], shape.bounds[2]
             ylim = shape.bounds[1], shape.bounds[3]
 
@@ -2859,8 +2853,7 @@ class SpatialUnitsData(DeepCopyMixin):
             feature_names = _self._shapes.index.tolist()
             _self._data = _self._data[feature_names, :].copy()
 
-        if verbose:
-            print(f"Cropped to {len(_self._shapes)} features.")
+        logger.info(f"Cropped to {len(_self._shapes)} features.")
 
         if not inplace:
             return _self
@@ -2871,8 +2864,7 @@ class SpatialUnitsData(DeepCopyMixin):
         Keeps only units present in both.
         """
         if self._data is None:
-            if verbose:
-                print("No data to sync.")
+            logger.info("No data to sync.")
             return
 
         unit_names = set(self._shapes.index)
@@ -2885,8 +2877,7 @@ class SpatialUnitsData(DeepCopyMixin):
         # Filter data
         self._data = self._data[list(common_names), :].copy()
 
-        if verbose:
-            print(f"Synced to {len(common_names)} common features.")
+        logger.info(f"Synced to {len(common_names)} common features.")
 
     def transform(
         self,
@@ -2988,25 +2979,22 @@ class SpatialUnitsData(DeepCopyMixin):
 
             M[0, 2] *= reference_pixel_size  # Convert x offset: pixels → µm
             M[1, 2] *= reference_pixel_size  # Convert y offset: pixels → µm
-            if verbose:
-                print(f"Converted transformation matrix from pixel coordinates "
-                      f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
+            logger.info(f"Converted transformation matrix from pixel coordinates "
+                        f"(reference: {reference_pixel_size} µm/pixel) to physical coordinates.")
 
         # Apply transformation to geometries using shapely's affine_transform
         # Matrix format for shapely: [a, b, d, e, xoff, yoff]
         a, b, xoff = M[0, :]
         d, e, yoff = M[1, :]
 
-        if verbose:
-            print(f"Applying transformation (in physical coordinates): "
-                  f"a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
+        logger.info(f"Applying transformation (in physical coordinates): "
+                    f"a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
 
         _self._shapes["geometry"] = _self._shapes["geometry"].apply(
             lambda geom: affinity.affine_transform(geom, [a, b, d, e, xoff, yoff])
         )
 
-        if verbose:
-            print(f"Transformed {len(_self._shapes)} features.")
+        logger.info(f"Transformed {len(_self._shapes)} features.")
 
         if not inplace:
             return _self

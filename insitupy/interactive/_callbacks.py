@@ -1,4 +1,4 @@
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 if WITH_NAPARI:
     import math

@@ -1,3 +1,4 @@
+import logging
 import warnings
 from typing import Optional, Tuple
 
@@ -7,6 +8,8 @@ import pandas as pd
 
 from insitupy._core.data import InSituData
 from insitupy.dataclasses._utils import _get_cell_layer
+
+logger = logging.getLogger(__name__)
 
 
 def calc_distance_of_cells_from(
@@ -76,11 +79,11 @@ def calc_distance_of_cells_from(
     adata = celldata.table
 
     if region_tuple is None:
-        print(f'Calculate the distance of cells from the annotation "{annotation_name}"')
+        logger.info('Calculate the distance of cells from the annotation "%s"', annotation_name)
         region_mask = [True] * len(adata)
     else:
         region_key_resolved, region_name_resolved = region_tuple
-        print(f'Calculate the distance of cells from the annotation "{annotation_name}" within region "{region_name_resolved}"')
+        logger.info('Calculate the distance of cells from the annotation "%s" within region "%s"', annotation_name, region_name_resolved)
 
         try:
             region_df = adata.obsm["regions"]
@@ -123,4 +126,4 @@ def calc_distance_of_cells_from(
         adata.obsm["distance_from"] = pd.DataFrame(index=adata.obs_names)
 
     adata.obsm["distance_from"][key_to_save] = min_dists
-    print(f'Saved distances to `.cells[{cells_layer_name}].table.obsm["distance_from"]["{key_to_save}"]`')
+    logger.info('Saved distances to `.cells[%s].table.obsm["distance_from"]["%s"]`', cells_layer_name, key_to_save)

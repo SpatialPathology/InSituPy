@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Tuple
 
 import anndata as ad
@@ -9,6 +10,8 @@ from anndata import AnnData
 from insitupy.dataclasses.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.utils._helpers import suppress_output
+
+logger = logging.getLogger(__name__)
 
 
 def _obs_qc_plot(
@@ -123,7 +126,7 @@ def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
     after = pdata.shape[0]
 
     if verbose:
-        print(f"Filtered pseudobulk samples: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
+        logger.info("Filtered pseudobulk samples: %d removed, %d remaining (out of %d total).", before - after, after, before)
 
 def _verbose_filter_features(
     pdata: AnnData,
@@ -148,7 +151,7 @@ def _verbose_filter_features(
     after = pdata.shape[1]
 
     if verbose:
-        print(f"Filtered features: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
+        logger.info("Filtered features: %d removed, %d remaining (out of %d total).", before - after, after, before)
 
 
 def pseudobulk_dge(
@@ -200,7 +203,7 @@ def pseudobulk_dge(
 
     if plot_qc:
         # plot QC
-        print("Sample filtering QC:", flush=True)
+        logger.info("Sample filtering QC:")
         _obs_qc_plot(
             pdata=pdata, pdata_nb=pdata_nb,
             celltype_col=celltype_col,
@@ -221,7 +224,7 @@ def pseudobulk_dge(
 
     if plot_qc:
         # plot feature QC
-        print("Feature filtering QC:", flush=True)
+        logger.info("Feature filtering QC:")
         _feature_qc_plot(pdata_ct, condition_str=dge_setup[0])
 
     _verbose_filter_features(

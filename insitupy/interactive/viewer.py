@@ -1,4 +1,5 @@
-from insitupy import WITH_NAPARI, __version__
+from insitupy._version import __version__
+from insitupy._constants import WITH_NAPARI
 
 if WITH_NAPARI:
     import os

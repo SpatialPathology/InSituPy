@@ -1,3 +1,4 @@
+import logging
 from numbers import Number
 from typing import List, Literal, Optional, Tuple, Union
 from warnings import catch_warnings, filterwarnings, warn
@@ -15,6 +16,8 @@ from insitupy.plotting.volcano import single_volcano
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
+
+logger = logging.getLogger(__name__)
 
 DGE_COMPARISON_COLUMN = "DGE_COMPARISON_COLUMN"
 
@@ -172,7 +175,8 @@ def dge(
         # generate a list from ref_dta
         ref = [ref]
     elif isinstance(ref, list):
-        assert np.all([isinstance(elem, InSituData) for elem in ref]), "Not all elements of list given in `ref` are InSituData objects."
+        if not np.all([isinstance(elem, InSituData) for elem in ref]):
+            raise TypeError("Not all elements of list given in `ref` are InSituData objects.")
     else:
         raise ValueError("`ref` must be an InSituData object or a list of InSituData objects.")
 
@@ -229,14 +233,14 @@ def dge(
         duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
 
         if np.any(duplicated_mask):
-            print("Exclude ambiguously assigned cells...")
+            logger.info("Exclude ambiguously assigned cells...")
             # remove duplicated values
             adata_combined = adata_combined[~duplicated_mask].copy()
 
     # add column to .obs for its use in rank_genes_groups()
     #adata_combined.obs = adata_combined.obs.filter([dge_comparison_column]) # empty obs
 
-    print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}'.")
+    logger.info("Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '%s'.", method)
     sc.tl.rank_genes_groups(adata=adata_combined,
                             groupby=DGE_COMPARISON_COLUMN,
                             groups=["DATA"],

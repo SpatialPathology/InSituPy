@@ -55,7 +55,8 @@ class lowess:
 
     def predict(self, newdata, stderror=False, verbose=False, K=100, **kwargs):
         # make sure the fit() function was run before
-        assert self.fitted, "Values have not been fitted yet. Run .fit() first."
+        if not self.fitted:
+            raise RuntimeError("Values have not been fitted yet. Run .fit() first.")
 
         # regularly sample it onto the grid (statsmodel does not provide the solution on interpolated values)
         # for the statistics later it is important that the same grid of x values is used

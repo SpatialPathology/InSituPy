@@ -13,6 +13,22 @@ from collections import Counter
 from contextlib import contextmanager
 
 
+def setup_logging():
+    """Configure the insitupy package logger with a TqdmLoggingHandler."""
+    logger = logging.getLogger('insitupy')
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    # Only add handler if one doesn't exist yet
+    # Use TqdmLoggingHandler to prevent progress bar disruption from log messages
+    if not logger.handlers:
+        handler = TqdmLoggingHandler()
+        handler.setFormatter(
+            logging.Formatter('%(asctime)s | [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        )
+        logger.addHandler(handler)
+
+
 class TqdmLoggingHandler(logging.Handler):
     """
     Custom logging handler that uses tqdm.write() to output log messages.

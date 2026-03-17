@@ -1,5 +1,8 @@
+import logging
 import warnings
 from typing import Callable, List, Literal, Optional, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import dask.array as da
 import numpy as np
@@ -42,13 +45,13 @@ def _calc_kernel_density(
         except:
             raise ImportError("To calculate densities with the mellon package, please install it with `pip install mellon`.")
         if verbose:
-            print("Using Mellon density estimator.")
+            logger.info("Using Mellon density estimator.")
         # Fit and predict log density
         model = mellon.DensityEstimator()
         density = model.fit_predict(data)
     elif mode == "gauss":
         if verbose:
-            print("Using Gaussian KDE.")
+            logger.info("Using Gaussian KDE.")
         try:
             kde = gaussian_kde(data.T, bw_method="scott")
             density = kde(data.T)
@@ -58,8 +61,7 @@ def _calc_kernel_density(
             density[:] = np.nan
 
     else:
-        warnings.warn(f"Invalid mode '{mode}' provided. Please use 'gauss' or 'mellon'.")
-        return None
+        raise ValueError(f"Invalid mode '{mode}' provided. Please use 'gauss' or 'mellon'.")
 
     return density
 
@@ -169,7 +171,8 @@ def cohens_d(a, b, paired=False, correct_small_sample_size=True):
             d *= corr_factor
 
     else:
-        assert len(a) == len(b), "For paired testing the size of both samples needs to be equal."
+        if len(a) != len(b):
+            raise ValueError("For paired testing the size of both samples needs to be equal.")
         diff = np.array(a) - np.array(b)
         d = np.mean(diff) / np.std(diff)
 

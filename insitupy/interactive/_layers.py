@@ -1,4 +1,8 @@
-from insitupy import WITH_NAPARI
+import logging
+
+from insitupy._constants import WITH_NAPARI
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
     from numbers import Number
@@ -117,14 +121,14 @@ if WITH_NAPARI:
                 if shapes_layer_exists:
                     layer = viewer.layers[shapes_layer_name_with_symbol]
                     if uid in layer.properties["uid"]:
-                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
+                        logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
                         continue
 
             if annotation_type == "point_like":
                 if points_layer_exists:
                     layer = viewer.layers[points_layer_name_with_symbol]
                     if uid in layer.properties["uid"]:
-                        print(f"Already in layer: {uid}") if viewer_config.verbose else None
+                        logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
                         continue
 
             if annotation_type == "polygon_like":

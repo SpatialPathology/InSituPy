@@ -1,14 +1,17 @@
 import json
+import logging
 from math import ceil
 from pathlib import Path
 
 import anndata
 import pandas as pd
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils.utils import convert_int_to_xenium_hex
+
+logger = logging.getLogger(__name__)
 
 
 def _get_pixel_size_from_qupath_metadata(metadata, name):
@@ -26,7 +29,7 @@ def _list_insitupy_data_folders(
 
     # Check if the 'insitupy' folder exists
     if not data_path.exists():
-        print(f"No 'insitupy' folder found at {data_path}")
+        logger.warning(f"No 'insitupy' folder found at {data_path}")
         return dataset_paths
 
     # Iterate through the contents of the 'insitupy' folder
@@ -40,9 +43,9 @@ def _list_insitupy_data_folders(
                 dataset_paths[item.name] = subdirs
 
     # Print summary of folders and datasets found
-    print(f"Data folders found:")
+    logger.info(f"Data folders found:")
     for name, paths in dataset_paths.items():
-        print(f"\t- '{name}': {len(paths)} dataset(s)")
+        logger.info(f"\t- '{name}': {len(paths)} dataset(s)")
     return dataset_paths
 
 def _read_measurements_qupath(

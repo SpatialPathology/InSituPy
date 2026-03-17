@@ -148,7 +148,7 @@ def overview(
     list_transcript_count = []
     for _, data in data.iterdata():
         if data.cells.is_empty:
-            warnings.warn("Cells were not loaded. Loading cells.")
+            warnings.warn("Cells were not loaded. Loading cells.", UserWarning, stacklevel=2)
             data.load_cells()
 
         # get CellData

@@ -1,3 +1,4 @@
+import logging
 import textwrap
 
 import matplotlib.pyplot as plt
@@ -5,6 +6,8 @@ import numpy as np
 
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils.utils import check_list, get_nrows_maxcols
+
+logger = logging.getLogger(__name__)
 
 
 def go_plot(
@@ -152,10 +155,11 @@ def go_plot(
         # check if all libraries are in dataframe
         libs_available = enrichment['source'].unique()
         notin = [elem for elem in libraries if elem not in libs_available]
-        assert len(notin) == 0, (
-            f"Following libraries could not be found in the `source` column: {notin}\n"
-            f"Following libraries are possible: {libs_available}"
-        )
+        if len(notin) != 0:
+            raise ValueError(
+                f"Following libraries could not be found in the `source` column: {notin}\n"
+                f"Following libraries are possible: {libs_available}"
+            )
         # filter for libraries
         enrichment = enrichment[enrichment['source'].isin(libraries)].copy()
 
@@ -191,7 +195,7 @@ def go_plot(
                 cmax = None
                 cmin = None
         except KeyError:
-            print(f"color_key '{color_key}' not found in columns.")
+            logger.warning(f"color_key '{color_key}' not found in columns.")
 
     # Plotting
     if axis is None:
@@ -199,7 +203,8 @@ def go_plot(
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(figsize[0]*n_cols, figsize[1]*n_rows))
 
     else:
-        assert len(groups) == 1, "Enrichment dataframe contains more than one group in first index level 0."
+        if len(groups) != 1:
+            raise ValueError("Enrichment dataframe contains more than one group in first index level 0.")
         axs = axis
         n_plots = 1
         show = False
@@ -217,7 +222,7 @@ def go_plot(
                 try:
                     color = df[color_key]
                 except KeyError:
-                    print(f"color_key '{color_key}' not found in columns.")
+                    logger.warning(f"color_key '{color_key}' not found in columns.")
                     color = 'k'
             else:
                 color = 'k'

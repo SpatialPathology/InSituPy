@@ -12,7 +12,7 @@ import xmltodict
 import zarr
 from tifffile import TiffFile, TiffWriter, imread
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
@@ -378,7 +378,7 @@ def write_zarr(image, file,
                verbose: bool = False
                ):
     if verbose:
-        print(f"Saving image to {str(file)}")
+        logger.info(f"Saving image to {str(file)}")
 
     # get suffix
     file = Path(file)
@@ -502,7 +502,7 @@ def write_ome_tiff(
         ... )
     """
     if verbose:
-        print(f"Saving image to {str(file)}")
+        logger.info(f"Saving image to {str(file)}")
     # check if the image is an image pyramid
     if isinstance(image, list):
         # if it is a pyramid, select only the highest resolution image

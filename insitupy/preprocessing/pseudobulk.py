@@ -1,3 +1,4 @@
+import logging
 from numbers import Number
 from typing import List, Literal, Optional, Union
 
@@ -8,6 +9,8 @@ from insitupy._checks import try_import
 from insitupy.dataclasses._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 
 def get_neighborhood(
@@ -119,7 +122,8 @@ def neighborhoods_pseudobulk(
             )
 
         # make obs_names unique
-        assert pdata.shape[0] == 1, "Pseudobulk AnnData should have only one observation at this point."
+        if pdata.shape[0] != 1:
+            raise ValueError("Pseudobulk AnnData should have only one observation at this point.")
         pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}_neighbors"]
         #pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}"]
 
@@ -294,6 +298,6 @@ def _transfer_metadata(
             if col not in pdata.obs.columns:
                 pdata.obs[col] = meta[col]
             else:
-                print(f"Column '{col}' already exists in the pseudobulk AnnData.obs. Skipping transfer of this metadata column.")
+                logger.warning("Column '%s' already exists in the pseudobulk AnnData.obs. Skipping transfer of this metadata column.", col)
     return pdata
 

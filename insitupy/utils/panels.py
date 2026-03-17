@@ -1,8 +1,11 @@
+import logging
 import os
 from pathlib import Path
 
 import anndata
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class XeniumPanels:
@@ -22,7 +25,7 @@ class XeniumPanels:
             name = p.stem.split("_")[1]
             panel = pd.read_csv(p)
             setattr(self, name, panel)
-            print(name) if verbose else None
+            logger.debug(name) if verbose else None
 
             # make sure that the column names are correct
             panel.columns = ["Gene", "Ensembl_ID", "Coverage", "Codewords", "Annotation"]
@@ -34,7 +37,7 @@ class XeniumPanels:
         panel_list = [elem for elem in dir(self) if not elem.startswith("__")]
         panel_list = [elem for elem in panel_list if elem not in ["show_all"]]
         for p in panel_list:
-            print(p)
+            logger.info(p)
 
 
 def generate_mock_reference(

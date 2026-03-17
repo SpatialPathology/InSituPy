@@ -1,5 +1,6 @@
 
 import gc
+import logging
 import math
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple, Union
@@ -30,6 +31,8 @@ from insitupy.utils._colors import (_add_colorlegend_to_axis,
                                     create_cmap_mapping)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 FilterMode = Literal[
     "contains", "not contains", "starts with", "ends with",
@@ -490,7 +493,7 @@ class MultiSpatialPlot:
         )
 
     def setup_subplots(self):
-        print("Setup subplots.") if self.verbose else None
+        logger.info("Setup subplots.") if self.verbose else None
         self.add_legend_to_last_subplot = False
         if self.multidata:
             if self.multikeys:
@@ -682,7 +685,7 @@ class MultiSpatialPlot:
         return adata, sample_name, imagedata, regions, annotations
 
     def plot_to_subplots(self):
-        print("Do plotting.") if self.verbose else None
+        logger.info("Do plotting.") if self.verbose else None
         #i = 0
         for idx in range(self.n_data):
 
@@ -735,7 +738,7 @@ class MultiSpatialPlot:
                         # add_legend=add_legend,
                         )
                 else:
-                    print("Key '{}' not found.".format(key), flush=True)
+                    logger.warning("Key '{}' not found.".format(key))
                     ax.set_axis_off()
 
                 # free RAM
@@ -1001,8 +1004,10 @@ def plot_spatial_old(
     if plotter.ax is None:
         plotter.setup_subplots()
     else:
-        assert plotter.fig is not None, "If axis for plotting is given, also a figure object needs to be provided via `fig`"
-        assert len(plotter.keys) == 1, "If single axis is given not more than one key is allowed."
+        if plotter.fig is None:
+            raise ValueError("If axis for plotting is given, also a figure object needs to be provided via `fig`")
+        if len(plotter.keys) != 1:
+            raise ValueError("If single axis is given not more than one key is allowed.")
 
     plotter.plot_to_subplots()
 

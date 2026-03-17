@@ -317,7 +317,7 @@ def convert_from_spatialdata(
         _validate_image_data_format(image_data)
 
         if verbose:
-            print("Adding images...", flush=True)
+            logger.info("Adding images...")
         _add_images_to_insitudata(data, sdata, image_data, verbose)
 
     if cells_key:
@@ -329,7 +329,7 @@ def convert_from_spatialdata(
         if table_key is not None:
             if table_key in sdata:
                 if verbose:
-                    print("Adding cell data...", flush=True)
+                    logger.info("Adding cell data...")
             table = sdata[table_key]
             cell_names = np.array(table.obs_names)
 
@@ -352,7 +352,7 @@ def convert_from_spatialdata(
             cd = CellData(table=table, boundaries=boundaries)
             data.cells.add_celldata(cd=cd, key="main", is_main=True)
         elif verbose:
-            logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
+            logger.warning(f"Table key '{table_key}' not found in SpatialData")
 
     if units_key:
         data.add_units(
@@ -367,7 +367,7 @@ def convert_from_spatialdata(
     # LOAD TRANSCRIPTS
     if transcripts_key and transcripts_key in sdata:
         if verbose:
-            print("Adding transcripts...", flush=True)
+            logger.info("Adding transcripts...")
 
         # Rename coordinate columns lazily
         transcripts_df = sdata[transcripts_key]
@@ -386,6 +386,6 @@ def convert_from_spatialdata(
 
         data.transcripts = transcripts_df
     elif verbose and transcripts_key:
-        print(f"Warning: Transcripts key '{transcripts_key}' not found in SpatialData", flush=True)
+        logger.warning(f"Transcripts key '{transcripts_key}' not found in SpatialData")
 
     return data

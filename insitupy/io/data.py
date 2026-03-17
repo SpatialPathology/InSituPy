@@ -9,7 +9,7 @@ import dask.dataframe as dd
 import pandas as pd
 from shapely import affinity
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy._io._qupath import (_read_boundaries_qupath,
@@ -182,7 +182,7 @@ def read_xenium(
 
         # LOAD CELLS
         if verbose:
-            print("Loading cells...", flush=True)
+            logger.info("Loading cells...")
 
         # read celldata
         table = _read_table_from_xenium(path=data.path)
@@ -193,7 +193,7 @@ def read_xenium(
 
         # LOAD IMAGES
         if verbose:
-            print("Loading images...", flush=True)
+            logger.info("Loading images...")
         nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
         # In v2.0 the "mip" image was removed due to better focusing of the machine.
@@ -238,7 +238,7 @@ def read_xenium(
         # LOAD TRANSCRIPTS
         transcript_filename = "transcripts.parquet"
         if verbose:
-            print("Loading transcripts...", flush=True)
+            logger.info("Loading transcripts...")
 
         if transcript_mode == "pandas":
             transcript_dataframe = pd.read_parquet(data.path / transcript_filename)

@@ -8,7 +8,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 
 def _get_viewer_uid(viewer):

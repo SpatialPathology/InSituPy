@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass, field
@@ -8,6 +9,8 @@ from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 import pandas as pd
 import toml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -260,7 +263,7 @@ class DiffExprResults:
                     "Set `overwrite=True` to overwrite its contents."
                 )
             else:
-                print(f"Warning: Overwriting existing directory '{directory}'.")
+                logger.warning(f"Overwriting existing directory '{directory}'.")
                 shutil.rmtree(directory)
 
         directory.mkdir(exist_ok=True)

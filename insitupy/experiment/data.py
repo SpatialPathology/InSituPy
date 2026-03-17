@@ -358,9 +358,9 @@ class InSituExperiment:
         Returns:
             pandas.DataFrame: A copy of the metadata DataFrame.
         """
-        print(
-            f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
+        logger.warning(
+            "You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
+            "Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata."
         )
         return self._metadata.copy()
 
@@ -480,7 +480,8 @@ class InSituExperiment:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
         # checks whether dataset is an instance of InSituData or any subclass of it, and avoids issues with direct object identity comparison
-        assert dataset.__class__ is InSituData, f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
+        if dataset.__class__ is not InSituData:
+            raise TypeError(f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'")
 
         # Add the dataset to the data collection
         self._data.append(dataset)
@@ -993,7 +994,9 @@ class InSituExperiment:
             if len(subset) == 0:
                 warnings.warn(
                     f"No matching data found in `adata` for ID '{current_uid}'. "
-                    f"Skipping this dataset."
+                    f"Skipping this dataset.",
+                    UserWarning,
+                    stacklevel=2
                 )
                 continue
 
@@ -1027,7 +1030,9 @@ class InSituExperiment:
                     warnings.warn(
                         f"Partial match for dataset '{current_uid}': "
                         f"Only {n_matching}/{n_total} cells found. "
-                        f"Missing cells will be filled with NaN."
+                        f"Missing cells will be filled with NaN.",
+                        UserWarning,
+                        stacklevel=2
                     )
 
             # Transfer obs columns
@@ -1196,7 +1201,7 @@ class InSituExperiment:
                     try:
                         func()
                     except ModalityNotFoundError as err:
-                        print(err)
+                        logger.warning(str(err))
 
     def load_annotations(self):
         """Load annotations for all datasets."""
@@ -1602,7 +1607,7 @@ class InSituExperiment:
         # check overwrite
         check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
 
-        print(f"Saving InSituExperiment to {str(path)}") if verbose else None
+        logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
         if collect_warnings_mode:
             with collect_warnings() as collector:
@@ -1624,7 +1629,7 @@ class InSituExperiment:
         self.save_colors(path=path, overwrite=True)
         self.save_filters(path=path)
 
-        print("Saved.") if verbose else None
+        logger.info("Saved.") if verbose else None
 
     def save_filters(
         self,
@@ -1690,7 +1695,7 @@ class InSituExperiment:
                 elif modality == "regions":
                     repr_string += f"{tf.SPACER}   " + data._regions.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
 
-        print(repr_string)
+        logger.info(repr_string)
 
     def sync_colors(
         self,
@@ -1728,7 +1733,7 @@ class InSituExperiment:
 
             if is_numeric:
                 if verbose:
-                    print(f"Skipping sync_colors for numeric column '{obs_col}'.")
+                    logger.info(f"Skipping sync_colors for numeric column '{obs_col}'.")
                 continue
 
             if obs_col not in self.colors or overwrite:
@@ -1761,9 +1766,9 @@ class InSituExperiment:
                     self.colors[obs_col] = color_dict
 
                     if verbose:
-                        print(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+                        logger.info(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
             else:
-                print(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
+                logger.info(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
 
 
     @classmethod
@@ -2023,14 +2028,14 @@ class InSituExperiment:
         experiment._path = path
 
         # Read the SpatialData zarr store
-        print(f"Reading SpatialData from {path}...")
+        logger.info(f"Reading SpatialData from {path}...")
         # sdata = read_zarr(path)
         sdata = _silent_read_zarr(path)
 
         # Extract samples from the SpatialData object
         samples = cls._extract_samples_from_spatialdata(sdata)
 
-        print(f"Found {len(samples)} sample(s)")
+        logger.info(f"Found {len(samples)} sample(s)")
 
         # Create StructuredSpatialData for each sample
         for sample_id, sample_elements in tqdm(samples.items(), desc="Loading samples"):
@@ -2064,7 +2069,7 @@ class InSituExperiment:
                 with open(colors_path, 'r') as f:
                     experiment._colors = json.load(f)
             except Exception as e:
-                warnings.warn(f"Could not load colors.json: {e}")
+                logger.warning(f"Could not load colors.json: {e}")
 
         return experiment
 
@@ -2099,7 +2104,7 @@ class InSituExperiment:
         # If we have multi-sample data, remove the 'single' key
         if has_multi_sample and 'single' in samples:
             if len(samples['single']) > 0:
-                warnings.warn(
+                logger.warning(
                     "Found both multi-sample (with 'sample.' prefix) and single-sample elements. "
                     "Single-sample elements will be ignored."
                 )
@@ -2130,7 +2135,7 @@ class InSituExperiment:
                 parts = key.split('.')
 
             if len(parts) == 0:
-                warnings.warn(f"Could not parse key: {key}")
+                logger.warning(f"Could not parse key: {key}")
                 continue
 
             modality = parts[0]
@@ -2146,7 +2151,7 @@ class InSituExperiment:
                         scale_obj = get_transformation(elem)
                         struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
                     except Exception as e:
-                        warnings.warn(f"Could not add image {image_name}: {e}")
+                        logger.warning(f"Could not add image {image_name}: {e}")
 
             elif modality == "CELLS":
                 if len(parts) >= 2:
@@ -2181,7 +2186,7 @@ class InSituExperiment:
                     struct_data._regions[region_name] = elem
 
             else:
-                warnings.warn(f"Unknown modality in key: {key}")
+                logger.warning(f"Unknown modality in key: {key}")
 
     @staticmethod
     def _get_loaded_modalities_spatialdata(data) -> List[str]:
@@ -2355,7 +2360,7 @@ class InSituExperiment:
         # concatenate the obs dataframes
         all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
         if not all_obs.index.is_unique:
-            warnings.warn("Observation names are not unique across all datasets.")
+            logger.warning("Observation names are not unique across all datasets.")
 
     def _create_categorical_color_dict(
         self,
@@ -2412,7 +2417,7 @@ class InSituExperiment:
 
         for _, dataset in self.iterdata():
             if dataset.cells.is_empty:
-                warnings.warn("Cells were not loaded. Loading cells.")
+                logger.warning("Cells were not loaded. Loading cells.")
                 dataset.load_cells()
 
             celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)

@@ -37,9 +37,11 @@ def _generate_spatialdata_key(
         raise ValueError(f"Modality '{modality}' not recognized. Choose from {MODALITIES}.")
 
     if modality == "transcripts":
-        assert locator is None, "Locator must be None for modality 'transcripts'."
+        if locator is not None:
+            raise ValueError("Locator must be None for modality 'transcripts'.")
     else:
-        assert locator is not None, f"Locator cannot be None for modality '{modality}'."
+        if locator is None:
+            raise ValueError(f"Locator cannot be None for modality '{modality}'.")
 
     if sample_id is None:
         sample_part = ""
@@ -95,7 +97,7 @@ def _transform_anndata_for_spatialdata(
         try:
             cell_areas = adata.obs[cell_area_key].to_numpy()
         except KeyError:
-            print(f"Key '{cell_area_key}' not found in AnnData. Skipped generation of sized circles.")
+            logger.warning(f"Key '{cell_area_key}' not found in AnnData. Skipped generation of sized circles.")
             circles_sized = None
         else:
             radius = np.sqrt(cell_areas / np.pi)
@@ -341,7 +343,7 @@ def _merge_dicts_with_warning(*dicts):
     for d in dicts:
         for key in d:
             if key in seen_keys:
-                print(f"Warning: Duplicate key detected - '{key}'")
+                logger.warning(f"Duplicate key detected - '{key}'")
             seen_keys.add(key)
         merged.update(d)
     return merged
@@ -377,12 +379,12 @@ def _extract_pixel_size_from_spatialdata(
                 raise ValueError(f"Transformation type '{type(transform)}' not supported for pixel size extraction.")
 
             if verbose:
-                print(f"Extracted pixel size {ps} from '{element_to_extract_from}'", flush=True)
+                logger.info(f"Extracted pixel size {ps} from '{element_to_extract_from}'")
             return ps
 
         except Exception as e:
             if verbose:
-                print(f"Warning: Could not extract pixel size from '{element_to_extract_from}': {e}", flush=True)
+                logger.warning(f"Could not extract pixel size from '{element_to_extract_from}': {e}")
 
     else:
         raise ValueError(f"Element '{element_to_extract_from}' not found in SpatialData for pixel size extraction")
@@ -443,7 +445,7 @@ def _add_images_to_insitudata(
         is_rgb = image_tuple[2] if len(image_tuple) > 2 else False
         if key not in sdata:
             if verbose:
-                print(f"Warning: Image key '{key}' not found in SpatialData", flush=True)
+                logger.warning(f"Image key '{key}' not found in SpatialData")
             continue
         img_data = sdata[key]
         try:

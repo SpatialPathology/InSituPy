@@ -1,5 +1,6 @@
 
 import functools as ft
+import logging
 import os
 import shutil
 from copy import deepcopy
@@ -11,6 +12,8 @@ from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
+logger = logging.getLogger(__name__)
+
 import dask.dataframe as dd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -21,7 +24,7 @@ from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT,
                                  with_insitupy_style)
@@ -172,7 +175,8 @@ class InSituData:
             self._metadata = metadata
 
         # add method parameters
-        assert isinstance(method_params, dict), "`method_params` must be a dictionary."
+        if not isinstance(method_params, dict):
+            raise TypeError("`method_params` must be a dictionary.")
         self._metadata["method_params"] = method_params
 
         # modalities
@@ -307,7 +311,7 @@ class InSituData:
             if Path(self._path).exists():
                 return True
             else:
-                print(f"Path {str(self._path)} does not exist.")
+                logger.warning("Path %s does not exist.", self._path)
                 return False
         else:
             return False
@@ -327,7 +331,7 @@ class InSituData:
     @images.deleter
     def images(self):
         self._images = ImageData()
-        print("Cleared all data from 'images'.")
+        logger.info("Cleared all data from 'images'.")
 
     @property
     def cells(self):
@@ -344,7 +348,7 @@ class InSituData:
     @cells.deleter
     def cells(self):
         self._cells = MultiCellData()
-        print("Cleared all data from 'cells'.")
+        logger.info("Cleared all data from 'cells'.")
 
     @property
     def units(self):
@@ -361,7 +365,7 @@ class InSituData:
     @units.deleter
     def units(self):
         self._units = None
-        print("Cleared all data from 'units'.")
+        logger.info("Cleared all data from 'units'.")
 
     def add_units(self, data: SpatialUnitsData):
         """
@@ -393,7 +397,7 @@ class InSituData:
     @annotations.deleter
     def annotations(self):
         self._annotations = AnnotationsData()
-        print("Cleared all data from 'annotations'.")
+        logger.info("Cleared all data from 'annotations'.")
 
     @property
     def regions(self):
@@ -410,7 +414,7 @@ class InSituData:
     @regions.deleter
     def regions(self):
         self._regions = RegionsData()
-        print("Cleared all data from 'regions'.")
+        logger.info("Cleared all data from 'regions'.")
 
     @property
     def transcripts(self):
@@ -473,7 +477,7 @@ class InSituData:
 
         # iterate through annotation keys
         for key in keys:
-            print(f"Assigning key '{key}'...")
+            logger.info("Assigning key '%s'...", key)
             if key not in geom_attr.keys():
                 raise KeyError(f"Key '{key}' not found in {geometry_type}.")
 
@@ -521,7 +525,7 @@ class InSituData:
                 if col_name in celldata.table.obs:
                     if overwrite:
                         celldata.table.obs.drop(col_name, axis=1, inplace=True)
-                        print(f'Existing column "{col_name}" is overwritten.', flush=True)
+                        logger.warning('Existing column "%s" is overwritten.', col_name)
                         add = True
                     else:
                         warn(f'Column "{col_name}" exists already in `{name}.table.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
@@ -549,7 +553,7 @@ class InSituData:
                 # save that the current key was analyzed
                 geom_attr.metadata[key]["analyzed"] = tf.TICK
 
-                print(f"Added results to `{name}.table.obsm['{geometry_type}']", flush=True)
+                logger.info("Added results to `%s.table.obsm['%s']`", name, geometry_type)
 
 
     def assign_annotations(
@@ -756,7 +760,7 @@ class InSituData:
         # Transform images
         if not _self.images.is_empty:
             if verbose:
-                print("Transforming images...")
+                logger.info("Transforming images...")
             _self.images.transform(
                 transformation_matrix=transformation_matrix,
                 reference_pixel_size=reference_pixel_size,
@@ -769,7 +773,7 @@ class InSituData:
         # Transform units
         if _self.units is not None:
             if verbose:
-                print("Transforming units...")
+                logger.info("Transforming units...")
             _self.units.transform(
                 transformation_matrix=transformation_matrix,
                 reference_pixel_size=reference_pixel_size,
@@ -852,7 +856,7 @@ class InSituData:
 
         # Transform units
         if verbose:
-            print("Transforming and aligning spatial units...")
+            logger.info("Transforming and aligning spatial units...")
 
         units_to_add.transform(
             transformation_matrix=transformation_matrix,
@@ -866,12 +870,12 @@ class InSituData:
         self._units = units_to_add
 
         if verbose:
-            print("Spatial units aligned and added to InSituData object.")
+            logger.info("Spatial units aligned and added to InSituData object.")
 
         # Align images
         if transfer_images and not other.images.is_empty:
             if verbose:
-                print("Transforming and aligning images...")
+                logger.info("Transforming and aligning images...")
 
             images_to_add = other.images.copy()
             images_to_add.transform(
@@ -898,7 +902,7 @@ class InSituData:
                 )
 
             if verbose:
-                print("Images aligned and added to InSituData object.")
+                logger.info("Images aligned and added to InSituData object.")
 
     @with_insitupy_style
     def plot_dimred(self, save: Optional[str] = None):
@@ -949,7 +953,7 @@ class InSituData:
 
     def load_annotations(self, verbose: bool = False):
         if verbose:
-            print("Loading annotations...", flush=True)
+            logger.info("Loading annotations...")
         # try:
         #     p = self._metadata["data"]["annotations"]
         # except KeyError:
@@ -975,7 +979,7 @@ class InSituData:
                            verbose: bool = False
                            ):
         if verbose:
-            print("Importing annotations...", flush=True)
+            logger.info("Importing annotations...")
 
         # add annotations object
         files = convert_to_list(files)
@@ -999,7 +1003,7 @@ class InSituData:
 
     def load_regions(self, verbose: bool = False):
         if verbose:
-            print("Loading regions...", flush=True)
+            logger.info("Loading regions...")
         # try:
         #     p = self._metadata["data"]["regions"]
         # except KeyError:
@@ -1024,7 +1028,7 @@ class InSituData:
                     verbose: bool = False
                     ):
         if verbose:
-            print("Importing regions...", flush=True)
+            logger.info("Importing regions...")
 
         # add regions object
         files = convert_to_list(files)
@@ -1049,7 +1053,7 @@ class InSituData:
 
     def load_cells(self, verbose: bool = False):
         if verbose:
-            print("Loading cells...", flush=True)
+            logger.info("Loading cells...")
 
         if self.from_insitudata:
             # try:
@@ -1079,7 +1083,7 @@ class InSituData:
         ):
         # load image into ImageData object
         if verbose:
-            print("Loading images...", flush=True)
+            logger.info("Loading images...")
 
         if self.from_insitudata:
             # check if image data is stored in this InSituData
@@ -1117,7 +1121,7 @@ class InSituData:
                         ):
         # read transcripts
         if verbose:
-            print("Loading transcripts...", flush=True)
+            logger.info("Loading transcripts...")
 
         if self.from_insitudata:
             # # check if transcript data is stored in this InSituData
@@ -1153,7 +1157,7 @@ class InSituData:
                      ):
         # read units
         if verbose:
-            print("Loading spatial units...", flush=True)
+            logger.info("Loading spatial units...")
 
         if self.from_insitudata:
             # extract available paths
@@ -1257,7 +1261,8 @@ class InSituData:
             zippath = path / (path.stem + ".zip")
             check_overwrite_and_remove_if_true(path=zippath, overwrite=overwrite)
 
-        print(f"Saving data to {str(path)}") if verbose else None
+        if verbose:
+            logger.info("Saving data to %s", path)
 
         # create output directory if it does not exist yet
         path.mkdir(parents=True, exist_ok=True)
@@ -1351,7 +1356,8 @@ class InSituData:
         # # reload the modalities
         # self.reload(verbose=False)
 
-        print("Saved.") if verbose else None
+        if verbose:
+            logger.info("Saved.")
 
     def save(self,
              path: Optional[Union[str, os.PathLike, Path]] = None,
@@ -1383,7 +1389,7 @@ class InSituData:
 
         if path.exists():
             if verbose:
-                print(f"Saving to existing path: {str(path)}", flush=True)
+                logger.info("Saving to existing path: %s", path)
 
             # check if path is a valid directory
             if not path.is_dir():
@@ -1431,7 +1437,7 @@ class InSituData:
 
         else:
             if verbose:
-                print(f"Saving to new path: {str(path)}", flush=True)
+                logger.info("Saving to new path: %s", path)
 
             # save to the respective directory
             self.saveas(path=path)
@@ -1468,7 +1474,7 @@ class InSituData:
 
             # Tiled approach
             overlap = int(100 / pixel_size)
-            print(f"Quantification using tiled approach with overlap {overlap}...", flush=True)
+            logger.info("Quantification using tiled approach with overlap %d...", overlap)
             img_tiles = create_tiles(img, tile_size=tile_size, overlap=overlap)
             mask_tiles = create_tiles(mask, tile_size=tile_size, overlap=overlap)
 
@@ -1484,7 +1490,7 @@ class InSituData:
                 ))
 
             # extract measurements from tiled results
-            print("Collecting results...", flush=True)
+            logger.info("Collecting results...")
             measurements, cell_ids = summarize_tile_measurements(quant_results)
 
         name_mapping = dict(zip(
@@ -1499,7 +1505,7 @@ class InSituData:
         if add_to_obs:
             obs_col = f"{image_name}_signal_{cells_compartment}_{method}"
             cellsdata.table.obs[obs_col] = res_series
-            print(f"Added quantification results to `.cells['{cells_layer}'].table.obs['{obs_col}']`.", flush=True)
+            logger.info("Added quantification results to `.cells['%s'].table.obs['%s']`.", cells_layer, obs_col)
         else:
             return res_series
 
@@ -1514,7 +1520,7 @@ class InSituData:
 
         # save annotations
         if self._annotations.is_empty:
-            print("No annotations found. Quicksave skipped.", flush=True)
+            logger.warning("No annotations found. Quicksave skipped.")
         else:
             annotations = self._annotations
             # create filename
@@ -1577,7 +1583,7 @@ class InSituData:
         if len(files) == 1:
             ad = read_shapesdata(files[0] / "annotations", mode="annotations")
         elif len(files) == 0:
-            print(f"No quicksave with uid '{uid}' found. Use `.list_quicksaves()` to list all available quicksaves.")
+            logger.warning("No quicksave with uid '%s' found. Use `.list_quicksaves()` to list all available quicksaves.", uid)
         else:
             raise ValueError(f"More than one quicksave with uid '{uid}' found.")
 
@@ -1662,7 +1668,8 @@ class InSituData:
                     pass
 
         if len(loaded_modalities) > 0:
-            print(f"Reloading following modalities: {', '.join(loaded_modalities)}") if verbose else None
+            if verbose:
+                logger.info("Reloading following modalities: %s", ', '.join(loaded_modalities))
             for cm in loaded_modalities:
                 func = getattr(self, f"load_{cm}")
                 # For images, pass overwrite=True so that in-memory arrays are
@@ -1681,7 +1688,7 @@ class InSituData:
             import gc
             gc.collect()
         else:
-            print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
+            logger.warning("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
 
     def get_modality(self, modality: str):
         return getattr(self, modality)
@@ -1714,9 +1721,11 @@ class InSituData:
                 for d in dirs_to_remove:
                     shutil.rmtree(d)
 
-                print(f"Removed {len(dirs_to_remove)} entries from '.{cat}'.") if verbose else None
+                if verbose:
+                    logger.info("Removed %d entries from '.%s'.", len(dirs_to_remove), cat)
             else:
-                print(f"No history found for '{cat}'.") if verbose else None
+                if verbose:
+                    logger.info("No history found for '%s'.", cat)
 
     def remove_modality(self,
                         modality: str
@@ -1729,7 +1738,7 @@ class InSituData:
             self.metadata["data"].pop(modality, None) # returns None if key does not exist
 
         else:
-            print(f"No modality '{modality}' found. Nothing removed.")
+            logger.warning("No modality '%s' found. Nothing removed.", modality)
 
     def _update_to_existing_project(
         self,
@@ -1741,15 +1750,15 @@ class InSituData:
         overwrite_images: bool = False
         ):
         if verbose:
-            print(f"Updating project in {path}")
+            logger.info("Updating project in %s", path)
 
         # save images
         if sync_images and not self._images.is_empty:
             if verbose:
                 if overwrite_images:
-                    print("\tSyncing images (overwriting existing)...", flush=True)
+                    logger.info("Syncing images (overwriting existing)...")
                 else:
-                    print("\tSyncing images (saving new images only)...", flush=True)
+                    logger.info("Syncing images (saving new images only)...")
             img_path = path / "images"
             savepaths = self._images.save(
                 output_folder=img_path,
@@ -1772,7 +1781,7 @@ class InSituData:
             if not self._cells.is_empty:
                 cells = self._cells
                 if verbose:
-                    print("\tUpdating cells...", flush=True)
+                    logger.info("Updating cells...")
                 _save_cells(
                     cells=cells,
                     path=path,
@@ -1786,7 +1795,7 @@ class InSituData:
             if not self._annotations.is_empty:
                 annotations = self._annotations
                 if verbose:
-                    print("\tUpdating annotations...", flush=True)
+                    logger.info("Updating annotations...")
                 _save_annotations(
                     annotations=annotations,
                     path=path,
@@ -1797,7 +1806,7 @@ class InSituData:
             if not self._regions.is_empty:
                 regions = self._regions
                 if verbose:
-                    print("\tUpdating regions...", flush=True)
+                    logger.info("Updating regions...")
                 _save_regions(
                     regions=regions,
                     path=path,
@@ -1816,6 +1825,6 @@ class InSituData:
         write_dict_to_json(dictionary=self._metadata, file=xd_metadata_path)
 
         if verbose:
-            print("Saved.")
+            logger.info("Saved.")
 
 

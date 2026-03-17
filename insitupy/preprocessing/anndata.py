@@ -1,3 +1,4 @@
+import logging
 from typing import Literal, Optional
 
 import numpy as np
@@ -5,9 +6,11 @@ import scanpy as sc
 from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
-from insitupy import __version__
+from insitupy._version import __version__
 from insitupy._textformat import textformat as tf
 from insitupy.utils._checks import check_integer_counts
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_and_transform_anndata(
@@ -54,11 +57,11 @@ def normalize_and_transform_anndata(
             check_integer_counts(adata.X)
 
         # store raw counts in layer
-        print("Store raw counts in .layers['counts'].") if verbose else None
+        logger.info("Store raw counts in .layers['counts'].") if verbose else None
         counts = adata.X.copy()
         adata.layers['counts'] = counts
     else:
-        print(f"Retrieve raw counts from .layers['{layer}'].") if verbose else None
+        logger.info("Retrieve raw counts from .layers['%s'].", layer) if verbose else None
         if assert_integer_counts:
             # check if the matrix consists of raw integer counts
             check_integer_counts(adata.layers[layer])
@@ -67,7 +70,7 @@ def normalize_and_transform_anndata(
         adata.X = adata.layers[layer].copy()
 
     # preprocessing according to napari tutorial in squidpy
-    print(f"Normalization with target sum {target_sum}.") if verbose else None
+    logger.info("Normalization with target sum %s.", target_sum) if verbose else None
     sc.pp.normalize_total(adata, target_sum=target_sum)
 
     # make sure the matrix is saved as sparse array
@@ -77,7 +80,7 @@ def normalize_and_transform_anndata(
     adata.layers['norm_counts'] = adata.X.copy()
 
     # transform either using log transformation or square root transformation
-    print(f"Perform {transformation_method}-transformation.") if verbose else None
+    logger.info("Perform %s-transformation.", transformation_method) if verbose else None
     if transformation_method == "log1p":
         sc.pp.log1p(adata)
 
@@ -96,7 +99,7 @@ def normalize_and_transform_anndata(
 
 
     if scale:
-        print(f"Scale data.") if verbose else None
+        logger.info("Scale data.") if verbose else None
         adata.layers[f'{transformation_method}'] = adata.X.copy()
         sc.pp.scale(adata)
 
@@ -137,15 +140,15 @@ def reduce_dimensions_anndata(
         None: Modifies ``adata`` in place.
     """
     # dimensionality reduction
-    print("Calculate PCA...") if verbose else None
+    logger.info("Calculate PCA...") if verbose else None
     sc.pp.pca(adata)
 
     # calculate neighbors
-    print("Calculate neighbors...") if verbose else None
+    logger.info("Calculate neighbors...") if verbose else None
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
     # dimensionality reduction
-    print(f"Calculate {method}...") if verbose else None
+    logger.info("Calculate %s...", method) if verbose else None
     if method.lower() == "umap":
         sc.tl.umap(adata, **kwargs)
     elif method.lower() == "tsne":
@@ -177,10 +180,10 @@ def cluster_anndata(
     """
     # clustering
     if method.lower() == "leiden":
-        print("Leiden clustering...") if verbose else None
+        logger.info("Leiden clustering...") if verbose else None
         sc.tl.leiden(adata)
     elif method.lower() == "louvain":
-        print("Louvain clustering...") if verbose else None
+        logger.info("Louvain clustering...") if verbose else None
         sc.tl.louvain(adata)
     else:
         raise ValueError(f'`type` is not one of ["leiden", "louvain"]')

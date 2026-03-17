@@ -1,5 +1,6 @@
 
 import gc
+import logging
 import math
 import warnings
 from dataclasses import dataclass, field
@@ -31,6 +32,8 @@ from insitupy.utils._colors import (_add_colorlegend_to_axis,
                                     create_cmap_mapping)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 FilterMode = Literal[
     "contains", "not contains", "starts with", "ends with",
@@ -460,7 +463,7 @@ def _setup_subplots(
     layout_config: LayoutConfig,
     verbose: bool = False
     ):
-    print("Setup subplots.") if verbose else None
+    logger.info("Setup subplots.") if verbose else None
 
     fig, axs = plt.subplots(
         layout_config.n_rows, layout_config.n_cols,
@@ -502,7 +505,7 @@ def _plot_to_subplots(
     color_config,
     verbose: bool = False
 ):
-    print("Do plotting.") if verbose else None
+    logger.info("Do plotting.") if verbose else None
 
     if _is_experiment(data):
         n_data = len(data)
@@ -577,7 +580,7 @@ def _single_spatial(
     )
 
     if color_values is None:
-        print("Key '{}' not found.".format(key), flush=True)
+        logger.warning("Key '{}' not found.".format(key))
         ax.set_axis_off()
 
     else:
