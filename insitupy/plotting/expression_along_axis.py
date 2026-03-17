@@ -39,7 +39,7 @@ def cell_expression_along_axis(
     xlabel: Optional[str] = None,
     fit_reg: bool = False,
     kde: bool = False,
-    max_cols: bool = 4,
+    max_cols: int = 4,
     savepath: Union[str, os.PathLike, Path] = None,
     save_only: bool = False,
     dpi_save: int = 300,

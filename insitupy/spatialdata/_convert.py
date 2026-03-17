@@ -20,7 +20,7 @@ from xarray import DataArray
 from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
                                  MODALITIES, SAMPLE_STR)
 from insitupy._core.data import InSituData
-from insitupy.dataclasses import BoundariesData, CellData
+from insitupy.containers import BoundariesData, CellData
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
 

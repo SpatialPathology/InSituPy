@@ -507,95 +507,65 @@ def embedding(
     """
     Fast embedding plot using datashader for large datasets.
 
-    Parameters
-    ----------
-    adata
-        Annotated data matrix.
-    basis
-        Key in adata.obsm for coordinates (e.g., "X_umap", "X_pca").
-    keys
-        Key(s) for color encoding. Searches adata.obs first, then adata.var_names.
-        Can be single key or list of keys for multiple panels.
-    color
-        Deprecated. Use ``keys`` instead.
-    cmap
-        Colormap for continuous values. Default: "viridis".
-    vmin
-        Minimum value for continuous color scale. Default: data minimum.
-    vmax
-        Maximum value for continuous color scale. Default: data maximum.
-        Ignored if vmax_percentile is set.
-    vmax_percentile
-        Percentile (0-100) to use for vmax. Useful for clipping outliers.
-        E.g., 95 uses the 95th percentile as vmax. Overrides vmax if set.
-    point_size
-        Point size control.
-        For plotly/jscatter it sets marker size directly.
-        For datashader modes it controls pixel spreading (larger values make points appear thicker).
-    interactive
-        If True, return interactive plot.
-    interactive_backend
-        Backend for datashader interactive plots: "bokeh" or "matplotlib".
-        Ignored when render_mode="jscatter" or "plotly".
-    interactive_resolution
-        Pixel resolution for interactive plots (default: 800).
-    render_mode
-        Rendering mode for interactive plots:
-        - "datashader": Rasterized, fastest for static/overview
-        - "jscatter": WebGL vector, best for zooming/selection (Jupyter)
-        - "plotly": WebGL vector, works on clusters/remote servers
-    plotly_renderer
-        Plotly renderer to use (default: "notebook"). Options include:
-        "iframe", "notebook", "jupyterlab", "browser", "png", "svg".
-        Only used when render_mode="plotly".
-    tooltip
-        Column(s) to show in tooltip (jscatter only).
-    legend_mode
-        How to handle legends for categorical data:
-        - "full": Show all categories
-        - "truncate": Show max_categories, indicate remaining
-        - "separate": Create separate legend figure
-        - "none": No legend
-    legend_max_categories
-        Maximum categories to show when legend_mode="truncate".
-    legend_entries_per_col
-        Maximum legend entries per column.
-    title
-        Plot title. If None, uses color key.
-    figsize
-        Figure size (width, height) in inches.
-    ncols
-        Number of columns for multi-panel plots.
-    wspace
-        Horizontal spacing between subplots (fraction of subplot width).
-        Default: None (uses matplotlib default).
-    hspace
-        Vertical spacing between subplots (fraction of subplot height).
-        Default: None (uses matplotlib default).
-    show_tick_labels
-        Whether to show x/y tick labels. Default: False.
-    savepath
-        Path to save figure. If None, not saved.
-    save
-        Deprecated. Use ``savepath`` instead.
-    save_dpi
-        DPI used when saving figures. Default: 150.
-    show
-        Whether to show figure. Default: True.
-    return_fig
-        If True, return the figure object.
+    Args:
+        adata (ad.AnnData): Annotated data matrix.
+        basis (str): Key in adata.obsm for coordinates (e.g., "X_umap", "X_pca").
+        keys (str or Sequence[str], optional): Key(s) for color encoding. Searches
+            adata.obs first, then adata.var_names. Can be single key or list of keys
+            for multiple panels.
+        color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
+        cmap (str, optional): Colormap for continuous values. Default is "viridis".
+        vmin (float, optional): Minimum value for continuous color scale. Default is
+            data minimum.
+        vmax (float, optional): Maximum value for continuous color scale. Default is
+            data maximum. Ignored if vmax_percentile is set.
+        vmax_percentile (float, optional): Percentile (0-100) to use for vmax. Useful
+            for clipping outliers. E.g., 95 uses the 95th percentile as vmax. Overrides
+            vmax if set.
+        point_size (float): Point size control. For plotly/jscatter it sets marker size
+            directly. For datashader modes it controls pixel spreading (larger values make
+            points appear thicker). Default is 1.0.
+        interactive (bool): If True, return interactive plot. Default is False.
+        interactive_backend (str): Backend for datashader interactive plots: "bokeh" or
+            "matplotlib". Ignored when render_mode="jscatter" or "plotly".
+            Default is "bokeh".
+        interactive_resolution (int): Pixel resolution for interactive plots. Default is 800.
+        render_mode (str): Rendering mode for interactive plots: "datashader" (rasterized,
+            fastest for static/overview), "jscatter" (WebGL vector, best for
+            zooming/selection in Jupyter), or "plotly" (WebGL vector, works on
+            clusters/remote servers). Default is "datashader".
+        plotly_renderer (str, optional): Plotly renderer to use. Options include "iframe",
+            "notebook", "jupyterlab", "browser", "png", "svg". Only used when
+            render_mode="plotly". Default is "notebook".
+        tooltip (str or Sequence[str], optional): Column(s) to show in tooltip
+            (jscatter only).
+        legend_mode (str): How to handle legends for categorical data: "full" (show all
+            categories), "truncate" (show max_categories, indicate remaining), "separate"
+            (create separate legend figure), or "none" (no legend). Default is "full".
+        legend_max_categories (int): Maximum categories to show when
+            legend_mode="truncate". Default is 20.
+        legend_entries_per_col (int): Maximum legend entries per column. Default is 10.
+        title (str, optional): Plot title. If None, uses color key.
+        figsize (tuple[float, float], optional): Figure size (width, height) in inches.
+        ncols (int): Number of columns for multi-panel plots. Default is 3.
+        wspace (float, optional): Horizontal spacing between subplots (fraction of subplot
+            width). Default is None (uses matplotlib default).
+        hspace (float, optional): Vertical spacing between subplots (fraction of subplot
+            height). Default is None (uses matplotlib default).
+        show_tick_labels (bool): Whether to show x/y tick labels. Default is False.
+        savepath (str or Path, optional): Path to save figure. If None, not saved.
+        save (str or Path, optional): Deprecated. Use ``savepath`` instead.
+        save_dpi (int): DPI used when saving figures. Default is 150.
+        show (bool): Whether to show figure. Default is True.
+        return_fig (bool): If True, return the figure object. Default is False.
 
-    Returns
-    -------
-    Figure object if return_fig=True, else None.
-    For interactive mode with datashader, returns holoviews object.
-    For interactive mode with jscatter, returns Scatter widget(s).
-    For interactive mode with plotly, returns Figure or list of Figures.
+    Returns:
+        Figure object if return_fig=True, else None. For interactive mode with datashader,
+        returns holoviews object. For interactive mode with jscatter, returns Scatter
+        widget(s). For interactive mode with plotly, returns Figure or list of Figures.
 
-    Raises
-    ------
-    ImportError
-        If required optional dependencies are not installed.
+    Raises:
+        ImportError: If required optional dependencies are not installed.
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",
@@ -891,12 +861,10 @@ def umap(
     Wrapper around embedding() with basis="X_umap".
     See embedding() for full parameter documentation.
 
-    Parameters
-    ----------
-    keys
-        Key(s) for color encoding. Deprecated alias: ``color``.
-    color
-        Deprecated. Use ``keys`` instead.
+    Args:
+        keys (str or Sequence[str], optional): Key(s) for color encoding.
+            Deprecated alias: ``color``.
+        color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",

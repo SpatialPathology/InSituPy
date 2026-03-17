@@ -6,7 +6,7 @@ from anndata import AnnData
 
 from insitupy._core._checks import _check_assignment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)

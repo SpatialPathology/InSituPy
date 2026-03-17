@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.font_manager import FontProperties
 
-from insitupy.dataclasses.results import DiffExprConfigCollector
+from insitupy.containers.results import DiffExprConfigCollector
 
 TABLE_ROW_HEIGHT = 0.075
 

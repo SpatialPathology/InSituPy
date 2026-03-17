@@ -1,6 +1,6 @@
 from typing import Optional
 
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.utils._checks import _is_list_unique
 
 

@@ -11,7 +11,7 @@ from insitupy._version import __version__
 from insitupy._constants import WITH_NAPARI
 from insitupy._constants import FLUO_CMAP
 from insitupy._exceptions import InSituDataMissingObject
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.utils._helpers import _get_expression_values

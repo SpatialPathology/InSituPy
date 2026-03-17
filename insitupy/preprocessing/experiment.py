@@ -10,7 +10,7 @@ from insitupy._version import __version__
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing.anndata import (cluster_anndata,
                                             normalize_and_transform_anndata,

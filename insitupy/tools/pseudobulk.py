@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
+from insitupy.containers.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.utils._helpers import suppress_output
 

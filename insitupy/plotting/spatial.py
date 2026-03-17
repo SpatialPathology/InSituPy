@@ -21,8 +21,8 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.dataclasses import (AnnotationsData, ImageData,
                                               RegionsData)
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
@@ -282,83 +282,43 @@ def spatial(
     It supports categorical and continuous features, overlays images and annotations, and provides flexible configuration
     for plotting, layout, and saving.
 
-    Parameters
-    ----------
-    Main
-        data : InSituData or InSituExperiment
-            Input dataset or experiment.
-        keys : str or list of str
-            Feature key(s) to plot (e.g., gene names or annotations).
-        cells_layer : str, optional
-            Name of the cell layer to extract data from.
-        layer : str, optional
-            AnnData layer to extract values from.
-        region_tuple : tuple of (str, str), optional
-            Region identifier (dataset key, region name).
-        annotation_tuple : tuple of (str, str or list of str), optional
+    Args:
+        data (InSituData or InSituExperiment): Input dataset or experiment.
+        keys (str or list of str): Feature key(s) to plot (e.g., gene names or annotations).
+        cells_layer (str, optional): Name of the cell layer to extract data from.
+        layer (str, optional): AnnData layer to extract values from.
+        region_tuple (tuple of (str, str), optional): Region identifier (dataset key, region name).
+        annotation_tuple (tuple of (str, str or list of str), optional):
             Annotation overlay specifier as ``(key, name)`` where ``key`` is the
             annotation category and ``name`` is the specific annotation class (or
             a list of classes) to overlay. Pass just the key as a plain string to
             overlay all classes in that category.
-        annotations_key : tuple or str, optional
-            Deprecated. Use ``annotation_tuple`` instead.
-        image_key : str, optional
-            Key for associated images to overlay.
-        filter_mode : str, optional
-            Mode used for filtering cells (e.g., "contains", "greater than").
-        filter_tuple : tuple, optional
-            Parameters for filtering (depends on ``filter_mode``).
+        annotations_key (tuple or str, optional): Deprecated. Use ``annotation_tuple`` instead.
+        image_key (str, optional): Key for associated images to overlay.
+        filter_mode (str, optional): Mode used for filtering cells (e.g., "contains", "greater than").
+        filter_tuple (tuple, optional): Parameters for filtering (depends on ``filter_mode``).
+        xlim (tuple of float, optional): X-axis limits.
+        ylim (tuple of float, optional): Y-axis limits.
+        spot_size (float): Marker size for cells. Default is 10.
+        alpha (float): Transparency for plotted markers. Default is 1.0.
+        max_cols (int, optional): Maximum number of subplot columns. Default is 4.
+        savepath (str, optional): Path to save the figure (if None, figure is not saved).
+        save_only (bool): If True, save figure without displaying. Default is False.
+        dpi_save (int): Resolution in DPI for saving the figure. Default is 300.
+        show (bool): Whether to display the plot. Default is True.
+        plot_config (PlotConfig, optional): Plot configuration object (overrides defaults if provided).
+        layout_config (LayoutConfig, optional): Layout configuration object (overrides defaults if provided).
+        data_config (DataConfig, optional): Data configuration object (overrides defaults if provided).
+        verbose (bool): If True, print progress messages. Default is False.
 
-    Plotting
-        xlim : tuple of float, optional
-            X-axis limits.
-        ylim : tuple of float, optional
-            Y-axis limits.
-        spot_size : float, default=10
-            Marker size for cells.
-        alpha : float, default=1.0
-            Transparency for plotted markers.
+    Returns:
+        None: Displays and/or saves the generated spatial plot(s).
 
-    Layout
-        max_cols : int, optional, default=4
-            Maximum number of subplot columns.
+    Raises:
+        ValueError: If filter parameters or layout arguments are invalid.
+        ValueError: If mixed categorical and continuous values are encountered for a key.
 
-    Save
-        savepath : str, optional
-            Path to save the figure (if None, figure is not saved).
-        save_only : bool, default=False
-            If True, save figure without displaying.
-        dpi_save : int, default=300
-            Resolution in DPI for saving the figure.
-        show : bool, default=True
-            Whether to display the plot.
-
-    Configuration
-        plot_config : PlotConfig, optional
-            Plot configuration object (overrides defaults if provided).
-        layout_config : LayoutConfig, optional
-            Layout configuration object (overrides defaults if provided).
-        data_config : DataConfig, optional
-            Data configuration object (overrides defaults if provided).
-
-    Miscellaneous
-        verbose : bool, default=False
-            If True, print progress messages.
-
-    Returns
-    -------
-    None
-        Displays and/or saves the generated spatial plot(s).
-
-    Raises
-    ------
-    ValueError
-        If filter parameters or layout arguments are invalid.
-    ValueError
-        If mixed categorical and continuous values are encountered for a key.
-
-    Examples
-    --------
+    Examples:
     >>> import insitupy as isp
     >>> isp.pl.spatial(data, keys="GeneA")
     >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")

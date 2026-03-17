@@ -99,8 +99,8 @@ def test_spatial_smoke_calls_subplot_pipeline(monkeypatch):
     monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
     monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", _DummyColorConfig)
     monkeypatch.setattr(spatial_module.LayoutConfig, "calc_subplot_params", _fake_calc_subplot_params)
-    monkeypatch.setattr(spatial_module, "setup_subplots", _fake_setup_subplots)
-    monkeypatch.setattr(spatial_module, "plot_to_subplots", _fake_plot_to_subplots)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", _fake_plot_to_subplots)
     monkeypatch.setattr(spatial_module, "save_and_show_figure", _fake_save_and_show_figure)
 
     spatial_module.spatial(data=object(), keys=["gene_a"], show=False)

@@ -123,7 +123,7 @@ def _read_boundaries_qupath(
     xshift, yshift,
     pixel_size
     ):
-    from insitupy.dataclasses.dataclasses import BoundariesData
+    from insitupy.containers.dataclasses import BoundariesData
 
     bound_path = Path(bound_path)
 

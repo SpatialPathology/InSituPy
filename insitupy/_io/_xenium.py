@@ -15,7 +15,7 @@ from scipy.sparse import csr_matrix
 from zarr.errors import ArrayNotFoundError
 
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy.dataclasses.dataclasses import BoundariesData
+from insitupy.containers.dataclasses import BoundariesData
 from insitupy.images.io import _get_zarr_store
 from insitupy.images.utils import _efficiently_resize_array
 from insitupy.utils.utils import (convert_int_to_xenium_hex,

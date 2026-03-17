@@ -35,11 +35,11 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                 write_dict_to_json)
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.dataclasses import (AnnotationsData, ImageData,
                                               MultiCellData, RegionsData,
                                               SpatialUnitsData)
-from insitupy.dataclasses.io import (_save_annotations, _save_cells,
+from insitupy.containers.io import (_save_annotations, _save_cells,
                                      _save_images, _save_regions,
                                      _save_transcripts, _save_units,
                                      _read_multicelldata, _read_shapesdata)
@@ -1245,12 +1245,26 @@ class InSituData:
             images_max_resolution: Optional[Number] = None, # in µm per pixel
             verbose: bool = True
             ):
-        '''
-        Function to save the InSituData object.
+        """Save the InSituData object to a new directory.
+
+        Writes all modalities (images, cells, transcripts, spatial units,
+        annotations, regions) and metadata to ``path``.  Use this method
+        when you want to create a new, standalone copy of the dataset.
 
         Args:
-            path: Path to save the data to.
-        '''
+            path: Destination directory for the saved project.
+            overwrite: If True, remove ``path`` first if it already exists.
+            zip_output: If True, compress the output directory into a
+                ``.zip`` archive and delete the uncompressed directory.
+            images_as_zarr: If True, save images in zarr format.  If False,
+                images are saved as TIFF files.
+            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
+            images_max_resolution: Maximum spatial resolution for saved images,
+                in micrometers per pixel.  Images with finer resolution are
+                downsampled.  If None, images are saved at their original
+                resolution.
+            verbose: If True, log progress messages.
+        """
         # check if the path already exists
         path = Path(path)
 
@@ -1368,7 +1382,29 @@ class InSituData:
              images_only: bool = False,
              overwrite_images: bool = False
              ):
+        """Save the InSituData object to an existing InSituPy project or a new path.
 
+        If no ``path`` is given, the object is saved back to the project it was
+        loaded from.  When a ``path`` is provided and does not yet exist, the
+        data is written to a new directory via :meth:`saveas`.  When ``path``
+        points to an existing InSituPy project whose UID matches, only the
+        changed components are updated in place.
+
+        Args:
+            path: Destination directory.  If None, saves to the original project
+                path. Raises ``RuntimeError`` when no project is linked and
+                ``path`` is None.
+            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
+            verbose: If True, log progress messages.
+            keep_history: If True, retain the undo-history snapshots that are
+                normally cleaned up after saving.
+            sync_images: If True, synchronize images on disk with the current
+                in-memory state (e.g. after adding or removing image layers).
+            images_only: If True, only synchronize images (implies
+                ``sync_images=True``).  All other modalities are skipped.
+            overwrite_images: If True, overwrite existing image files on disk
+                when synchronizing images.
+        """
         # check path
         if path is not None:
             path = Path(path)

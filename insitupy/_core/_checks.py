@@ -1,7 +1,7 @@
 import logging
 from typing import Literal
 
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 
 logger = logging.getLogger(__name__)
 

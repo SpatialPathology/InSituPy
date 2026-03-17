@@ -9,7 +9,7 @@ from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
 from insitupy._constants import with_insitupy_style
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import _calculate_single_metrics

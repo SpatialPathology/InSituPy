@@ -11,7 +11,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.font_manager import FontProperties
 
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.plotting.save import save_and_show_figure
 
 

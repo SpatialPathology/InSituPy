@@ -15,7 +15,7 @@ from insitupy._constants import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, with_insitupy_style
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
 from insitupy.plotting.save import save_and_show_figure
@@ -426,12 +426,60 @@ def cellular_composition(
     dpi_save: int = 300,
     ):
 
-    """
-    Plots the composition of cell types for specified regions or annotations.
+    """Plot the composition of cell types for specified regions or annotations.
 
-    This function generates pie charts or a single stacked bar plot to visualize the proportions of different cell types
-    within specified regions or annotations. It can optionally save the plot to a file and
-    return the composition data.
+    Generates stacked bar plots to visualize the proportions of different
+    cell types within specified regions or annotations. Can optionally save
+    the plot to a file and return the underlying composition data.
+
+    Args:
+        data: An InSituData or InSituExperiment object containing the
+            cell-level data to plot.
+        cell_type_col: Column name in ``.obs`` of the AnnData table that
+            holds cell-type labels.
+        cell_type_values: Subset of cell types to include.  All other
+            types are aggregated into an "Others" category.  If None,
+            all cell types are shown.
+        cells_layer: Key of the cell segmentation layer to use when
+            multiple layers are available. If None, the main layer is
+            used.
+        mask_col: Boolean column in ``.obs`` used to filter cells before
+            computing composition.  If None, all cells are included.
+        geom_key: Key within the selected modality (regions or
+            annotations) to group cells by.  If None, the overall
+            composition is shown without spatial grouping.
+        geom_values: Subset of geometry classes to include when
+            ``geom_key`` is set.  If None, all classes are shown.
+        modality: Which spatial modality to use for grouping cells.
+            Required when ``geom_key`` is not None.  Must be
+            ``"regions"`` or ``"annotations"``.
+        plot_type: Type of bar plot.  ``"bar"`` for vertical bars,
+            ``"barh"`` for horizontal bars.
+        groupby: Column name in InSituExperiment metadata used to
+            identify individual datasets (x-axis labels).
+        normalize: If True, show percentages (0--100).  If False, show
+            absolute counts.
+        force_assignment: If True, force re-assignment of cells to the
+            selected geometry even if assignments already exist.
+        max_cols: Maximum number of subplot columns.
+        aspect_factor: Scaling factor applied to the subplot width (for
+            ``"bar"``) or height (for ``"barh"``).
+        legend_max_per_col: Maximum number of legend entries per column.
+            ``"auto"`` chooses 10 for vertical bars and 5 for horizontal
+            bars.
+        savepath: File path to save the figure.  If None, the figure is
+            only displayed.
+        palette: Color palette for cell types.  Accepts a
+            ``ListedColormap``, a list of color strings, a dict mapping
+            cell-type names to colors, or None to use the default palette.
+        return_data: If True, return the composition DataFrame after
+            plotting.
+        save_only: If True, save the figure without displaying it.
+        dpi_save: Resolution in dots per inch for the saved figure.
+
+    Returns:
+        pd.DataFrame or None: The composition DataFrame when
+            ``return_data=True``, otherwise None.
     """
     if palette is None:
         palette_is_dict = False

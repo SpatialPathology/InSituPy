@@ -14,7 +14,7 @@ import numpy as np
 
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses import CellData, SpatialUnitsData
+from insitupy.containers import CellData, SpatialUnitsData
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata, _create_boundaries_from_spatialdata,
     _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,

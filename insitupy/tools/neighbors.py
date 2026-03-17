@@ -461,58 +461,45 @@ def calculate_gex_diff_to_neighbors(
     Identifies potential spatial contamination by comparing each cell's gene expression
     to its spatial neighborhood using either mean or maximum neighbor expression.
 
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data object containing spatial coordinates and gene expression.
-    radius : Number, default=20.0
-        Radius in coordinate units for defining spatial neighbors.
-    obs_key : str, default="spatial"
-        Key in adata.obsm containing spatial coordinates.
-    celltype_tuple : Tuple[str, str], optional
-        Tuple specifying (celltype_col, celltype) to filter by cell type.
-    exclude_self : bool, default=True
-        Whether to exclude the cell itself from its neighborhood.
-    strategy : {"mean", "max"}, default="mean"
-        Strategy for computing neighbor expression:
-        - "mean": Compare to mean of all neighbors
-        - "max": Compare to maximum expression across neighbors per gene
-    method : {"wilcoxon", "t-test"}, default="wilcoxon"
-        Statistical test to use.
-    test : {"wilcoxon", "t-test"}, optional
-        Deprecated. Use ``method`` instead.
-    correction_method : str, default="fdr_bh"
-        Multiple testing correction method.
-    min_cells : Number, default=3
-        Minimum number of cells required for a valid test.
-    genes_subset : List[str], optional
-        List of gene names to analyze.
-    use_distance_weighting : bool, default=False
-        Weight neighbor contributions by inverse distance (only for mean strategy).
-    exclude_zeros_from_max : bool, default=True
-        Exclude zero values when computing maximum (only for max strategy).
-        Zeros cannot be contamination sources.
-    batch_size : int, optional
-        Process genes in batches to reduce memory usage.
-    verbose : bool, default=True
-        Print progress messages.
+    Args:
+        adata (AnnData): Annotated data object containing spatial coordinates and gene
+            expression.
+        radius (Number): Radius in coordinate units for defining spatial neighbors.
+            Default is 20.0.
+        obs_key (str): Key in adata.obsm containing spatial coordinates.
+            Default is "spatial".
+        celltype_tuple (Tuple[str, str], optional): Tuple specifying (celltype_col,
+            celltype) to filter by cell type.
+        exclude_self (bool): Whether to exclude the cell itself from its neighborhood.
+            Default is True.
+        strategy (str): Strategy for computing neighbor expression: "mean" (compare to
+            mean of all neighbors) or "max" (compare to maximum expression across
+            neighbors per gene). Default is "mean".
+        method (str): Statistical test to use: "wilcoxon" or "t-test".
+            Default is "wilcoxon".
+        test (str, optional): Deprecated. Use ``method`` instead.
+        correction_method (str): Multiple testing correction method. Default is "fdr_bh".
+        min_cells (Number): Minimum number of cells required for a valid test.
+            Default is 3.
+        genes_subset (List[str], optional): List of gene names to analyze.
+        use_distance_weighting (bool): Weight neighbor contributions by inverse distance
+            (only for mean strategy). Default is False.
+        exclude_zeros_from_max (bool): Exclude zero values when computing maximum (only
+            for max strategy). Zeros cannot be contamination sources. Default is True.
+        batch_size (int, optional): Process genes in batches to reduce memory usage.
+        verbose (bool): Print progress messages. Default is True.
 
-    Returns
-    -------
-    results : pd.DataFrame
-        Per-gene statistics with contamination metrics.
-        Columns depend on strategy:
-        - For "mean": mean_neighbor, log2foldchange, log2foldchange_unpaired
-        - For "max": mean_neighbor_max, log2foldchange, log2foldchange_unpaired
-    adjacency_matrix : sparse.csr_matrix
-        Neighbor adjacency matrix.
-    diff_matrix : np.ndarray
-        Per-cell gene expression differences.
-    qc_stats : dict
-        Quality control statistics.
+    Returns:
+        tuple: A tuple containing:
+            - results (pd.DataFrame): Per-gene statistics with contamination metrics.
+              Columns depend on strategy: for "mean" includes mean_neighbor,
+              log2foldchange, log2foldchange_unpaired; for "max" includes
+              mean_neighbor_max, log2foldchange, log2foldchange_unpaired.
+            - adjacency_matrix (sparse.csr_matrix): Neighbor adjacency matrix.
+            - diff_matrix (np.ndarray): Per-cell gene expression differences.
+            - qc_stats (dict): Quality control statistics.
 
-    Examples
-    --------
+    Examples:
     # Mean strategy (default)
     results, A, diffs, qc = calculate_gex_diff_to_neighbors(
         adata,

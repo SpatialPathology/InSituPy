@@ -112,7 +112,7 @@ def _safe_get_members(obj, predicate=None):
 # NOTE: The preferred long-term fix is to add missing imports to insitupy/__init__.py
 # so that __all__ is consistent with the top-level namespace.
 _ALL_SUBMODULE_SEARCH_PATHS = [
-    "insitupy.dataclasses.dataclasses",
+    "insitupy.containers.dataclasses",
     "insitupy.palettes",
     "insitupy.io.data",
     "insitupy.tools.dge",
@@ -209,7 +209,7 @@ def list_classes(module_path: str) -> str:
     """List all classes defined in a given module.
 
     Args:
-        module_path: Fully qualified module path (e.g. "insitupy.dataclasses.dataclasses")
+        module_path: Fully qualified module path (e.g. "insitupy.containers.dataclasses")
                      or relative to insitupy (e.g. "dataclasses.dataclasses").
 
     Returns:
@@ -1201,7 +1201,7 @@ def get_result_types() -> str:
     lines.append("## DiffExprResults")
     lines.append("Returned by: ispy.tl.dge(), InSituExperiment.dge()\n")
     try:
-        from insitupy.dataclasses.results import DiffExprResults as _DER
+        from insitupy.containers.results import DiffExprResults as _DER
 
         doc = inspect.getdoc(_DER)
         if doc:

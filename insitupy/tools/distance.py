@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 
 logger = logging.getLogger(__name__)
 

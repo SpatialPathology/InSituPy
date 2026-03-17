@@ -9,8 +9,8 @@ import pandas as pd
 import scanpy as sc
 
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.plotting.volcano import single_volcano
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors

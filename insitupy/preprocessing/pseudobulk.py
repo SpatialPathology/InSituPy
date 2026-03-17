@@ -6,7 +6,7 @@ import anndata as ad
 from sklearn.neighbors import radius_neighbors_graph
 
 from insitupy._checks import try_import
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils.utils import convert_to_list
 

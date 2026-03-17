@@ -111,7 +111,7 @@ def reduce_dimensions_anndata(
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
     n_pcs: int = 0,
-    verbose: bool = True,
+    verbose: bool = False,
     **kwargs
     ) -> None:
     """
@@ -131,7 +131,7 @@ def reduce_dimensions_anndata(
             Number of principal components to use when computing the neighbor
             graph. 0 means use all PCs. Defaults to 0.
         verbose (bool, optional):
-            If True, print progress messages. Defaults to True.
+            If True, print progress messages. Defaults to False.
         **kwargs:
             Additional keyword arguments forwarded to ``sc.tl.umap()`` or
             ``sc.tl.tsne()``.

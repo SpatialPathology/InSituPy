@@ -20,7 +20,7 @@ from insitupy._io._xenium import (_read_boundaries_from_xenium,
                                   _restructure_transcripts_dataframe)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
-from insitupy.dataclasses.dataclasses import CellData
+from insitupy.containers.dataclasses import CellData
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ import pandas as pd
 from adjustText import adjust_text
 
 from insitupy._constants import with_insitupy_style
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
+from insitupy.containers.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
@@ -64,70 +64,56 @@ def dual_foldchange_plot(
     or downregulated in the main comparison behave in their respective neighborhood
     comparisons.
 
-    Parameters
-    ----------
-    results : DiffExprResults
-        Result container holding main and neighborhood differential expression data.
-        Must include both target_neighborhood and ref_neighborhood.
-    significance_threshold : Number, default=0.05
-        Adjusted p-value threshold for significance in the main comparison.
-    foldchange_threshold : Number, default=1
-        Minimum absolute fold change (not log-transformed) to include genes in the plot.
-        Genes must exceed this threshold in the main comparison to be plotted.
-    logfc_col : str, default='log2foldchange'
-        Column name for log2 fold change values.
-    pval_col : str, default='padj'
-        Column name for adjusted p-values.
-    patch_colors : list of str, default=['lightgreen', 'lightcoral']
-        Background colors for [positive, negative] y-axis regions, indicating
-        whether genes are higher or lower in the neighborhood.
-    adjust_labels : bool, default=True
-        If True, automatically adjust overlapping gene labels using adjustText.
-    label_top_n : int or 'all', default='all'
-        Number of top genes to label based on label_sortby.
-        If 'all', labels all genes in the plot.
-        If int, labels the top N most significant genes.
-    label_sortby : str, default='padj'
-        Column name to use for ranking genes when label_top_n is an integer.
-        Typically 'padj' (ascending) or 'log2foldchange' (absolute value).
-    size_by_pvalue : bool, default=False
-        If True, scale point sizes based on -log10(padj) values.
-        More significant genes (lower p-values) will have larger points.
-    size_range : tuple of Number, default=(10, 40)
-        Range of point sizes (min, max) when size_by_pvalue is True.
-        Ignored if size_by_pvalue is False.
-    show_nonsignificant : bool, default=True
-        If True, plots both significant and non-significant genes.
-        If False, only plots significant genes (padj < significance_threshold).
-    show_config : bool, default=False
-        If True, displays a configuration table below the plots showing analysis
-        parameters and DEG counts.
-    figsize : tuple of Number, default=(6, 6)
-        Size of each subplot in inches (width, height).
-        Total figure width will be figsize[0] * 2.
-    savepath : str, os.PathLike, Path, optional
-        Path to save the plot. If None, plot is not saved.
-    save_only : bool, default=False
-        If True, saves plot without displaying it.
-    dpi_save : int, default=300
-        Resolution in dots per inch for saved figure.
-    show : bool, default=True
-        If True, displays the plot after creation.
+    Args:
+        results (DiffExprResults): Result container holding main and neighborhood
+            differential expression data. Must include both target_neighborhood and
+            ref_neighborhood.
+        significance_threshold (Number): Adjusted p-value threshold for significance in
+            the main comparison. Default is 0.05.
+        foldchange_threshold (Number): Minimum absolute fold change (not log-transformed)
+            to include genes in the plot. Genes must exceed this threshold in the main
+            comparison to be plotted. Default is 1.
+        logfoldchanges_col (str): Column name for log2 fold change values.
+            Default is 'log2foldchange'.
+        pval_col (str): Column name for adjusted p-values. Default is 'padj'.
+        patch_colors (list of str): Background colors for [positive, negative] y-axis
+            regions, indicating whether genes are higher or lower in the neighborhood.
+            Default is ['lightgreen', 'lightcoral'].
+        adjust_labels (bool): If True, automatically adjust overlapping gene labels using
+            adjustText. Default is True.
+        label_top_n (int or 'all'): Number of top genes to label based on label_sortby.
+            If 'all', labels all genes in the plot. If int, labels the top N most
+            significant genes. Default is 'all'.
+        label_sortby (str): Column name to use for ranking genes when label_top_n is an
+            integer. Typically 'padj' (ascending) or 'log2foldchange' (absolute value).
+            Default is 'padj'.
+        size_by_pvalue (bool): If True, scale point sizes based on -log10(padj) values.
+            More significant genes (lower p-values) will have larger points.
+            Default is True.
+        size_range (tuple of Number): Range of point sizes (min, max) when size_by_pvalue
+            is True. Ignored if size_by_pvalue is False. Default is (10, 40).
+        show_nonsignificant (bool): If True, plots both significant and non-significant
+            genes. If False, only plots significant genes (padj < significance_threshold).
+            Default is True.
+        show_config (bool): If True, displays a configuration table below the plots showing
+            analysis parameters and DEG counts. Default is False.
+        figsize (tuple of Number): Size of each subplot in inches (width, height). Total
+            figure width will be figsize[0] * 2. Default is (6, 6).
+        savepath (str, os.PathLike, Path, optional): Path to save the plot. If None, plot
+            is not saved.
+        save_only (bool): If True, saves plot without displaying it. Default is False.
+        dpi_save (int): Resolution in dots per inch for saved figure. Default is 300.
+        show (bool): If True, displays the plot after creation. Default is True.
 
-    Returns
-    -------
-    None
-        Displays and/or saves the plot as specified.
+    Returns:
+        None: Displays and/or saves the plot as specified.
 
-    Raises
-    ------
-    ValueError
-        If results object has no neighborhood comparisons or if parameters are invalid.
-    KeyError
-        If required columns are missing from the DataFrames.
+    Raises:
+        ValueError: If results object has no neighborhood comparisons or if parameters
+            are invalid.
+        KeyError: If required columns are missing from the DataFrames.
 
-    Notes
-    -----
+    Notes:
     The function creates two subplots:
     - Left: Downregulated genes in main comparison vs. their neighborhood behavior
     - Right: Upregulated genes in main comparison vs. their neighborhood behavior
@@ -284,51 +270,35 @@ def _plot_single_nb_plot(
     """
     Helper function for plotting one dual fold change comparison subplot.
 
-    Parameters
-    ----------
-    df_main : pd.DataFrame
-        Main comparison data (already filtered by fold change threshold).
-    df_neighbor : pd.DataFrame
-        Neighborhood comparison data for the same genes.
-    logfc_col : str
-        Column name for log2 fold change values.
-    pval_col : str
-        Column name for adjusted p-values.
-    fold_change_threshold : Number
-        Log2 fold change threshold (already transformed).
-    significance_threshold : Number
-        Adjusted p-value threshold for significance.
-    patch_colors : list of str
-        Background colors for [positive, negative] regions.
-    label_top_n : int or 'all'
-        Number of top genes to label, or 'all' for all genes.
-    label_sortby : str
-        Column to sort by for selecting top genes.
-    adjust_labels : bool
-        Whether to adjust overlapping labels.
-    size_by_pvalue : bool
-        Whether to scale point sizes by -log10(padj).
-    size_range : tuple of Number
-        Range of point sizes (min, max) when size_by_pvalue is True.
-    show_nonsignificant : bool
-        Whether to plot non-significant genes.
-    config : DiffExprConfigCollector, optional
-        Configuration object containing analysis metadata to display in table below plot.
-    n_upreg : int, optional
-        Number of significantly upregulated genes.
-    n_downreg : int, optional
-        Number of significantly downregulated genes.
-    ax : matplotlib.axes.Axes
-        Axes to plot on.
-    show_legend : bool
-        Whether to show the legend.
-    show_ylabel : bool
-        Whether to show the y-axis label.
+    Args:
+        df_main (pd.DataFrame): Main comparison data (already filtered by fold change
+            threshold).
+        df_neighbor (pd.DataFrame): Neighborhood comparison data for the same genes.
+        logfc_col (str): Column name for log2 fold change values.
+        pval_col (str): Column name for adjusted p-values.
+        fold_change_threshold (Number): Log2 fold change threshold (already transformed).
+        significance_threshold (Number): Adjusted p-value threshold for significance.
+        patch_colors (list of str): Background colors for [positive, negative] regions.
+        label_top_n (int or 'all'): Number of top genes to label, or 'all' for all genes.
+        label_sortby (str): Column to sort by for selecting top genes.
+        adjust_labels (bool): Whether to adjust overlapping labels.
+        size_by_pvalue (bool): Whether to scale point sizes by -log10(padj).
+        size_range (tuple of Number): Range of point sizes (min, max) when size_by_pvalue
+            is True.
+        show_nonsignificant (bool): Whether to plot non-significant genes.
+        config (DiffExprConfigCollector, optional): Configuration object containing
+            analysis metadata to display in table below plot.
+        n_upreg (int, optional): Number of significantly upregulated genes.
+        n_downreg (int, optional): Number of significantly downregulated genes.
+        ax (matplotlib.axes.Axes): Axes to plot on.
+        show_legend (bool): Whether to show the legend.
+        xlabel (str, optional): X-axis label. Default is "Log2FoldChange".
+        ylabel (str, optional): Y-axis label. Default is "Log2FoldChange (with
+            neighborhood)".
+        title (str, optional): Title for the subplot.
 
-    Returns
-    -------
-    None
-        Plots on the provided axes.
+    Returns:
+        None: Plots on the provided axes.
     """
     # CRITICAL: Merge dataframes to ensure x and y values are aligned by gene
     # Keep only genes present in both dataframes

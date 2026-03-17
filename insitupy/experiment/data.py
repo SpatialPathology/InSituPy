@@ -27,7 +27,7 @@ from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
