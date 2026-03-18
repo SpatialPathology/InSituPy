@@ -167,6 +167,7 @@ class ShapesData(DeepCopyMixin):
 
     @property
     def is_empty(self):
+        """Return ``True`` if no shape keys have been added yet."""
         return len(self._data) == 0
 
     def _check_uniqueness(self,
@@ -202,6 +203,25 @@ class ShapesData(DeepCopyMixin):
                  verbose: bool = False,
                  in_napari: bool = False
                    ):
+        """Add or update a geometry layer under *key*.
+
+        Parses *data* into a :class:`~geopandas.GeoDataFrame`, scales
+        coordinates to physical units using *scale_factor*, and stores the
+        result.  If *key* already exists, new shapes are merged (with
+        duplicates removed, keeping the newest).
+
+        Args:
+            data: Geometry source — a :class:`~geopandas.GeoDataFrame`,
+                :class:`~pandas.DataFrame`, dict, or a file path to a
+                GeoJSON/Parquet file.
+            key: Name under which the geometry layer is stored.
+            scale_factor: Multiplier applied to coordinates to convert from
+                pixels to physical units (e.g. µm/pixel).
+            verbose: If ``True``, log how many shapes were added.
+                Defaults to ``False``.
+            in_napari: If ``True``, use napari notifications instead of
+                the logger. Defaults to ``False``.
+        """
         # parse geopandas data from dataframe or file
         new_df = parse_geopandas(data)
 
@@ -298,6 +318,30 @@ class ShapesData(DeepCopyMixin):
              verbose: bool = True,
              inplace: bool = False
              ):
+        """Crop geometry layers to a spatial region.
+
+        Retains only shapes that intersect with the given bounding box or
+        polygon, then translates coordinates so the cropped region starts at
+        the origin.  Keys with no remaining shapes are removed.
+
+        Args:
+            shape: A :class:`~shapely.geometry.Polygon` defining the crop
+                region.  If ``None``, *xlim* and *ylim* are used to build a
+                rectangle.
+            xlim: ``(x_min, x_max)`` tuple in physical units.  Required when
+                *shape* is ``None``.
+            ylim: ``(y_min, y_max)`` tuple in physical units.  Required when
+                *shape* is ``None``.
+            verbose: If ``True``, warn when both *shape* and *xlim*/*ylim* are
+                provided. Defaults to ``True``.
+            inplace: If ``True``, modify this object in place and return
+                ``None``; otherwise return a cropped copy. Defaults to
+                ``False``.
+
+        Returns:
+            A cropped copy of this object, or ``None`` if *inplace* is
+            ``True``.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
@@ -341,6 +385,7 @@ class ShapesData(DeepCopyMixin):
             return _self
 
     def keys(self):
+        """Return the names of all stored geometry layers."""
         return self._data.keys()
 
     def remove_key(
@@ -348,6 +393,14 @@ class ShapesData(DeepCopyMixin):
         key_to_remove: str,
         classes_to_remove: Union[Literal["all"], List[str], str] = "all"
         ):
+        """Remove a geometry layer or specific classes within it.
+
+        Args:
+            key_to_remove: Name of the layer to remove or filter.
+            classes_to_remove: ``"all"`` to delete the entire layer, or a
+                list of class names to remove only those shapes. Defaults to
+                ``"all"``.
+        """
         if classes_to_remove == "all":
             try:
                 del self._data[key_to_remove]
@@ -376,6 +429,15 @@ class ShapesData(DeepCopyMixin):
              path: Union[str, os.PathLike, Path],
              overwrite: bool = False
              ):
+        """Save all geometry layers to a directory as GeoJSON files.
+
+        Each layer is written to ``{path}/{key}.geojson``.
+
+        Args:
+            path: Output directory path.
+            overwrite: If ``True``, delete any existing directory at *path*
+                before saving. Defaults to ``False``.
+        """
         path = Path(path)
 
         # check if the output file should be overwritten
@@ -396,6 +458,11 @@ class ShapesData(DeepCopyMixin):
 
 
 class AnnotationsData(ShapesData):
+    """Stores free-form annotation geometries (polygons, points, lines).
+
+    Subclass of :class:`ShapesData` configured for annotations: does not
+    require unique shape names per key and supports all geometry types.
+    """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -429,6 +496,12 @@ class AnnotationsData(ShapesData):
 
 
 class RegionsData(ShapesData):
+    """Stores mutually exclusive region polygons used for spatial subsetting.
+
+    Subclass of :class:`ShapesData` configured for regions: enforces unique
+    shape names per key and accepts only :class:`~shapely.geometry.Polygon`
+    geometries (no points or lines).
+    """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -557,18 +630,17 @@ class BoundariesData(DeepCopyMixin):
 
     @property
     def metadata(self):
+        """Dict of per-compartment metadata (e.g. ``{"cells": {"pixel_size": 0.2125}}``)."""
         return self._metadata
-
-    # @property
-    # def cell_ids(self):
-    #     return self._cell_ids
 
     @property
     def cell_names(self):
+        """Dask array of cell name strings, one per segmented cell."""
         return self._cell_names
 
     @property
     def seg_mask_value(self):
+        """Dask array of integer mask values corresponding to each cell name."""
         return self._seg_mask_value
 
     @property
@@ -583,6 +655,7 @@ class BoundariesData(DeepCopyMixin):
 
     @property
     def is_empty(self):
+        """Return ``True`` if no boundary compartments have been added."""
         return len(self._data) == 0
 
     def update_nucleus_metadata_from_xenium(
@@ -694,12 +767,34 @@ class BoundariesData(DeepCopyMixin):
 
     def add_boundaries(self,
                        cell_boundaries: Union[da.core.Array, np.ndarray],
-                       pixel_size: Number, # required for boundaries that are saved as masks
+                       pixel_size: Number,
                        nuclei_boundaries: Optional[Union[da.core.Array, np.ndarray]] = None,
-                       #data: Optional[Union[Dict[str, da.core.Array]]],
-                    #    labels: Optional[List[str]] = [],
                        overwrite: bool = False
                        ):
+        """Add cell (and optionally nucleus) segmentation mask arrays.
+
+        Stores *cell_boundaries* under the ``"cells"`` compartment and
+        *nuclei_boundaries* (if provided) under ``"nuclei"``.  Both arrays
+        are converted to :class:`dask.array.Array` if passed as
+        :class:`numpy.ndarray`.
+
+        Args:
+            cell_boundaries: 2-D segmentation mask (YX) where each unique
+                non-zero integer value encodes one cell.  May be a Dask array,
+                numpy array, or a list of arrays (pyramid).
+            pixel_size: Physical pixel size in µm.  Stored in the compartment
+                metadata for downstream coordinate calculations.
+            nuclei_boundaries: Optional nucleus segmentation mask with the same
+                format as *cell_boundaries*. Defaults to ``None``.
+            overwrite: If ``True``, replace existing compartments.
+                Defaults to ``False``.
+
+        Raises:
+            ValueError: If *cell_boundaries* is ``None`` or has an
+                unsupported type.
+            KeyError: If a compartment already exists and *overwrite* is
+                ``False``.
+        """
         if cell_boundaries is None:
             raise ValueError("cell_boundaries cannot be None.")
 
@@ -800,6 +895,14 @@ class BoundariesData(DeepCopyMixin):
             return _self
 
     def convert_to_shapely_objects(self):
+        """Convert raw boundary coordinate DataFrames to Shapely Polygon objects.
+
+        For each compartment that is stored as a :class:`~pandas.DataFrame`
+        with ``vertex_x`` / ``vertex_y`` columns, groups the rows by
+        ``cell_id`` and replaces them with a :class:`~pandas.DataFrame` of
+        :class:`~shapely.geometry.Polygon` objects.  Compartments that are
+        already Dask arrays (i.e. mask images) are skipped.
+        """
         for n in self._metadata.keys():
             logger.info(f"Converting `{n}` to GeoPandas DataFrame with shapely objects.")
             # retrief dataframe with boundary coordinates
@@ -825,6 +928,28 @@ class BoundariesData(DeepCopyMixin):
              max_resolution: Optional[Number] = None,
              verbose: bool = False
              ):
+        """Save all boundary compartments to a Zarr or Zarr.zip store.
+
+        Each compartment (``"cells"``, ``"nuclei"``) is stored under
+        ``masks/{compartment}/`` together with its pixel-size metadata.
+        Cell names and segmentation mask values are saved as separate arrays.
+
+        Args:
+            path: Output path.  Must end in ``.zarr`` or ``.zarr.zip``.
+                Defaults to ``"boundaries.zarr.zip"``.
+            save_as_pyramid: If ``True`` (default), write a 6-level resolution
+                pyramid. If *data* is already a pyramid list it is stored
+                as-is.
+            max_resolution: If set, downsample images so that the pixel size
+                does not exceed this value (in µm) before saving, reducing
+                file size.  Defaults to ``None`` (no downsampling).
+            verbose: Unused; reserved for future progress reporting.
+                Defaults to ``False``.
+
+        Raises:
+            :class:`~insitupy._exceptions.InvalidFileTypeError`: If *path*
+                does not end in ``.zarr`` or ``.zarr.zip``.
+        """
         path = Path(path)
         suffix = path.name.split(".", maxsplit=1)[-1]
 
@@ -982,6 +1107,7 @@ class CellData(DeepCopyMixin):
 
     @property
     def matrix(self):
+        """Deprecated alias for :attr:`table`. Use ``table`` instead."""
         warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead.",
@@ -992,6 +1118,7 @@ class CellData(DeepCopyMixin):
 
     @matrix.setter
     def matrix(self, value: AnnData):
+        """Deprecated alias for the ``table`` setter. Use ``table`` instead."""
         warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead.",
@@ -1056,14 +1183,17 @@ class CellData(DeepCopyMixin):
 
     @property
     def config(self):
+        """Dict of configuration options stored with this cell layer."""
         return self._config
 
     @property
     def boundaries(self):
+        """The :class:`BoundariesData` object holding segmentation masks, or ``None``."""
         return self._boundaries
 
     @property
     def is_synced(self) -> bool:
+        """Return ``True`` if the table and boundary cell IDs are perfectly aligned."""
         if self._boundaries is None:
             return True
 
@@ -1082,6 +1212,7 @@ class CellData(DeepCopyMixin):
 
     @property
     def entries(self):
+        """List of loaded data components, e.g. ``["table", "boundaries"]``."""
         return self._entries
 
     def copy(self):
@@ -1105,7 +1236,33 @@ class CellData(DeepCopyMixin):
             inplace: bool = False,
             verbose: bool = True
             ):
+        """Crop this :class:`CellData` to a spatial region.
 
+        Keeps only cells whose centroid lies within the specified bounding box
+        or polygon.  The boundary masks and cell coordinates are translated so
+        the cropped region starts at the origin.
+
+        Args:
+            xlim: ``(x_min, x_max)`` tuple in physical units (µm).  Required
+                unless *shape* is provided.
+            ylim: ``(y_min, y_max)`` tuple in physical units (µm).  Required
+                unless *shape* is provided.
+            shape: A :class:`~shapely.geometry.Polygon` or
+                :class:`~shapely.geometry.MultiPolygon` defining the crop
+                region.  When provided, *xlim*/*ylim* are derived from the
+                shape's bounding box.
+            inplace: If ``True``, modify this object and return ``None``;
+                otherwise return a cropped copy. Defaults to ``False``.
+            verbose: If ``True``, warn when both *shape* and *xlim*/*ylim* are
+                given. Defaults to ``True``.
+
+        Returns:
+            A cropped :class:`CellData`, or ``None`` if *inplace* is ``True``.
+
+        Raises:
+            ValueError: If neither a *shape* nor both *xlim* and *ylim* are
+                provided.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
@@ -1178,11 +1335,25 @@ class CellData(DeepCopyMixin):
     def save(self,
              path: Union[str, os.PathLike, Path],
              zipped: bool = False,
-             #boundaries_as_pyramid: bool = True,
              max_resolution_boundaries: Optional[Number] = None,
              overwrite: bool = False
              ):
+        """Save this :class:`CellData` object to a directory.
 
+        Writes the expression table (``table.h5ad``), boundary masks
+        (``boundaries.zarr`` or ``.zarr.zip``), and a metadata file
+        (``.celldata``) to *path*.
+
+        Args:
+            path: Output directory path.
+            zipped: If ``True``, save boundaries as ``.zarr.zip``; otherwise
+                as an unzipped ``.zarr`` directory. Defaults to ``False``.
+            max_resolution_boundaries: If set, downsample boundary masks to
+                this maximum pixel size (µm) before saving. Defaults to
+                ``None`` (no downsampling).
+            overwrite: If ``True``, delete any existing directory at *path*
+                before saving. Defaults to ``False``.
+        """
         path = Path(path)
         celldata_metadata = {}
 
@@ -1459,10 +1630,12 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def layers(self):
+        """Dict mapping layer names to :class:`CellData` objects."""
         return self._layers
 
     @property
     def matrix(self):
+        """Deprecated alias for :attr:`table`. Use ``table`` instead."""
         logger.warning(
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead."
@@ -1490,6 +1663,7 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def boundaries(self):
+        """Boundaries of the main cell layer, or ``None`` if empty."""
         try:
             return self._layers[self._main_key].boundaries
         except KeyError:
@@ -1501,6 +1675,7 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def is_synced(self) -> bool:
+        """Return ``True`` if all layers have aligned table and boundary IDs."""
         if self.is_empty:
             return True
 
@@ -1508,16 +1683,19 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def main_key(self):
+        """Name of the active (main) cell segmentation layer."""
         return self._main_key
 
     @main_key.setter
     def main_key(self, value: str):
+        """Set the active layer by name."""
         if value not in self._layers.keys():
             raise ValueError(f"Such layer does not exist.")
         self._main_key = value
 
     @property
     def is_empty(self):
+        """Return ``True`` if no cell layers have been added."""
         return len(self._layers) == 0
 
     def add_celldata(self,
@@ -1525,6 +1703,20 @@ class MultiCellData(DeepCopyMixin):
                      key: str,
                      is_main: bool = False,
                      overwrite: bool = False):
+        """Add a :class:`CellData` layer under *key*.
+
+        Args:
+            cd: The :class:`CellData` object to add.
+            key: Name for the new layer.
+            is_main: If ``True``, set this layer as the active main layer.
+                Defaults to ``False``.
+            overwrite: If ``True``, replace an existing layer with the same
+                key. Defaults to ``False``.
+
+        Raises:
+            ValueError: If *cd* is not a :class:`CellData` instance.
+            KeyError: If *key* already exists and *overwrite* is ``False``.
+        """
         if not isinstance(cd, CellData):
             raise ValueError(f"cd must be of type CellData. Instead: {type(cd)}.")
 
@@ -1709,7 +1901,22 @@ class MultiCellData(DeepCopyMixin):
             shape: Optional[Union[Polygon, MultiPolygon]] = None,
             inplace: bool = False,
             verbose: bool = True):
+        """Crop all cell layers to a spatial region.
 
+        Calls :meth:`CellData.crop` on every layer with the same arguments.
+
+        Args:
+            xlim: ``(x_min, x_max)`` tuple in physical units (µm).
+            ylim: ``(y_min, y_max)`` tuple in physical units (µm).
+            shape: Optional :class:`~shapely.geometry.Polygon` crop region.
+            inplace: If ``True``, modify in place and return ``None``;
+                otherwise return a cropped copy. Defaults to ``False``.
+            verbose: Passed to each :meth:`CellData.crop` call.
+                Defaults to ``True``.
+
+        Returns:
+            A cropped :class:`MultiCellData`, or ``None`` if *inplace*.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
@@ -1728,6 +1935,7 @@ class MultiCellData(DeepCopyMixin):
             return _self
 
     def keys(self):
+        """Return the names of all cell segmentation layers."""
         return self._layers.keys()
 
     def save(self,
@@ -1736,7 +1944,22 @@ class MultiCellData(DeepCopyMixin):
              overwrite: bool = False,
              max_resolution_boundaries: Optional[Number] = None
              ):
+        """Save all cell layers to a directory.
 
+        Each layer is saved to a sub-directory named after its key.  A
+        ``.multicelldata`` metadata file is written to *path* recording the
+        main key and all layer keys.
+
+        Args:
+            path: Output directory path.
+            zipped: If ``True``, save boundary masks as ``.zarr.zip``;
+                otherwise as unzipped ``.zarr``. Defaults to ``False``.
+            overwrite: If ``True``, delete any existing directory at *path*
+                before saving. Defaults to ``False``.
+            max_resolution_boundaries: Maximum pixel size (µm) for
+                downsampling boundary masks. ``None`` keeps full resolution.
+                Defaults to ``None``.
+        """
         path = Path(path)
         multicelldata_metadata = {"key_main": self._main_key, "all_keys": list(self._layers.keys())}
         # check if the output file should be overwritten
@@ -1759,6 +1982,11 @@ class MultiCellData(DeepCopyMixin):
         write_dict_to_json(dictionary=multicelldata_metadata, file=path / ".multicelldata")
 
     def set_main(self, key):
+        """Set the active (main) cell layer by name.
+
+        Args:
+            key: Name of an existing layer to promote to main.
+        """
         if key in self.keys():
             self._main_key = key
 
@@ -1878,18 +2106,22 @@ class ImageData(DeepCopyMixin):
         return key in self.keys()
 
     def keys(self):
+        """Return the names of all stored images."""
         return self._data.keys()
 
     @property
     def metadata(self):
+        """Dict of per-image metadata (pixel size, axes, OME, rgb flag, etc.)."""
         return self._metadata
 
     @property
     def names(self):
+        """List of image names in insertion order."""
         return self._names
 
     @property
     def is_empty(self):
+        """Return ``True`` if no images have been added."""
         return len(self._data) == 0
 
     def add_image(
@@ -2271,6 +2503,20 @@ class ImageData(DeepCopyMixin):
              ylim: Optional[Tuple[int, int]],
              inplace: bool = False
              ):
+        """Crop all images to a rectangular region.
+
+        Each image pyramid is cropped to *xlim* × *ylim* and the bounding-box
+        limits are stored in the per-image metadata.
+
+        Args:
+            xlim: ``(x_min, x_max)`` tuple in physical units (µm).
+            ylim: ``(y_min, y_max)`` tuple in physical units (µm).
+            inplace: If ``True``, modify in place and return ``None``;
+                otherwise return a cropped copy. Defaults to ``False``.
+
+        Returns:
+            A cropped :class:`ImageData`, or ``None`` if *inplace* is ``True``.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
@@ -2864,6 +3110,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
     @shapes.setter
     def shapes(self, value: gpd.GeoDataFrame):
+        """Set the shapes GeoDataFrame; must be a :class:`~geopandas.GeoDataFrame`."""
         if not isinstance(value, gpd.GeoDataFrame):
             raise TypeError(f"`.shapes` must be GeoDataFrame, not {type(value)}")
         self._shapes = value
@@ -2899,6 +3146,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
     @property
     def is_empty(self) -> bool:
+        """Return ``True`` if the shapes GeoDataFrame contains no rows."""
         return len(self._shapes) == 0
 
     def _validate_consistency(self):

@@ -38,6 +38,14 @@ if WITH_NAPARI:
         return viewer, config
 
     def sync_geometries():
+        """Synchronise annotation and region shapes from the active napari viewer back into the :class:`InSituData` object.
+
+        Iterates all napari Shapes and Points layers whose names match the
+        expected pattern, classifies each as an annotation or region, and
+        writes the geometries into the corresponding :class:`~insitupy.containers.shapes_data.ShapesData`
+        object.  Geometries present in the data but absent from the viewer are
+        also removed.
+        """
         name_pattern = "{type_symbol} {class_name} ({annot_key})"
 
         # get current viewer config
@@ -101,6 +109,18 @@ if WITH_NAPARI:
         max_per_col: int = 10,
         save_only: bool = True
         ):
+        """Save colour legends for all currently selected napari layers to PDF files.
+
+        For each selected layer, a colour-legend figure is generated via
+        :func:`~insitupy.plotting.plots.colorlegend` and saved to
+        *output_folder* as ``colorlegend-<layer_name>.pdf``.
+
+        Args:
+            output_folder: Directory to write legend PDFs into.  Created
+                automatically if it does not exist.
+            max_per_col: Maximum number of legend entries per column.
+            save_only: If True, save the figure without displaying it.
+        """
         from insitupy.plotting.plots import colorlegend
 
         viewer, _ = _get_current_viewer_config("save color legends")

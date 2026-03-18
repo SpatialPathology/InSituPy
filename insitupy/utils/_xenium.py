@@ -68,7 +68,20 @@ def find_xenium_outputs(
 def collect_qc_data(
     data_folders: List[Union[str, os.PathLike, Path]]
     ) -> pd.DataFrame:
+    """Collect QC metadata from a list of Xenium output directories.
 
+    Parses the run date from the folder name and reads a fixed set of QC
+    fields (cell count, transcripts per cell, etc.) from each
+    ``experiment.xenium`` metadata file.
+
+    Args:
+        data_folders: Paths to Xenium output directories.
+
+    Returns:
+        A :class:`~pandas.DataFrame` with one row per directory and columns
+        for date, run name, slide ID, region, preservation method, and key
+        QC metrics.
+    """
     cats = ["date", "run_name", "slide_id", "region_name", "preservation_method",
             "num_cells", "transcripts_per_cell",
             "transcripts_per_100um", "panel_organism", "panel_tissue_type"]
@@ -96,6 +109,19 @@ def plot_qc(
     save_only: bool = False,
     dpi_save: int = 300
     ):
+    """Plot Xenium QC metrics as a strip-plot grid, grouped by a categorical column.
+
+    Args:
+        data: DataFrame returned by :func:`collect_qc_data`.
+        x: Column used for the x-axis grouping.
+        cats: Numeric columns to plot — one subplot per entry.
+        max_cols: Maximum number of columns in the subplot grid.
+        fontsize: Base font size applied globally via ``rcParams``.
+        size: Marker size for the strip plot.
+        savepath: If provided, save the figure to this path.
+        save_only: If True, close the figure after saving without displaying it.
+        dpi_save: Resolution used when saving.
+    """
     # set plotting parameters
     plt.rcParams.update({
     'font.size': fontsize,          # Base font size

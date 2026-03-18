@@ -182,6 +182,20 @@ class LayoutConfig(_UpdatablePlottingConfig):
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
     def calc_subplot_params(self, keys, n_data, color_config):
+        """Compute subplot grid dimensions and layout flags from the number of keys and data objects.
+
+        Sets ``self.n_rows``, ``self.n_cols``, ``self.n_plots``,
+        ``self.multikeys``, ``self.multidata``, and
+        ``self.add_legend_to_last_subplot`` in-place based on the combination
+        of *keys* and *n_data*.
+
+        Args:
+            keys: Sequence of colour/feature keys to plot.
+            n_data: Number of data objects (samples / experiments) to show.
+            color_config: Mapping from key to colour configuration dict; used
+                to detect categorical vs. continuous data when laying out
+                categorical legends.
+        """
         # set multiplot variables
         if len(keys) > 1:
             self.multikeys = True
@@ -416,6 +430,7 @@ def spatial(
 
 # deprecated version
 def plot_spatial(*args, **kwargs):
+    """Deprecated. Use :func:`spatial` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="spatial")
 
@@ -757,9 +772,11 @@ class _ColorConfigMultiPlot:
 
     @property
     def dict(self):
+        """Return the underlying colour configuration dictionary."""
         return self._dict
 
     def keys(self):
+        """Return the keys of the colour configuration dictionary."""
         return self._dict.keys()
 
     def _add_color_entry(

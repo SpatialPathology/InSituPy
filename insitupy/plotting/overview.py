@@ -210,5 +210,6 @@ def overview(
 
 # deprecated version
 def plot_overview(*args, **kwargs):
+    """Deprecated. Use :func:`overview` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="overview")

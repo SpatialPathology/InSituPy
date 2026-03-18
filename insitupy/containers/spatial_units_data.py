@@ -158,6 +158,11 @@ class SpatialUnitsData(DeepCopyMixin):
 
     @shapes.setter
     def shapes(self, value: gpd.GeoDataFrame):
+        """Set the geometry GeoDataFrame.
+
+        Raises:
+            TypeError: If *value* is not a :class:`~geopandas.GeoDataFrame`.
+        """
         if not isinstance(value, gpd.GeoDataFrame):
             raise TypeError(f"`.shapes` must be GeoDataFrame, not {type(value)}")
         self._shapes = value
@@ -181,6 +186,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
     @property
     def is_empty(self) -> bool:
+        """True if the shapes GeoDataFrame contains no geometries."""
         return len(self._shapes) == 0
 
     def _validate_consistency(self):

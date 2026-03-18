@@ -140,6 +140,22 @@ def create_cmap_mapping(
     cmap: Optional[Union[str, ListedColormap]] = None,
     rgba_values: Optional[np.ndarray] = None
     ):
+    """Build a mapping from unique category labels to RGBA colour tuples.
+
+    When *rgba_values* is provided, each category is matched to its
+    corresponding pre-computed RGBA colour in *data*.  Otherwise a
+    matplotlib colourmap (*cmap*) is cycled over sorted unique categories.
+
+    Args:
+        data: Array-like of category labels.
+        cmap: Matplotlib colourmap name or :class:`~matplotlib.colors.ListedColormap`.
+            Defaults to the internal ``tab20_mod`` palette when ``None``.
+        rgba_values: Pre-computed RGBA array aligned to *data*.  When
+            supplied, *cmap* is ignored.
+
+    Returns:
+        A dict mapping each unique category label to an RGBA tuple.
+    """
     unique_categories = _parse_unique_categories(data)
 
     if rgba_values is None:
@@ -168,7 +184,26 @@ def categorical_data_to_rgba(data,
                              nan_val: tuple = (1,1,1,0),
                              rgba_values: Optional[np.ndarray] = None
                              ):
+    """Convert a categorical array to a NumPy array of RGBA colours.
 
+    Each unique category is assigned an RGBA colour via *cmap* (or a
+    pre-built mapping when *cmap* is a ``dict``).  NaN values are assigned
+    *nan_val*.
+
+    Args:
+        data: Array-like of category labels (may include NaN as string).
+        cmap: Colourmap name, :class:`~matplotlib.colors.ListedColormap`, or
+            a ``dict`` mapping category labels to RGBA tuples.
+        return_mapping: If True, return the category-to-RGBA mapping alongside
+            the colour array.
+        nan_val: RGBA tuple used for NaN entries.  ``None`` to skip NaN
+            handling.
+        rgba_values: Pre-computed RGBA array aligned to *data*.
+
+    Returns:
+        An ``(N, 4)`` float array of RGBA colours, or a tuple
+        ``(colours, mapping)`` when *return_mapping* is True.
+    """
     # len_colormap = cmap.N
     # category_to_rgba = {category: cmap(i % len_colormap) for i, category in enumerate(unique_categories)}
 
@@ -223,6 +258,27 @@ def continuous_data_to_rgba(
     nan_val: tuple = (1,1,1,0),
     return_mapping: bool = False
     ):
+    """Map a continuous numeric array to RGBA colours using a matplotlib colourmap.
+
+    Colour limits are determined from percentiles of non-NaN values.  NaN
+    entries receive *nan_val*.
+
+    Args:
+        data: 1-D numeric array to colourise.
+        cmap: Matplotlib colourmap name or :class:`~matplotlib.colors.ListedColormap`.
+        upper_climit_pct: Percentile of non-NaN values used as the upper
+            colour limit.
+        lower_climit: Explicit lower colour limit.  Defaults to the data
+            minimum when ``None``.
+        clip: If True, clip values outside the colour limits before mapping.
+        nan_val: RGBA tuple assigned to NaN entries.
+        return_mapping: If True, also return the
+            :class:`~matplotlib.cm.ScalarMappable` used for the mapping.
+
+    Returns:
+        An ``(N, 4)`` float array of RGBA colours, or a tuple
+        ``(colours, scalar_mappable)`` when *return_mapping* is True.
+    """
     if np.any(pd.isna(data)):
         contains_nans = True
         # Convert the numpy array to a pandas Series

@@ -152,10 +152,12 @@ class InSituExperiment:
 
     @property
     def is_view(self) -> bool:
+        """Return False; this is the base experiment, not a view."""
         return False
 
     @property
     def applied_filters(self) -> List[str]:
+        """Return the list of filter labels that have been applied to this experiment."""
         return list(self._applied_filters)
 
     def _subset(
@@ -2452,4 +2454,5 @@ class InSituExperimentView(InSituExperiment):
 
     @property
     def is_view(self) -> bool:
+        """Return True; this object is a linked view of a parent experiment."""
         return True

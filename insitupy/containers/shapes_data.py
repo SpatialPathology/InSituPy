@@ -111,6 +111,7 @@ class ShapesData(DeepCopyMixin):
 
     @property
     def is_empty(self):
+        """True if no shape data has been added yet."""
         return len(self._data) == 0
 
     def _check_uniqueness(self,
@@ -329,6 +330,7 @@ class ShapesData(DeepCopyMixin):
             return _self
 
     def keys(self):
+        """Return the keys of all stored shape layers."""
         return self._data.keys()
 
     def remove_key(
@@ -336,6 +338,14 @@ class ShapesData(DeepCopyMixin):
         key_to_remove: str,
         classes_to_remove: Union[Literal["all"], List[str], str] = "all"
         ):
+        """Remove a shape layer or specific classes within it.
+
+        Args:
+            key_to_remove: Key of the shape layer to modify or delete.
+            classes_to_remove: Which classes to remove.  ``"all"`` deletes
+                the entire key; a string or list of strings removes only the
+                specified class rows from the layer.
+        """
         if classes_to_remove == "all":
             try:
                 del self._data[key_to_remove]
@@ -390,6 +400,13 @@ class ShapesData(DeepCopyMixin):
 
 
 class AnnotationsData(ShapesData):
+    """Container for spatial annotation shapes (non-exclusive, mixed geometry).
+
+    Subclass of :class:`ShapesData` configured for annotations:
+    duplicate names within a key are allowed, all geometry types (points,
+    lines, polygons) are accepted, and a set of reserved names is
+    forbidden to prevent conflicts with downstream analysis functions.
+    """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -423,6 +440,13 @@ class AnnotationsData(ShapesData):
 
 
 class RegionsData(ShapesData):
+    """Container for spatial region shapes (unique names, polygons only).
+
+    Subclass of :class:`ShapesData` configured for regions:
+    each class name within a key must be unique, only
+    :class:`~shapely.geometry.Polygon` geometries are accepted, and no
+    forbidden-name list is applied.
+    """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,

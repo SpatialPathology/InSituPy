@@ -125,14 +125,17 @@ class BoundariesData(DeepCopyMixin):
 
     @property
     def metadata(self):
+        """Dict of boundary metadata (pixel size, shape, etc.) keyed by layer name."""
         return self._metadata
 
     @property
     def cell_names(self):
+        """Dask array of cell-name strings, one entry per labelled cell."""
         return self._cell_names
 
     @property
     def seg_mask_value(self):
+        """Dask array of integer mask values corresponding to each cell name."""
         return self._seg_mask_value
 
     @property
@@ -147,6 +150,7 @@ class BoundariesData(DeepCopyMixin):
 
     @property
     def is_empty(self):
+        """True if no boundary masks have been added yet."""
         return len(self._data) == 0
 
     def update_nucleus_metadata_from_xenium(
@@ -358,6 +362,15 @@ class BoundariesData(DeepCopyMixin):
             return _self
 
     def convert_to_shapely_objects(self):
+        """Convert raw coordinate DataFrames to GeoDataFrames with Shapely Polygon objects.
+
+        Iterates over all boundary layers that are still stored as plain
+        :class:`pandas.DataFrame` objects (with ``vertex_x`` / ``vertex_y``
+        columns) and converts them to cell-level
+        :class:`~shapely.geometry.Polygon` geometries grouped by
+        ``cell_id``.  Layers that are already converted are skipped with a
+        warning.
+        """
         for n in self._metadata.keys():
             logger.info(f"Converting `{n}` to GeoPandas DataFrame with shapely objects.")
             # retrief dataframe with boundary coordinates

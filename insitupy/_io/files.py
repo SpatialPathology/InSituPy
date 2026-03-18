@@ -28,6 +28,16 @@ def write_dict_to_json(
     dictionary: dict,
     file: Union[str, os.PathLike, Path],
     ):
+    """Serialise a dictionary to a JSON file, converting NumPy arrays to lists if needed.
+
+    Writes atomically via a temporary file to avoid corrupting an existing
+    file if serialisation fails.  Parent directories are created automatically.
+
+    Args:
+        dictionary: The dict to serialise.  Must be JSON-compatible after
+            optional NumPy array conversion.
+        file: Output file path.
+    """
     # First, serialize to string (may raise TypeError — no file touched yet)
     try:
         dict_json = json.dumps(dictionary, indent=4)
@@ -50,6 +60,17 @@ def check_overwrite_and_remove_if_true(
     path: Union[str, os.PathLike, Path],
     overwrite: bool = False
     ):
+    """Delete *path* if *overwrite* is True; raise :exc:`FileExistsError` otherwise.
+
+    Args:
+        path: File or directory to check.
+        overwrite: If True and *path* exists, delete it (directory tree or
+            file).  If False and *path* exists, raise.
+
+    Raises:
+        FileExistsError: If *path* exists and *overwrite* is False.
+        ValueError: If *path* exists but is neither a file nor a directory.
+    """
     path = Path(path)
     if path.exists():
         if overwrite:

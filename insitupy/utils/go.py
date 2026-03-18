@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 #from .adata import create_deg_df
 
 class SpeciesToID:
+    """Map organism name strings to NCBI taxonomy IDs.
+
+    Currently supports ``'mmusculus'`` (mouse), ``'hsapiens'`` (human), and
+    ``'dmelanogaster'`` (fruit fly).
+    """
     def __init__(self):
         self.species_dict = {
             'mmusculus': 10090,
@@ -26,11 +31,20 @@ class SpeciesToID:
             'dmelanogaster': 7227
         }
     def check_species(self, species):
+        """Raise :exc:`ValueError` if *species* is not in the supported list."""
         if species not in self.species_dict:
             raise ValueError(
                 "`species` must be one of following values: {}".format(list(self.species_dict.keys()))
             )
     def convert(self, species):
+        """Return the NCBI taxonomy integer ID for *species*.
+
+        Args:
+            species: Organism name string (e.g. ``'hsapiens'``).
+
+        Returns:
+            The NCBI taxonomy ID as an :class:`int`.
+        """
         self.check_species(species)
         return self.species_dict[species]
 
@@ -43,11 +57,18 @@ def _find_between(s, first, last ):
         return ""
 
 class GOEnrichment():
+    """Container for GO term enrichment analyses.
+
+    Wraps the `gprofiler <https://biit.cs.ut.ee/gprofiler/>`_ web API to
+    perform enrichment analysis on gene lists and stores results keyed by
+    analysis name for downstream plotting and export.
+    """
     def __init__(self):
         self._results = {}
 
     @property
     def results(self):
+        """Dict mapping analysis keys to result :class:`~pandas.DataFrame` objects."""
         return self._results
 
     def gprofiler(self,
@@ -317,6 +338,11 @@ class GOEnrichment():
 
 
 class StringDB:
+    """Client for the `STRING-DB <https://string-db.org/>`_ protein interaction API.
+
+    Provides methods to query functional enrichment results and download
+    interaction network images for gene lists.
+    """
     def __init__(self, return_results: bool = True):
         self.result = None
         self.return_results = return_results
@@ -438,6 +464,29 @@ class StringDB:
     def stringdb_network_from_adata(self, adata: AnnData = None, key: str = None, top_n: Optional[int] = None, organism: str = None, output_format: str = "image",
         key_added: str = None, sortby: str = 'pvalue_adj', ascending: bool = True,
         **kwargs: Any):
+        """Generate STRING-DB interaction network images from DGE results in an AnnData object.
+
+        Retrieves top differentially expressed genes from *adata* and calls
+        :meth:`call_stringdb_network` for each comparison group, saving the
+        resulting network images to ``stringdb_networks/``.
+
+        Args:
+            adata: :class:`~anndata.AnnData` object containing DGE results in
+                ``.uns``.
+            key: Key in ``adata.uns`` where DGE results are stored.
+            top_n: Maximum number of top genes per group to query.  ``None``
+                uses all significant genes.
+            organism: Organism name following STRING-DB conventions (e.g.
+                ``'mmusculus'``).
+            output_format: Image format — ``"image"`` (PNG) or ``"svg"``.
+                Defaults to ``"image"``.
+            key_added: Unused; reserved for future use.
+            sortby: Column in DGE results used to rank genes. Defaults to
+                ``'pvalue_adj'``.
+            ascending: Sort order for *sortby*. Defaults to ``True``.
+            **kwargs: Additional keyword arguments forwarded to
+                :meth:`call_stringdb_network`.
+        """
 
         deg, groups, key_added = GOEnrichment().prepare_enrichment(adata=adata, key=key, key_added=key_added,
                         sortby=sortby, ascending=ascending)

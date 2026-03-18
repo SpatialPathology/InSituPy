@@ -95,18 +95,22 @@ class ImageData(DeepCopyMixin):
         return key in self.keys()
 
     def keys(self):
+        """Return the keys of all stored images."""
         return self._data.keys()
 
     @property
     def metadata(self):
+        """Dict of image metadata (pixel size, shape, axes, etc.) keyed by image name."""
         return self._metadata
 
     @property
     def names(self):
+        """List of image names in insertion order."""
         return self._names
 
     @property
     def is_empty(self):
+        """True if no images have been added yet."""
         return len(self._data) == 0
 
     def add_image(
@@ -446,6 +450,23 @@ class ImageData(DeepCopyMixin):
              ylim: Optional[Tuple[int, int]],
              inplace: bool = False
              ):
+        """Crop all images to a spatial bounding box.
+
+        Slices each stored image (or pyramid) to the physical-unit region
+        defined by *xlim* and *ylim* using
+        :func:`~insitupy.images.utils.crop_dask_array_or_pyramid`, and
+        records the crop coordinates in the metadata.
+
+        Args:
+            xlim: ``(x_min, x_max)`` in physical units (e.g. µm).
+            ylim: ``(y_min, y_max)`` in physical units (e.g. µm).
+            inplace: If True, modify this object in place; otherwise
+                return a new cropped copy.
+
+        Returns:
+            ImageData or None: Cropped copy when ``inplace=False``,
+            otherwise None.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self

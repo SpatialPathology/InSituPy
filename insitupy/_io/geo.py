@@ -24,6 +24,23 @@ def parse_geopandas(
                 str, os.PathLike, Path],
     uid_col: str = "id"
     ):
+    """Parse geometry data from various input types into a GeoDataFrame.
+
+    Accepts a GeoDataFrame, DataFrame, dict, or a GeoJSON file path and
+    returns a normalised GeoDataFrame with CRS set to EPSG:4326 and
+    *uid_col* as the index.  Returns None if the data is empty.
+
+    Args:
+        data: Geometry data as a GeoDataFrame, pandas DataFrame, dict
+            with a ``"geometry"`` key, or a path to a ``.geojson`` file.
+        uid_col: Column name used as the index.  Defaults to ``"id"``.
+
+    Returns:
+        A :class:`~geopandas.GeoDataFrame` or None if the data is empty.
+
+    Raises:
+        ValueError: If *data* is a file path with an unsupported extension.
+    """
     # check if the input is a path or a GeoDataFrame
     if isinstance(data, GeoDataFrame):
         df = data
@@ -59,6 +76,7 @@ def _read_file_helper(file, engine):
         # convert string representations of dicts to actual dicts
         # only if they are strings (pyogrio may already parse them as dicts)
         def safe_literal_eval(val):
+            """Parse val as JSON or Python literal; return as-is if parsing fails."""
             if isinstance(val, dict):
                 return val
 

@@ -70,6 +70,18 @@ def _feature_qc_plot(
     plt.show()
 
 def _preprocess_psbulk_data(adata):
+    """Preprocess an AnnData for pseudobulk DESeq2 by normalising, scaling, and computing PCA.
+
+    Saves raw counts to ``adata.layers["counts"]``, runs normalisation,
+    log1p, scaling, and PCA via scanpy, then restores raw counts to
+    ``adata.X`` so that DESeq2 receives integer count data.
+
+    Args:
+        adata: AnnData with raw counts in ``X``.
+
+    Returns:
+        The same *adata* object (modified in-place) with raw counts back in ``X``.
+    """
     # Store raw counts in layers
     adata.layers["counts"] = adata.X.copy()
 
@@ -85,6 +97,26 @@ def _preprocess_psbulk_data(adata):
     return adata
 
 def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
+    """Run DESeq2 pseudobulk differential expression via pydeseq2.
+
+    Builds a :class:`~pydeseq2.dds.DeseqDataSet`, runs the DESeq2 pipeline,
+    and extracts Wald-test statistics for the specified contrast.
+
+    Args:
+        adata: Pseudobulk AnnData with raw counts in ``X`` and the design
+            factor in ``obs``.
+        dge_setup: Three-element list ``[factor, numerator, denominator]``
+            passed to :class:`~pydeseq2.ds.DeseqStats` as the contrast.
+        return_params: If True, also return a dictionary of all estimated
+            DESeq2 parameters (dispersions, LFCs, etc.).
+
+    Returns:
+        The :class:`~pydeseq2.ds.DeseqStats` result object, or a tuple
+        ``(stat_res, params)`` if *return_params* is True.
+
+    Raises:
+        ImportError: If ``pydeseq2`` is not installed.
+    """
     try:
         from pydeseq2.dds import DefaultInference, DeseqDataSet
         from pydeseq2.ds import DeseqStats

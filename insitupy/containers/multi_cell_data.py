@@ -99,10 +99,12 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def layers(self):
+        """Dict mapping layer keys to :class:`~insitupy.containers.cell_data.CellData` objects."""
         return self._layers
 
     @property
     def matrix(self):
+        """Deprecated alias for the ``table`` of the main layer. Use ``table`` instead."""
         import warnings
         warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
@@ -133,6 +135,7 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def boundaries(self):
+        """Boundaries of the main layer, or None if the object is empty."""
         try:
             return self._layers[self._main_key].boundaries
         except KeyError:
@@ -144,6 +147,7 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def is_synced(self) -> bool:
+        """True if all layers have their table and boundaries in sync."""
         if self.is_empty:
             return True
 
@@ -151,16 +155,23 @@ class MultiCellData(DeepCopyMixin):
 
     @property
     def main_key(self):
+        """Key of the currently active (main) cell data layer."""
         return self._main_key
 
     @main_key.setter
     def main_key(self, value: str):
+        """Set the main layer key.
+
+        Raises:
+            ValueError: If *value* is not an existing layer key.
+        """
         if value not in self._layers.keys():
             raise ValueError(f"Such layer does not exist.")
         self._main_key = value
 
     @property
     def is_empty(self):
+        """True if no cell data layers have been added."""
         return len(self._layers) == 0
 
     def add_celldata(self,
@@ -370,7 +381,25 @@ class MultiCellData(DeepCopyMixin):
             shape: Optional[Union[Polygon, MultiPolygon]] = None,
             inplace: bool = False,
             verbose: bool = True):
+        """Crop all cell data layers to a spatial bounding box or polygon.
 
+        Delegates to :meth:`~insitupy.containers.cell_data.CellData.crop` on
+        each layer.  Either a *shape* or both *xlim* and *ylim* must be
+        provided.
+
+        Args:
+            xlim: ``(x_min, x_max)`` bounding box in physical units.
+            ylim: ``(y_min, y_max)`` bounding box in physical units.
+            shape: Shapely polygon defining the crop region.  Takes
+                precedence over *xlim* / *ylim* if provided.
+            inplace: If True, modify this object in place; otherwise
+                return a cropped copy.
+            verbose: Passed to each layer's ``crop`` call.
+
+        Returns:
+            MultiCellData or None: Cropped copy when ``inplace=False``,
+            otherwise None.
+        """
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
@@ -389,6 +418,7 @@ class MultiCellData(DeepCopyMixin):
             return _self
 
     def keys(self):
+        """Return the keys of all stored cell data layers."""
         return self._layers.keys()
 
     def save(self,
@@ -397,7 +427,22 @@ class MultiCellData(DeepCopyMixin):
              overwrite: bool = False,
              max_resolution_boundaries: Optional[Number] = None
              ):
+        """Save all cell data layers to a directory on disk.
 
+        Each layer is saved into a subdirectory named after its key.
+        A ``.multicelldata`` JSON file stores the main-key and layer-key
+        metadata required to reload the object.
+
+        Args:
+            path: Output directory path.
+            zipped: If True, save boundary zarr stores as ``.zarr.zip``
+                archives.  Defaults to False.
+            overwrite: If True, remove an existing directory at *path*
+                before saving.  Defaults to False.
+            max_resolution_boundaries: Maximum spatial resolution for
+                downsampling boundary pyramids.  If None, boundaries are
+                saved at their original resolution.
+        """
         path = Path(path)
         multicelldata_metadata = {"key_main": self._main_key, "all_keys": list(self._layers.keys())}
         # check if the output file should be overwritten
@@ -420,6 +465,12 @@ class MultiCellData(DeepCopyMixin):
         write_dict_to_json(dictionary=multicelldata_metadata, file=path / ".multicelldata")
 
     def set_main(self, key):
+        """Set the active (main) layer by key.
+
+        Args:
+            key: Key of the layer to promote to main.  Silently ignored if
+                *key* is not present.
+        """
         if key in self.keys():
             self._main_key = key
 

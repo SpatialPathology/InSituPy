@@ -344,6 +344,30 @@ def crop_dask_array_or_pyramid(
     ylim: Tuple[int, int],
     pixel_size: Number
     ):
+    """Crop a dask array or image pyramid to physical-unit bounding box.
+
+    Converts the physical-unit limits (*xlim*, *ylim*) to pixel coordinates
+    using *pixel_size*, then slices the spatial dimensions of *data*
+    accordingly.  For pyramids (list of dask arrays), each level is cropped
+    taking the accumulated downscale factor into account.
+
+    Args:
+        data: Single dask array with shape ``(Y, X[, ...])`` or a list of
+            dask arrays representing an image pyramid (index 0 = full
+            resolution, each subsequent level is downsampled).
+        xlim: ``(x_min, x_max)`` in physical units (e.g. micrometres).
+        ylim: ``(y_min, y_max)`` in physical units (e.g. micrometres).
+        pixel_size: Physical size of one pixel (in the same units as *xlim*
+            and *ylim*).  Used to convert coordinates to pixel indices.
+
+    Returns:
+        Cropped dask array or list of cropped dask arrays, rechunked to
+        avoid irregular chunks after slicing.
+
+    Raises:
+        InvalidDataTypeError: If *data* is neither a dask array nor a list
+            of dask arrays.
+    """
     # check if image data is one dask array or a pyramid of dask arrays
     if isinstance(data, list):
         if np.all([isinstance(elem, da.core.Array) for elem in data]):
@@ -389,12 +413,45 @@ def clip_image_histogram(
     lower_perc: int = 2,
     upper_perc: int = 98
     ):
+    """Clip image intensity range and rescale to 8-bit.
+
+    Stretches the image histogram by clipping pixel values below the
+    *lower_perc*-th percentile and above the *upper_perc*-th percentile,
+    then linearly rescaling the clipped range to [0, 255] and casting to
+    ``uint8``.
+
+    Args:
+        image: Input image as a NumPy array of any numeric dtype.
+        lower_perc: Lower percentile used as the clip floor. Defaults to 2.
+        upper_perc: Upper percentile used as the clip ceiling. Defaults to 98.
+
+    Returns:
+        Contrast-adjusted image as a ``uint8`` NumPy array with the same
+        spatial shape as *image*.
+    """
     # Define the min and max intensity values
     lp, up = np.percentile(image, (lower_perc, upper_perc))
     image = np.clip((image - lp) * 255.0 / (up - lp), 0, 255).astype(np.uint8)
     return image
 
 def otsu_thresholding(image: np.ndarray) -> np.ndarray:
+    """Apply Otsu's thresholding to produce a binary image.
+
+    Uses OpenCV's implementation of Otsu's method to automatically select a
+    threshold value that minimises intra-class intensity variance, then
+    returns a binary mask where pixels above the threshold are 255 and
+    pixels below are 0.
+
+    Args:
+        image: Grayscale input image as a ``uint8`` NumPy array.
+
+    Returns:
+        Binary ``uint8`` NumPy array of the same shape as *image*, with
+        values 0 or 255.
+
+    Raises:
+        ImportError: If OpenCV (``cv2``) is not installed.
+    """
     if not HAS_OPENCV:
         raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python")
 

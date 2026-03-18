@@ -16,11 +16,19 @@ if WITH_NAPARI:
 
 # checker functions for data sanity
 def check_adata(adata):
+    """Raise TypeError if *adata* is not an :class:`~anndata.AnnData` instance."""
     if type(adata) is not anndata.AnnData:
         raise TypeError('Input is not a valid AnnData object')
 
 
 def check_batch(batch, obs, verbose=False):
+    """Raise ValueError if the *batch* column is absent from *obs*.
+
+    Args:
+        batch: Column name to check for in *obs*.
+        obs: A DataFrame (typically ``adata.obs``).
+        verbose: If True, log the number of unique batches found.
+    """
     if batch not in obs:
         raise ValueError(f'column {batch} is not in obs')
     elif verbose:
@@ -28,6 +36,18 @@ def check_batch(batch, obs, verbose=False):
 
 
 def check_hvg(hvg, hvg_key, adata_var):
+    """Validate that the HVG list and HVG key are present in ``adata.var``.
+
+    Args:
+        hvg: List of highly variable gene names.
+        hvg_key: Column in *adata_var* that flags highly variable genes.
+        adata_var: The ``var`` DataFrame of an AnnData object.
+
+    Raises:
+        TypeError: If *hvg* is not a list.
+        ValueError: If any gene in *hvg* is absent from *adata_var*.
+        KeyError: If *hvg_key* is not a column in *adata_var*.
+    """
     if type(hvg) is not list:
         raise TypeError('HVG list is not a list')
     else:
@@ -37,6 +57,17 @@ def check_hvg(hvg, hvg_key, adata_var):
         raise KeyError('`hvg_key` not found in `adata.var`')
 
 def check_sanity(adata, batch, hvg, hvg_key):
+    """Run a suite of sanity checks on an AnnData object before processing.
+
+    Delegates to :func:`check_adata`, :func:`check_batch`, and (when *hvg*
+    is truthy) :func:`check_hvg`.
+
+    Args:
+        adata: AnnData object to validate.
+        batch: Batch column name expected in ``adata.obs``.
+        hvg: HVG gene list or falsy value to skip HVG check.
+        hvg_key: Column in ``adata.var`` that marks highly variable genes.
+    """
     check_adata(adata)
     check_batch(batch, adata.obs)
     if hvg:
@@ -70,6 +101,19 @@ def is_integer_counts(X):
     return np.all(np.modf(X)[0] == 0)
 
 def check_raw(adata, use_raw, layer=None):
+    """Return the expression matrix, var DataFrame, and var names for either raw or processed data.
+
+    Args:
+        adata: AnnData object.
+        use_raw: If True, return data from ``adata.raw``; otherwise from
+            ``adata.X`` or ``adata.layers[layer]``.
+        layer: Layer key to use when *use_raw* is False.  Ignored when
+            *use_raw* is True.
+
+    Returns:
+        A tuple ``(X, var, var_names)`` where *X* is a dense numpy array
+        and *var* / *var_names* are the corresponding variable metadata.
+    """
     # check if plotting raw data
     if use_raw:
         adata_X = adata.raw.X
@@ -91,6 +135,20 @@ def check_raw(adata, use_raw, layer=None):
     return adata_X, adata_var, adata_var_names
 
 def check_zip(path):
+    """Determine whether *path* refers to a zip output and return the base path.
+
+    Args:
+        path: A :class:`~pathlib.Path` whose suffix is either ``".zip"`` or
+            ``""`` (no extension for a directory output).
+
+    Returns:
+        A tuple ``(zip_output, base_path)`` where *zip_output* is a bool
+        indicating zip mode and *base_path* is the path without the ``.zip``
+        suffix (if applicable).
+
+    Raises:
+        ValueError: If the suffix is neither ``".zip"`` nor empty.
+    """
     # check if the output directory is going to be zipped or not
     if path.suffix == ".zip":
         zip_output = True
@@ -104,6 +162,14 @@ def check_zip(path):
 
 # Function to check if there are any valid labels in matplotlib figure
 def has_valid_labels(ax):
+    """Return True if *ax* has at least one legend handle with a non-underscore label.
+
+    Args:
+        ax: A matplotlib :class:`~matplotlib.axes.Axes` to inspect.
+
+    Returns:
+        True if a labelled artist exists, False otherwise.
+    """
     for artist in ax.get_legend_handles_labels()[0]:  # Get the handles (artists)
         if artist.get_label() and not artist.get_label().startswith('_'):
             return True

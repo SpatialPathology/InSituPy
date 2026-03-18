@@ -21,11 +21,24 @@ from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
 
 
 def create_ansi_color_code_from_rgb(rgb_color):
+    """Return an ANSI 24-bit foreground colour escape code for the given RGB tuple.
+
+    Args:
+        rgb_color: A 3-element sequence of integers ``(R, G, B)`` in 0–255.
+
+    Returns:
+        The ANSI escape string ``\\033[38;2;R;G;Bm``.
+    """
     # Create the ANSI escape code
     ansi_escape_code = f'\033[38;2;{rgb_color[0]};{rgb_color[1]};{rgb_color[2]}m'
     return ansi_escape_code
 
 def remove_last_line_from_csv(filename):
+    """Strip the trailing newline from the last line of a CSV file in-place.
+
+    Args:
+        filename: Path to the CSV file to modify.
+    """
     with open(filename) as myFile:
         lines = myFile.readlines()
         last_line = lines[len(lines)-1]
@@ -34,6 +47,17 @@ def remove_last_line_from_csv(filename):
         myFile.writelines(lines)
 
 def decode_robust(s, encoding="utf-8"):
+    """Decode *s* with the given *encoding*, returning *s* unchanged on failure.
+
+    Args:
+        s: Bytes-like object to decode, or a value that will be returned as-is
+            if it is already a string or decoding fails.
+        encoding: Character encoding to use for decoding.
+
+    Returns:
+        The decoded string, or the original *s* if decoding raised
+        :exc:`UnicodeDecodeError` or :exc:`AttributeError`.
+    """
     try:
         return s.decode(encoding)
     except (UnicodeDecodeError, AttributeError):
@@ -66,6 +90,14 @@ def convert_to_list(elem):
     return [elem] if (isinstance(elem, str) or isinstance(elem, os.PathLike) or isinstance(elem, int)) else list(elem)
 
 def nested_dict_numpy_to_list(dictionary):
+    """Recursively convert all NumPy arrays in a nested dict to plain Python lists.
+
+    Modifies *dictionary* in-place.
+
+    Args:
+        dictionary: A possibly-nested dict whose ``ndarray`` values should be
+            converted to lists.
+    """
     for key, value in dictionary.items():
         if isinstance(value, ndarray):
             dictionary[key] = value.tolist()
@@ -90,6 +122,17 @@ def get_nrows_maxcols(n_keys, max_cols):
     return n_keys, n_rows, max_cols
 
 def remove_empty_subplots(axes, nplots, nrows, ncols):
+    """Hide trailing empty axes in a flat subplot array.
+
+    Args:
+        axes: 1-D array of :class:`~matplotlib.axes.Axes` objects.
+        nplots: Number of subplots that were actually populated.
+        nrows: Total number of rows in the subplot grid.
+        ncols: Total number of columns in the subplot grid.
+
+    Raises:
+        ValueError: If *axes* is not 1-D.
+    """
     if len(axes.shape) != 1:
         raise ValueError("Axis object must have only one dimension.")
     if nplots > 1:

@@ -287,6 +287,7 @@ class InSituData:
 
     @metadata.setter
     def metadata(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'metadata' attribute after initialization.")
 
     @property
@@ -307,6 +308,13 @@ class InSituData:
 
     @property
     def from_insitudata(self):
+        """Return whether this object was loaded from a saved InSituPy project.
+
+        Returns:
+            ``True`` if a valid project path is set and the directory exists,
+            ``False`` otherwise (e.g. object created in-memory via
+            :func:`~insitupy.io.read_xenium`).
+        """
         if self._path is not None:
             if Path(self._path).exists():
                 return True
@@ -326,10 +334,12 @@ class InSituData:
 
     @images.setter
     def images(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @images.deleter
     def images(self):
+        """Clear all image data from this object."""
         self._images = ImageData()
         logger.info("Cleared all data from 'images'.")
 
@@ -343,10 +353,12 @@ class InSituData:
 
     @cells.setter
     def cells(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @cells.deleter
     def cells(self):
+        """Clear all cell data from this object."""
         self._cells = MultiCellData()
         logger.info("Cleared all data from 'cells'.")
 
@@ -360,10 +372,12 @@ class InSituData:
 
     @units.setter
     def units(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'units' attribute after initialization.")
 
     @units.deleter
     def units(self):
+        """Clear all spatial units data from this object."""
         self._units = None
         logger.info("Cleared all data from 'units'.")
 
@@ -392,10 +406,12 @@ class InSituData:
 
     @annotations.setter
     def annotations(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'annotations' attribute after initialization.")
 
     @annotations.deleter
     def annotations(self):
+        """Clear all annotation data from this object."""
         self._annotations = AnnotationsData()
         logger.info("Cleared all data from 'annotations'.")
 
@@ -409,10 +425,12 @@ class InSituData:
 
     @regions.setter
     def regions(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'regions' attribute after initialization.")
 
     @regions.deleter
     def regions(self):
+        """Clear all region data from this object."""
         self._regions = RegionsData()
         logger.info("Cleared all data from 'regions'.")
 
@@ -426,6 +444,7 @@ class InSituData:
 
     @transcripts.setter
     def transcripts(self, value: dd.DataFrame):
+        """Set transcript data, converting a :class:`pandas.DataFrame` to Dask if needed."""
         if isinstance(value, dd.DataFrame):
             self._transcripts = value
         elif isinstance(value, pd.DataFrame):
@@ -435,6 +454,7 @@ class InSituData:
 
     @transcripts.deleter
     def transcripts(self):
+        """Clear all transcript data from this object."""
         self._transcripts = None
 
 
@@ -563,6 +583,22 @@ class InSituData:
         add_masks: bool = False,
         overwrite: bool = True
     ):
+        """Assign annotation geometries to cell layers.
+
+        For each cell layer, spatial point-in-polygon assignment is performed
+        and the result is stored in ``.cells[layer].table.obs``.  Wraps
+        :meth:`assign_geometries` with ``geometry_type="annotations"``.
+
+        Args:
+            keys: Annotation key(s) to assign, or ``"all"`` to assign every
+                available annotation. Defaults to ``"all"``.
+            cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
+                all available layers. Defaults to ``None``.
+            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+                Defaults to ``False``.
+            overwrite: If ``True``, overwrite existing assignment columns.
+                Defaults to ``True``.
+        """
         if cells_layers is None:
             layers_list = self._cells.keys()
         else:
@@ -584,6 +620,22 @@ class InSituData:
         add_masks: bool = False,
         overwrite: bool = True
     ):
+        """Assign region geometries to cell layers.
+
+        Identical to :meth:`assign_annotations` but operates on
+        ``geometry_type="regions"``.  Results are stored in
+        ``.cells[layer].table.obs``.
+
+        Args:
+            keys: Region key(s) to assign, or ``"all"`` to assign every
+                available region. Defaults to ``"all"``.
+            cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
+                all available layers. Defaults to ``None``.
+            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+                Defaults to ``False``.
+            overwrite: If ``True``, overwrite existing assignment columns.
+                Defaults to ``True``.
+        """
         if cells_layers is None:
             layers_list = self._cells.keys()
         else:
@@ -939,6 +991,19 @@ class InSituData:
                  skip: Optional[str] = None,
                  verbose: bool = False
                  ):
+        """Load all available modalities from the project directory.
+
+        Calls every ``load_*`` method in sequence (cells, images, transcripts,
+        annotations, regions, units).  Silently skips modalities that are not
+        stored on disk.
+
+        Args:
+            skip: Optional modality name to skip (e.g. ``"images"``).
+                Substring matching is used, so ``"image"`` also skips
+                ``"images"``. Defaults to ``None``.
+            verbose: If ``True``, log progress for each modality.
+                Defaults to ``False``.
+        """
         # # extract read functions
         # read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
         # read_funcs = [elem for elem in read_funcs if elem not in ["load_all", "load_quicksave"]]
@@ -952,6 +1017,16 @@ class InSituData:
                 #         print(err)
 
     def load_annotations(self, verbose: bool = False):
+        """Load annotations from the project directory into :attr:`annotations`.
+
+        Reads the most recently saved annotations sub-folder.  If no
+        annotations are found on disk, a warning is issued when
+        ``verbose=True`` and the attribute remains empty.
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                annotations are found. Defaults to ``False``.
+        """
         if verbose:
             logger.info("Loading annotations...")
         # try:
@@ -975,9 +1050,25 @@ class InSituData:
     def import_annotations(self,
                            files: Optional[Union[str, os.PathLike, Path]],
                            keys: Optional[str],
-                           scale_factor: Number, # µm/pixel - can be used to convert the pixel coordinates into µm coordinates
+                           scale_factor: Number,
                            verbose: bool = False
                            ):
+        """Import external annotation files into :attr:`annotations`.
+
+        Use this to load annotation geometries from files that were not
+        originally saved by InSituPy (e.g. GeoJSON or QuPath exports).
+
+        Args:
+            files: Path or list of paths to annotation files.
+            keys: Key or list of keys to assign to each file.  Must have the
+                same length as *files*.
+            scale_factor: Conversion factor in µm/pixel used to transform
+                pixel coordinates to µm coordinates.
+            verbose: If ``True``, log progress. Defaults to ``False``.
+
+        Raises:
+            ValueError: If *files* and *keys* have different lengths.
+        """
         if verbose:
             logger.info("Importing annotations...")
 
@@ -1002,6 +1093,15 @@ class InSituData:
         #self._remove_empty_modalities()
 
     def load_regions(self, verbose: bool = False):
+        """Load regions from the project directory into :attr:`regions`.
+
+        Reads the most recently saved regions sub-folder.  If no regions are
+        found on disk, a warning is issued when ``verbose=True``.
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                regions are found. Defaults to ``False``.
+        """
         if verbose:
             logger.info("Loading regions...")
         # try:
@@ -1024,9 +1124,25 @@ class InSituData:
     def import_regions(self,
                     files: Optional[Union[str, os.PathLike, Path]],
                     keys: Optional[str],
-                    scale_factor: Number, # µm/pixel - used to convert the pixel coordinates into µm coordinates
+                    scale_factor: Number,
                     verbose: bool = False
                     ):
+        """Import external region files into :attr:`regions`.
+
+        Use this to load region geometries from files not originally saved by
+        InSituPy (e.g. GeoJSON exports).
+
+        Args:
+            files: Path or list of paths to region files.
+            keys: Key or list of keys to assign to each file.  Must have the
+                same length as *files*.
+            scale_factor: Conversion factor in µm/pixel used to transform
+                pixel coordinates to µm coordinates.
+            verbose: If ``True``, log progress. Defaults to ``False``.
+
+        Raises:
+            ValueError: If *files* and *keys* have different lengths.
+        """
         if verbose:
             logger.info("Importing regions...")
 
@@ -1052,6 +1168,16 @@ class InSituData:
 
 
     def load_cells(self, verbose: bool = False):
+        """Load cell data from the project directory into :attr:`cells`.
+
+        Reads the most recently saved cells sub-folder, which contains the
+        expression matrix and segmentation boundaries.  Requires the object to
+        have been loaded from a saved project (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                cell data is found. Defaults to ``False``.
+        """
         if verbose:
             logger.info("Loading cells...")
 
@@ -1077,10 +1203,28 @@ class InSituData:
 
     def load_images(
         self,
-        names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
+        names: Union[Literal["all", "nuclei"], str] = "all",
         overwrite: bool = True,
-        verbose: bool = False
-        ):
+        verbose: bool = False,
+    ):
+        """Load image pyramids from the project directory into :attr:`images`.
+
+        Discovers all ``.zarr`` files inside the ``images/`` sub-folder and
+        loads them lazily as Dask arrays.  Requires the object to have been
+        loaded from a saved project (:attr:`from_insitudata`).
+
+        Args:
+            names: Image name(s) to load, or ``"all"`` to load every available
+                image. Common values: ``"morphology_focus"``, ``"nuclei"``.
+                Defaults to ``"all"``.
+            overwrite: If ``True``, replace any already-loaded image with the
+                same name. Defaults to ``True``.
+            verbose: If ``True``, log progress and emit a warning when no
+                images are found. Defaults to ``False``.
+
+        Raises:
+            ValueError: If any name in *names* is not found in the project.
+        """
         # load image into ImageData object
         if verbose:
             logger.info("Loading images...")
@@ -1119,6 +1263,23 @@ class InSituData:
                         verbose: bool = False,
                         mode: Literal["pandas", "dask"] = "dask",
                         ):
+        """Load transcript data from the project directory into :attr:`transcripts`.
+
+        Reads ``transcripts/transcripts.parquet`` from the project folder.
+        Requires the object to have been loaded from a saved project
+        (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                transcript data is found. Defaults to ``False``.
+            mode: Backend used to read the Parquet file.  ``"dask"`` (default)
+                returns a lazy :class:`dask.dataframe.DataFrame`, which is
+                recommended for large datasets.  ``"pandas"`` reads the entire
+                file into memory as a :class:`pandas.DataFrame`.
+
+        Raises:
+            ValueError: If *mode* is not ``"pandas"`` or ``"dask"``.
+        """
         # read transcripts
         if verbose:
             logger.info("Loading transcripts...")
@@ -1155,6 +1316,17 @@ class InSituData:
     def load_units(self,
                      verbose: bool = False
                      ):
+        """Load spatial units data from the project directory into :attr:`units`.
+
+        Reads shapes (``units/shapes.parquet``), optional expression data
+        (``units/data.h5ad``), and metadata (``units/metadata.json``) from the
+        project folder.  Requires the object to have been loaded from a saved
+        project (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                units data is found. Defaults to ``False``.
+        """
         # read units
         if verbose:
             logger.info("Loading spatial units...")
@@ -1484,6 +1656,36 @@ class InSituData:
         tile_size: Optional[int] = None,
         add_to_obs: bool = True
     ):
+        """Quantify image fluorescence signal per cell using segmentation masks.
+
+        Extracts per-cell signal intensities from a multiplexed image by
+        applying cell or nucleus segmentation masks.  For large images a tiled
+        approach can be used to limit memory usage.
+
+        Args:
+            image_name: Key of the image in :attr:`images` to quantify.
+            cells_layer: Name of the cell layer whose masks to use.  ``None``
+                uses the default (main) layer. Defaults to ``None``.
+            cells_compartment: Whether to use whole-cell or nucleus masks for
+                quantification. One of ``"cells"`` or ``"nuclei"``.
+                Defaults to ``"cells"``.
+            method: Aggregation method applied within each mask.
+                One of ``"mean"`` or ``"median"``. Defaults to ``"median"``.
+            downsample_factor: Optional integer factor by which to downsample
+                the image before quantification, to reduce memory and compute.
+                Defaults to ``None`` (no downsampling).
+            tile_size: If set, process the image in square tiles of this pixel
+                size with a 100 µm overlap to avoid edge artefacts.  Recommended
+                for images that do not fit into RAM. Defaults to ``None``.
+            add_to_obs: If ``True`` (default), add results directly to
+                ``.cells[layer].table.obs`` under the key
+                ``{image_name}_signal_{compartment}_{method}``.  If ``False``,
+                return a :class:`pandas.Series` indexed by cell name.
+
+        Returns:
+            If *add_to_obs* is ``False``: a :class:`pandas.Series` of per-cell
+            signal values indexed by cell name.  Otherwise ``None``.
+        """
         from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
                                           summarize_tile_measurements)
         img = self.images[image_name]
@@ -1546,6 +1748,18 @@ class InSituData:
     def quicksave(self,
                   note: Optional[str] = None
                   ):
+        """Save the current annotations to a time-stamped cache directory.
+
+        Creates a snapshot of :attr:`annotations` in a dedicated quicksave
+        cache (``~/.insitupy/quicksaves/``).  Each snapshot is identified by a
+        short UID and can be restored with :meth:`load_quicksave`.  Useful for
+        preserving intermediate annotation states without triggering a full
+        :meth:`save`.
+
+        Args:
+            note: Optional free-text note saved alongside the snapshot as
+                ``note.txt``. Defaults to ``None``.
+        """
         # create quicksave directory if it does not exist already
         self._quicksave_dir = CACHE / "quicksaves"
         self._quicksave_dir.mkdir(parents=True, exist_ok=True)
@@ -1581,6 +1795,12 @@ class InSituData:
 
 
     def list_quicksaves(self):
+        """List all available quicksaves for this object.
+
+        Returns:
+            A :class:`pandas.DataFrame` with columns ``slide_id``,
+            ``sample_id``, ``savetime``, ``uid``, and ``note``.
+        """
         pattern = "{slide_id}__{sample_id}__{savetime}__{uid}"
 
         # collect results
@@ -1609,6 +1829,15 @@ class InSituData:
     def load_quicksave(self,
                        uid: str
                        ):
+        """Restore annotations from a previously saved quicksave snapshot.
+
+        Merges the annotation keys from the snapshot into the current
+        :attr:`annotations`.  Use :meth:`list_quicksaves` to obtain available
+        UIDs.
+
+        Args:
+            uid: The 8-character UID of the quicksave to restore.
+        """
         # find files with the uid
         files = list(self._quicksave_dir.glob(f"*{uid}*"))
 
@@ -1687,6 +1916,20 @@ class InSituData:
         skip: Optional[List] = None,
         verbose: bool = True
         ):
+        """Reload all currently loaded modalities from disk.
+
+        Re-reads every modality that was previously loaded (i.e. is non-empty)
+        by calling the corresponding ``load_*`` method.  Useful after an
+        in-place operation such as :func:`~insitupy.tools.register_images`
+        followed by :meth:`save`, to replace in-memory arrays with fresh lazy
+        Dask arrays.  Triggers garbage collection afterwards to free memory.
+
+        Args:
+            skip: Modality name(s) to exclude from reloading (e.g.
+                ``["images"]``). Defaults to ``None``.
+            verbose: If ``True``, log which modalities are being reloaded.
+                Defaults to ``True``.
+        """
         data_meta = self._metadata["data"]
         loaded_modalities = [elem for elem in self.get_loaded_modalities() if elem in data_meta]
 
@@ -1723,9 +1966,24 @@ class InSituData:
             logger.warning("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
 
     def get_modality(self, modality: str):
+        """Return the data object for the specified modality.
+
+        Args:
+            modality: Name of the modality attribute (e.g. ``"cells"``,
+                ``"images"``, ``"annotations"``).
+
+        Returns:
+            The modality data object (type depends on modality).
+        """
         return getattr(self, modality)
 
     def get_loaded_modalities(self):
+        """Return a list of modality names that are currently loaded (non-empty).
+
+        Returns:
+            A :class:`list` of modality name strings, e.g.
+            ``["cells", "images", "annotations"]``.
+        """
         loaded_modalities = []
         for m in MODALITIES:
             try:
@@ -1742,7 +2000,16 @@ class InSituData:
     def remove_history(self,
                        verbose: bool = True
                        ):
+        """Delete all but the most recent save of each modality from disk.
 
+        InSituPy preserves previous saves as time-stamped sub-folders.  This
+        method removes all but the latest entry for ``annotations``, ``cells``,
+        and ``regions``, freeing disk space.
+
+        Args:
+            verbose: If ``True``, log how many entries were removed per
+                modality. Defaults to ``True``.
+        """
         for cat in ["annotations", "cells", "regions"]:
             dirs_to_remove = []
             #if hasattr(self, cat):
@@ -1762,6 +2029,15 @@ class InSituData:
     def remove_modality(self,
                         modality: str
                         ):
+        """Remove a modality from the object and its metadata.
+
+        Deletes the attribute and its entry from ``metadata["data"]``.
+        If the modality does not exist, a warning is logged.
+
+        Args:
+            modality: Name of the modality to remove (e.g. ``"images"``,
+                ``"transcripts"``).
+        """
         if hasattr(self, modality):
             # delete attribute from InSituData object
             delattr(self, modality)

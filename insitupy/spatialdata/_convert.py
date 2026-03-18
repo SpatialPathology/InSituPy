@@ -79,6 +79,24 @@ def _transform_anndata_for_spatialdata(
     cells_key: str,
     cell_area_key: Optional[str] = "cell_area"
     ):
+    """Convert an AnnData table to spatialdata-compatible format with circle shapes.
+
+    Adds ``spatialdata_attrs`` metadata to ``adata.uns``, creates unit circles
+    for all cells, and — if *cell_area_key* is present in ``obs`` — creates
+    area-sized circles whose radii are derived from the cell area.
+
+    Args:
+        adata: AnnData with spatial coordinates in ``obsm["spatial"]``.
+        cells_key: SpatialData element key used for the ``region`` attribute.
+        cell_area_key: Column in ``adata.obs`` containing cell areas in
+            squared pixels.  Used to compute per-cell circle radii.  Pass
+            ``None`` to skip sized circles.
+
+    Returns:
+        A tuple ``(adata, circles_sized, circles)`` where *circles_sized* is
+        a :class:`~geopandas.GeoDataFrame` of area-scaled circles (or ``None``)
+        and *circles* is a GeoDataFrame of unit-radius circles.
+    """
     # from spatialdata.models import ShapesModel
     adata = adata.copy()
     region_str = "region"
@@ -125,6 +143,20 @@ def _transform_images_for_spatialdata(
     n_pyramids: int = 5,
     sample_id: Optional[str] = None
     ):
+    """Extract images from an :class:`InSituData` and parse them into SpatialData Image2DModel elements.
+
+    Reads each named image from ``xd.images``, applies a pixel-size scale
+    transformation, and parses the array into a :class:`~spatialdata.models.Image2DModel`
+    with a multi-resolution pyramid.
+
+    Args:
+        xd: Source :class:`InSituData` object.
+        n_pyramids: Number of pyramid levels to generate.
+        sample_id: Optional prefix for the SpatialData element key.
+
+    Returns:
+        A dict mapping SpatialData element keys to parsed Image2DModel arrays.
+    """
     # from spatialdata.models import Image2DModel
     # from spatialdata.transformations.transformations import Scale
 
@@ -185,6 +217,16 @@ def _transform_transcripts_for_spatialdata(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    """Parse transcript coordinates from an :class:`InSituData` into a SpatialData PointsModel element.
+
+    Args:
+        xd: Source :class:`InSituData` object with transcripts loaded.
+        sample_id: Optional prefix for the SpatialData element key.
+
+    Returns:
+        A dict mapping a SpatialData element key to a parsed PointsModel
+        DataFrame, or an empty dict if no transcripts are available.
+    """
     # from spatialdata.models import PointsModel
     points = {}
     if xd.transcripts is not None:
@@ -211,6 +253,21 @@ def _transform_table_for_spatialdata(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    """Convert cell AnnData tables and circle shapes from an :class:`InSituData` into SpatialData elements.
+
+    For each cell layer with a loaded table, parses the AnnData into a
+    :class:`~spatialdata.models.TableModel` and the corresponding cell
+    positions into circle :class:`~spatialdata.models.ShapesModel` elements
+    (both unit-radius and area-scaled variants when cell areas are available).
+
+    Args:
+        xd: Source :class:`InSituData` object.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A tuple ``(tables, cell_shapes)`` where both are dicts mapping
+        SpatialData element keys to their parsed model objects.
+    """
     # from spatialdata.models import TableModel
     tables, cell_shapes = {}, {}
     #if xd.cells is not None and xd.cells.table is not None:
@@ -256,6 +313,21 @@ def _transform_cell_boundaries_for_spatialdata(
     n_pyramids: int = 5,
     sample_id: Optional[str] = None
     ):
+    """Convert cell boundary label arrays from an :class:`InSituData` into SpatialData Labels2DModel elements.
+
+    For each cell layer with boundaries loaded, wraps the top-level label
+    array in a :class:`~xarray.DataArray` and parses it into a
+    :class:`~spatialdata.models.Labels2DModel` with a multi-resolution pyramid
+    and a pixel-size scale transformation.
+
+    Args:
+        xd: Source :class:`InSituData` object.
+        n_pyramids: Number of pyramid down-sampling levels.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A dict mapping SpatialData element keys to parsed Labels2DModel arrays.
+    """
     # from spatialdata.models import Labels2DModel
     # from spatialdata.transformations.transformations import Scale
 
@@ -298,6 +370,16 @@ def _transform_annotations_for_spatialdata(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    """Parse annotation GeoDataFrames from an :class:`InSituData` into SpatialData ShapesModel elements.
+
+    Args:
+        xd: Source :class:`InSituData` object with annotations loaded.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A dict mapping SpatialData element keys to parsed ShapesModel GeoDataFrames,
+        or an empty dict if no annotations are available.
+    """
     # from spatialdata.models import ShapesModel
     shapes = {}
     if xd.annotations is not None:
@@ -320,6 +402,16 @@ def _transform_regions_for_spatialdata(
     xd: InSituData,
     sample_id: Optional[str] = None
     ):
+    """Parse region GeoDataFrames from an :class:`InSituData` into SpatialData ShapesModel elements.
+
+    Args:
+        xd: Source :class:`InSituData` object with regions loaded.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A dict mapping SpatialData element keys to parsed ShapesModel GeoDataFrames,
+        or an empty dict if no regions are available.
+    """
     # from spatialdata.models import ShapesModel
     shapes = {}
     if xd.annotations is not None:

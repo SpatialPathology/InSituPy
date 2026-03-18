@@ -101,5 +101,18 @@ def cmap2hex(cmap):
     return hexlist
 
 def map_to_colors(cat_list, palette):
+    """Map a list of categories to hex colour strings using a matplotlib colormap.
+
+    Cycles through *palette* using modular indexing, so the palette wraps
+    around if there are more categories than colours.
+
+    Args:
+        cat_list: Sequence of category labels to assign colours to.
+        palette: A matplotlib :class:`~matplotlib.colors.Colormap` with a
+            ``N`` attribute (number of colours).
+
+    Returns:
+        A ``dict`` mapping each category label to its hex colour string.
+    """
     color_dict = {cat: rgb2hex(palette(i % palette.N)) for i, cat in enumerate(cat_list)}
     return color_dict

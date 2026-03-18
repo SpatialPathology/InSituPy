@@ -22,9 +22,11 @@ from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
 
 # Functions
 def total_variation(values):
+    """Compute the total variation (sum of absolute first differences) of *values*."""
     return np.sum(np.abs(np.diff(values)))
 
 def random_permutation_tv(expr):
+    """Return the total variation of *expr* after a random permutation of its elements."""
     random_order = np.random.permutation(np.arange(len(expr)))
     expr_random = expr[random_order]
 
@@ -67,6 +69,8 @@ from tqdm import tqdm
 
 
 class EvaluateExpressionObject:
+    """Container for spatial expression evaluation results, including raw data, binned data, and regression output."""
+
     def __init__(self, raw_data: Optional[pd.DataFrame] = None, binned_data: Optional[pd.DataFrame] = None, result: Optional[pd.DataFrame] = None):
         """
         EvaluateExpressionObject holds the results of the expression evaluation.
@@ -247,6 +251,21 @@ def plot_evaluation(
     maxcols=4,
     font_scale_factor: Optional[Number] = None
 ):
+    """Plot gene expression along a spatial axis with optional LOESS regression overlays.
+
+    For each gene in *genes*, draws raw or binned expression values and
+    overlays a LOESS regression curve with a shaded confidence band.
+
+    Args:
+        eval_object: :class:`EvaluateExpressionObject` holding raw and/or
+            binned expression data and pre-computed regression results.
+        genes: List of gene names to plot.  Defaults to all columns in the
+            raw data.
+        xlabel: Label for the spatial x-axis.
+        maxcols: Maximum number of subplot columns.
+        font_scale_factor: Scaling factor applied to global matplotlib font
+            sizes.  ``None`` leaves fonts unchanged.
+    """
     # extract data from object
     binned_data = eval_object.binned_data
     raw_data = eval_object.raw_data
@@ -366,6 +385,20 @@ def loess_regress(
     eval_object: EvaluateExpressionObject,
     genes: Optional[List[str]] = None,
 ):
+    """Run LOESS regression for each gene in an :class:`EvaluateExpressionObject`.
+
+    Fits a LOESS curve to binned data (if available) or raw data for each
+    gene and returns the regression results keyed by gene name.
+
+    Args:
+        eval_object: :class:`EvaluateExpressionObject` with raw and/or binned
+            expression data.
+        genes: Gene names to regress.  Defaults to all columns in raw data.
+
+    Returns:
+        A dict mapping gene name to a :class:`~insitupy.utils._regression.lowess_prediction`
+        result object.
+    """
     # extract data from object
     binned_data = eval_object.binned_data
     raw_data = eval_object.raw_data

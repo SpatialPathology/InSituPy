@@ -179,6 +179,38 @@ class ImageRegistration:
         return nuclei_img
 
     def load_and_scale_images(self, scaling_log_label: str = "Scaling"):
+        """Load images into memory, optionally deconvolve and convert, then scale.
+
+        Performs the following steps in order:
+
+        1. Compute any lazy dask arrays into NumPy arrays.
+        2. Apply H&E colour deconvolution (if requested via
+           ``self.deconvolve_image`` / ``self.deconvolve_template``).
+        3. Convert to grayscale (if ``self.convert_to_grayscale`` is True).
+        4. Downscale both images so that the longest side does not exceed
+           ``self.max_width`` pixels (using square-area scaling) and convert
+           to ``uint8``.
+        5. Store x/y scale factors (``x_sf_image``, ``y_sf_image``, etc.)
+           and the template dimensions (``template_h``, ``template_w``).
+        6. If either spatial dimension of the original image exceeds
+           ``SHRT_MAX``, resize it further and store the result in
+           ``self.image_resized``.
+
+        After this method returns:
+        - ``self.image_scaled`` and ``self.template_scaled`` hold the
+          downscaled 8-bit arrays used for feature extraction.
+        - ``self.image_resized`` holds a further-resized version (or None).
+        - ``self.resize_factor_image`` is the resize scale factor applied
+          (1 if no extra resize was needed).
+
+        Args:
+            scaling_log_label: Label shown in the log output next to the
+                scaling step.  Defaults to ``"Scaling"``.
+
+        Raises:
+            ImportError: If OpenCV (``cv2``) is not installed.
+            ValueError: If HE deconvolution is requested for a non-RGB image.
+        """
         if not HAS_OPENCV:
             raise ImportError("OpenCV (cv2) is required for image registration. Install it with: pip install opencv-python")
 
@@ -507,7 +539,21 @@ class ImageRegistration:
                 (self.T_resized, mask) = cv2.estimateAffine2D(self.ptsA, self.ptsB)
 
     def perform_registration(self):
+        """Warp the source image onto the template using the estimated transform.
 
+        Selects the full-resolution or resized source image based on whether
+        ``self.image_resized`` is set, applies any pending flip (stored in
+        ``self.flip_axis``), and calls either :func:`cv2.warpAffine` or
+        :func:`cv2.warpPerspective` depending on ``self.perspective_transform``.
+
+        After this method returns, ``self.registered`` holds the warped image
+        array with spatial dimensions matching the template
+        (``self.template_h`` × ``self.template_w``).
+
+        This method is called automatically by :meth:`run`.  Call it directly
+        only if you need to re-apply the transformation after manually
+        modifying ``self.T`` or ``self.T_resized``.
+        """
         # determine which image to be registered here
         if self.image_resized is None:
             self.image_to_register = self.image

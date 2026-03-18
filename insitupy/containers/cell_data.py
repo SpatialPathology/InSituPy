@@ -95,6 +95,7 @@ class CellData(DeepCopyMixin):
 
     @property
     def matrix(self):
+        """Deprecated alias for :attr:`table`. Use ``table`` instead."""
         warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead.",
@@ -105,6 +106,7 @@ class CellData(DeepCopyMixin):
 
     @matrix.setter
     def matrix(self, value: AnnData):
+        """Deprecated alias for the ``table`` setter. Use ``table`` instead."""
         warnings.warn(
             "The 'matrix' property is deprecated and will be removed in a future version. "
             "Please use 'table' instead.",
@@ -169,14 +171,17 @@ class CellData(DeepCopyMixin):
 
     @property
     def config(self):
+        """Configuration object storing segmentation and data-loading parameters."""
         return self._config
 
     @property
     def boundaries(self):
+        """Associated :class:`~insitupy.containers.boundaries_data.BoundariesData` object, or None."""
         return self._boundaries
 
     @property
     def is_synced(self) -> bool:
+        """True if the cell IDs in the table and boundaries are identical and ordered the same way."""
         if self._boundaries is None:
             return True
 
@@ -195,6 +200,7 @@ class CellData(DeepCopyMixin):
 
     @property
     def entries(self):
+        """List of data entries (e.g. file sources) associated with this layer."""
         return self._entries
 
     def copy(self):

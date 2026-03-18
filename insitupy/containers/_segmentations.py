@@ -71,7 +71,20 @@ def _read_baysor_polygons(
 def read_baysor_transcripts(
     baysor_output: Union[str, os.PathLike, Path]
     ) -> pd.DataFrame:
+    """Read the transcript-level assignment CSV produced by Baysor.
 
+    Reads ``segmentation.csv`` from the Baysor output directory and returns
+    a :class:`~pandas.DataFrame` indexed by the transcript identifier column
+    (``transcript_id`` or ``molecule_id``).
+
+    Args:
+        baysor_output: Path to the Baysor output directory containing
+            ``segmentation.csv``.
+
+    Returns:
+        A :class:`~pandas.DataFrame` with one row per transcript and
+        Baysor-assigned cell IDs (and other columns) as columns.
+    """
     # convert to pathlib path
     baysor_output = Path(baysor_output)
 

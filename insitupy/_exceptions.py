@@ -139,6 +139,7 @@ class ModalityNotFoundWarning(UserWarning):
         super().__init__(message)
 
 class InvalidFileTypeError(Exception):
+    """Raised when a file path has an extension that is not in the allowed set."""
     def __init__(self,
                  allowed_types: List[Type],
                  received_type: Type,
@@ -154,6 +155,7 @@ class InvalidFileTypeError(Exception):
         super().__init__(self.message)
 
 class InvalidDataTypeError(Exception):
+    """Raised when a data object has a type that is not in the allowed set."""
     def __init__(self,
                  allowed_types: List[Type],
                  received_type: Type,
@@ -169,6 +171,7 @@ class InvalidDataTypeError(Exception):
         super().__init__(self.message)
 
 class InvalidXeniumDirectory(Exception):
+    """Raised when a path is not a valid Xenium output directory."""
     def __init__(self, directory):
         directory = Path(directory)
         if (directory / ".ispy").exists():
@@ -179,6 +182,7 @@ class InvalidXeniumDirectory(Exception):
 
 
 class MissingPackageError(ImportError):
+    """Raised when an optional dependency is required but not installed."""
     def __init__(self, package_name: str, installation_command: Optional[str]):
         if installation_command is None:
             installation_command = f"pip install {package_name}"

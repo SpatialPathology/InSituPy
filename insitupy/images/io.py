@@ -270,6 +270,29 @@ def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
 
 
 def read_zarr(path):
+    """Read an image from a Zarr or Zarr.zip store.
+
+    Loads the image data and associated OME metadata from a ``.zarr`` directory
+    or ``.zarr.zip`` archive. Both single-array stores and multi-resolution
+    pyramid stores (sub-arrays named ``0``, ``1``, …) are supported.
+    Compatible with Zarr v2 and v3.
+
+    Args:
+        path: Path to the ``.zarr`` directory or ``.zarr.zip`` file.
+
+    Returns:
+        A tuple ``(img, ome_meta, axes, pixel_size)`` where
+
+        - **img** – a :class:`dask.array.Array` for single-array stores, or a
+          :class:`list` of :class:`dask.array.Array` for pyramid stores
+          (index 0 = full resolution).
+        - **ome_meta** – OME metadata dict parsed from the Zarr store attributes.
+        - **axes** – axis string after normalisation (e.g. ``"YXS"``).
+        - **pixel_size** – physical pixel size in the unit stored in the metadata.
+
+    Raises:
+        ValueError: If no image data is found in the store.
+    """
     # load image from .zarr.zip
     zipped = zipfile.is_zipfile(path)
 
@@ -319,9 +342,31 @@ def read_zarr(path):
     return img, ome_meta, axes, pixel_size
 
 
-def read_image(
-    path
-    ):
+def read_image(path):
+    """Read an image from disk, dispatching on file extension.
+
+    Supported formats: ``.zarr``, ``.zarr.zip``, ``.ome.tif``, ``.ome.tiff``,
+    ``.tif``, ``.tiff``.  Zarr and OME-TIFF files are loaded lazily as
+    :class:`dask.array.Array` objects; plain TIFF files are read eagerly via
+    :func:`tifffile.imread`.
+
+    Args:
+        path: Path to the image file.
+
+    Returns:
+        A tuple ``(img, ome_meta, axes, pixel_size)`` where
+
+        - **img** – a :class:`dask.array.Array`, a :class:`list` of
+          :class:`dask.array.Array` (pyramid), or a :class:`numpy.ndarray`
+          (plain TIFF).
+        - **ome_meta** – OME metadata dict.
+        - **axes** – normalised axis string (e.g. ``"YXS"``).
+        - **pixel_size** – physical pixel size extracted from the OME metadata.
+
+    Raises:
+        :class:`~insitupy._exceptions.InvalidFileTypeError`: If the file
+            extension is not recognised.
+    """
     path = Path(path)
     suffix = path.name.split(".", maxsplit=1)[-1]
 
@@ -370,13 +415,43 @@ def read_image(
 
     return img, ome_meta, axes, pixel_size
 
-def write_zarr(image, file,
-               img_metadata: dict,
-               axes: str, # channels, e.g. "YXS" for RGB - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-               save_pyramid: bool = True,
-               overwrite: bool = False,
-               verbose: bool = False
-               ):
+def write_zarr(
+    image,
+    file,
+    img_metadata: dict,
+    axes: str,
+    save_pyramid: bool = True,
+    overwrite: bool = False,
+    verbose: bool = False,
+):
+    """Write image data to a Zarr or Zarr.zip store.
+
+    Saves an image (or existing pyramid) together with OME metadata as a
+    ``.zarr`` directory or ``.zarr.zip`` archive.  When ``save_pyramid=True``
+    and a non-pyramidal array is provided, a six-level pyramid is created
+    automatically.  Compatible with Zarr v2 and v3.
+
+    Args:
+        image: Input image as a :class:`dask.array.Array`,
+            :class:`numpy.ndarray`, or a :class:`list` of arrays representing
+            an existing pyramid (index 0 = full resolution).
+        file: Output path.  The extension controls the format:
+            ``.zarr`` for a directory store, ``.zarr.zip`` for a zip store.
+        img_metadata: Metadata dict to store in the Zarr root attributes
+            (e.g. ``{"OME": ..., "axes": "YXS", "pixel_size": 0.2125}``).
+        axes: Axis string describing the image dimensions, e.g. ``"YX"``
+            (grayscale), ``"YXS"`` (RGB), ``"CYX"`` (multi-channel IF).
+        save_pyramid: If ``True`` (default), write a multi-resolution pyramid.
+            If the input is already a list, it is written as-is; otherwise a
+            pyramid is created via :func:`~insitupy.images.utils.create_img_pyramid`.
+            If ``False``, only the full-resolution array is written.
+        overwrite: If ``True``, delete any existing file or directory at
+            *file* before writing. Defaults to ``False``.
+        verbose: If ``True``, log the output path. Defaults to ``False``.
+
+    Raises:
+        FileExistsError: If *file* already exists and *overwrite* is ``False``.
+    """
     if verbose:
         logger.info(f"Saving image to {str(file)}")
 
@@ -581,6 +656,24 @@ def write_ome_tiff(
             )
 
 def read_zarr_pyramid(dirstore, persist):
+    """Read a pyramid from an already-opened Zarr store.
+
+    Reads sub-arrays from *dirstore*, treating them as pyramid resolution
+    levels sorted in ascending order (``"0"`` = full resolution).  If the
+    store contains a single array (indicated by a ``.zarray`` entry), that
+    array is returned directly.
+
+    Args:
+        dirstore: An open Zarr store object (e.g.
+            :class:`zarr.storage.DirectoryStore` or
+            :class:`zarr.storage.ZipStore`).
+        persist: If ``True``, call ``.persist()`` on each
+            :class:`dask.array.Array` to trigger eager loading into memory.
+
+    Returns:
+        A :class:`dask.array.Array` (single array) or a :class:`list` of
+        :class:`dask.array.Array` (pyramid, index 0 = full resolution).
+    """
     # get components of zip store
     components = dirstore.listdir()
 
