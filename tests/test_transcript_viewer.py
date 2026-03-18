@@ -213,60 +213,8 @@ class TestPrepareGeneColors:
         assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
 
 
-class TestBboxQuery:
-    """Tests for bounding box query functionality."""
-
-    def test_bbox_query_logic(self):
-        """Test bounding box filtering logic (unit test without widget)."""
-        # Create test coordinates
-        coords = np.array([
-            [5.0, 5.0],    # inside
-            [15.0, 5.0],   # outside (x too high)
-            [5.0, 15.0],   # outside (y too high)
-            [0.0, 0.0],    # on edge
-            [10.0, 10.0],  # on edge
-        ])
-
-        # Define bbox: xmin=0, xmax=10, ymin=0, ymax=10
-        xmin, xmax, ymin, ymax = 0, 10, 0, 10
-
-        # Apply bbox filter (same logic as in widget)
-        mask = (
-            (coords[:, 0] >= xmin) & (coords[:, 0] <= xmax) &
-            (coords[:, 1] >= ymin) & (coords[:, 1] <= ymax)
-        )
-        filtered = coords[mask]
-
-        # Should include points at indices 0, 3, 4
-        assert len(filtered) == 3
-        np.testing.assert_array_equal(filtered[0], [5.0, 5.0])
-        np.testing.assert_array_equal(filtered[1], [0.0, 0.0])
-        np.testing.assert_array_equal(filtered[2], [10.0, 10.0])
-
-
 class TestSubsampling:
     """Tests for subsampling functionality."""
-
-    def test_subsampling_logic(self):
-        """Test subsampling when points exceed limit."""
-        n_points = 1000
-        max_points = 100
-
-        coords = np.random.rand(n_points, 2)
-        colors = np.random.rand(n_points, 3)
-        gene_names = np.array([f"Gene{i}" for i in range(n_points)])
-
-        # Apply subsampling (same logic as in widget)
-        if len(coords) > max_points:
-            rng = np.random.default_rng(42)
-            idx = rng.choice(len(coords), max_points, replace=False)
-            subsampled_coords = coords[idx]
-            subsampled_colors = colors[idx]
-            subsampled_names = gene_names[idx]
-
-        assert len(subsampled_coords) == max_points
-        assert len(subsampled_colors) == max_points
-        assert len(subsampled_names) == max_points
 
     def test_no_subsampling_when_under_limit(self):
         """Test that no subsampling occurs when under limit."""

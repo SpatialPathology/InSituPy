@@ -214,9 +214,3 @@ def test_crop_works_without_boundaries():
     assert cropped.boundaries is None
     assert list(cropped.table.obs_names) == ["c2", "c3"]
     assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
-    assert list(cropped.table.obs_names) == ["c2", "c3"]
-    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
-    assert list(cropped.table.obs_names) == ["c2", "c3"]
-    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
-    assert list(cropped.table.obs_names) == ["c2", "c3"]
-    assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
