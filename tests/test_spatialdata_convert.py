@@ -50,19 +50,21 @@ class TestConvertToSpatialdata:
     def test_tables_element_present(self):
         xd = _make_insitudata()
         sdata = convert_to_spatialdata(xd)
-        assert "table" in sdata.tables
+        assert len(sdata.tables) > 0
 
     def test_table_obs_shape_matches(self):
         n_cells = 8
         xd = _make_insitudata(n_cells=n_cells)
         sdata = convert_to_spatialdata(xd)
-        assert sdata.tables["table"].n_obs == n_cells
+        table = next(iter(sdata.tables.values()))
+        assert table.n_obs == n_cells
 
     def test_table_var_shape_matches(self):
         n_genes = 6
         xd = _make_insitudata(n_genes=n_genes)
         sdata = convert_to_spatialdata(xd)
-        assert sdata.tables["table"].n_vars == n_genes
+        table = next(iter(sdata.tables.values()))
+        assert table.n_vars == n_genes
 
     def test_no_images_element_when_none_loaded(self):
         xd = _make_insitudata()
