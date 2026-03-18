@@ -242,6 +242,42 @@ def _plot_static_continuous(
     )
 
 
+def _plot_static_categorical_mpl(
+    ax: "plt.Axes",
+    df: pd.DataFrame,
+    color_key: str,
+    color_dict: dict,
+    point_size: float
+) -> None:
+    """Plot categorical data with matplotlib scatter (fallback when datashader unavailable)."""
+    col = df[color_key].astype(str)
+    for cat, color in color_dict.items():
+        mask = col == str(cat)
+        if mask.any():
+            ax.scatter(
+                df.loc[mask, "x"], df.loc[mask, "y"],
+                c=color, s=point_size, rasterized=True, linewidths=0, label=cat
+            )
+
+
+def _plot_static_continuous_mpl(
+    ax: "plt.Axes",
+    df: pd.DataFrame,
+    color_key: str,
+    cmap: str,
+    point_size: float,
+    vmin: float,
+    vmax: float
+) -> None:
+    """Plot continuous data with matplotlib scatter (fallback when datashader unavailable)."""
+    ax.scatter(
+        df["x"], df["y"],
+        c=df[color_key], cmap=cmap,
+        vmin=vmin, vmax=vmax,
+        s=point_size, rasterized=True, linewidths=0
+    )
+
+
 def _add_legend(
     ax: "plt.Axes",
     color_dict: dict,
@@ -745,17 +781,11 @@ def embedding(
 
         return plots[0] if len(plots) == 1 else hv.Layout(plots).cols(ncols)
 
-    # Static mode - requires datashader and matplotlib
-    if not _check_datashader():
-        raise ImportError(
-            "datashader and matplotlib are required for static plots. "
-            "Install with: pip install datashader matplotlib"
-        )
+    # Static mode - use datashader when available, fall back to matplotlib scatter
+    use_datashader = _check_datashader()
 
-    import datashader as ds
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
-    from datashader.mpl_ext import dsshow
 
     user_provided_figsize = figsize is not None
     ncols_plot = min(ncols, n_panels)
@@ -785,24 +815,35 @@ def embedding(
             colormap, _ = _get_colormap(values, color_type, cmap)
 
             if color_type == "categorical":
-                _plot_static_categorical(ax, df, c, colormap, point_size)
+                if use_datashader:
+                    _plot_static_categorical(ax, df, c, colormap, point_size)
+                else:
+                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size)
                 legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
                 if legend_fig:
                     legend_figs.append(legend_fig)
             else:
                 vmin_use, vmax_use = _get_vmin_vmax(df[c].values, vmin, vmax, vmax_percentile)
-                _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                if use_datashader:
+                    _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                else:
+                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use)
                 sm = plt.cm.ScalarMappable(
                     cmap=colormap,
                     norm=mcolors.Normalize(vmin=vmin_use, vmax=vmax_use)
                 )
                 plt.colorbar(sm, ax=ax, shrink=0.6)
         else:
-            import datashader.transfer_functions as tf
+            if use_datashader:
+                import datashader as ds
+                import datashader.transfer_functions as tf
+                from datashader.mpl_ext import dsshow
 
-            spread_px = max(1, int(round(point_size)))
-            shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
-            dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
+                spread_px = max(1, int(round(point_size)))
+                shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+                dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
+            else:
+                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=True, linewidths=0)
             c = "density"
 
         ax.set_title(title or c)

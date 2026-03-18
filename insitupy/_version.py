@@ -1,7 +1,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("insitupy")
+    __version__ = version("insitupy-spatial")
 except PackageNotFoundError:
     __version__ = "unknown"
 
