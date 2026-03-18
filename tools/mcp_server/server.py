@@ -31,6 +31,10 @@ import insitupy as _ispy
 
 _PACKAGE_DIR = Path(_ispy.__file__).resolve().parent  # .../insitupy/
 _REPO_ROOT = _PACKAGE_DIR.parent  # one level up
+_TESTS_DIR = _REPO_ROOT / "tests"
+_SEARCH_ROOTS = [_PACKAGE_DIR]
+if _TESTS_DIR.exists():
+    _SEARCH_ROOTS.append(_TESTS_DIR)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -412,6 +416,8 @@ def get_docstring(dotted_path: str) -> str:
 def search_codebase(pattern: str, file_glob: str = "*.py", max_results: int = 30) -> str:
     """Search across all Python files in the InSituPy source tree.
 
+    Searches both the ``insitupy/`` package directory and ``tests/`` (if present).
+
     Args:
         pattern: Regex pattern to search for in file contents.
         file_glob: Glob pattern to filter files (default: "*.py").
@@ -424,7 +430,12 @@ def search_codebase(pattern: str, file_glob: str = "*.py", max_results: int = 30
     results: list[str] = []
     count = 0
 
-    for py_file in sorted(_PACKAGE_DIR.rglob(file_glob)):
+    all_files: list[Path] = []
+    for root in _SEARCH_ROOTS:
+        all_files.extend(root.rglob(file_glob))
+    all_files.sort()
+
+    for py_file in all_files:
         try:
             text = py_file.read_text(encoding="utf-8", errors="replace")
         except Exception:
@@ -441,6 +452,53 @@ def search_codebase(pattern: str, file_glob: str = "*.py", max_results: int = 30
     if not results:
         return f"No matches for pattern '{pattern}' in {file_glob} files."
     return "\n".join(results)
+
+
+@mcp.tool()
+def list_test_files() -> str:
+    """List all test files in the tests/ directory.
+
+    Returns:
+        File names with line counts and a one-line description extracted
+        from the module docstring (if present).
+    """
+    if not _TESTS_DIR.exists():
+        return "tests/ directory not found in the repository."
+
+    test_files = sorted(
+        f for f in _TESTS_DIR.rglob("*.py")
+        if f.stem.startswith("test_") or f.stem.endswith("_test")
+    )
+
+    if not test_files:
+        return "No test files found in tests/."
+
+    lines_out: list[str] = []
+    for tf in test_files:
+        try:
+            source = tf.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        source_lines = source.splitlines()
+        line_count = len(source_lines)
+        # Extract first non-empty line of the module docstring
+        description = ""
+        try:
+            tree = ast.parse(source)
+            raw_doc = ast.get_docstring(tree)
+            if raw_doc:
+                for doc_line in raw_doc.splitlines():
+                    doc_line = doc_line.strip()
+                    if doc_line:
+                        description = doc_line
+                        break
+        except SyntaxError:
+            pass
+        rel = tf.relative_to(_REPO_ROOT)
+        suffix = f"  — {description}" if description else ""
+        lines_out.append(f"  {rel}  ({line_count} lines){suffix}")
+
+    return "\n".join(lines_out)
 
 
 @mcp.tool()
