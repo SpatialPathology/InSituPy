@@ -84,6 +84,27 @@ def _short_doc(obj) -> str:
     return ""
 
 
+def _returns_doc(obj) -> str:
+    """Extract the Returns: section from a callable's docstring, if present."""
+    doc = inspect.getdoc(obj)
+    if not doc:
+        return ""
+    in_returns = False
+    result: list[str] = []
+    for line in doc.splitlines():
+        if re.match(r"^[Rr]eturns?:\s*$", line):
+            in_returns = True
+            continue
+        if in_returns:
+            # A non-indented line ending with ":" signals a new section header
+            if line and not line[0].isspace() and line.rstrip().endswith(":"):
+                break
+            stripped = line.strip()
+            if stripped:
+                result.append(stripped)
+    return " ".join(result).strip()
+
+
 def _format_signature(obj) -> str:
     """Return a string representation of a callable's signature."""
     try:
@@ -218,6 +239,8 @@ def list_classes(module_path: str) -> str:
 
     Returns:
         A list of classes with their base classes and one-line descriptions.
+        For full details including constructor signature, properties, and
+        methods, call get_class_info("module_path.ClassName").
     """
     if not module_path.startswith("insitupy"):
         module_path = f"insitupy.{module_path}"
@@ -252,6 +275,8 @@ def list_functions(module_path: str) -> str:
 
     Returns:
         A list of function names, signatures, and one-line descriptions.
+        For full parameter types, return values, and examples, call
+        get_docstring("module_path.function_name").
     """
     if not module_path.startswith("insitupy"):
         module_path = f"insitupy.{module_path}"
@@ -875,7 +900,9 @@ def get_tools_api() -> str:
 
     Returns:
         Analysis tools (DGE, distance, neighbors, permutation, pseudobulk,
-        registration) with their signatures.
+        registration) with their signatures. Analysis functions return
+        structured result objects (e.g. DiffExprResults, ImageRegistration);
+        call get_result_types() for their full field and method documentation.
     """
     lines: list[str] = ["# InSituPy Analysis Tools (insitupy.tl)\n"]
 
@@ -1484,9 +1511,12 @@ def get_images_api() -> str:
                 continue
             sig = _format_signature(obj)
             desc = _short_doc(obj)
+            ret = _returns_doc(obj)
             lines.append(f"  {name}{sig}")
             if desc:
                 lines.append(f"    {desc}")
+            if ret:
+                lines.append(f"    Returns: {ret}")
         lines.append("")
     except Exception as exc:
         lines.append(f"(Could not introspect images.io: {exc})\n")
@@ -1500,9 +1530,12 @@ def get_images_api() -> str:
                 continue
             sig = _format_signature(obj)
             desc = _short_doc(obj)
+            ret = _returns_doc(obj)
             lines.append(f"  {name}{sig}")
             if desc:
                 lines.append(f"    {desc}")
+            if ret:
+                lines.append(f"    Returns: {ret}")
         lines.append("")
     except Exception as exc:
         lines.append(f"(Could not introspect images.utils: {exc})\n")
