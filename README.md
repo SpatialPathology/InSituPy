@@ -28,6 +28,12 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
 </p>
 
 
+### AI Assistant Integration (MCP Server)
+
+InSituPy ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Supported clients include **Claude Desktop**, **Claude Code**, **Cursor**, **Windsurf**, **Continue.dev**, and **Cline**.
+
+See **[MCP_TUTORIAL.md](MCP_TUTORIAL.md)** for step-by-step setup instructions for each client.
+
 ### Documentation
 
 For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
