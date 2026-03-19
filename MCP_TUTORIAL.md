@@ -29,33 +29,25 @@ The AI will call the appropriate MCP tool and answer based on the actual, up-to-
 
 ## Prerequisites
 
-1. **Python ≥ 3.10** installed and available as `python` on your PATH.
-2. The **InSituPy package** installed in the Python environment that will run the server:
+**`uv`** must be installed on your system. `uv` is a fast Python package manager that `uvx` (the zero-install runner) is part of.
 
-   ```bash
-   pip install insitupy-spatial
-   ```
+Install `uv`:
 
-3. The **MCP library** installed in the same environment:
+- **macOS / Linux:**
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+- **macOS (Homebrew):**
+  ```bash
+  brew install uv
+  ```
+- **Windows and other options:** see [https://docs.astral.sh/uv/getting-started/installation/](https://docs.astral.sh/uv/getting-started/installation/)
 
-   ```bash
-   pip install "mcp[cli]>=1.0.0"
-   ```
+Once `uv` is installed, no further manual setup is needed — `uvx` downloads and runs the InSituPy MCP server automatically in an isolated environment.
 
-   Or install both at once using the bundled optional extra:
+> **Python version:** All config snippets below use `--python 3.12`. This is required because a transitive dependency of napari (`triangle`) does not yet ship pre-built wheels for Python 3.13+. Without this flag, uvx may pick a newer Python and fail to build `triangle` from source.
 
-   ```bash
-   pip install "insitupy-spatial[mcp]"
-   ```
-
-4. A **local clone** of this repository (the MCP server code is not distributed via PyPI):
-
-   ```bash
-   git clone https://github.com/SpatialPathology/InSituPy.git
-   cd InSituPy
-   ```
-
-   > **Important:** The `python` command in your MCP config must point to the same environment where `insitupy-spatial` is installed. If you use conda, activate that environment first, then find the full path to its Python interpreter with `which python` (macOS/Linux) or `where python` (Windows).
+> **Advanced / local development:** If you prefer to run the server from a local repository clone (e.g. to test unreleased changes), see the [Local Development Setup](#local-development-setup) section at the end of this document.
 
 ---
 
@@ -73,44 +65,20 @@ Claude Desktop has built-in MCP support. You configure servers via a JSON file.
 | Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
 | Linux | `~/.config/Claude/claude_desktop_config.json` |
 
-**2. Add the InSituPy server** to `mcpServers`. Replace `/path/to/InSituPy` with the actual path to your cloned repository, and `/path/to/your/python` with the Python interpreter that has `insitupy-spatial` installed:
+**2. Add the InSituPy server** to `mcpServers`:
 
 ```json
 {
   "mcpServers": {
     "insitupy": {
-      "command": "/path/to/your/python",
-      "args": ["/path/to/InSituPy/run_server.py"]
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
     }
   }
 }
 ```
 
-**Example on macOS with a conda environment:**
-
-```json
-{
-  "mcpServers": {
-    "insitupy": {
-      "command": "/Users/yourname/miniforge3/envs/insitupy/bin/python",
-      "args": ["/Users/yourname/projects/InSituPy/run_server.py"]
-    }
-  }
-}
-```
-
-**Example on Windows:**
-
-```json
-{
-  "mcpServers": {
-    "insitupy": {
-      "command": "C:\\Users\\yourname\\miniforge3\\envs\\insitupy\\python.exe",
-      "args": ["C:\\Users\\yourname\\projects\\InSituPy\\run_server.py"]
-    }
-  }
-}
-```
+This is all you need. `uvx` downloads `insitupy-spatial` with its MCP dependencies and launches the server in an isolated environment — no repository clone or manual Python setup required.
 
 **3. Restart Claude Desktop.** The server starts automatically when Claude Desktop launches. You should see "insitupy" listed in the MCP tools panel (hammer icon).
 
@@ -149,8 +117,8 @@ Cursor supports MCP servers via a JSON config file.
 {
   "mcpServers": {
     "insitupy": {
-      "command": "/path/to/your/python",
-      "args": ["/path/to/InSituPy/run_server.py"]
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
     }
   }
 }
@@ -177,8 +145,8 @@ Add the InSituPy server:
 {
   "mcpServers": {
     "insitupy": {
-      "command": "/path/to/your/python",
-      "args": ["/path/to/InSituPy/run_server.py"]
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
     }
   }
 }
@@ -203,8 +171,8 @@ Continue is an open-source AI coding assistant that supports MCP.
       {
         "transport": {
           "type": "stdio",
-          "command": "/path/to/your/python",
-          "args": ["/path/to/InSituPy/run_server.py"]
+          "command": "uvx",
+          "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
         }
       }
     ]
@@ -224,8 +192,8 @@ Cline is a VS Code extension with MCP support.
 
 **2. Choose "Command (stdio)"** and fill in:
 
-- **Command:** `/path/to/your/python`
-- **Args:** `/path/to/InSituPy/run_server.py`
+- **Command:** `uvx`
+- **Args:** `--python 3.12 --from insitupy-spatial[mcp] insitupy-mcp`
 - **Name:** `insitupy`
 
 Or edit `cline_mcp_settings.json` directly (accessible from the Cline MCP panel) with the same JSON structure as the other clients above.
@@ -242,14 +210,11 @@ Tools such as [`mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) can expose 
 
 **Option 2 — Copy relevant tool output manually**
 
-Run the MCP server interactively using the MCP CLI and paste output into your chat session:
+Run the MCP server interactively using the MCP inspector:
 
 ```bash
-# Install the MCP CLI if not already installed
-pip install "mcp[cli]"
-
-# Start an interactive session with the server
-mcp dev /path/to/InSituPy/run_server.py
+# Install uv if not already installed, then run:
+uvx --from "insitupy-spatial[mcp]" mcp dev insitupy-mcp
 ```
 
 This opens a browser-based inspector where you can call individual tools and copy their output to use in any chat interface.
@@ -264,10 +229,9 @@ Once set up, test the connection by asking your AI assistant:
 
 The assistant should call the `list_modules` tool and return a structured list of InSituPy submodules (`io`, `pl`, `pp`, `tl`, `im`, `interactive`, `datasets`, `spatialdata`, `utils`). If it responds without calling a tool or says it has no InSituPy tools available, check that:
 
-1. The Python path in the config points to the correct environment.
-2. `insitupy-spatial` and `mcp[cli]` are both installed in that environment.
-3. The path to `run_server.py` (or the repo) is correct and the file exists.
-4. You restarted the client after saving the config.
+1. `uv` is installed and `uvx` is available on your PATH (`uvx --version` should print a version number).
+2. The `"command"` in your config is exactly `"uvx"` (not a full path).
+3. You restarted the client after saving the config.
 
 ---
 
@@ -325,3 +289,60 @@ The server exposes the following tools. Your AI assistant selects the appropriat
 | `get_interactive_guide` | napari-based interactive visualization |
 | `get_images_api` | Image I/O and utility functions |
 | `get_spatialdata_api` | SpatialData conversion functions |
+
+---
+
+## Local Development Setup
+
+> **This section is for advanced users only.** Most users should use the `uvx` one-liner described above.
+
+If you want to run the server from a local clone of the repository — for example, to test unreleased changes — follow these steps:
+
+**1. Clone the repository and install dependencies:**
+
+```bash
+git clone https://github.com/SpatialPathology/InSituPy.git
+cd InSituPy
+pip install "insitupy-spatial[mcp]"
+```
+
+**2. Configure your client** using the local Python interpreter that has `insitupy-spatial` installed. Replace the paths below with your actual paths:
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "/path/to/your/python",
+      "args": ["-m", "tools.mcp_server"]
+    }
+  }
+}
+```
+
+On macOS with a conda environment:
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "/Users/yourname/miniforge3/envs/insitupy/bin/python",
+      "args": ["-m", "tools.mcp_server"]
+    }
+  }
+}
+```
+
+On Windows:
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "C:\\Users\\yourname\\miniforge3\\envs\\insitupy\\python.exe",
+      "args": ["-m", "tools.mcp_server"]
+    }
+  }
+}
+```
+
+> **Note:** The `python` interpreter must belong to the environment where `insitupy-spatial` is installed, and the working directory must be the repository root (so `tools.mcp_server` is importable).

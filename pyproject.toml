@@ -49,9 +49,13 @@ spatialdata = [
 ]
 mcp = ["mcp[cli]>=1.0.0"]
 
+[project.scripts]
+insitupy-mcp = "mcp_server:main"
+
 [tool.poetry]
 packages =[
-    { include = 'insitupy' }
+    { include = 'insitupy' },
+    { include = 'mcp_server', from = 'tools' }
 ]
 
 [build-system]
