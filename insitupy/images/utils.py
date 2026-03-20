@@ -206,20 +206,9 @@ def scale_to_max_width(image: np.ndarray,
         # use the square area of the maximum width as measure for rescaling. Better for elongated images.
         max_square_area = max_width ** 2
 
-        # calculate new dimensions based on the maximum square area
-        long_idx = np.argmax(image_yx)  # search for position of longest dimension
-        short_idx = np.argmin(image_yx)  # same for shortest
-        long_side = image_yx[long_idx]  # extract longest side
-        short_side = image_yx[short_idx]  # extract shortest
-        dim_ratio = short_side / long_side  # calculate ratio between the two sides.
-        new_long_side = int(np.sqrt(max_square_area / dim_ratio))  # calculate the length of the new longer side based on area
-        new_short_side = int(new_long_side * dim_ratio) # calculate length of new shorter side based on the longer one
-
-        # create new shape
-        new_shape = [None, None]
-        new_shape[long_idx] = new_long_side
-        new_shape[short_idx] = new_short_side
-        new_shape = tuple(new_shape)
+        # scale both dimensions by the same factor so the resulting area equals max_square_area
+        sf = np.sqrt(max_square_area / (image_yx[0] * image_yx[1]))
+        new_shape = (int(image_yx[0] * sf), int(image_yx[1] * sf))
 
     # resizing - caution: order of dimensions is reversed in OpenCV compared to numpy
     image_scaled = resize_image(img=image, dim=(new_shape[1], new_shape[0]), axes=axes)
