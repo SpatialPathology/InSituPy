@@ -22,8 +22,7 @@ from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.containers.dataclasses import (AnnotationsData, ImageData,
-                                              RegionsData)
+from insitupy.containers import AnnotationsData, ImageData, RegionsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata

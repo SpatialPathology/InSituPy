@@ -9,8 +9,8 @@ from typing import Dict, Optional, Tuple, Union
 import numpy as np
 from shapely import MultiPolygon, Polygon
 
-from insitupy._io._files import (check_overwrite_and_remove_if_true,
-                                write_dict_to_json)
+from insitupy._io.files import (check_overwrite_and_remove_if_true,
+                               write_dict_to_json)
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__

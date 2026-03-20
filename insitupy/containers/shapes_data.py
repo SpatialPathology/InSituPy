@@ -13,8 +13,8 @@ import pandas as pd
 from shapely import MultiPoint, Point, Polygon, affinity
 
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI
-from insitupy._io._files import check_overwrite_and_remove_if_true
-from insitupy._io._geo import parse_geopandas, write_qupath_geojson
+from insitupy._io.files import check_overwrite_and_remove_if_true
+from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.utils.utils import convert_to_list

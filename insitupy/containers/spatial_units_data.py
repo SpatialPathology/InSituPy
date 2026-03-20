@@ -12,9 +12,9 @@ import pandas as pd
 from anndata import AnnData
 from shapely import MultiPolygon, Polygon, affinity
 
-from insitupy._io._files import (check_overwrite_and_remove_if_true,
-                                write_dict_to_json)
-from insitupy._io._geo import write_qupath_geojson
+from insitupy._io.files import (check_overwrite_and_remove_if_true,
+                               write_dict_to_json)
+from insitupy._io.geo import write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__

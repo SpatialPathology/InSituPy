@@ -6,8 +6,9 @@ import pytest
 from anndata import AnnData
 
 from insitupy._core._napari import _sync_cells_for_viewer_if_needed
-from insitupy.containers.dataclasses import (BoundariesData, CellData,
-                                              MultiCellData)
+from insitupy.containers.boundaries_data import BoundariesData
+from insitupy.containers.cell_data import CellData
+from insitupy.containers.multi_cell_data import MultiCellData
 
 
 def _create_table(obs_names):

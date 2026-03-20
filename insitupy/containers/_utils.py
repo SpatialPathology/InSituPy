@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from insitupy.containers.dataclasses import MultiCellData
+from insitupy.containers.multi_cell_data import MultiCellData
 
 logger = logging.getLogger(__name__)
 

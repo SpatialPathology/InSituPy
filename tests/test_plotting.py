@@ -16,7 +16,7 @@ from anndata import AnnData
 import matplotlib.pyplot as plt
 
 from insitupy._core.data import InSituData
-from insitupy.containers.dataclasses import CellData
+from insitupy.containers.cell_data import CellData
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.volcano import single_volcano, volcano
 from insitupy.plotting.go import go_plot

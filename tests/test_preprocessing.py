@@ -8,7 +8,7 @@ from anndata import AnnData
 from scipy.sparse import issparse
 
 from insitupy._core.data import InSituData
-from insitupy.containers.dataclasses import CellData
+from insitupy.containers.cell_data import CellData
 from insitupy.preprocessing import (
     calculate_qc_metrics,
     cluster_cells,

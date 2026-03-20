@@ -9,7 +9,7 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
-from insitupy.containers.dataclasses import CellData
+from insitupy.containers.cell_data import CellData
 from insitupy.containers.results import DiffExprResults
 from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from shapely import MultiPolygon, Polygon
 
-from insitupy.containers.dataclasses import BoundariesData
+from insitupy.containers.boundaries_data import BoundariesData
 from insitupy._io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils._shapely import scale_polygon

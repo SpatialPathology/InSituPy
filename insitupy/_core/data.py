@@ -36,9 +36,8 @@ from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
 from insitupy._textformat import textformat as tf
 from insitupy._warnings import NoProjectLoadWarning
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.containers.dataclasses import (AnnotationsData, ImageData,
-                                              MultiCellData, RegionsData,
-                                              SpatialUnitsData)
+from insitupy.containers import (AnnotationsData, ImageData, MultiCellData,
+                                 RegionsData, SpatialUnitsData)
 from insitupy.containers.io import (_save_annotations, _save_cells,
                                      _save_images, _save_regions,
                                      _save_transcripts, _save_units,

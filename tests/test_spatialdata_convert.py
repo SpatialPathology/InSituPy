@@ -12,7 +12,7 @@ from anndata import AnnData
 pytest.importorskip("spatialdata")
 
 from insitupy._core.data import InSituData  # noqa: E402
-from insitupy.containers.dataclasses import CellData  # noqa: E402
+from insitupy.containers.cell_data import CellData  # noqa: E402
 from insitupy.spatialdata.convert import convert_to_spatialdata  # noqa: E402
 
 

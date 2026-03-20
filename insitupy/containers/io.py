@@ -21,11 +21,10 @@ from insitupy._io.files import read_json
 
 logger = logging.getLogger(__name__)
 from insitupy.containers._segmentations import _read_baysor_polygons
-from insitupy.containers.dataclasses import (ZARR_V3, AnnotationsData,
-                                              BoundariesData, CellData,
-                                              ImageData, MultiCellData,
-                                              RegionsData, ShapesData,
-                                              _get_zarr_store)
+from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
+from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
+                                  ImageData, MultiCellData, RegionsData,
+                                  ShapesData)
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 
