@@ -554,6 +554,14 @@ def xenium_test_dataset_v3_mm(
     return data
 
 
+def xenium_test_dataset(
+        overwrite: bool = False,
+        output_dir=None,
+) -> InSituData:
+    """Load the default Xenium test dataset (mouse ileum tiny, v3.0.0, nuclear expansion)."""
+    return xenium_test_dataset_v3_nucex(overwrite=overwrite, output_dir=output_dir)
+
+
 # xenium onboard analysis 3.0.0
 # data from https://cf.10xgenomics.com/samples/xenium/3.0.0/Xenium_Prime_Mouse_Ileum_tiny/Xenium_Prime_Mouse_Ileum_tiny_outs.zip
 # Mouse ileum, nuclear expansion

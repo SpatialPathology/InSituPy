@@ -20,17 +20,18 @@ import numpy as np
 # from dask_image.imread import imread
 from matplotlib.patches import ConnectionPatch
 
-from insitupy._version import __version__
 from insitupy._constants import CACHE, SHRT_MAX
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy._textformat import textformat as tf
+from insitupy._version import __version__
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import read_image, write_ome_tiff
 from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    deconvolve_he, fit_image_to_size_limit,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
+from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
 
 logger = logging.getLogger(__name__)
@@ -562,9 +563,6 @@ class ImageRegistration:
             self.image_to_register = self.image_resized
             self.T_to_register = self.T_resized
 
-        # determine the kind of transformation
-        warp_func, warp_name = (cv2.warpPerspective, "perspective") if self.perspective_transform else (cv2.warpAffine, "affine")
-
         if self.flip_axis is not None:
             flip_dir = 'vertically' if self.flip_axis == 0 else 'horizontally'
             self._log(f"Applying {flip_dir} flip", detail=True)
@@ -574,7 +572,12 @@ class ImageRegistration:
         (h, w) = (self.template_h, self.template_w)
         # warping
         self._log("Registration")
-        self.registered = warp_func(self.image_to_register, self.T_to_register, (w, h))
+        self.registered = apply_warp(
+            self.image_to_register,
+            self.T_to_register,
+            (w, h),
+            self.axes_image,
+        )
 
     def run(self):
         '''
@@ -1319,8 +1322,9 @@ def register_images(
             reg_qc_dir = Path(output_dir) / "registration_qc"
             reg_qc_dir.mkdir(parents=True, exist_ok=True)
             debug_decon_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_target.png"
-            nuclei_img_scaled = _percentile_scale_for_saving(nuclei_img)
-            plt.imsave(debug_decon_qc_path, nuclei_img_scaled, cmap="gray")
+            nuclei_img_qc = scale_to_max_width(nuclei_img, axes="YX", max_width=4000, verbose=False)
+            nuclei_img_scaled = (_percentile_scale_for_saving(nuclei_img_qc) * 255).astype(np.uint8)
+            cv2.imwrite(str(debug_decon_qc_path), nuclei_img_scaled)
             logger.debug("%s%s     Debug: saved deconvolved target -> %s", _prefix, _VLINE, debug_decon_qc_path)
 
         # set nuclei_channel and nuclei_axis to None
@@ -1362,8 +1366,9 @@ def register_images(
         reg_qc_dir = Path(output_dir) / "registration_qc"
         reg_qc_dir.mkdir(parents=True, exist_ok=True)
         debug_decon_template_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_template.png"
-        template_scaled_for_save = _percentile_scale_for_saving(imreg_complete.template)
-        plt.imsave(debug_decon_template_qc_path, template_scaled_for_save, cmap="gray")
+        template_qc = scale_to_max_width(imreg_complete.template, axes="YX", max_width=4000, verbose=False)
+        template_scaled_for_save = (_percentile_scale_for_saving(template_qc) * 255).astype(np.uint8)
+        cv2.imwrite(str(debug_decon_template_qc_path), template_scaled_for_save)
         logger.debug("%s%s     Debug: saved deconvolved template -> %s", _prefix, _VLINE, debug_decon_template_qc_path)
 
     # Determine the axes_template for the selected registration object
@@ -1414,6 +1419,8 @@ def register_images(
 
     if image_type == "histo":
         # in case of histo RGB images, the channels are in the third axis and OpenCV can transform them
+        # Restore the original axes so apply_warp receives the correct axis descriptor
+        imreg_selected.axes_image = axes_image
         if imreg_complete.image_resized is None:
             imreg_selected.image = imreg_complete.image  # use original image
             del imreg_complete.image  # free memory - avoid holding two references

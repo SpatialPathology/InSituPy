@@ -64,12 +64,12 @@ def test_embedding_raises_for_one_dimensional_basis():
         scatter_module.embedding(adata=adata, basis="X_umap", color=None)
 
 
-def test_embedding_static_requires_datashader(monkeypatch):
+def test_embedding_static_works_without_datashader(monkeypatch):
     adata = _make_adata_with_umap()
     monkeypatch.setattr(scatter_module, "_check_datashader", lambda: False)
 
-    with pytest.raises(ImportError, match="datashader and matplotlib are required"):
-        scatter_module.embedding(adata=adata, basis="X_umap", color=None, interactive=False)
+    # Static mode falls back to matplotlib when datashader is unavailable — must not raise
+    scatter_module.embedding(adata=adata, basis="X_umap", color=None, interactive=False)
 
 
 def test_spatial_smoke_calls_subplot_pipeline(monkeypatch):

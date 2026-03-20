@@ -85,7 +85,7 @@ def test_sync_zeros_removed_cells_in_array_masks_and_filters_table():
     table = _create_table(["c1", "c3", "x1"])
     celldata = CellData(table=table, boundaries=boundaries)
 
-    with patch("insitupy.containers.dataclasses.logger.info") as mock_info:
+    with patch("insitupy.containers.cell_data.logger.info") as mock_info:
         summary = celldata.sync(return_summary=True)
 
     assert list(celldata.table.obs_names) == ["c1", "c3"]
@@ -131,7 +131,7 @@ def test_sync_is_noop_without_boundaries_even_with_duplicate_obs_names():
     table = _create_table(["c1", "c1", "c2"])
     celldata = CellData(table=table, boundaries=None)
 
-    with patch("insitupy.containers.dataclasses.logger.info") as mock_info:
+    with patch("insitupy.containers.cell_data.logger.info") as mock_info:
         summary = celldata.sync(return_summary=True)
 
     assert list(celldata.table.obs_names) == ["c1", "c1", "c2"]
@@ -150,7 +150,7 @@ def test_sync_reports_noop_when_already_aligned():
     table = _create_table(["c1", "c2", "c3"])
     celldata = CellData(table=table, boundaries=boundaries)
 
-    with patch("insitupy.containers.dataclasses.logger.info") as mock_info:
+    with patch("insitupy.containers.cell_data.logger.info") as mock_info:
         summary = celldata.sync(return_summary=True)
 
     assert summary == {

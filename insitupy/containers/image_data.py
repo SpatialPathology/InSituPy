@@ -18,6 +18,7 @@ from insitupy.images.io import (get_zarr_source_path, is_from_zarr_disk,
                                 read_image, write_ome_tiff, write_zarr)
 from insitupy.images.utils import (create_img_pyramid,
                                    crop_dask_array_or_pyramid, resize_image)
+from insitupy.images.warp import apply_warp, load_transformation_matrix
 from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
@@ -695,53 +696,13 @@ class ImageData(DeepCopyMixin):
         Returns:
             ImageData: Transformed ImageData object if inplace=False, else None.
         """
-        import cv2
-
         _self = self if inplace else self.copy()
 
-        # Load transformation matrix if it's a file path
-        if isinstance(transformation_matrix, (str, os.PathLike, Path)):
-            transformation_matrix = Path(transformation_matrix)
-            if not transformation_matrix.exists():
-                raise FileNotFoundError(f"Transformation matrix file not found: {transformation_matrix}")
-
-            # Read file based on extension
-            if transformation_matrix.suffix.lower() in ['.csv', '.txt']:
-                M = pd.read_csv(transformation_matrix, header=None).values
-            elif transformation_matrix.suffix.lower() in ['.xlsx', '.xls']:
-                M = pd.read_excel(transformation_matrix, header=None).values
-            else:
-                raise ValueError(f"Unsupported file format: {transformation_matrix.suffix}. Use .csv, .txt, .xlsx, or .xls")
-        else:
-            M = np.array(transformation_matrix)
-
-        # Validate matrix dimensions
-        if M.shape not in [(2, 3), (3, 3)]:
-            raise ValueError(
-                f"Transformation matrix must be 2x3 or 3x3, got shape {M.shape}. "
-                f"Expected format:\n"
-                f"[[a, b, xoff],\n"
-                f" [d, e, yoff]] or with [0, 0, 1] as third row."
-            )
-
-        # Extract transformation parameters
-        if M.shape == (3, 3):
-            # Validate that the third row is [0, 0, 1]
-            if not np.allclose(M[2, :], [0, 0, 1]):
-                raise ValueError("For 3x3 matrix, third row must be [0, 0, 1]")
-            M = M[:2, :]
-
-        # Convert pixel-based matrix to physical coordinates if reference_pixel_size is provided
-        if reference_pixel_size is not None:
-            M = M.copy().astype(np.float64)
-
-            if source_pixel_size is not None:
-                M[:2, :2] *= (reference_pixel_size / source_pixel_size)
-
-            M[0, 2] *= reference_pixel_size  # Convert x offset: pixels -> um
-            M[1, 2] *= reference_pixel_size  # Convert y offset: pixels -> um
-            logger.info(f"Converted transformation matrix from pixel coordinates "
-                        f"(reference: {reference_pixel_size} um/pixel) to physical coordinates.")
+        M = load_transformation_matrix(
+            transformation_matrix,
+            reference_pixel_size=reference_pixel_size,
+            source_pixel_size=source_pixel_size,
+        )
 
         logger.info(f"Applying transformation matrix (in physical coordinates):\n{M}")
 
@@ -781,47 +742,7 @@ class ImageData(DeepCopyMixin):
 
             logger.info(f"Transforming image '{name}' with shape {img_to_transform.shape} -> output size ({w}, {h})")
 
-            # Apply transformation based on image type (grayscale, RGB, or multichannel)
-            if len(img_to_transform.shape) == 2:
-                # Grayscale image (YX)
-                transformed = cv2.warpAffine(
-                    img_to_transform,
-                    scaled_M,
-                    (w, h),
-                    flags=cv2.INTER_LINEAR,
-                    borderMode=cv2.BORDER_CONSTANT,
-                    borderValue=0
-                )
-            elif len(img_to_transform.shape) == 3:
-                if img_axes.is_rgb:
-                    # RGB image - transform directly
-                    transformed = cv2.warpAffine(
-                        img_to_transform,
-                        scaled_M,
-                        (w, h),
-                        flags=cv2.INTER_LINEAR,
-                        borderMode=cv2.BORDER_CONSTANT,
-                        borderValue=0
-                    )
-                else:
-                    # Multichannel image (CYX) - transform each channel
-                    n_channels = img_to_transform.shape[img_axes.C]
-                    transformed_channels = []
-                    for c in range(n_channels):
-                        channel = np.take(img_to_transform, c, axis=img_axes.C)
-                        transformed_channel = cv2.warpAffine(
-                            channel,
-                            scaled_M,
-                            (w, h),
-                            flags=cv2.INTER_LINEAR,
-                            borderMode=cv2.BORDER_CONSTANT,
-                            borderValue=0
-                        )
-                        transformed_channels.append(transformed_channel)
-                    # Stack channels back
-                    transformed = np.stack(transformed_channels, axis=img_axes.C)
-            else:
-                raise ValueError(f"Unsupported image shape: {img_to_transform.shape}")
+            transformed = apply_warp(img_to_transform, scaled_M, (w, h), axes)
 
             # Convert back to dask array
             transformed = da.from_array(transformed)
