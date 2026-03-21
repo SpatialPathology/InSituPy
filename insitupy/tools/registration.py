@@ -31,37 +31,16 @@ from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
                                    deconvolve_he, fit_image_to_size_limit,
                                    otsu_thresholding, resize_image,
                                    scale_to_max_width)
+from insitupy.images.registration import (
+    _percentile_scale_for_saving,
+    register_images_standalone,
+    save_registered_image_tiff,
+    save_registration_qc,
+)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
 
 logger = logging.getLogger(__name__)
-
-
-def _percentile_scale_for_saving(img: np.ndarray, upper_percentile: float = 99.0) -> np.ndarray:
-    """Clip to upper percentile and scale intensities to [0, 1] for visualization export."""
-    arr = np.asarray(img)
-    if arr.size == 0:
-        return arr
-
-    def _scale_channel(channel: np.ndarray) -> np.ndarray:
-        c = channel.astype(np.float32, copy=False)
-        c_min = np.nanmin(c)
-        c_max = np.nanpercentile(c, upper_percentile)
-        if not np.isfinite(c_min) or not np.isfinite(c_max) or c_max <= c_min:
-            return np.zeros_like(c, dtype=np.float32)
-        c = np.clip(c, c_min, c_max)
-        return (c - c_min) / (c_max - c_min)
-
-    if arr.ndim == 2:
-        return _scale_channel(arr)
-
-    if arr.ndim == 3:
-        scaled = np.empty(arr.shape, dtype=np.float32)
-        for channel_idx in range(arr.shape[2]):
-            scaled[..., channel_idx] = _scale_channel(arr[..., channel_idx])
-        return scaled
-
-    return arr
 
 
 class ImageRegistration:
@@ -1050,22 +1029,22 @@ class ImageRegistration:
 
 
 def register_images(
-    data: InSituData, # type: ignore
+    data: InSituData,  # type: ignore
     image_path: Optional[Union[str, os.PathLike, Path]] = None,
     channel_names: Optional[Union[str, List[str]]] = None,
-    channel_name_for_registration: Optional[str] = None,  # name used for the nuclei image. Only required for IF images.
+    channel_name_for_registration: Optional[str] = None,
     template_image_name: str = "nuclei",
     save_registered_images: bool = True,
     output_dir: Union[str, os.PathLike, Path] = None,
-    min_good_matches_per_area: int = 5, # unit: 1/mm²
+    min_good_matches_per_area: int = 5,  # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
-    deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
+    deconvolve_template: bool = False,
     physicalsize: str = 'µm',
     debug: bool = False,
     rank_matches_for_qc: bool = True,
     identifier: Optional[str] = None,
-    force_failure_qc: bool = False,  # if True, simulate a failure even when enough matches are found (for QC testing)
+    force_failure_qc: bool = False,
     *,
     image_to_be_registered: Optional[Union[str, os.PathLike, Path]] = None,
     ):
@@ -1130,7 +1109,6 @@ def register_images(
     _LSIGN = "\u2514"   # └
     _VLINE = "\u2502"   # │
     _HLINE = "\u2500"   # ─
-    _TICK  = "\u2714"   # ✔
     _SEP   = "\u2501"   # ━
     _prefix = "  "  # consistent print prefix
 
@@ -1178,7 +1156,6 @@ def register_images(
     channel_names = convert_to_list(channel_names)
 
     if output_dir is None:
-        # define output directory
         output_dir = data.path.parent / "registered_images"
     else:
         output_dir = Path(output_dir) / "registered_images"
@@ -1238,8 +1215,7 @@ def register_images(
     if image_type == "IF" and channel_name_for_registration is None:
         raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")
 
-    # sometimes images are read with an empty time dimension in the first axis.
-    # If this is the case, it is removed here.
+    # sometimes images are read with an empty time dimension in the first axis
     if len(image.shape) == 4:
         image = image[0]
 
@@ -1272,20 +1248,14 @@ def register_images(
                 "`channel_name_for_registration`. Provide at least one additional channel."
             )
 
-    # # read images in InSituData object
-    template = data.images[template_image_name][0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
+    # Load template
+    template = data.images[template_image_name][0]
     template = _unwrap_first_level_image(template, template_image_name)
     logger.info("%s%s     Image:    %s", _prefix, _VLINE, image.shape)
     logger.info("%s%s     Template: %s", _prefix, _VLINE, template.shape)
 
-    # extract OME metadata
-    #ome_metadata_template = data.images.metadata[template_image_name]["OME"]
-
     # get pixel size from template image metadata
     pixel_size_template = data.images.metadata[template_image_name]["pixel_size"]
-
-    # extract pixel size for x and y from OME metadata
-    #pixelsizes = {key: ome_metadata_template['Image']['Pixels'][key] for key in ['PhysicalSizeX', 'PhysicalSizeY']}
 
     # generate OME metadata for saving
     ome_metadata = {
@@ -1293,235 +1263,199 @@ def register_images(
         'PhysicalSizeXUnit': physicalsize,
         'PhysicalSizeYUnit': physicalsize,
         'PhysicalSizeX': pixel_size_template,
-        'PhysicalSizeY': pixel_size_template
-        }
+        'PhysicalSizeY': pixel_size_template,
+    }
 
-    # determine minimum number of good matches that are necessary for the registration to be performed
+    # determine minimum number of good matches required
     h, w = template.shape[:2]
-    image_area = h * w * pixel_size_template**2 / 1000**2 # in mm²
+    image_area = h * w * pixel_size_template ** 2 / 1000 ** 2  # in mm²
     min_good_matches = int(min_good_matches_per_area * image_area)
 
     # Validate deconvolve_template parameter
     if deconvolve_template and axes_template not in ["YXS", "SYX"]:
-        raise ValueError(f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', got '{axes_template}'")
-
-    # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
-    if image_type == "histo":
-        logger.info("%s%s%s%s Color deconvolution (scale factor: %s)", _prefix, _TSIGN, _HLINE, _HLINE, decon_scale_factor)
-        # deconvolve HE - performed on resized image to save memory
-        # TODO: Scale to max width instead of using a fixed scale factor before deconvolution (`scale_to_max_width`)
-        nuclei_img, eo, dab = deconvolve_he(img=resize_image(image, scale_factor=decon_scale_factor, axes="YXS"),
-                                    return_type="grayscale", convert=True)
-
-        # bring back to original size
-        nuclei_img = resize_image(nuclei_img, scale_factor=1/decon_scale_factor, axes="YX")
-        del eo, dab  # free memory - deconvolution intermediates no longer needed
-
-        if debug:
-            debug_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
-            reg_qc_dir = Path(output_dir) / "registration_qc"
-            reg_qc_dir.mkdir(parents=True, exist_ok=True)
-            debug_decon_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_target.png"
-            nuclei_img_qc = scale_to_max_width(nuclei_img, axes="YX", max_width=4000, verbose=False)
-            nuclei_img_scaled = (_percentile_scale_for_saving(nuclei_img_qc) * 255).astype(np.uint8)
-            cv2.imwrite(str(debug_decon_qc_path), nuclei_img_scaled)
-            logger.debug("%s%s     Debug: saved deconvolved target -> %s", _prefix, _VLINE, debug_decon_qc_path)
-
-        # set nuclei_channel and nuclei_axis to None
-        channel_name_for_registration = channel_axis = None
-    else:
-        # image_type is "IF" then
-        # get index of nuclei channel
-        channel_id_for_registration = channel_names.index(channel_name_for_registration)
-
-        logger.info("%s%s%s%s Selecting nuclei channel (index: %s)", _prefix, _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
-        # # select nuclei channel from IF image
-        # if channel_name_for_registration is None:
-        #     raise TypeError("Argument `nuclei_channel` should be an integer and not NoneType.")
-
-        # select dapi channel for registration and convert to numpy array
-        nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
-        if hasattr(nuclei_img, "compute"):
-            nuclei_img = nuclei_img.compute()
-
-    # Setup image registration objects - is important to load and scale the images.
-    # The reason for this are limits in C++, not allowing to perform certain OpenCV functions on big images.
-
-    # First: Setup the ImageRegistration object for the whole image (before deconvolution in histo images and multi-channel in IF)
-    imreg_complete = ImageRegistration(
-        image=image,
-        template=template,
-        axes_image=axes_image,
-        axes_template=axes_template,
-        deconvolve_template=deconvolve_template,
-        decon_scale_factor=decon_scale_factor,
-        verbose=True,
-        print_prefix=_prefix
+        raise ValueError(
+            f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', "
+            f"got '{axes_template}'"
         )
-    # load and scale the whole image
-    imreg_complete.load_and_scale_images(scaling_log_label="Scaling (full image prep)")
 
-    if debug and deconvolve_template:
-        debug_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
-        reg_qc_dir = Path(output_dir) / "registration_qc"
-        reg_qc_dir.mkdir(parents=True, exist_ok=True)
-        debug_decon_template_qc_path = reg_qc_dir / f"{debug_id}__deconvolved_template.png"
-        template_qc = scale_to_max_width(imreg_complete.template, axes="YX", max_width=4000, verbose=False)
-        template_scaled_for_save = (_percentile_scale_for_saving(template_qc) * 255).astype(np.uint8)
-        cv2.imwrite(str(debug_decon_template_qc_path), template_scaled_for_save)
-        logger.debug("%s%s     Debug: saved deconvolved template -> %s", _prefix, _VLINE, debug_decon_template_qc_path)
-
-    # Determine the axes_template for the selected registration object
-    # If template was deconvolved, it's now grayscale (YX)
-    axes_template_selected = "YX" if deconvolve_template else axes_template
-
-    # setup ImageRegistration object with the nucleus image (either from deconvolution or just selected from IF image)
-    imreg_selected = ImageRegistration(
-        image=nuclei_img,
-        template=imreg_complete.template,  # use the (potentially deconvolved) template
-        axes_image="YX", # at this point the nuclei image was extracted and therefore the axes are always "YX"
-        axes_template=axes_template_selected,
-        max_width=4000,
-        convert_to_grayscale=False,
-        perspective_transform=False,
-        min_good_matches=min_good_matches,
-        print_prefix=_prefix
-    )
-    imreg_selected.pixel_size_image = pixel_size_image
-    imreg_selected.pixel_size_template = pixel_size_template
-    imreg_selected.physical_size_unit = physicalsize
-
-    # run all steps to extract features and get transformation matrix
-    imreg_selected.load_and_scale_images(scaling_log_label="Scaling (registration channel)")
-    del imreg_selected.template  # free memory - h/w already stored
-    del imreg_complete.image_scaled, imreg_complete.template_scaled  # free memory
-
-    # perform registration to extract the common features ptsA and ptsB
-    try:
-        imreg_selected.extract_features(test_flipping=test_flipping, force_failure=force_failure_qc)
-    except NotEnoughFeatureMatchesError:
-        if output_dir is not None:
-            if image_type == "IF":
-                _qc_ref_name = channel_name_for_registration if channel_name_for_registration is not None else "registration_reference"
-                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
-            else:
-                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
-            if hasattr(imreg_selected, "matchedVis"):
-                logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
-                imreg_selected.save_qc(
-                    output_dir=output_dir,
-                    identifier=_failed_identifier,
-                    rank_matches_for_qc=rank_matches_for_qc,
-                )
-        raise
-    imreg_selected.calculate_transformation_matrix()
-    del nuclei_img  # free memory - features and transformation matrix already extracted
+    # QC directory (used for both debug and failure QC)
+    qc_dir_resolved = Path(output_dir) / "registration_qc"
 
     if image_type == "histo":
-        # in case of histo RGB images, the channels are in the third axis and OpenCV can transform them
-        # Restore the original axes so apply_warp receives the correct axis descriptor
-        imreg_selected.axes_image = axes_image
-        if imreg_complete.image_resized is None:
-            imreg_selected.image = imreg_complete.image  # use original image
-            del imreg_complete.image  # free memory - avoid holding two references
-        else:
-            imreg_selected.image_resized = imreg_complete.image_resized  # use resized original image
-            del imreg_complete.image_resized  # free memory - avoid holding two references
+        save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
 
-        # perform registration
-        imreg_selected.perform_registration()
+        # Debug QC: save deconvolved moving image for diagnostics (separate from registration)
+        if debug:
+            logger.info("%s%s%s%s Color deconvolution (debug QC, scale factor: %s)", _prefix, _TSIGN, _HLINE, _HLINE, decon_scale_factor)
+            nuclei_qc, eo, dab = deconvolve_he(
+                img=resize_image(np.asarray(image) if hasattr(image, "compute") else image,
+                                 scale_factor=decon_scale_factor, axes="YXS"),
+                return_type="grayscale", convert=True,
+            )
+            del eo, dab
+            nuclei_qc = resize_image(nuclei_qc, scale_factor=1 / decon_scale_factor, axes="YX")
+            qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+            debug_decon_qc_path = qc_dir_resolved / f"{save_identifier}__deconvolved_target.png"
+            nuclei_qc_small = scale_to_max_width(nuclei_qc, axes="YX", max_width=4000, verbose=False)
+            nuclei_scaled = (_percentile_scale_for_saving(nuclei_qc_small) * 255).astype(np.uint8)
+            cv2.imwrite(str(debug_decon_qc_path), nuclei_scaled)
+            logger.debug("%s%s     Debug: saved deconvolved target -> %s", _prefix, _VLINE, debug_decon_qc_path)
+            del nuclei_qc, nuclei_qc_small, nuclei_scaled
+
+        # Debug QC: save deconvolved template if applicable
+        if debug and deconvolve_template:
+            template_np = np.asarray(template.compute() if hasattr(template, "compute") else template)
+            template_decon, _, _ = deconvolve_he(
+                img=resize_image(template_np, scale_factor=decon_scale_factor, axes=axes_template),
+                return_type="grayscale", convert=True,
+            )
+            template_decon = resize_image(template_decon, scale_factor=1 / decon_scale_factor, axes="YX")
+            qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+            debug_decon_tmpl_path = qc_dir_resolved / f"{save_identifier}__deconvolved_template.png"
+            tmpl_qc_small = scale_to_max_width(template_decon, axes="YX", max_width=4000, verbose=False)
+            tmpl_scaled = (_percentile_scale_for_saving(tmpl_qc_small) * 255).astype(np.uint8)
+            cv2.imwrite(str(debug_decon_tmpl_path), tmpl_scaled)
+            logger.debug("%s%s     Debug: saved deconvolved template -> %s", _prefix, _VLINE, debug_decon_tmpl_path)
+            del template_decon, tmpl_qc_small, tmpl_scaled
+
+        try:
+            registered, T = register_images_standalone(
+                moving=image,
+                fixed=template,
+                axes_moving=axes_image,
+                axes_fixed=axes_template,
+                deconvolve_moving=True,
+                deconvolve_fixed=deconvolve_template,
+                decon_scale_factor=decon_scale_factor,
+                min_good_matches=min_good_matches,
+                test_flipping=test_flipping,
+                debug=debug,
+                qc_dir=qc_dir_resolved,
+                qc_identifier=save_identifier,
+                rank_matches_for_qc=rank_matches_for_qc,
+                pixel_size_moving=pixel_size_image,
+                pixel_size_fixed=pixel_size_template,
+                physical_size_unit=physicalsize,
+                force_failure=force_failure_qc,
+            )
+        except NotEnoughFeatureMatchesError as exc:
+            # Preserve failure QC even when debug=False (debug=True already handled by standalone)
+            if not debug and output_dir is not None:
+                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
+                partial = exc.partial_result
+                if partial is not None and partial.matchedVis is not None:
+                    logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
+                    qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                    import matplotlib.pyplot as plt
+                    plt.imshow(partial.matchedVis)
+                    plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                    plt.close()
+            raise
 
         if save_registered_images:
-            # save files
-            save_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
-            imreg_selected.save_registered_image(
+            save_registered_image_tiff(
                 output_dir=output_dir,
                 identifier=save_identifier,
+                registered=registered,
                 axes=axes_image,
                 photometric='rgb',
-                ome_metadata=ome_metadata
+                ome_metadata=ome_metadata,
             )
-            if debug:
-                imreg_selected.save_qc(
-                    output_dir=output_dir,
-                    identifier=save_identifier,
-                    rank_matches_for_qc=rank_matches_for_qc,
-                )
-
-            # # save metadata
-            # data.metadata["method_params"]['images'][f'registered_{channel_names[0]}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
-            # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
-            # #self._save_metadata_after_registration()
 
         data.images.add_image(
-            image=imreg_selected.registered,
+            image=registered,
             channel_names=channel_names[0],
             axes=axes_image,
             pixel_size=pixel_size_template,
             ome_meta=ome_metadata,
-            overwrite=True
-            )
+            overwrite=True,
+        )
 
-        del imreg_complete, imreg_selected, image, template
     else:
         # image_type is IF
-        # In case of IF images the channels are normally in the first axis and each channel is registered separately
-        # Further, each channel is then saved separately as grayscale image.
+        channel_id_for_registration = channel_names.index(channel_name_for_registration)
+        logger.info("%s%s%s%s Selecting registration channel (index: %s)", _prefix, _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
 
-        # iterate over channels
+        nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
+        if hasattr(nuclei_img, "compute"):
+            nuclei_img = nuclei_img.compute()
+
+        _qc_ref_name = channel_name_for_registration
+        qc_identifier_if = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}"
+
+        try:
+            _, T = register_images_standalone(
+                moving=nuclei_img,
+                fixed=template,
+                axes_moving="YX",
+                axes_fixed=axes_template,
+                deconvolve_fixed=deconvolve_template,
+                decon_scale_factor=decon_scale_factor,
+                min_good_matches=min_good_matches,
+                test_flipping=test_flipping,
+                debug=debug,
+                qc_dir=qc_dir_resolved,
+                qc_identifier=qc_identifier_if,
+                rank_matches_for_qc=rank_matches_for_qc,
+                pixel_size_moving=pixel_size_image,
+                pixel_size_fixed=pixel_size_template,
+                physical_size_unit=physicalsize,
+                force_failure=force_failure_qc,
+            )
+        except NotEnoughFeatureMatchesError as exc:
+            # Preserve failure QC even when debug=False
+            if not debug and output_dir is not None:
+                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
+                partial = exc.partial_result
+                if partial is not None and partial.matchedVis is not None:
+                    logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
+                    qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                    import matplotlib.pyplot as plt
+                    plt.imshow(partial.matchedVis)
+                    plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                    plt.close()
+            raise
+
+        del nuclei_img
+
+        # Compute output dimensions from template
+        ref_h, ref_w = get_height_and_width(
+            template if not hasattr(template, "compute") else template.compute(),
+            ImageAxes(axes_template),
+        )
+
+        # Warp each non-registration channel using the shared transformation matrix
         for i, n in enumerate(channel_names):
-            # skip the DAPI image
             if n == channel_name_for_registration:
                 continue
 
             logger.info("%s%s%s%s Registering channel: %s", _prefix, _TSIGN, _HLINE, _HLINE, n)
-            if imreg_complete.image_resized is None:
-                # select one channel from non-resized original image
-                imreg_selected.image = np.take(imreg_complete.image, i, channel_axis)
-            else:
-                # select one channel from resized original image
-                imreg_selected.image_resized = np.take(imreg_complete.image_resized, i, channel_axis)
+            channel = np.take(image, i, channel_axis)
+            if hasattr(channel, "compute"):
+                channel = channel.compute()
+            channel = np.asarray(channel)
 
-            # perform registration
-            imreg_selected.perform_registration()
+            registered_channel = apply_warp(channel, T, (ref_w, ref_h), "YX")
 
             if save_registered_images:
-                # save files
                 save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
-
-                imreg_selected.save_registered_image(
+                save_registered_image_tiff(
                     output_dir=output_dir,
                     identifier=save_identifier,
+                    registered=registered_channel,
                     axes='YX',
                     photometric='minisblack',
-                    ome_metadata=ome_metadata
-                    )
-
-                # # save metadata
-                # data.metadata["method_params"]['images'][f'registered_{n}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
-                # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
-                # #self._save_metadata_after_registration()
-            # if add_registered_image:
-            data.images.add_image(
-                image=imreg_selected.registered,
-                channel_names=n,
-                axes="YX", # currently the images are added channel wise and therefore it is always "YX"
-                pixel_size=pixel_size_template,
-                ome_meta=ome_metadata,
-                overwrite=True
+                    ome_metadata=ome_metadata,
                 )
 
-        if save_registered_images and debug:
-            _qc_ref_name = channel_name_for_registration if channel_name_for_registration is not None else "registration_reference"
-            qc_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}"
-            imreg_selected.save_qc(
-                output_dir=output_dir,
-                identifier=qc_identifier,
-                rank_matches_for_qc=rank_matches_for_qc,
+            data.images.add_image(
+                image=registered_channel,
+                channel_names=n,
+                axes="YX",
+                pixel_size=pixel_size_template,
+                ome_meta=ome_metadata,
+                overwrite=True,
             )
-
-        # free RAM
-        del imreg_complete, imreg_selected, image, template
 
     _elapsed = time.time() - _t_start
     _, _peak_mem = tracemalloc.get_traced_memory()

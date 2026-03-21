@@ -1128,6 +1128,7 @@ def register_images_standalone(
     pixel_size_fixed: Optional[float] = None,
     physical_size_unit: str = "µm",
     verbose: bool = True,
+    force_failure: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Register a moving image to a fixed image using feature-based alignment.
 
@@ -1221,7 +1222,7 @@ def register_images_standalone(
 
     # Stage 2: Feature extraction
     try:
-        features = extract_features(scaled, config)
+        features = extract_features(scaled, config, force_failure=force_failure)
     except NotEnoughFeatureMatchesError as exc:
         if debug:
             save_registration_qc(
