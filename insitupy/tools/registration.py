@@ -5,7 +5,7 @@ import time
 import tracemalloc
 import warnings
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import List, Optional, Union
 
 try:
     import cv2
@@ -17,28 +17,20 @@ except ImportError:
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
-# from dask_image.imread import imread
-from matplotlib.patches import ConnectionPatch
 
-from insitupy._constants import CACHE, SHRT_MAX
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy._textformat import textformat as tf
-from insitupy._version import __version__
 from insitupy.images.axes import ImageAxes, get_height_and_width
-from insitupy.images.io import read_image, write_ome_tiff
-from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
-                                   deconvolve_he, fit_image_to_size_limit,
-                                   otsu_thresholding, resize_image,
-                                   scale_to_max_width)
+from insitupy.images.io import read_image
+from insitupy.images.utils import deconvolve_he, resize_image, scale_to_max_width
 from insitupy.images.registration import (
     _percentile_scale_for_saving,
     register_images_standalone,
     save_registered_image_tiff,
-    save_registration_qc,
 )
 from insitupy.images.warp import apply_warp
-from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
+from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
 
