@@ -9,6 +9,12 @@ from insitupy.images.registration import (
     register_images_standalone,
 )
 
+try:
+    import cv2 as _cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+
 
 def _blank_image(shape=(64, 64), dtype=np.uint8):
     return np.zeros(shape, dtype=dtype)
@@ -105,6 +111,50 @@ def test_force_failure_raises_even_with_no_natural_failure():
             **_COMMON_KWARGS,
             force_failure=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# register_images_standalone — real image integration test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV required")
+def test_registration_recovers_known_transform():
+    """register_images_standalone recovers a synthetic affine transform on real image data.
+
+    Uses skimage.data.coins() as a fixed reference image, applies a known
+    rotation + translation to create the moving image, then checks that the
+    registered output is close to the fixed image (MAE on the interior region).
+    """
+    skimage = pytest.importorskip("skimage", reason="scikit-image required")
+    from skimage.data import coins
+
+    fixed = coins()  # (303, 384) uint8, rich texture for SIFT
+
+    # Build a known affine transform: 5° rotation + (20, 15) px translation
+    h, w = fixed.shape
+    M_gt = _cv2.getRotationMatrix2D((w / 2, h / 2), 5.0, 1.0)
+    M_gt[0, 2] += 20
+    M_gt[1, 2] += 15
+    moving = _cv2.warpAffine(fixed, M_gt, (w, h), flags=_cv2.INTER_LINEAR)
+
+    registered, _ = register_images_standalone(
+        moving, fixed,
+        axes_moving="YX",
+        axes_fixed="YX",
+        min_good_matches=10,
+        test_flipping=False,
+        verbose=False,
+    )
+
+    assert registered.shape == fixed.shape
+
+    # Crop borders to exclude zero-padding introduced by the synthetic warp
+    pad = 40
+    mae = np.mean(np.abs(
+        registered[pad:-pad, pad:-pad].astype(float)
+        - fixed[pad:-pad, pad:-pad].astype(float)
+    ))
+    assert mae < 15.0, f"Registration quality too low: MAE = {mae:.2f} (threshold 15.0)"
 
 
 def test_rgb_axes_accepted():
