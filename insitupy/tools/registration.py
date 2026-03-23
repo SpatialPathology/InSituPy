@@ -20,15 +20,13 @@ import numpy as np
 
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
-from insitupy._textformat import textformat as tf
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import read_image
-from insitupy.images.utils import deconvolve_he, resize_image, scale_to_max_width
-from insitupy.images.registration import (
-    _percentile_scale_for_saving,
-    register_images_standalone,
-    save_registered_image_tiff,
-)
+from insitupy.images.registration import (_percentile_scale_for_saving,
+                                          register_images_standalone,
+                                          save_registered_image_tiff)
+from insitupy.images.utils import (deconvolve_he, resize_image,
+                                   scale_to_max_width)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list
 
@@ -207,7 +205,6 @@ def register_images(
     _VLINE = "\u2502"   # │
     _HLINE = "\u2500"   # ─
     _SEP   = "\u2501"   # ━
-    _prefix = "  "  # consistent print prefix
 
     _t_start = time.time()
     tracemalloc.start()
@@ -272,7 +269,7 @@ def register_images(
         )
 
     # read images
-    logger.info("%s%s%s%s Loading images", _prefix, _TSIGN, _HLINE, _HLINE)
+    logger.info("%s%s%s Loading images", _TSIGN, _HLINE, _HLINE)
     image, ome_meta, axes_image, pixel_size_image = read_image(image_to_be_registered)
     image = _unwrap_first_level_image(image, str(image_to_be_registered))
 
@@ -305,7 +302,7 @@ def register_images(
     _header_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
     _header_channels = ", ".join(channel_names)
     logger.info("%s", _SEP * 80)
-    logger.info("Registration: %s%s%s %s%s %s (%s)", tf.Bold, _header_id, tf.ResetAll, _HLINE, _HLINE, _header_channels, image_type)
+    logger.info("Registration: %s %s%s %s (%s)", _header_id, _HLINE, _HLINE, _header_channels, image_type)
     logger.info("%s", _SEP * 80)
 
     # if image type is IF, the channel name for registration needs to be given
@@ -348,8 +345,8 @@ def register_images(
     # Load template
     template = data.images[template_image_name][0]
     template = _unwrap_first_level_image(template, template_image_name)
-    logger.info("%s%s     Image:    %s", _prefix, _VLINE, image.shape)
-    logger.info("%s%s     Template: %s", _prefix, _VLINE, template.shape)
+    logger.info("%s     Image:    %s", _VLINE, image.shape)
+    logger.info("%s     Template: %s", _VLINE, template.shape)
 
     # get pixel size from template image metadata
     pixel_size_template = data.images.metadata[template_image_name]["pixel_size"]
@@ -377,43 +374,11 @@ def register_images(
 
     # QC directory (used for both debug and failure QC)
     qc_dir_resolved = Path(output_dir) / "registration_qc"
+    if debug:
+        logger.info("%s%s%s QC directory: %s", _TSIGN, _HLINE, _HLINE, qc_dir_resolved)
 
     if image_type == "histo":
         save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
-
-        # Debug QC: save deconvolved moving image for diagnostics (separate from registration)
-        if debug:
-            logger.info("%s%s%s%s Color deconvolution (debug QC, scale factor: %s)", _prefix, _TSIGN, _HLINE, _HLINE, decon_scale_factor)
-            nuclei_qc, eo, dab = deconvolve_he(
-                img=resize_image(np.asarray(image) if hasattr(image, "compute") else image,
-                                 scale_factor=decon_scale_factor, axes="YXS"),
-                return_type="grayscale", convert=True,
-            )
-            del eo, dab
-            nuclei_qc = resize_image(nuclei_qc, scale_factor=1 / decon_scale_factor, axes="YX")
-            qc_dir_resolved.mkdir(parents=True, exist_ok=True)
-            debug_decon_qc_path = qc_dir_resolved / f"{save_identifier}__deconvolved_target.png"
-            nuclei_qc_small = scale_to_max_width(nuclei_qc, axes="YX", max_width=4000, verbose=False)
-            nuclei_scaled = (_percentile_scale_for_saving(nuclei_qc_small) * 255).astype(np.uint8)
-            cv2.imwrite(str(debug_decon_qc_path), nuclei_scaled)
-            logger.debug("%s%s     Debug: saved deconvolved target -> %s", _prefix, _VLINE, debug_decon_qc_path)
-            del nuclei_qc, nuclei_qc_small, nuclei_scaled
-
-        # Debug QC: save deconvolved template if applicable
-        if debug and deconvolve_template:
-            template_np = np.asarray(template.compute() if hasattr(template, "compute") else template)
-            template_decon, _, _ = deconvolve_he(
-                img=resize_image(template_np, scale_factor=decon_scale_factor, axes=axes_template),
-                return_type="grayscale", convert=True,
-            )
-            template_decon = resize_image(template_decon, scale_factor=1 / decon_scale_factor, axes="YX")
-            qc_dir_resolved.mkdir(parents=True, exist_ok=True)
-            debug_decon_tmpl_path = qc_dir_resolved / f"{save_identifier}__deconvolved_template.png"
-            tmpl_qc_small = scale_to_max_width(template_decon, axes="YX", max_width=4000, verbose=False)
-            tmpl_scaled = (_percentile_scale_for_saving(tmpl_qc_small) * 255).astype(np.uint8)
-            cv2.imwrite(str(debug_decon_tmpl_path), tmpl_scaled)
-            logger.debug("%s%s     Debug: saved deconvolved template -> %s", _prefix, _VLINE, debug_decon_tmpl_path)
-            del template_decon, tmpl_qc_small, tmpl_scaled
 
         try:
             registered, T = register_images_standalone(
@@ -441,7 +406,7 @@ def register_images(
                 _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
                 partial = exc.partial_result
                 if partial is not None and partial.matchedVis is not None:
-                    logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
+                    logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
                     qc_dir_resolved.mkdir(parents=True, exist_ok=True)
                     import matplotlib.pyplot as plt
                     plt.imshow(partial.matchedVis)
@@ -450,7 +415,7 @@ def register_images(
             raise
 
         if save_registered_images:
-            save_registered_image_tiff(
+            _outfile = save_registered_image_tiff(
                 output_dir=output_dir,
                 identifier=save_identifier,
                 registered=registered,
@@ -458,6 +423,7 @@ def register_images(
                 photometric='rgb',
                 ome_metadata=ome_metadata,
             )
+            logger.info("%s     Saved: %s", _VLINE, _outfile)
 
         data.images.add_image(
             image=registered,
@@ -471,7 +437,7 @@ def register_images(
     else:
         # image_type is IF
         channel_id_for_registration = channel_names.index(channel_name_for_registration)
-        logger.info("%s%s%s%s Selecting registration channel (index: %s)", _prefix, _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
+        logger.info("%s%s%s Selecting registration channel (index: %s)", _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
 
         nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
         if hasattr(nuclei_img, "compute"):
@@ -505,7 +471,7 @@ def register_images(
                 _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
                 partial = exc.partial_result
                 if partial is not None and partial.matchedVis is not None:
-                    logger.info("%s%s%s%s Saving failure QC images", _prefix, _TSIGN, _HLINE, _HLINE)
+                    logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
                     qc_dir_resolved.mkdir(parents=True, exist_ok=True)
                     import matplotlib.pyplot as plt
                     plt.imshow(partial.matchedVis)
@@ -526,7 +492,7 @@ def register_images(
             if n == channel_name_for_registration:
                 continue
 
-            logger.info("%s%s%s%s Registering channel: %s", _prefix, _TSIGN, _HLINE, _HLINE, n)
+            logger.info("%s%s%s Registering channel: %s", _TSIGN, _HLINE, _HLINE, n)
             channel = np.take(image, i, channel_axis)
             if hasattr(channel, "compute"):
                 channel = channel.compute()
@@ -536,7 +502,7 @@ def register_images(
 
             if save_registered_images:
                 save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
-                save_registered_image_tiff(
+                _outfile = save_registered_image_tiff(
                     output_dir=output_dir,
                     identifier=save_identifier,
                     registered=registered_channel,
@@ -544,6 +510,7 @@ def register_images(
                     photometric='minisblack',
                     ome_metadata=ome_metadata,
                 )
+                logger.info("%s     Saved: %s", _VLINE, _outfile)
 
             data.images.add_image(
                 image=registered_channel,
@@ -558,7 +525,7 @@ def register_images(
     _, _peak_mem = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
-    logger.info("%s%s%s%s Done (%.1f s, peak memory: %s)", _prefix, _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
+    logger.info("%s%s%s Done (%.1f s, peak memory: %s)", _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
     gc.collect()
 
 

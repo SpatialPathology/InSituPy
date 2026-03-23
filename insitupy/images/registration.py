@@ -34,15 +34,10 @@ from insitupy._constants import CACHE, SHRT_MAX
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import write_ome_tiff
-from insitupy.images.utils import (
-    clip_image_histogram,
-    convert_to_8bit_func,
-    deconvolve_he,
-    fit_image_to_size_limit,
-    otsu_thresholding,
-    resize_image,
-    scale_to_max_width,
-)
+from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
+                                   deconvolve_he, fit_image_to_size_limit,
+                                   otsu_thresholding, resize_image,
+                                   scale_to_max_width)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import remove_last_line_from_csv
 
@@ -151,6 +146,10 @@ class ScaledImages:
     # For warping, use config.axes_moving (the original axes of moving_for_warp).
     axes_moving_effective: str
     axes_fixed_effective: str
+
+    # Full-resolution deconvolved images for QC output (only set when deconvolve_moving/fixed=True).
+    moving_deconvolved: Optional[np.ndarray] = None
+    fixed_deconvolved: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -535,6 +534,7 @@ def load_and_scale_images(
 
     # --- Preprocessing for moving_scaled (feature detection copy) ---
     axes_moving_effective = config.axes_moving
+    moving_deconvolved = None
     if config.deconvolve_moving:
         if config.axes_moving not in ["YXS", "SYX"]:
             raise ValueError(
@@ -544,6 +544,7 @@ def load_and_scale_images(
         moving_for_feature = _deconvolve_he_image(
             moving_np, config.axes_moving, config.decon_scale_factor, name="moving"
         )
+        moving_deconvolved = moving_for_feature
         axes_moving_effective = "YX"
     else:
         moving_for_feature = moving_np
@@ -554,6 +555,7 @@ def load_and_scale_images(
 
     # --- Preprocessing for fixed_scaled ---
     axes_fixed_effective = config.axes_fixed
+    fixed_deconvolved = None
     if config.deconvolve_fixed:
         if config.axes_fixed not in ["YXS", "SYX"]:
             raise ValueError(
@@ -563,6 +565,7 @@ def load_and_scale_images(
         fixed_for_feature = _deconvolve_he_image(
             fixed_np, config.axes_fixed, config.decon_scale_factor, name="fixed"
         )
+        fixed_deconvolved = fixed_for_feature
         axes_fixed_effective = "YX"
     else:
         fixed_for_feature = fixed_np
@@ -649,6 +652,8 @@ def load_and_scale_images(
         resize_factor_moving=resize_factor_moving,
         axes_moving_effective=axes_moving_effective,
         axes_fixed_effective=axes_fixed_effective,
+        moving_deconvolved=moving_deconvolved,
+        fixed_deconvolved=fixed_deconvolved,
     )
 
 
@@ -954,12 +959,12 @@ def perform_registration_warp(
     """
     verbose = config.verbose
     if verbose:
-        logger.info("%s%s%s Registration", _LSIGN, _HLINE, _HLINE)
+        logger.info("%s%s%s Registration", _TSIGN, _HLINE, _HLINE)
 
     image_to_warp = scaled.moving_for_warp
 
     if features.flip_axis is not None:
-        flip_dir = "vertically" if features.flip_axis == 0 else "horizontally"
+        flip_dir = "vertical" if features.flip_axis == 0 else "horizontal"
         if verbose:
             logger.info("%s     Applying %s flip", _VLINE, flip_dir)
         image_to_warp = np.flip(image_to_warp, axis=features.flip_axis)
@@ -1005,6 +1010,17 @@ def save_registration_qc(
     """
     qc_dir = Path(qc_dir)
     qc_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save deconvolved images for visual inspection (only when available)
+    if scaled_images.moving_deconvolved is not None:
+        _decon_small = scale_to_max_width(scaled_images.moving_deconvolved, axes="YX", max_width=4000, verbose=False)
+        _decon_png = (_percentile_scale_for_saving(_decon_small) * 255).astype(np.uint8)
+        cv2.imwrite(str(qc_dir / f"{identifier}__deconvolved_target.png"), _decon_png)
+
+    if scaled_images.fixed_deconvolved is not None:
+        _decon_small = scale_to_max_width(scaled_images.fixed_deconvolved, axes="YX", max_width=4000, verbose=False)
+        _decon_png = (_percentile_scale_for_saving(_decon_small) * 255).astype(np.uint8)
+        cv2.imwrite(str(qc_dir / f"{identifier}__deconvolved_template.png"), _decon_png)
 
     if T is not None:
         # Save transformation matrix as 3×3 CSV
