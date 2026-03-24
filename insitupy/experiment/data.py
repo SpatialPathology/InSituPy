@@ -1945,10 +1945,15 @@ class InSituExperiment:
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
 
-        for n in sorted(region_df["name"].tolist()):
+        for n in tqdm(sorted(region_df["name"].tolist()), desc="Loading regions"):
             if n in region_names:
                 # crop data by region
                 cropped_data = data.crop(region_tuple=(region_key, n))
+
+                # skip regions with no cells
+                if not cropped_data.cells.is_empty and cropped_data.cells.table.n_obs == 0:
+                    logger.warning(f"Region '{n}' contains no cells and will be skipped.")
+                    continue
 
                 # create metadata
                 metadata = {"region_key": region_key, "region_name": n}

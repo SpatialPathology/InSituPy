@@ -10,14 +10,13 @@ from typing import List, Literal, Optional, Union
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely import MultiPoint, Point, Polygon, affinity
-
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI
 from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.utils.utils import convert_to_list
+from shapely import MultiPoint, Point, Polygon, affinity
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +25,26 @@ if WITH_NAPARI:
 
 
 class ShapesData(DeepCopyMixin):
-    '''
-    Object to store annotations.
-    '''
+    """Object to store shape data (annotations, regions, or generic shapes).
+
+    Args:
+        files: Optional list of file paths to load on construction.
+        keys: Keys to assign to each file.  Required when ``files`` is given.
+        pixel_size: Scale factor (µm/pixel) applied to all geometries when
+            loading from ``files``.  Required when ``files`` is given.
+        assert_uniqueness: If True, reject a key whose name column contains
+            duplicate values.
+        polygons_only: If True, discard non-Polygon geometries on import.
+        forbidden_names: Names that may not appear in the name column.
+        shape_name: Human-readable label used in log messages and
+            ``__repr__`` (e.g. ``"annotations"``, ``"regions"``).
+        name_col: Column name that holds the class/category label of each
+            shape.  Defaults to ``"name"``.
+        color_col: Column name that holds the display colour of each shape.
+            Defaults to ``"color"``.
+        uid_col: Column name used as the row index (unique shape identifier).
+            Defaults to ``"id"``.
+    """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
@@ -37,8 +53,14 @@ class ShapesData(DeepCopyMixin):
                  polygons_only: bool = False,
                  forbidden_names: Optional[List[str]] = None,
                  shape_name: Optional[str] = None,
+                 name_col: str = "name",
+                 color_col: str = "color",
+                 uid_col: str = "id",
                  ) -> None:
         self._shape_name = shape_name if shape_name is not None else "shapes"
+        self._name_col = name_col
+        self._color_col = color_col
+        self._uid_col = uid_col
 
         # add hidden variables
         self._data = {}
@@ -64,6 +86,7 @@ class ShapesData(DeepCopyMixin):
                     self.add_data(data=file,
                                   key=key,
                                   scale_factor=pixel_size,
+                                  uid_col=self._uid_col,
                                   )
 
     def __repr__(self):
@@ -105,7 +128,7 @@ class ShapesData(DeepCopyMixin):
         for key, df in self._data.items():
             meta[key] = {
                 f"n_{self._shape_name}": len(df),
-                "classes": sorted(df['name'].unique().tolist()) if 'name' in df.columns else ["unnamed"],
+                "classes": sorted(df[self._name_col].unique().tolist()) if self._name_col in df.columns else ["unnamed"],
             }
         return meta
 
@@ -117,15 +140,31 @@ class ShapesData(DeepCopyMixin):
     def _check_uniqueness(self,
                           dataframe: Optional[gpd.GeoDataFrame] = None,
                           key: Optional[str] = None,
-                          verbose: bool = True
+                          verbose: bool = True,
+                          name_col: Optional[str] = None,
                           ) -> bool:
+        """Check that every index entry maps to a unique name-column value.
+
+        Args:
+            dataframe: GeoDataFrame to check.  When ``None``, the stored
+                layer for ``key`` is used.
+            key: Key of the stored layer (used for the warning message and
+                to look up the dataframe when ``dataframe`` is ``None``).
+            verbose: If True, log a confirmation message when names are unique.
+            name_col: Column name holding the class label.  Falls back to
+                the instance default (``self._name_col``) when ``None``.
+
+        Returns:
+            True if the name column contains only unique values, False otherwise.
+        """
+        _name_col = name_col if name_col is not None else self._name_col
 
         if dataframe is None:
             annot_df = self[key]
         else:
             annot_df = dataframe
 
-        if len(annot_df.index.unique()) != len(annot_df.name.unique()):
+        if len(annot_df.index.unique()) != len(annot_df[_name_col].unique()):
             warnings.warn(
                     f"The names of the {self._shape_name} for key '{key}' were not unique and thus "
                     f"the key was skipped. In regions only one geometry per class is allowed."
@@ -145,7 +184,10 @@ class ShapesData(DeepCopyMixin):
                  key: str,
                  scale_factor: Number,
                  verbose: bool = False,
-                 in_napari: bool = False
+                 in_napari: bool = False,
+                 uid_col: Optional[str] = None,
+                 name_col: Optional[str] = None,
+                 color_col: Optional[str] = None,
                    ):
         """Add shape data from a file or dataframe to the ShapesData object.
 
@@ -153,6 +195,14 @@ class ShapesData(DeepCopyMixin):
         ``scale_factor``, and stores the result under ``key``.  If the
         key already exists, new shapes are appended and duplicates
         (by index) are resolved by keeping the latest entry.
+
+        The ``name_col``, ``color_col``, and ``uid_col`` parameters act as
+        **source column mappings**: they identify which columns in the input
+        data carry the class label, colour, and unique ID respectively.  On
+        import these columns are renamed to the canonical internal names
+        (``self._name_col``, ``self._color_col``, ``self._uid_col``), so the
+        stored dataframe always has a consistent structure regardless of the
+        input naming convention.
 
         Args:
             data: Shape data as a GeoDataFrame, DataFrame, dict, or a
@@ -163,23 +213,55 @@ class ShapesData(DeepCopyMixin):
             verbose: If True, log a summary of added shapes.
             in_napari: If True, use napari notification functions for
                 reporting instead of the logger.
+            uid_col: Column name in the *input* data that holds the unique
+                shape identifier.  Renamed to ``self._uid_col`` on import.
+                Falls back to ``self._uid_col`` (typically ``"id"``) when
+                ``None``.
+            name_col: Column name in the *input* data that holds the
+                class/category label.  Renamed to ``self._name_col`` on
+                import.  Falls back to ``self._name_col`` (typically
+                ``"name"``) when ``None``.
+            color_col: Column name in the *input* data that holds the display
+                colour.  Renamed to ``self._color_col`` on import.  Falls
+                back to ``self._color_col`` (typically ``"color"``) when
+                ``None``.
         """
+        _uid_col = uid_col if uid_col is not None else self._uid_col
+        _name_col = name_col if name_col is not None else self._name_col
+        _color_col = color_col if color_col is not None else self._color_col
+
         # parse geopandas data from dataframe or file
-        new_df = parse_geopandas(data)
+        new_df = parse_geopandas(
+            data,
+            uid_col=_uid_col
+            )
 
         if new_df is None:
             logger.warning(f"Data for key '{key}' was empty. Skipped import.")
         else:
-            if "name" not in new_df.columns:
-                new_df["name"] = ["None"] * len(new_df)
+            # Rename source columns to canonical internal names so the stored
+            # dataframe always has a consistent structure (required by the I/O
+            # layer, e.g. write_qupath_geojson).
+            rename_map = {}
+            if _name_col in new_df.columns and _name_col != self._name_col:
+                rename_map[_name_col] = self._name_col
+            if _color_col in new_df.columns and _color_col != self._color_col:
+                rename_map[_color_col] = self._color_col
+            if rename_map:
+                new_df = new_df.rename(columns=rename_map)
+            if new_df.index.name != self._uid_col:
+                new_df.index.name = self._uid_col
 
-            if "color" not in new_df.columns:
-                warnings.warn("No 'color' column found in the imported data. Setting all colors to red.", UserWarning, stacklevel=2)
-                new_df["color"] = [RED] * len(new_df)
+            if self._name_col not in new_df.columns:
+                new_df[self._name_col] = [None] * len(new_df)
+
+            if self._color_col not in new_df.columns:
+                warnings.warn(f"No '{_color_col}' column found in the imported data. Setting all colors to red.", UserWarning, stacklevel=2)
+                new_df[self._color_col] = [RED] * len(new_df)
 
             if self._forbidden_names is not None:
                 try:
-                    new_names = new_df["name"].tolist()
+                    new_names = new_df[self._name_col].tolist()
                 except KeyError:
                     pass
                 else:
@@ -344,7 +426,8 @@ class ShapesData(DeepCopyMixin):
             key_to_remove: Key of the shape layer to modify or delete.
             classes_to_remove: Which classes to remove.  ``"all"`` deletes
                 the entire key; a string or list of strings removes only the
-                specified class rows from the layer.
+                rows whose name-column value (``self._name_col``) matches one
+                of the given class names.
         """
         if classes_to_remove == "all":
             try:
@@ -354,7 +437,7 @@ class ShapesData(DeepCopyMixin):
         else:
             classes_to_remove = convert_to_list(classes_to_remove)
             geom_df = self[key_to_remove]
-            self._data[key_to_remove] = geom_df[~geom_df.name.isin(classes_to_remove)]
+            self._data[key_to_remove] = geom_df[~geom_df[self._name_col].isin(classes_to_remove)]
 
     @classmethod
     def read(cls, path, scale_factor=None):
@@ -406,11 +489,26 @@ class AnnotationsData(ShapesData):
     duplicate names within a key are allowed, all geometry types (points,
     lines, polygons) are accepted, and a set of reserved names is
     forbidden to prevent conflicts with downstream analysis functions.
+
+    Args:
+        files: Optional list of file paths to load on construction.
+        keys: Keys to assign to each file.  Required when ``files`` is given.
+        pixel_size: Scale factor (µm/pixel) applied to all geometries when
+            loading from ``files``.  Required when ``files`` is given.
+        name_col: Column name that holds the class/category label of each
+            shape.  Defaults to ``"name"``.
+        color_col: Column name that holds the display colour of each shape.
+            Defaults to ``"color"``.
+        uid_col: Column name used as the row index (unique shape identifier).
+            Defaults to ``"id"``.
     """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
-                 pixel_size: Optional[float] = None
+                 pixel_size: Optional[float] = None,
+                 name_col: str = "name",
+                 color_col: str = "color",
+                 uid_col: str = "id",
                  ) -> None:
 
         ShapesData.__init__(
@@ -422,6 +520,9 @@ class AnnotationsData(ShapesData):
             polygons_only=False,
             forbidden_names=FORBIDDEN_ANNOTATION_NAMES,
             shape_name="annotations",
+            name_col=name_col,
+            color_col=color_col,
+            uid_col=uid_col,
             )
 
     @classmethod
@@ -446,11 +547,26 @@ class RegionsData(ShapesData):
     each class name within a key must be unique, only
     :class:`~shapely.geometry.Polygon` geometries are accepted, and no
     forbidden-name list is applied.
+
+    Args:
+        files: Optional list of file paths to load on construction.
+        keys: Keys to assign to each file.  Required when ``files`` is given.
+        pixel_size: Scale factor (µm/pixel) applied to all geometries when
+            loading from ``files``.  Required when ``files`` is given.
+        name_col: Column name that holds the class/category label of each
+            shape.  Defaults to ``"name"``.
+        color_col: Column name that holds the display colour of each shape.
+            Defaults to ``"color"``.
+        uid_col: Column name used as the row index (unique shape identifier).
+            Defaults to ``"id"``.
     """
     def __init__(self,
                  files: Optional[List[Union[str, os.PathLike, Path]]] = None,
                  keys: Optional[List[str]] = None,
-                 pixel_size: Optional[float] = None
+                 pixel_size: Optional[float] = None,
+                 name_col: str = "name",
+                 color_col: str = "color",
+                 uid_col: str = "id",
                  ) -> None:
 
         ShapesData.__init__(
@@ -462,6 +578,9 @@ class RegionsData(ShapesData):
             polygons_only=True,
             forbidden_names=None,
             shape_name="regions",
+            name_col=name_col,
+            color_col=color_col,
+            uid_col=uid_col,
             )
 
     @classmethod
