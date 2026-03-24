@@ -101,12 +101,16 @@ class NotEnoughFeatureMatchesError(Exception):
             Number of feature matches that were found.
         threshold:
             Threshold of number of feature matches.
+        partial_result:
+            Best FeatureMatchResult found before failure (for QC output). May be None.
     """
 
     def __init__(self,
                  number: str,
-                 threshold: str
+                 threshold: str,
+                 partial_result=None,
                  ):
+        self.partial_result = partial_result
         self.message = f"A maximum of {number} matched features were found. This was below the threshold of {threshold}."
         super().__init__(self.message)
 

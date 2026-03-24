@@ -310,7 +310,7 @@ class CellData(DeepCopyMixin):
             _self.shift(x=-xlim[0], y=-ylim[0])
 
         # sync the ids and names
-        _self.sync()
+        _self.sync(verbose=verbose)
 
         if not inplace:
             return _self
@@ -401,7 +401,8 @@ class CellData(DeepCopyMixin):
                 "removed_boundaries": 0,
                 "reordered_boundaries": False,
             }
-            logger.info("CellData.sync(): no boundaries present; nothing to synchronize.")
+            if verbose:
+                logger.info("CellData.sync(): no boundaries present; nothing to synchronize.")
             if return_summary:
                 return summary
             return None
@@ -425,7 +426,7 @@ class CellData(DeepCopyMixin):
             overlapping_table_ids = table_cell_ids[table_mask_in_boundaries]
             boundary_overlap_ids = ds.index[ds.index.isin(overlapping_table_ids)]
 
-            if not np.any(table_mask_in_boundaries):
+            if len(table_cell_ids) > 0 and not np.any(table_mask_in_boundaries):
                 raise ValueError("No matching values between `.boundaries.cell_names` and `.table.obs_names`. All table entries would get filtered out.")
 
             n_removed_table = int(np.sum(~table_mask_in_boundaries))
@@ -479,17 +480,18 @@ class CellData(DeepCopyMixin):
                 "reordered_boundaries": was_reordered,
             }
 
-            if changed:
-                changes = []
-                if n_removed_table > 0:
-                    changes.append(f"removed {n_removed_table} table entries")
-                if n_removed_boundaries > 0:
-                    changes.append(f"removed {n_removed_boundaries} boundary entries")
-                if was_reordered:
-                    changes.append("reordered boundary metadata to match table order")
-                logger.info(f"CellData.sync(): synchronized table and boundaries ({', '.join(changes)}).")
-            else:
-                logger.info("CellData.sync(): no synchronization needed; table and boundaries are already aligned.")
+            if verbose:
+                if changed:
+                    changes = []
+                    if n_removed_table > 0:
+                        changes.append(f"removed {n_removed_table} table entries")
+                    if n_removed_boundaries > 0:
+                        changes.append(f"removed {n_removed_boundaries} boundary entries")
+                    if was_reordered:
+                        changes.append("reordered boundary metadata to match table order")
+                    logger.info(f"CellData.sync(): synchronized table and boundaries ({', '.join(changes)}).")
+                else:
+                    logger.info("CellData.sync(): no synchronization needed; table and boundaries are already aligned.")
 
             if verbose:
                 if n_removed_table > 0:
