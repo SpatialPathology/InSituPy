@@ -23,11 +23,12 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
+import insitupy as _ispy
+
 # ---------------------------------------------------------------------------
 # Bootstrap: locate the insitupy package and repo root
 # ---------------------------------------------------------------------------
 
-import insitupy as _ispy
 
 _PACKAGE_DIR = Path(_ispy.__file__).resolve().parent  # .../insitupy/
 _REPO_ROOT = _PACKAGE_DIR.parent  # one level up
@@ -799,12 +800,12 @@ def get_plotting_api() -> str:
         # FACS — lives in its own submodule, may not be re-exported at pl top-level
         try:
             _facs_mod = importlib.import_module("insitupy.plotting.facs")
-            facs_obj = getattr(_facs_mod, "facs_plot", None)
+            facs_obj = getattr(_facs_mod, "facs", None)
             if facs_obj is not None:
                 lines.append("## FACS")
                 sig = _format_signature(facs_obj)
                 desc = _short_doc(facs_obj)
-                lines.append(f"  facs_plot{sig}")
+                lines.append(f"  facs{sig}")
                 if desc:
                     lines.append(f"    {desc}")
                 lines.append("")
@@ -1404,7 +1405,8 @@ def get_interactive_guide() -> str:
     # TranscriptViewerWidget
     lines.append("## TranscriptViewerWidget — Napari dock widget for transcripts")
     try:
-        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+        from insitupy.interactive._transcript_viewer import \
+            TranscriptViewerWidget
 
         sig = _format_signature(TranscriptViewerWidget.__init__)
         doc = inspect.getdoc(TranscriptViewerWidget)
@@ -1555,10 +1557,8 @@ def get_spatialdata_api() -> str:
     lines.append("Requires the `spatialdata` package: `pip install spatialdata`\n")
 
     try:
-        from insitupy.spatialdata.convert import (
-            convert_from_spatialdata,
-            convert_to_spatialdata,
-        )
+        from insitupy.spatialdata.convert import (convert_from_spatialdata,
+                                                  convert_to_spatialdata)
 
         for fn_name, fn_obj in [
             ("convert_to_spatialdata", convert_to_spatialdata),

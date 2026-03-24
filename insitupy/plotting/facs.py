@@ -15,7 +15,7 @@ from insitupy.containers._utils import _get_cell_layer
 from insitupy.plotting.save import save_and_show_figure
 
 
-def facs_plot(data,
+def facs(data,
               gene1: str = 'gene1',
               gene2: str = 'gene2',
               cluster_key: str = 'None',
