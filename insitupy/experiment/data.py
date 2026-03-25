@@ -33,7 +33,7 @@ from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+                                  remove_empty_subplots, _crop_transcripts)
 
 logger = logging.getLogger(__name__)
 
@@ -1920,7 +1920,9 @@ class InSituExperiment:
     def from_regions(cls,
                     data: InSituData,
                     region_key: str,
-                    region_names: Optional[Union[List[str], str]] = None
+                    region_names: Optional[Union[List[str], str]] = None,
+                    lazy: bool = False,
+                    detach_transcripts: bool = True
                     ):
         """Creates an `InSituExperiment` object from specified regions in the given `InSituData`.
 
@@ -1928,6 +1930,16 @@ class InSituExperiment:
             data (InSituData): The input data containing regions to extract.
             region_key (str): The key identifying the region of interest in `data.regions`.
             region_names (Optional[Union[List[str], str]]): Region names to include.
+            lazy (bool): If ``False`` (default), transcript data is loaded into memory
+                once before cropping, making per-region crops fast (pandas boolean mask
+                instead of repeated Dask task-graph traversal). If ``True``, transcripts
+                remain lazy; each crop reads from disk. Slower but uses less peak RAM.
+            detach_transcripts (bool): If ``True`` (default), transcripts are detached
+                from ``data`` before the loop so that ``deepcopy()`` inside ``crop()``
+                does not copy the full transcript array on every iteration. Cropping is
+                then applied directly on the shared pandas DataFrame. Set to ``False``
+                to let ``crop()`` handle transcripts normally (useful for benchmarking
+                or if detaching causes unexpected side-effects).
 
         Returns:
             InSituExperiment: An instance containing the cropped data and metadata for the specified regions.
@@ -1942,24 +1954,56 @@ class InSituExperiment:
             # make sure region_names is a list
             region_names = convert_to_list(region_names)
 
+        # When lazy=False, materialise transcripts into a pandas DataFrame.
+        # When detach_transcripts=True, also remove them from `data` before the
+        # loop so deepcopy() inside crop() does not copy 41M rows every iteration.
+        transcripts_pdf = None
+        original_transcripts = None
+        if not lazy and data.transcripts is not None:
+            warnings.warn(
+                "Transcript data will be loaded into memory to speed up region cropping. "
+                "This may require substantial RAM for large datasets.",
+                stacklevel=2
+            )
+            data.materialize(layers=["transcripts"], verbose=True)
+            transcripts_pdf = data._transcripts.compute()   # one 41M-row pandas DF
+            if detach_transcripts:
+                original_transcripts = data._transcripts
+                data._transcripts = None                     # detach — crop() skips it
+
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
 
-        for n in tqdm(sorted(region_df["name"].tolist()), desc="Loading regions"):
-            if n in region_names:
-                # crop data by region
-                cropped_data = data.crop(region_tuple=(region_key, n))
+        try:
+            for n in tqdm(sorted(region_df["name"].tolist()), desc="Iterating regions"):
+                if n in region_names:
+                    cropped_data = data.crop(
+                        region_tuple=(region_key, n),
+                        materialize_transcripts=True
+                    )
 
-                # skip regions with no cells
-                if not cropped_data.cells.is_empty and cropped_data.cells.table.n_obs == 0:
-                    logger.warning(f"Region '{n}' contains no cells and will be skipped.")
-                    continue
+                    # when detached, apply transcript crop separately on the shared pandas DF
+                    if detach_transcripts and transcripts_pdf is not None:
+                        shape = region_df[region_df["name"] == n]["geometry"].item()
+                        cropped_data.transcripts = _crop_transcripts(
+                            transcript_df=transcripts_pdf,
+                            shape=shape,
+                        )
 
-                # create metadata
-                metadata = {"region_key": region_key, "region_name": n}
+                    # skip regions with no cells
+                    if not cropped_data.cells.is_empty and cropped_data.cells.table.n_obs == 0:
+                        logger.warning(f"Region '{n}' contains no cells and will be skipped.")
+                        continue
 
-                # add to InSituExperiment
-                experiment.add(data=cropped_data, metadata=metadata)
+                    # create metadata
+                    metadata = {"region_key": region_key, "region_name": n}
+
+                    # add to InSituExperiment
+                    experiment.add(data=cropped_data, metadata=metadata)
+        finally:
+            # Restore detached transcripts so the caller's object is unchanged.
+            if original_transcripts is not None:
+                data._transcripts = original_transcripts
 
         return experiment
 

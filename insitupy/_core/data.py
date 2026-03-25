@@ -447,7 +447,8 @@ class InSituData:
         if isinstance(value, dd.DataFrame):
             self._transcripts = value
         elif isinstance(value, pd.DataFrame):
-            self._transcripts = dd.from_pandas(value, npartitions=8)
+            n_partitions = max(1, min(8, len(value) // 2_000_000))
+            self._transcripts = dd.from_pandas(value, npartitions=n_partitions)
         else:
             raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
@@ -665,7 +666,8 @@ class InSituData:
              xlim: Optional[Tuple[int, int]] = None,
              ylim: Optional[Tuple[int, int]] = None,
              inplace: bool = False,
-             verbose: bool = False
+             verbose: bool = False,
+             materialize_transcripts: bool = True
             ):
         """
         Crop the data based on the provided parameters.
@@ -675,6 +677,9 @@ class InSituData:
             xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
             ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
             inplace (bool): If True, modify the data in place. Otherwise, return a new cropped data.
+            materialize_transcripts (bool): If True (default), compute and re-wrap the transcript
+                Dask DataFrame after cropping to avoid accumulating a deep lazy task graph.
+                Set to False to defer computation (e.g., when chaining multiple crops).
 
         Raises:
             ValueError: If none of region_tuple, layer_name, or xlim/ylim are provided.
@@ -731,7 +736,8 @@ class InSituData:
             _self.transcripts = _crop_transcripts(
                 transcript_df=_self.transcripts,
                 shape=shape,
-                xlim=xlim, ylim=ylim, verbose=verbose
+                xlim=xlim, ylim=ylim, verbose=verbose,
+                materialize=materialize_transcripts
             )
 
         if not self._images.is_empty:
@@ -1311,6 +1317,28 @@ class InSituData:
                     raise ValueError(f"Invalid value for `mode`: {mode}")
         else:
             NoProjectLoadWarning()
+
+    def materialize(self, layers=None, verbose: bool = True):
+        """Compute lazy Dask DataFrames and replace with well-partitioned equivalents.
+
+        This is useful after operations that accumulate deep task graphs
+        (e.g., repeated cropping, manual filtering), which can cause
+        performance bottlenecks in downstream operations.
+
+        Args:
+            layers: List of layer names to materialize (e.g., ``["transcripts"]``).
+                If ``None``, materializes all supported lazy layers.
+            verbose: If ``True``, log progress messages. Defaults to ``True``.
+        """
+        if layers is None or "transcripts" in layers:
+            if self._transcripts is not None and isinstance(self._transcripts, dd.DataFrame):
+                if verbose:
+                    logger.info("Materializing transcripts...")
+                pdf = self._transcripts.compute()
+                n_partitions = max(1, min(8, len(pdf) // 2_000_000))
+                self._transcripts = dd.from_pandas(pdf, npartitions=n_partitions)
+                if verbose:
+                    logger.info(f"Transcripts materialized: {len(pdf):,} rows, {n_partitions} partition(s).")
 
     def load_units(self,
                      verbose: bool = False

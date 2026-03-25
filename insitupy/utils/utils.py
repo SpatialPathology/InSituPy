@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
+import shapely as _shapely
 from shapely import LineString, Point, Polygon, affinity
 
 from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
@@ -323,46 +324,66 @@ def _crop_transcripts(
     shape: Optional[Polygon] = None,
     xlim: Optional[Tuple[int, int]] = None,
     ylim: Optional[Tuple[int, int]] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    materialize: bool = True
     ):
+
+    # Compute Dask → pandas BEFORE filtering to avoid task-graph overhead.
+    # On an in-memory-backed Dask DF this is nearly free; on disk-backed it
+    # loads the data once, which is the same total work as the old approach.
+    if materialize and isinstance(transcript_df, dd.DataFrame):
+        transcript_df = transcript_df.compute()
 
     if shape is not None:
         if xlim is not None and ylim is not None:
             if verbose:
                 warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
+        # Detect column layout
         try:
-            points = gpd.points_from_xy(
-                x=transcript_df.loc[:, ("coordinates", "x")].values,
-                y=transcript_df.loc[:, ("coordinates", "y")].values
-                )
-            warn("Filtering transcripts based on a shape may take longer if transcripts are stored as pandas dataframe instead of dask dataframe.")
+            x_vals = transcript_df.loc[:, ("coordinates", "x")]
+            y_vals = transcript_df.loc[:, ("coordinates", "y")]
             grouped_df = True
         except KeyError:
-            try:
-                import dask_geopandas as dask_gpd
-            except ImportError:
-                warn("Filtering transcripts based on a shape may take longer if `dask-geopandas` is not installed.")
-
-                # load the dataframe into memory to generate points
-                logger.info("Load transcript dataframe into memory...")
-                transcript_df = transcript_df.compute()
-                # generate points without dask_geopandas
-                points = gpd.points_from_xy(
-                    x=transcript_df.loc[:, "x_location"].values,
-                    y=transcript_df.loc[:, "y_location"].values
-                    )
-            else:
-                # generate points with dask_geopandas
-                points = dask_gpd.points_from_xy(df=transcript_df, x="x_location", y="y_location")
+            x_vals = transcript_df["x_location"]
+            y_vals = transcript_df["y_location"]
             grouped_df = False
 
-        # create mask
-        #mask = shape.contains(points)
-        mask = points.within(shape)
+        minx, miny, maxx, maxy = shape.bounds
 
-        # get minimum x and y values
-        minx, miny, _, _ = shape.bounds
+        if isinstance(transcript_df, pd.DataFrame):
+            # Step 1: bounding-box pre-filter — reduces 41M rows to ~region-size candidates
+            bbox_mask = (
+                (x_vals >= minx) & (x_vals <= maxx) &
+                (y_vals >= miny) & (y_vals <= maxy)
+            ).to_numpy()
+            # Step 2: shapely 2.0 vectorized containment on the candidate subset only
+            pts = _shapely.points(x_vals.to_numpy()[bbox_mask], y_vals.to_numpy()[bbox_mask])
+            within = _shapely.contains(shape, pts)
+            # Merge back into a full-length boolean mask
+            mask = bbox_mask.copy()
+            mask[mask] = within
+        else:
+            # Dask fallback: use dask_geopandas when available, otherwise compute first
+            try:
+                import dask_geopandas as dask_gpd
+                pts = dask_gpd.points_from_xy(df=transcript_df,
+                                               x="x_location" if not grouped_df else "coordinates",
+                                               y="y_location" if not grouped_df else "coordinates")
+                mask = pts.within(shape)
+            except ImportError:
+                warn("dask-geopandas not installed; loading transcripts into memory.")
+                transcript_df = transcript_df.compute()
+                x_vals = transcript_df["x_location"] if not grouped_df else transcript_df.loc[:, ("coordinates", "x")]
+                y_vals = transcript_df["y_location"] if not grouped_df else transcript_df.loc[:, ("coordinates", "y")]
+                bbox_mask = (
+                    (x_vals >= minx) & (x_vals <= maxx) &
+                    (y_vals >= miny) & (y_vals <= maxy)
+                ).to_numpy()
+                pts = _shapely.points(x_vals.to_numpy()[bbox_mask], y_vals.to_numpy()[bbox_mask])
+                within = _shapely.contains(shape, pts)
+                mask = bbox_mask.copy()
+                mask[mask] = within
 
     else:
         if xlim is None or ylim is None:
@@ -396,6 +417,11 @@ def _crop_transcripts(
         # move origin again to 0 by subtracting the lower limits from the coordinates
         transcript_df["x_location"] -= minx
         transcript_df["y_location"] -= miny
+
+    # Re-wrap pandas result as Dask to satisfy the transcripts setter contract.
+    if isinstance(transcript_df, pd.DataFrame):
+        n_partitions = max(1, len(transcript_df) // 500_000)
+        transcript_df = dd.from_pandas(transcript_df, npartitions=n_partitions)
 
     return transcript_df
 
