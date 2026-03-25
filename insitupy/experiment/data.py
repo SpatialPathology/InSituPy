@@ -1954,9 +1954,12 @@ class InSituExperiment:
             # make sure region_names is a list
             region_names = convert_to_list(region_names)
 
-        # When lazy=False, materialise transcripts into a pandas DataFrame.
-        # When detach_transcripts=True, also remove them from `data` before the
-        # loop so deepcopy() inside crop() does not copy 41M rows every iteration.
+        # When lazy=False, load transcripts into memory.
+        # When detach_transcripts=True: compute directly to pandas and detach from
+        # data so deepcopy() inside crop() does not copy the array each iteration.
+        # Transcripts are restored to their original state in the finally-block.
+        # When detach_transcripts=False: materialize into an in-memory Dask DF so
+        # deepcopy is cheaper; data._transcripts is mutated (in-memory after return).
         transcripts_pdf = None
         original_transcripts = None
         if not lazy and data.transcripts is not None:
@@ -1965,11 +1968,14 @@ class InSituExperiment:
                 "This may require substantial RAM for large datasets.",
                 stacklevel=2
             )
-            data.materialize(layers=["transcripts"], verbose=True)
-            transcripts_pdf = data._transcripts.compute()   # one 41M-row pandas DF
             if detach_transcripts:
+                logger.info("Loading transcripts into memory...")
+                transcripts_pdf = data._transcripts.compute()
+                logger.info(f"Transcripts loaded: {len(transcripts_pdf):,} rows.")
                 original_transcripts = data._transcripts
                 data._transcripts = None                     # detach — crop() skips it
+            else:
+                data.materialize(layers=["transcripts"], verbose=True)
 
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
@@ -1979,7 +1985,7 @@ class InSituExperiment:
                 if n in region_names:
                     cropped_data = data.crop(
                         region_tuple=(region_key, n),
-                        materialize_transcripts=True
+                        materialize_transcripts=not detach_transcripts
                     )
 
                     # when detached, apply transcript crop separately on the shared pandas DF

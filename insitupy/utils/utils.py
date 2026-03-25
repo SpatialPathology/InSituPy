@@ -364,18 +364,25 @@ def _crop_transcripts(
             mask = bbox_mask.copy()
             mask[mask] = within
         else:
-            # Dask fallback: use dask_geopandas when available, otherwise compute first
-            try:
-                import dask_geopandas as dask_gpd
-                pts = dask_gpd.points_from_xy(df=transcript_df,
-                                               x="x_location" if not grouped_df else "coordinates",
-                                               y="y_location" if not grouped_df else "coordinates")
-                mask = pts.within(shape)
-            except ImportError:
-                warn("dask-geopandas not installed; loading transcripts into memory.")
+            # Dask path (only reached when materialize=False).
+            # dask_geopandas only supports flat column names, so the grouped
+            # multi-level column case always falls through to compute-then-filter.
+            dask_mask_set = False
+            if not grouped_df:
+                try:
+                    import dask_geopandas as dask_gpd
+                    mask = dask_gpd.points_from_xy(
+                        df=transcript_df, x="x_location", y="y_location"
+                    ).within(shape)
+                    dask_mask_set = True
+                except ImportError:
+                    warn("dask-geopandas not installed; loading transcripts into memory.")
+
+            if not dask_mask_set:
+                # Compute to pandas and use the vectorized fast path
                 transcript_df = transcript_df.compute()
-                x_vals = transcript_df["x_location"] if not grouped_df else transcript_df.loc[:, ("coordinates", "x")]
-                y_vals = transcript_df["y_location"] if not grouped_df else transcript_df.loc[:, ("coordinates", "y")]
+                x_vals = transcript_df.loc[:, ("coordinates", "x")] if grouped_df else transcript_df["x_location"]
+                y_vals = transcript_df.loc[:, ("coordinates", "y")] if grouped_df else transcript_df["y_location"]
                 bbox_mask = (
                     (x_vals >= minx) & (x_vals <= maxx) &
                     (y_vals >= miny) & (y_vals <= maxy)
@@ -420,7 +427,7 @@ def _crop_transcripts(
 
     # Re-wrap pandas result as Dask to satisfy the transcripts setter contract.
     if isinstance(transcript_df, pd.DataFrame):
-        n_partitions = max(1, len(transcript_df) // 500_000)
+        n_partitions = max(1, min(8, len(transcript_df) // 2_000_000))
         transcript_df = dd.from_pandas(transcript_df, npartitions=n_partitions)
 
     return transcript_df
