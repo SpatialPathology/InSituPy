@@ -297,6 +297,22 @@ class InSituData:
         """
         return self._slide_id
 
+    @slide_id.setter
+    def slide_id(self, value):
+        """Set the slide id.
+
+        Args:
+            value (str or None): New slide id.
+
+        Note:
+            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
+            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
+            metadata in sync.
+        """
+        if value is not None and not isinstance(value, str):
+            raise TypeError(f"slide_id must be a str or None, got {type(value).__name__!r}")
+        self._slide_id = value
+
     @property
     def sample_id(self):
         """Return sample id of the InSituData object.
@@ -304,6 +320,22 @@ class InSituData:
             str: Sample id.
         """
         return self._sample_id
+
+    @sample_id.setter
+    def sample_id(self, value):
+        """Set the sample id.
+
+        Args:
+            value (str or None): New sample id.
+
+        Note:
+            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
+            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
+            metadata in sync.
+        """
+        if value is not None and not isinstance(value, str):
+            raise TypeError(f"sample_id must be a str or None, got {type(value).__name__!r}")
+        self._sample_id = value
 
     @property
     def from_insitudata(self):

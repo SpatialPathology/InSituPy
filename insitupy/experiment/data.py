@@ -32,8 +32,8 @@ from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots, _crop_transcripts)
+from insitupy.utils.utils import (_crop_transcripts, convert_to_list,
+                                  get_nrows_maxcols, remove_empty_subplots)
 
 logger = logging.getLogger(__name__)
 
@@ -793,6 +793,56 @@ class InSituExperiment:
         else:
             # Single value - broadcast to all indices
             self._metadata.loc[indices, column_name] = values
+
+    def update_metadata(self):
+        """Sync ``slide_id`` and ``sample_id`` from child datasets into the experiment metadata.
+
+        Reads :attr:`~insitupy._core.data.InSituData.slide_id` and
+        :attr:`~insitupy._core.data.InSituData.sample_id` from every dataset in
+        :attr:`data` and overwrites the corresponding values in :attr:`metadata`.
+        All other metadata columns are left untouched.
+
+        Call this method after changing ``slide_id`` or ``sample_id`` on one or more
+        :class:`~insitupy._core.data.InSituData` objects that belong to this experiment.
+
+        Examples:
+            >>> exp.data[0].slide_id = '0005405'
+            >>> exp.update_metadata()
+        """
+        changed = 0
+        for i, dataset in enumerate(self._data):
+            old_slide = self._metadata.at[i, 'slide_id']
+            old_sample = self._metadata.at[i, 'sample_id']
+            new_slide = dataset.slide_id
+            new_sample = dataset.sample_id
+            if old_slide != new_slide or old_sample != new_sample:
+                self._metadata.at[i, 'slide_id'] = new_slide
+                self._metadata.at[i, 'sample_id'] = new_sample
+                changed += 1
+        if changed:
+            logger.info("update_metadata: synced slide_id/sample_id for %d dataset(s).", changed)
+        else:
+            logger.info("update_metadata: all slide_id/sample_id values already in sync.")
+
+    def rename_metadata_column(self, old_name: str, new_name: str):
+        """Rename a column in the experiment metadata.
+
+        Args:
+            old_name (str): Current column name.
+            new_name (str): New column name.
+
+        Raises:
+            KeyError: If ``old_name`` does not exist in the metadata.
+            ValueError: If ``new_name`` already exists in the metadata.
+
+        Examples:
+            >>> exp.rename_metadata_column("old_col", "new_col")
+        """
+        if old_name not in self._metadata.columns:
+            raise KeyError(f"Column '{old_name}' not found in metadata.")
+        if new_name in self._metadata.columns:
+            raise ValueError(f"Column '{new_name}' already exists in metadata.")
+        self._metadata.rename(columns={old_name: new_name}, inplace=True)
 
     def remove_metadata_columns(self, columns):
         """
