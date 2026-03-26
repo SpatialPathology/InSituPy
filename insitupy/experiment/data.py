@@ -1462,26 +1462,35 @@ class InSituExperiment:
 
         path = Path(self.path)
 
-        # Reload each child dataset
+        # Collect the union of loaded modalities across all datasets for the summary log
         if verbose:
-            logger.info("Reloading %d dataset(s)...", len(self._data))
+            all_modalities: set = set()
+            for xd in self._data:
+                all_modalities.update(xd.get_loaded_modalities())
+            skip_set = set(skip) if skip else set()
+            active_modalities = [m for m in all_modalities if m not in skip_set]
+            logger.info(
+                "Reloading %d dataset(s) [modalities: %s]...",
+                len(self._data),
+                ", ".join(active_modalities) if active_modalities else "none",
+            )
+
+        # Reload each child dataset (suppress per-dataset messages to keep progress bar clean)
         for xd in tqdm(self._data):
-            xd.reload(skip=skip, verbose=verbose)
+            xd.reload(skip=skip, verbose=False)
 
         # Reload experiment metadata
         metadata_path = path / "metadata.csv"
         if metadata_path.exists():
             self._metadata = pd.read_csv(metadata_path, index_col=0)
             if verbose:
-                logger.info("Reloaded metadata from disk.")
+                logger.info("Reloaded metadata, colors, and filters from disk.")
 
         # Reload colors
         colors_path = path / "colors.json"
         if colors_path.exists():
             with open(colors_path, 'r') as f:
                 self._colors = json.load(f)
-            if verbose:
-                logger.info("Reloaded colors from disk.")
         else:
             self._colors = {}
 
@@ -1513,8 +1522,6 @@ class InSituExperiment:
                             )
                             continue
                         self._filters[name] = {"mask": mask_arr.tolist(), "note": spec.note}
-                if verbose:
-                    logger.info("Reloaded filters from disk.")
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
