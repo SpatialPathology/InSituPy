@@ -1431,6 +1431,93 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.remove_history(verbose=False)
 
+    def reload(
+        self,
+        skip: Optional[List] = None,
+        verbose: bool = True,
+    ):
+        """Reload all datasets and experiment-level files from disk.
+
+        Calls :meth:`~insitupy._core.data.InSituData.reload` on every child
+        dataset, then re-reads ``metadata.csv``, ``colors.json``, and
+        ``filters.json`` from the experiment's save path.  Useful after a
+        :meth:`save` call to replace in-memory data with fresh on-disk state.
+
+        Args:
+            skip: Modality name(s) forwarded to each dataset's
+                :meth:`~insitupy._core.data.InSituData.reload` (e.g.
+                ``["images"]``).  Defaults to ``None``.
+            verbose: If ``True``, log progress.  Defaults to ``True``.
+
+        Raises:
+            ValueError: If no experiment save path is set.
+        """
+        self._check_mode_compatibility("reload")
+
+        if self.path is None:
+            raise ValueError(
+                "No save path available. Cannot reload without a save path. "
+                "Save the experiment with `saveas()` first."
+            )
+
+        path = Path(self.path)
+
+        # Reload each child dataset
+        if verbose:
+            logger.info("Reloading %d dataset(s)...", len(self._data))
+        for xd in tqdm(self._data):
+            xd.reload(skip=skip, verbose=verbose)
+
+        # Reload experiment metadata
+        metadata_path = path / "metadata.csv"
+        if metadata_path.exists():
+            self._metadata = pd.read_csv(metadata_path, index_col=0)
+            if verbose:
+                logger.info("Reloaded metadata from disk.")
+
+        # Reload colors
+        colors_path = path / "colors.json"
+        if colors_path.exists():
+            with open(colors_path, 'r') as f:
+                self._colors = json.load(f)
+            if verbose:
+                logger.info("Reloaded colors from disk.")
+        else:
+            self._colors = {}
+
+        # Reload filters
+        self._filters = {}
+        self._applied_filters = []
+        filters_path = path / "filters.json"
+        if filters_path.exists():
+            try:
+                with open(filters_path, 'r') as f:
+                    filters_payload = json.load(f)
+                version = filters_payload.get("version", None)
+                filters = filters_payload.get("filters", None)
+                if version != _FILTERS_SCHEMA_VERSION:
+                    raise ValueError(
+                        f"Unsupported filters schema version: {version}. "
+                        f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                    )
+                if isinstance(filters, dict):
+                    for name, entry in filters.items():
+                        spec = FilterSpec.from_entry(name, entry)
+                        mask_arr = np.asarray(spec.mask, dtype=bool)
+                        if len(mask_arr) != len(self._metadata):
+                            warnings.warn(
+                                f"Filter '{name}' length ({len(mask_arr)}) does not match "
+                                f"metadata length ({len(self._metadata)}). Skipping.",
+                                UserWarning,
+                                stacklevel=2,
+                            )
+                            continue
+                        self._filters[name] = {"mask": mask_arr.tolist(), "note": spec.note}
+                if verbose:
+                    logger.info("Reloaded filters from disk.")
+            except Exception as err:
+                warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
