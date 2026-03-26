@@ -2022,7 +2022,70 @@ class InSituData:
             import gc
             gc.collect()
         else:
-            logger.warning("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
+            logger.warning(
+                "Nothing currently loaded — nothing to refresh. "
+                "Use load_cells(), load_images(), etc. to load modalities from disk."
+            )
+
+    def unload(self, modalities: Optional[List] = None, verbose: bool = True):
+        """Unload modality data from memory, keeping only the path reference.
+
+        Resets the specified modalities to their empty state without touching
+        the on-disk data.  The object remains fully usable: call the
+        corresponding ``load_*()`` method (e.g. :meth:`load_cells`) to bring
+        a modality back into memory.
+
+        Useful for freeing RAM after a :meth:`save` call, or as a preparatory
+        step before moving data on disk.
+
+        Args:
+            modalities: Modality name(s) to unload (e.g. ``["cells", "images"]``).
+                Defaults to ``None``, which unloads all modalities.
+            verbose: If ``True``, log which modalities were unloaded.
+                Defaults to ``True``.
+
+        Raises:
+            ValueError: If no save path is set, because unloading without a
+                save path would make the in-memory data unrecoverable.
+        """
+        if self._path is None:
+            raise ValueError(
+                "Cannot unload: no save path is set. Save the object with "
+                "'saveas()' first to avoid permanent data loss."
+            )
+
+        _resets = {
+            "images":      (ImageData,       "_images"),
+            "cells":       (MultiCellData,   "_cells"),
+            "transcripts": (None,            "_transcripts"),
+            "annotations": (AnnotationsData, "_annotations"),
+            "regions":     (RegionsData,     "_regions"),
+            "units":       (None,            "_units"),
+        }
+
+        target_set = set(modalities) if modalities is not None else set(_resets.keys())
+
+        # Early-exit if none of the requested modalities are actually loaded
+        loaded = set(self.get_loaded_modalities())
+        if self._units is not None:
+            loaded.add("units")
+        if not loaded & target_set:
+            return
+
+        # Reset each modality to its empty sentinel — mirrors what the property
+        # deleters do but without emitting a log line per modality.
+        cleared = []
+        for modality, (factory, attr) in _resets.items():
+            if modality not in target_set:
+                continue
+            setattr(self, attr, factory() if factory is not None else None)
+            cleared.append(modality)
+
+        import gc
+        gc.collect()
+
+        if cleared and verbose:
+            logger.info("Unloaded modalities: %s", ", ".join(cleared))
 
     def get_modality(self, modality: str):
         """Return the data object for the specified modality.

@@ -19,7 +19,8 @@ def _get_cell_layer(
         if cells_layer not in all_keys:
             raise ValueError(f"cells_layer {cells_layer} not in layers: {all_keys}")
 
-    logger.info(f"Using CellData from MultiCellData layer '{cells_layer}'.")
+    if verbose:
+        logger.info(f"Using CellData from MultiCellData layer '{cells_layer}'.")
     layer = cells[cells_layer]
 
     if return_layer_name:

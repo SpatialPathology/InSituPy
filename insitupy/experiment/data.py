@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import warnings
 from collections import defaultdict
 from copy import deepcopy
@@ -1525,6 +1526,42 @@ class InSituExperiment:
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
+    def unload(self, modalities: Optional[List] = None):
+        """Unload modality data from memory for every dataset in this experiment.
+
+        Calls :meth:`~insitupy._core.data.InSituData.unload` on every child
+        dataset.  The experiment object itself (metadata, colors, filters) is
+        unaffected.  Call the corresponding ``load_*()`` methods to bring
+        modalities back into memory.
+
+        Args:
+            modalities: Modality name(s) to unload (e.g. ``["cells", "images"]``).
+                Defaults to ``None``, which unloads all modalities.
+
+        Raises:
+            ValueError: If any dataset has no save path set.
+        """
+        self._check_mode_compatibility("unload")
+
+        missing = [
+            i for i, xd in enumerate(self._data) if xd._path is None
+        ]
+        if missing:
+            raise ValueError(
+                f"Cannot unload: dataset(s) at index {missing} have no save "
+                f"path. Call saveas() first to avoid permanent data loss."
+            )
+
+        all_modalities = ["images", "cells", "transcripts", "annotations", "regions", "units"]
+        active = modalities if modalities is not None else all_modalities
+        logger.info(
+            "Unloading %d dataset(s) [modalities: %s]...",
+            len(self._data),
+            ", ".join(active) if active else "none",
+        )
+        for xd in tqdm(self._data):
+            xd.unload(modalities=modalities, verbose=False)
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
@@ -1918,17 +1955,54 @@ class InSituExperiment:
 
 
     @classmethod
-    def concat(cls, objs, new_col_name=None):
+    def concat(
+        cls,
+        objs,
+        new_col_name=None,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        mode: Literal["copy", "move"] = "copy",
+    ):
         """Concatenate multiple InSituExperiment objects.
 
         Args:
             objs (Union[List[InSituExperiment], Dict[str, InSituExperiment]]):
-                A list of InSituExperiment objects or a dictionary where keys are added as a new column.
+                A list of InSituExperiment objects or a dictionary where keys
+                are added as a new column.
             new_col_name (str, optional):
-                The name of the new column to add when objs is a dictionary. Defaults to None.
+                The name of the new column to add when objs is a dictionary.
+                Defaults to None.
+            path (Union[str, os.PathLike, Path], optional):
+                Destination directory for the concatenated experiment.
+                Required when ``mode="move"``.
+            mode (str):
+                ``"copy"`` (default) — datasets remain at their original paths
+                and the new experiment object is in-memory only (no save path
+                is set unless you call :meth:`saveas` afterwards).
+
+                ``"move"`` — each dataset directory is moved (not copied) to
+                ``path``, the experiment-level files (``metadata.csv``,
+                ``colors.json``, ``filters.json``) are written there, and the
+                original experiment root directories are removed.  This is
+                disk-efficient because no data is duplicated.
+
+                .. warning::
+                    ``mode="move"`` is **destructive and irreversible**.
+                    All source experiments must have a save path set and must
+                    reside on the same filesystem as ``path``.
 
         Returns:
-            InSituExperiment: A new InSituExperiment object containing the concatenated data.
+            InSituExperiment: A new InSituExperiment object.
+
+        Raises:
+            ValueError: For invalid arguments or precondition violations in
+                ``mode="move"``.
+
+        Notes:
+            Existing filter masks are **always dropped** after concatenation
+            because their lengths no longer match the merged metadata.
+            Colors from all source experiments are merged with a first-wins
+            strategy: the first experiment whose color dict contains a given
+            key takes precedence.
         """
         if isinstance(objs, dict):
             if new_col_name is None:
@@ -1936,6 +2010,15 @@ class InSituExperiment:
             keys, objs = zip(*objs.items())
         else:
             keys = [None] * len(objs)
+
+        objs = list(objs)
+
+        # Validate mode
+        if mode not in ("copy", "move"):
+            raise ValueError(f"mode must be 'copy' or 'move', got '{mode}'.")
+
+        if mode == "move" and path is None:
+            raise ValueError("path must be provided when mode='move'.")
 
         # Check that all objects have the same data type
         data_types = [obj._data_type for obj in objs]
@@ -1945,12 +2028,47 @@ class InSituExperiment:
             )
         data_type = data_types[0]
 
-        # Initialize a new InSituExperiment object
+        # --- mode="move" precondition checks ---
+        if mode == "move":
+            for i, obj in enumerate(objs):
+                if not isinstance(obj, InSituExperiment):
+                    raise TypeError("All objects must be instances of InSituExperiment.")
+                if obj._path is None:
+                    raise ValueError(
+                        f"mode='move' requires all experiments to have a save path set, "
+                        f"but experiment at index {i} has no path. "
+                        f"Call saveas() first."
+                    )
+
+            path = Path(path)
+
+            # Verify same filesystem: compare the device of the destination
+            # parent (creating it if needed) against each source dataset.
+            path.mkdir(parents=True, exist_ok=True)
+            dst_dev = os.stat(path).st_dev
+            for obj in objs:
+                src_dev = os.stat(obj._path).st_dev
+                if src_dev != dst_dev:
+                    raise ValueError(
+                        f"mode='move' requires source and destination to be on the "
+                        f"same filesystem. Source '{obj._path}' and destination '{path}' "
+                        f"are on different devices. Use mode='copy' + saveas() instead."
+                    )
+
+            return cls._concat_move(
+                objs=objs,
+                keys=list(keys),
+                new_col_name=new_col_name,
+                data_type=data_type,
+                path=path,
+            )
+
+        # --- mode="copy" (original behaviour + colors merge) ---
         new_experiment = cls(data_type=data_type)
 
-        # Concatenate data and metadata
         new_data = []
         new_metadata = []
+        merged_colors: dict = {}
 
         for key, obj in zip(keys, objs):
             if not isinstance(obj, InSituExperiment):
@@ -1960,14 +2078,85 @@ class InSituExperiment:
             if key is not None:
                 metadata[new_col_name] = key
             new_metadata.append(metadata)
+            # Merge colors: first-wins per key
+            for k, v in obj._colors.items():
+                if k not in merged_colors:
+                    merged_colors[k] = v
 
         new_experiment._data = new_data
         new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
-
-        # Disconnect object from save path
+        new_experiment._colors = merged_colors
+        # Filters are intentionally dropped: masks are sized to individual
+        # experiment metadata and cannot be meaningfully merged.
         new_experiment._path = None
 
         # check if observation names are unique (only for insitupy mode)
+        if data_type == "insitupy":
+            new_experiment._check_obs_uniqueness()
+
+        return new_experiment
+
+    @classmethod
+    def _concat_move(
+        cls,
+        objs: list,
+        keys: list,
+        new_col_name,
+        data_type: str,
+        path: Path,
+    ) -> "InSituExperiment":
+        """Back-end for ``concat(..., mode='move')``.
+
+        Moves each source dataset directory to ``path/data-NNN``, updates
+        ``InSituData._path``, detaches in-memory data, writes experiment-level
+        files to ``path``, and removes the now-empty source experiment roots.
+        """
+        new_experiment = cls(data_type=data_type)
+        new_metadata: list = []
+        merged_colors: dict = {}
+        global_idx = 0
+
+        for key, obj in zip(keys, objs):
+            # Release in-memory data before moving so the move loop stays clean
+            obj.unload()
+
+            for xd in tqdm(obj._data, desc=f"Moving datasets from {obj._path.name}"):
+                dst = path / f"data-{str(global_idx).zfill(3)}"
+                shutil.move(str(xd._path), str(dst))
+                xd._path = dst
+                new_experiment._data.append(xd)
+                global_idx += 1
+
+            metadata = obj._metadata.copy()
+            if key is not None:
+                metadata[new_col_name] = key
+            new_metadata.append(metadata)
+
+            # Merge colors first-wins
+            for k, v in obj._colors.items():
+                if k not in merged_colors:
+                    merged_colors[k] = v
+
+        new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
+        new_experiment._colors = merged_colors
+        new_experiment._path = path
+
+        # Write experiment-level files
+        new_experiment.save_metadata(path=path, overwrite=True)
+        new_experiment.save_colors(path=path, overwrite=True)
+        new_experiment.save_filters(path=path)
+
+        # Remove source experiment roots (datasets have already been moved out)
+        for obj in objs:
+            remaining = list(obj._path.iterdir())
+            if remaining:
+                logger.info(
+                    "Removing source experiment root '%s' (%d item(s) remaining).",
+                    obj._path, len(remaining),
+                )
+            shutil.rmtree(str(obj._path))
+            obj._path = None
+
         if data_type == "insitupy":
             new_experiment._check_obs_uniqueness()
 
@@ -2559,6 +2748,8 @@ class InSituExperiment:
                 obs_list.append(celldata.table.obs)
 
         # concatenate the obs dataframes
+        if not obs_list:
+            return
         all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
         if not all_obs.index.is_unique:
             logger.warning("Observation names are not unique across all datasets.")
