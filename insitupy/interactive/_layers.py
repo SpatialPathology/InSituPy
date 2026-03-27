@@ -1,4 +1,5 @@
 import logging
+import time
 
 from insitupy._constants import WITH_NAPARI
 
@@ -42,6 +43,8 @@ if WITH_NAPARI:
         mode: Literal["Annotations", "Regions"] = "Annotations",
         tolerance: Number = 5
         ):
+
+        _t_start = time.perf_counter()
 
         # list to store information on shapes
         shape_list = []
@@ -93,12 +96,27 @@ if WITH_NAPARI:
             else:
                 dataframe["color"] = [(0,0,255)] * len(dataframe)
 
+        # pre-compute sets for O(1) duplicate UID lookups
+        existing_shape_uids = set(viewer.layers[shapes_layer_name_with_symbol].properties["uid"]) if shapes_layer_exists else set()
+        existing_point_uids = set(viewer.layers[points_layer_name_with_symbol].properties["uid"]) if points_layer_exists else set()
+
+        # pre-compute color conversion once if all rows share the same color
+        first_color = dataframe["color"].iloc[0]
+        has_per_row_color = not all(c == first_color for c in dataframe["color"])
+        if not has_per_row_color:
+            hexcolor = rgb2hex([elem / 255 for elem in first_color])
+            rgbacolor = [elem / 255 for elem in first_color] + [1]
+
+        _t_setup_done = time.perf_counter()
+        print(f"[TIMING] _add_geometries_as_layer | layer='{layer_name}' | n_rows={len(dataframe)} | setup done")
+
         for uid, row in dataframe.iterrows():
             # get coordinates
             geometry = row["geometry"]
             #uid = row["id"]
-            hexcolor = rgb2hex([elem / 255 for elem in row["color"]])
-            rgbacolor = [elem / 255 for elem in row["color"]] + [1] # scale to range 0-1 and add opacity value
+            if has_per_row_color:
+                hexcolor = rgb2hex([elem / 255 for elem in row["color"]])
+                rgbacolor = [elem / 255 for elem in row["color"]] + [1] # scale to range 0-1 and add opacity value
 
             # check if polygon is a MultiPolygon or just a simple Polygon object
             if isinstance(geometry, MultiPolygon):
@@ -118,18 +136,14 @@ if WITH_NAPARI:
 
             # check if this uid is already in the current layer. If so, skip it
             if annotation_type in ["polygon_like", "line_like"]:
-                if shapes_layer_exists:
-                    layer = viewer.layers[shapes_layer_name_with_symbol]
-                    if uid in layer.properties["uid"]:
-                        logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
-                        continue
+                if uid in existing_shape_uids:
+                    logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
+                    continue
 
             if annotation_type == "point_like":
-                if points_layer_exists:
-                    layer = viewer.layers[points_layer_name_with_symbol]
-                    if uid in layer.properties["uid"]:
-                        logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
-                        continue
+                if uid in existing_point_uids:
+                    logger.debug(f"Already in layer: {uid}") if viewer_config.verbose else None
+                    continue
 
             if annotation_type == "polygon_like":
                 for p in data:
@@ -191,6 +205,9 @@ if WITH_NAPARI:
                     type_list["Points"].append("point") # information on type of coordinates - important for interior/exterior of polygons
                     names_list["Points"].append(row["name"])
 
+        _t_iterrows_done = time.perf_counter()
+        print(f"[TIMING] _add_geometries_as_layer | layer='{layer_name}' | iterrows loop: {_t_iterrows_done - _t_setup_done:.3f}s | n_shapes={len(shape_list)}")
+
         if len(shape_list) > 0:
             properties_dict = {
                     'uid': uid_list["Shapes"], # list with uids
@@ -234,6 +251,7 @@ if WITH_NAPARI:
                 viewer_config._auto_set_uid = True
 
             else:
+                _t_before_add = time.perf_counter()
                 viewer.add_shapes(
                     data=shape_list,
                     name=shapes_layer_name_with_symbol,
@@ -246,7 +264,12 @@ if WITH_NAPARI:
                     #scale=scale_factor,
                     text=text_dict
                     )
+                _t_after_add = time.perf_counter()
+                print(f"[TIMING] _add_geometries_as_layer | layer='{layer_name}' | viewer.add_shapes(): {_t_after_add - _t_before_add:.3f}s")
+                _t_before_info = time.perf_counter()
                 show_info(f"New layer '{shapes_layer_name_with_symbol}' created.")
+                _t_after_info = time.perf_counter()
+                print(f"[TIMING] _add_geometries_as_layer | layer='{layer_name}' | show_info(): {_t_after_info - _t_before_info:.3f}s")
 
         point_data = np.stack([point_x_list, point_y_list]).T
         if len(point_data) > 0:
@@ -288,6 +311,7 @@ if WITH_NAPARI:
                     #scale=scale_factor
                 )
 
+        print(f"[TIMING] _add_geometries_as_layer | layer='{layer_name}' | TOTAL: {time.perf_counter() - _t_start:.3f}s")
 
     def _create_points_layer(points,
                             color_values: List[Number],

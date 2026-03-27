@@ -1,4 +1,5 @@
 import logging
+import time
 
 from insitupy._constants import WITH_NAPARI
 
@@ -949,8 +950,17 @@ if WITH_NAPARI:
                         else:
                             classes = [annot_class]
 
+                        # disconnect event callbacks during the class loop to avoid
+                        # redundant legend redraws and widget refreshes per layer
+                        _t_widget_start = time.perf_counter()
+                        viewer.layers.selection.events.active.disconnect(callback_update_legend)
+                        viewer.layers.events.inserted.disconnect(update_annotation_widget_after_changes)
+                        _t_disconnect_done = time.perf_counter()
+                        print(f"[TIMING] show_geometries_widget | n_classes={len(classes)} | disconnect: {_t_disconnect_done - _t_widget_start:.3f}s")
+
                         # iterate through classes
                         for cl in classes:
+                            _t_class_start = time.perf_counter()
                             layer_name = f"{cl} ({key})"
                             #if layer_name not in viewer.layers: # this cannot be checked here because the symbol is missing which is added in the adding process below
                             # get dataframe for this class
@@ -965,6 +975,8 @@ if WITH_NAPARI:
                             else:
                                 rgb_color = None
 
+                            _t_before_add_layer = time.perf_counter()
+                            print(f"[TIMING] show_geometries_widget | class='{cl}' | df_filter+color: {_t_before_add_layer - _t_class_start:.3f}s")
                             # add layer to viewer
                             _add_geometries_as_layer(
                                 dataframe=class_df,
@@ -978,6 +990,18 @@ if WITH_NAPARI:
                                 mode=geom_type,
                                 tolerance=tolerance
                             )
+                            print(f"[TIMING] show_geometries_widget | class='{cl}' | class total: {time.perf_counter() - _t_class_start:.3f}s")
+
+                        # reconnect event callbacks and fire once to update UI
+                        _t_before_reconnect = time.perf_counter()
+                        viewer.layers.selection.events.active.connect(callback_update_legend)
+                        viewer.layers.events.inserted.connect(update_annotation_widget_after_changes)
+                        _t_before_legend = time.perf_counter()
+                        callback_update_legend()
+                        _t_before_widget_update = time.perf_counter()
+                        update_annotation_widget_after_changes()
+                        _t_end = time.perf_counter()
+                        print(f"[TIMING] show_geometries_widget | TOTAL: {_t_end - _t_widget_start:.3f}s | reconnect: {_t_before_legend - _t_before_reconnect:.3f}s | callback_update_legend: {_t_before_widget_update - _t_before_legend:.3f}s | update_annotation_widget: {_t_end - _t_before_widget_update:.3f}s")
 
                     # connect key change with update function
                     @show_geometries_widget.geom_type.changed.connect
