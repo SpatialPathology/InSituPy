@@ -46,7 +46,8 @@ if WITH_NAPARI:
         object.  Geometries present in the data but absent from the viewer are
         also removed.
         """
-        name_pattern = "{type_symbol} {class_name} ({annot_key})"
+        new_pattern = "{type_symbol} {annot_key}"
+        old_pattern = "{type_symbol} {class_name} ({annot_key})"
 
         # get current viewer config
         viewer, config = _get_current_viewer_config("synchronize geometries")
@@ -59,29 +60,17 @@ if WITH_NAPARI:
         layers = viewer.layers
         for layer in layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
-                name_parsed = parse(name_pattern, layer.name)
+                name_parsed = parse(new_pattern, layer.name)
                 if name_parsed is not None:
                     type_symbol = name_parsed.named["type_symbol"]
                     annot_key = name_parsed.named["annot_key"]
-                    class_name = name_parsed.named["class_name"]
 
                     checks_passed, object_type = _check_geometry_symbol_and_layer(
                         layer=layer, type_symbol=type_symbol
                     )
 
                     if checks_passed:
-                        if object_type == "annotation":
-                            # if the InSituData object does not have an annotations attribute, initialize it
-                            # if data.annotations is None:
-                            #     data.annotations = AnnotationsData() # initialize empty object
-
-                            shapesdata = data.annotations
-                        else:
-                            # if the InSituData object does not have an regions attribute, initialize it
-                            # if data.regions is None:
-                            #     data.regions = RegionsData() # initialize empty object
-
-                            shapesdata = data.regions
+                        shapesdata = data.annotations if object_type == "annotation" else data.regions
 
                         # import all geometries from viewer into ShapesData object within InSituData
                         _store_geometries(
@@ -89,7 +78,6 @@ if WITH_NAPARI:
                             shapesdata=shapesdata,
                             object_type=object_type,
                             annot_key=annot_key,
-                            class_name=class_name
                         )
 
                         # remove entries in InSituData that are not present in viewer
@@ -99,8 +87,43 @@ if WITH_NAPARI:
                             config=config,
                             object_type=object_type,
                             annot_key=annot_key,
-                            class_name=class_name
                         )
+                else:
+                    name_parsed_old = parse(old_pattern, layer.name)
+                    if name_parsed_old is not None:
+                        import warnings
+                        warnings.warn(
+                            f"Layer '{layer.name}' uses the old naming pattern. "
+                            "Please re-add it via 'Show geometries' to use the new format.",
+                            DeprecationWarning
+                        )
+                        type_symbol = name_parsed_old.named["type_symbol"]
+                        annot_key = name_parsed_old.named["annot_key"]
+                        class_name = name_parsed_old.named["class_name"]
+
+                        checks_passed, object_type = _check_geometry_symbol_and_layer(
+                            layer=layer, type_symbol=type_symbol
+                        )
+
+                        if checks_passed:
+                            shapesdata = data.annotations if object_type == "annotation" else data.regions
+
+                            _store_geometries(
+                                layer=layer,
+                                shapesdata=shapesdata,
+                                object_type=object_type,
+                                annot_key=annot_key,
+                                class_name=class_name,
+                            )
+
+                            _remove_geometries(
+                                layer=layer,
+                                shapesdata=shapesdata,
+                                config=config,
+                                object_type=object_type,
+                                annot_key=annot_key,
+                                class_name=class_name,
+                            )
 
     def save_colorlegends(
         output_folder: Union[str, os.PathLike, Path] = "figures",
@@ -155,7 +178,7 @@ if WITH_NAPARI:
         config,
         object_type: str,
         annot_key: str,
-        class_name: str
+        class_name: str = None
     ):
         # remove entries in InSituData that are not present in viewer
         current_ids = layer.properties['uid'] # get ids from current layer
@@ -163,9 +186,17 @@ if WITH_NAPARI:
         try:
             geom_df = shapesdata[annot_key]
         except KeyError:
-            pass
+            return
+
+        if class_name is not None:
+            unique_names = [class_name]
+        elif 'name' in layer.features.columns:
+            unique_names = layer.features['name'].unique()
         else:
-            ids_stored = geom_df[geom_df["name"] == class_name].index
+            return
+
+        for name in unique_names:
+            ids_stored = geom_df[geom_df["name"] == name].index
 
             # filter geom_df and keep only those entries that are also present in viewer
             removal_mask = ~ids_stored.isin(current_ids)
@@ -176,25 +207,18 @@ if WITH_NAPARI:
             n_removed = len(ids_to_remove)
 
             # drop entries from geometries dataframe
-            geom_df.drop(
-                ids_to_remove,
-                inplace=True
-                )
+            geom_df.drop(ids_to_remove, inplace=True)
 
             if n_removed > 0:
-                if n_removed > 1:
-                    object_str = object_type + "s"
-                else:
-                    object_str = object_type
-
-                show_info(f"Removed {n_removed} {object_str} with key {annot_key} and class {class_name}.")
+                object_str = object_type + "s" if n_removed > 1 else object_type
+                show_info(f"Removed {n_removed} {object_str} with key {annot_key} and class {name}.")
 
     def _store_geometries(
         layer,
         shapesdata,
         object_type: str,
         annot_key: str,
-        class_name: str,
+        class_name: str = None,
         uid_col: str = "id"
         ):
         # extract shapes coordinates and colors
@@ -206,6 +230,8 @@ if WITH_NAPARI:
         else:
             colors = layer.edge_color.tolist()
 
+        name_values = layer.features['name'].values if 'name' in layer.features.columns else class_name
+
         if isinstance(layer, Shapes):
             # extract shape types
             shape_types = layer.shape_type
@@ -214,7 +240,7 @@ if WITH_NAPARI:
                 uid_col: layer.properties["uid"],
                 "objectType": object_type,
                 "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
-                "name": class_name,
+                "name": name_values,
                 "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
             }
 
@@ -224,7 +250,7 @@ if WITH_NAPARI:
                 uid_col: layer.properties["uid"],
                 "objectType": object_type,
                 "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
-                "name": class_name,
+                "name": name_values,
                 "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
             }
 

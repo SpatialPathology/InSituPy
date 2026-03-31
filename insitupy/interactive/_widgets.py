@@ -1,5 +1,4 @@
 import logging
-import time
 
 from insitupy._constants import WITH_NAPARI
 
@@ -944,64 +943,37 @@ if WITH_NAPARI:
                         else:
                             TypeError(f"Unknown geometry type: {geom_type}")
 
-                        if annot_class == "all":
-                            # get classes
-                            classes = annot_df['name'].unique()
-                        else:
-                            classes = [annot_class]
-
-                        # disconnect event callbacks during the class loop to avoid
-                        # redundant legend redraws and widget refreshes per layer
-                        _t_widget_start = time.perf_counter()
+                        # disconnect event callbacks to avoid redundant legend redraws
                         viewer.layers.selection.events.active.disconnect(callback_update_legend)
                         viewer.layers.events.inserted.disconnect(update_annotation_widget_after_changes)
-                        _t_disconnect_done = time.perf_counter()
-                        print(f"[TIMING] show_geometries_widget | n_classes={len(classes)} | disconnect: {_t_disconnect_done - _t_widget_start:.3f}s")
 
-                        # iterate through classes
-                        for cl in classes:
-                            _t_class_start = time.perf_counter()
-                            layer_name = f"{cl} ({key})"
-                            #if layer_name not in viewer.layers: # this cannot be checked here because the symbol is missing which is added in the adding process below
-                            # get dataframe for this class
-                            class_df = annot_df[annot_df["name"] == cl].copy()
+                        if annot_class == "all":
+                            df_to_add = annot_df
+                        else:
+                            df_to_add = annot_df[annot_df["name"] == annot_class].copy()
 
-                            # simplify polygons for visualization
-                            # class_df["geometry"] = class_df["geometry"].simplify(tolerance)
+                        if not "color" in df_to_add.columns:
+                            rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
+                        else:
+                            rgb_color = None
 
-                            if not "color" in class_df.columns:
-                                # create a RGB color with range 0-255 for this key
-                                rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
-                            else:
-                                rgb_color = None
-
-                            _t_before_add_layer = time.perf_counter()
-                            print(f"[TIMING] show_geometries_widget | class='{cl}' | df_filter+color: {_t_before_add_layer - _t_class_start:.3f}s")
-                            # add layer to viewer
-                            _add_geometries_as_layer(
-                                dataframe=class_df,
-                                viewer=viewer,
-                                layer_name=layer_name,
-                                #scale_factor=scale_factor,
-                                edge_width=edge_width,
-                                opacity=opacity,
-                                rgb_color=rgb_color,
-                                show_names=show_names,
-                                mode=geom_type,
-                                tolerance=tolerance
-                            )
-                            print(f"[TIMING] show_geometries_widget | class='{cl}' | class total: {time.perf_counter() - _t_class_start:.3f}s")
+                        _add_geometries_as_layer(
+                            dataframe=df_to_add,
+                            viewer=viewer,
+                            layer_name=key,
+                            edge_width=edge_width,
+                            opacity=opacity,
+                            rgb_color=rgb_color,
+                            show_names=show_names,
+                            mode=geom_type,
+                            tolerance=tolerance
+                        )
 
                         # reconnect event callbacks and fire once to update UI
-                        _t_before_reconnect = time.perf_counter()
                         viewer.layers.selection.events.active.connect(callback_update_legend)
                         viewer.layers.events.inserted.connect(update_annotation_widget_after_changes)
-                        _t_before_legend = time.perf_counter()
                         callback_update_legend()
-                        _t_before_widget_update = time.perf_counter()
                         update_annotation_widget_after_changes()
-                        _t_end = time.perf_counter()
-                        print(f"[TIMING] show_geometries_widget | TOTAL: {_t_end - _t_widget_start:.3f}s | reconnect: {_t_before_legend - _t_before_reconnect:.3f}s | callback_update_legend: {_t_before_widget_update - _t_before_legend:.3f}s | update_annotation_widget: {_t_end - _t_before_widget_update:.3f}s")
 
                     # connect key change with update function
                     @show_geometries_widget.geom_type.changed.connect
@@ -1040,7 +1012,7 @@ if WITH_NAPARI:
         class_name: str = "TestClass",
     ) -> napari.types.LayerDataTuple:
         # name pattern of layer name
-        name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
+        name_pattern: str = "{type_symbol} {annot_key}"
 
         # get current viewer and config
         viewer = napari.current_viewer()
@@ -1052,7 +1024,6 @@ if WITH_NAPARI:
                 # generate name
                 name = name_pattern.format(
                     type_symbol=ANNOTATIONS_SYMBOL,
-                    class_name=class_name,
                     annot_key=annot_key
                     )
 
@@ -1068,8 +1039,10 @@ if WITH_NAPARI:
                         #'scale': (config.pixel_size, config.pixel_size),
                         'properties': {
                             'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
-                            }
+                            'type': np.array([], dtype='object'),
+                            'name': np.array([], dtype='object'),
+                            },
+                        'text': {'string': '{name}', 'anchor': 'upper_left', 'size': 8, 'color': 'white'},
                         },
                     'shapes'
                     )
@@ -1078,7 +1051,6 @@ if WITH_NAPARI:
                 # generate name
                 name = name_pattern.format(
                     type_symbol=POINTS_SYMBOL,
-                    class_name=class_name,
                     annot_key=annot_key
                     )
 
@@ -1093,7 +1065,8 @@ if WITH_NAPARI:
                         #'scale': (config.pixel_size, config.pixel_size),
                         'properties': {
                             'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
+                            'type': np.array([], dtype='object'),
+                            'name': np.array([], dtype='object'),
                         }
                         },
                     'points'
@@ -1104,7 +1077,6 @@ if WITH_NAPARI:
                 # generate name
                 name = name_pattern.format(
                     type_symbol=REGIONS_SYMBOL,
-                    class_name=class_name,
                     annot_key=annot_key
                     )
 
@@ -1120,8 +1092,10 @@ if WITH_NAPARI:
                         #'scale': (config.pixel_size, config.pixel_size),
                         'properties': {
                             'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
-                        }
+                            'type': np.array([], dtype='object'),
+                            'name': np.array([], dtype='object'),
+                        },
+                        'text': {'string': '{name}', 'anchor': 'upper_left', 'size': 8, 'color': 'white'},
                         },
                     'shapes'
                     )
@@ -1130,7 +1104,27 @@ if WITH_NAPARI:
                 layer = None
 
             if name in viewer.layers:
+                # layer already exists — update current_properties for the new class name
+                viewer.layers[name].current_properties = {
+                    'name': np.array([class_name], dtype='object'),
+                    'uid':  np.array([''], dtype='object'),
+                    'type': np.array([''], dtype='object'),
+                }
+                add_new_geometries_widget.class_name.value = ""
                 return None
+
+            # set current_properties so every newly drawn shape gets class_name automatically
+            expected_name = name
+            def _on_layer_inserted(event):
+                if expected_name in viewer.layers:
+                    inserted_layer = viewer.layers[expected_name]
+                    viewer.layers.events.inserted.disconnect(_on_layer_inserted)
+                    inserted_layer.current_properties = {
+                        'name': np.array([class_name], dtype='object'),
+                        'uid':  np.array([''], dtype='object'),
+                        'type': np.array([''], dtype='object'),
+                    }
+            viewer.layers.events.inserted.connect(_on_layer_inserted)
 
             # reset class name to nothing
             add_new_geometries_widget.class_name.value = ""
@@ -1172,6 +1166,29 @@ if WITH_NAPARI:
 
         def _sync_geometries(self):
             sync_geometries()
+
+
+    class RefreshLabelsButton(QWidget):
+        """Button that forces text-label refresh on all geometry Shapes layers."""
+
+        def __init__(self):
+            super().__init__()
+            self.layout = QVBoxLayout()
+            self.setLayout(self.layout)
+
+            self.refresh_button = QPushButton("Refresh labels")
+            self.refresh_button.clicked.connect(self._refresh_labels)
+            self.layout.addWidget(self.refresh_button)
+
+        def _refresh_labels(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+            for layer in viewer.layers:
+                if isinstance(layer, napari.layers.shapes.shapes.Shapes):
+                    if 'name' in layer.features.columns:
+                        layer.features = layer.features.copy()
 
 
     class ResetWidgetsButton(QWidget):
@@ -1244,6 +1261,142 @@ if WITH_NAPARI:
                 viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False)
 
             show_info("Widgets have been reset.")
+
+
+    class UtilityButtonsWidget(QWidget):
+        """Combined dock widget grouping Sync, Refresh labels, and Reset Widgets buttons."""
+
+        def __init__(self, widgets_max_width: int = 500):
+            super().__init__()
+            self.widgets_max_width = widgets_max_width
+            layout = QVBoxLayout()
+            self.setLayout(layout)
+
+            sync_btn = QPushButton("Sync Geometries")
+            sync_btn.clicked.connect(self._sync_geometries)
+            layout.addWidget(sync_btn)
+
+            refresh_btn = QPushButton("Refresh labels")
+            refresh_btn.clicked.connect(self._refresh_labels)
+            layout.addWidget(refresh_btn)
+
+            reset_btn = QPushButton("Reset Widgets")
+            reset_btn.setToolTip("Restore all closed widgets")
+            reset_btn.clicked.connect(self._reset_widgets)
+            layout.addWidget(reset_btn)
+
+        def _sync_geometries(self):
+            sync_geometries()
+
+        def _refresh_labels(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+            for layer in viewer.layers:
+                if isinstance(layer, napari.layers.shapes.shapes.Shapes):
+                    if 'name' in layer.features.columns:
+                        layer.features = layer.features.copy()
+
+        def _reset_widgets(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
+
+            existing_widgets = set()
+            for dock_widget in viewer.window._dock_widgets.values():
+                existing_widgets.add(dock_widget.name)
+
+            (
+                show_cells_widget,
+                locate_cells_widget,
+                show_geometries_widget,
+                show_boundaries_widget,
+                select_data,
+                filter_cells_widget,
+                show_units_widget,
+            ) = _initialize_widgets(
+                viewer=viewer,
+                viewer_config=viewer_config
+            )
+
+            widgets_config = [
+                (select_data, "Select data", 80, False),
+                (show_cells_widget, "Show data", 170, False),
+                (show_units_widget, "Show spatial units", None, True),
+                (show_boundaries_widget, "Show boundaries", None, False),
+                (locate_cells_widget, "Navigate to cell", None, False),
+                (filter_cells_widget, "Filter cells", 150, True),
+                (show_geometries_widget, "Show geometries", None, True),
+            ]
+
+            for widget, name, max_height, tabify in widgets_config:
+                if widget is not None and name not in existing_widgets:
+                    viewer.window.add_dock_widget(widget, name=name, area="right", tabify=tabify)
+                    if max_height is not None:
+                        widget.max_height = max_height
+                    widget.max_width = self.widgets_max_width
+
+            if "Add geometries" not in existing_widgets:
+                add_geom_widget = add_new_geometries_widget()
+                add_geom_widget.max_width = self.widgets_max_width
+                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False)
+
+            show_info("Widgets have been reset.")
+
+
+    class ColorLegendWidget(QWidget):
+        """Combined widget showing the colour-legend canvas with save controls beneath it."""
+
+        def __init__(self, static_canvas):
+            super().__init__()
+            layout = QVBoxLayout()
+            self.setLayout(layout)
+
+            # Colour legend canvas at the top
+            layout.addWidget(static_canvas)
+
+            # Save controls below
+            path_layout = QHBoxLayout()
+
+            self.label = QLabel("No folder selected")
+            self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            self.label.setMinimumWidth(150)
+            self.label.setMaximumWidth(200)
+            self.label.setToolTip("No folder selected")
+            path_layout.addWidget(self.label)
+
+            self.select_button = QPushButton("Select")
+            self.select_button.setIconSize(QSize(16, 16))
+            self.select_button.setToolTip("Select Output Folder")
+            self.select_button.clicked.connect(self._select_folder)
+            path_layout.addWidget(self.select_button)
+
+            layout.addLayout(path_layout)
+
+            self.save_button = QPushButton("Save")
+            self.save_button.clicked.connect(self._save_data)
+            layout.addWidget(self.save_button)
+
+            self.output_folder = None
+
+        def _select_folder(self):
+            folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+            if folder:
+                self.output_folder = folder
+                metrics = QFontMetrics(self.label.font())
+                elided_text = metrics.elidedText(folder, Qt.ElideMiddle, self.label.width())
+                self.label.setText(elided_text)
+                self.label.setToolTip(folder)
+
+        def _save_data(self):
+            if self.output_folder:
+                save_colorlegends(output_folder=self.output_folder)
+            else:
+                self.label.setText("Please select a folder first.")
 
 
     class SaveWidget(QWidget):

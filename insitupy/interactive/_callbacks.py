@@ -252,16 +252,15 @@ if WITH_NAPARI:
             # check if the layer is a annotations or regions layer
             first_char = layer.name[:1]
             if first_char in [ANNOTATIONS_SYMBOL, REGIONS_SYMBOL]:
-                # collect the layer names and edge colors of the respective layer
-                layer_names = []
-                face_colors = []
+                mapping = {}
                 for elem in viewer.layers:
-                    if elem.name.startswith(first_char):
-                        layer_names.append(elem.name.strip(first_char + " "))
-                        face_colors.append(elem.current_edge_color)
-
-                # create mapping from collected values
-                mapping = dict(zip(layer_names, face_colors))
+                    if elem.name.startswith(first_char) and isinstance(elem, napari.layers.shapes.shapes.Shapes):
+                        if 'name' in elem.features.columns:
+                            for name, color in zip(elem.features['name'], elem.edge_color):
+                                mapping.setdefault(str(name), tuple(color))
+                        else:
+                            mapping.setdefault(elem.name.strip(first_char + " "), tuple(elem.current_edge_color))
+                mapping = {k: mapping[k] for k in sorted(mapping.keys())}
 
                 _update_categorical_legend(
                     static_canvas=viewer_config.static_canvas,

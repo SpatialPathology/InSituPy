@@ -47,8 +47,7 @@ if WITH_NAPARI:
     from insitupy.interactive._layers import _create_points_layer
     from insitupy.interactive._transcript_viewer import (
         TranscriptViewerConfig, create_transcript_viewer_widget)
-    from insitupy.interactive._widgets import (ResetWidgetsButton, SaveWidget,
-                                               SyncButton)
+    from insitupy.interactive._widgets import (ColorLegendWidget, UtilityButtonsWidget)
 
     #from napari.layers.shapes.shapes import Shapes
     from ..interactive._widgets import (_initialize_widgets,
@@ -397,26 +396,16 @@ if WITH_NAPARI:
         viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
 
     def _add_color_legend_to_viewer(viewer: napari.Viewer):
-        # # add color legend widget
         config = config_manager[_get_viewer_uid(viewer)]
-        viewer.window.add_dock_widget(config.static_canvas, area='left', name='Color legend')
-
-        # add save widget for color legends
-        save_widget = SaveWidget()
-        viewer.window.add_dock_widget(save_widget, area='left', name="Save color legend")
+        color_legend_widget = ColorLegendWidget(static_canvas=config.static_canvas)
+        viewer.window.add_dock_widget(color_legend_widget, area='left', name='Color legend')
 
     def _add_buttons_to_viewer(viewer: napari.Viewer, widgets_max_width: int = 500):
-        # create sync button
-        sync_button = SyncButton()
+        # create combined utility buttons widget
+        utility_buttons = UtilityButtonsWidget(widgets_max_width=widgets_max_width)
 
-        # add the sync button to viewer
-        viewer.window.add_dock_widget(sync_button, area='right', name="Sync")
-
-        # create reset widgets button
-        reset_widgets_button = ResetWidgetsButton(widgets_max_width=widgets_max_width)
-
-        # add the reset widgets button to viewer
-        viewer.window.add_dock_widget(reset_widgets_button, area='right', name="Reset Widgets")
+        # add the combined widget to viewer
+        viewer.window.add_dock_widget(utility_buttons, area='right', name="Utilities")
 
     def _add_transcript_viewer_to_viewer(
         data: Union["InSituData", "StructuredSpatialData"],
