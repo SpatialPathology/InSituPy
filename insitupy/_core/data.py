@@ -1239,6 +1239,7 @@ class InSituData:
             images_as_zarr: bool = True,
             zarr_zipped: bool = False,
             images_max_resolution: Optional[Number] = None, # in µm per pixel
+            debug: bool = False,
             verbose: bool = True
             ):
         '''
@@ -1246,6 +1247,8 @@ class InSituData:
 
         Args:
             path: Path to save the data to.
+            debug: If True, enable detailed debug logging for image metadata
+                serialization during save.
         '''
         # check if the path already exists
         path = Path(path)
@@ -1279,6 +1282,7 @@ class InSituData:
                 images_as_zarr=images_as_zarr,
                 zipped=zarr_zipped,
                 max_resolution=images_max_resolution,
+                debug=debug,
                 verbose=False
                 )
 

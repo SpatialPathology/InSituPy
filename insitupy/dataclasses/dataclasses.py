@@ -2097,6 +2097,7 @@ class ImageData(DeepCopyMixin):
              return_savepaths: bool = False,
              overwrite: bool = False,
              max_resolution: Optional[Number] = None, # in µm per pixel
+             debug: bool = False,
              verbose: bool = False
              ):
         """
@@ -2112,6 +2113,7 @@ class ImageData(DeepCopyMixin):
             return_savepaths (bool): If True, return the paths of the saved files.
             overwrite (bool): If True, overwrite existing files in the output folder. Default is False.
             max_resolution (Optional[Number]): Maximum resolution for images in µm per pixel. If the pixel size of an image is larger than `max_resolution`, the image is downscaled. Default is None.
+            debug (bool): If True, emit detailed debug logs for metadata serialization failures during zarr writing.
             verbose (bool): If True, print status messages during saving. Default is True.
 
         Returns:
@@ -2224,12 +2226,27 @@ class ImageData(DeepCopyMixin):
                             )
                             continue
 
-                    write_zarr(image=img, file=img_path,
-                               img_metadata=new_img_metadata,
-                               save_pyramid=save_pyramid,
-                               axes=axes, verbose=verbose,
-                               overwrite=overwrite
-                               )
+                    try:
+                        write_zarr(image=img, file=img_path,
+                                   img_metadata=new_img_metadata,
+                                   save_pyramid=save_pyramid,
+                                   axes=axes, verbose=verbose,
+                                   overwrite=overwrite
+                                   )
+                    except TypeError as e:
+                        if debug and "is not JSON serializable" in str(e):
+                            logger.debug(
+                                "Failed to save image '%s' as zarr due to non-JSON-serializable metadata.",
+                                name,
+                            )
+                            for meta_key, meta_value in new_img_metadata.items():
+                                logger.debug(
+                                    "metadata key='%s', type='%s', value=%r",
+                                    meta_key,
+                                    type(meta_value).__name__,
+                                    meta_value,
+                                )
+                        raise
                 else:
                     # get file name for saving
                     #filename = Path(img_metadata["file"]).name.split(".")[0] + ".ome.tif"
