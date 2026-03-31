@@ -16,7 +16,7 @@ from insitupy import __version__
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
-from insitupy.utils.utils import convert_to_list
+from insitupy.utils.utils import convert_to_list, make_json_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -436,7 +436,7 @@ def write_zarr(image, file,
 
         # open zarr store save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
-        store.attrs.put(img_metadata)
+        store.attrs.put(make_json_serializable(img_metadata))
     # for k,v in img_metadata.items():
     #     store.attrs[k] = v
 
