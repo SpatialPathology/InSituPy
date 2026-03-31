@@ -24,7 +24,6 @@ from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
-from insitupy._version import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT,
                                  with_insitupy_style)
@@ -34,14 +33,15 @@ from insitupy._exceptions import (InSituDataRepeatedCropError,
 from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                 write_dict_to_json)
 from insitupy._textformat import textformat as tf
+from insitupy._version import __version__
 from insitupy._warnings import NoProjectLoadWarning
-from insitupy.containers._utils import _get_cell_layer
 from insitupy.containers import (AnnotationsData, ImageData, MultiCellData,
                                  RegionsData, SpatialUnitsData)
-from insitupy.containers.io import (_save_annotations, _save_cells,
-                                     _save_images, _save_regions,
-                                     _save_transcripts, _save_units,
-                                     _read_multicelldata, _read_shapesdata)
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.io import (_read_multicelldata, _read_shapesdata,
+                                    _save_annotations, _save_cells,
+                                    _save_images, _save_regions,
+                                    _save_transcripts, _save_units)
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
@@ -1474,6 +1474,7 @@ class InSituData:
             images_as_zarr: bool = True,
             zarr_zipped: bool = False,
             images_max_resolution: Optional[Number] = None, # in µm per pixel
+            debug: bool = False,
             verbose: bool = True
             ):
         """Save the InSituData object to a new directory.
@@ -1494,6 +1495,8 @@ class InSituData:
                 in micrometers per pixel.  Images with finer resolution are
                 downsampled.  If None, images are saved at their original
                 resolution.
+            debug: If True, enable detailed debug logging for image metadata
+                serialization during save.
             verbose: If True, log progress messages.
         """
         # check if the path already exists
@@ -1529,6 +1532,7 @@ class InSituData:
                 images_as_zarr=images_as_zarr,
                 zipped=zarr_zipped,
                 max_resolution=images_max_resolution,
+                debug=debug,
                 verbose=False
                 )
 

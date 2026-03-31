@@ -12,9 +12,9 @@ import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely as _shapely
 from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
-import shapely as _shapely
 from shapely import LineString, Point, Polygon, affinity
 
 from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
@@ -104,6 +104,45 @@ def nested_dict_numpy_to_list(dictionary):
             dictionary[key] = value.tolist()
         elif isinstance(value, dict):
             nested_dict_numpy_to_list(value)
+
+
+def make_json_serializable(value):
+    """Recursively convert common non-JSON types to JSON-safe Python objects.
+
+    Handles nested mappings/sequences and converts NumPy scalar/array types
+    into native Python primitives so that ``json.dumps`` can serialize them.
+
+    Args:
+        value: Any Python object.
+
+    Returns:
+        A JSON-serializable representation of *value*.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, np.ndarray):
+        return [make_json_serializable(v) for v in value.tolist()]
+
+    if isinstance(value, dict):
+        return {str(k): make_json_serializable(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_serializable(v) for v in value]
+
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+
+    if isinstance(value, np.datetime64):
+        return str(value)
+
+    return str(value)
 
 def get_nrows_maxcols(n_keys, max_cols):
     '''

@@ -16,15 +16,15 @@ import toml
 import zarr
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._version import __version__
 from insitupy._io.files import read_json
+from insitupy._version import __version__
 
 logger = logging.getLogger(__name__)
+from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
+                                 ImageData, MultiCellData, RegionsData,
+                                 ShapesData)
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
-from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
-                                  ImageData, MultiCellData, RegionsData,
-                                  ShapesData)
 from insitupy.utils.utils import (_generate_time_based_uid,
                                   convert_int_to_xenium_hex, convert_to_list)
 
@@ -364,6 +364,7 @@ def _save_images(imagedata: ImageData,
                  images_as_zarr: bool = True,
                  zipped: bool = False,
                  max_resolution: Optional[Number] = None, # in µm per pixel,
+                 debug: bool = False,
                  verbose: bool = False
                  ):
     img_path = (path / "images")
@@ -374,6 +375,7 @@ def _save_images(imagedata: ImageData,
         zipped=zipped,
         return_savepaths=True,
         max_resolution=max_resolution,
+        debug=debug,
         verbose=verbose
         )
 
