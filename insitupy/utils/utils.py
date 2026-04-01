@@ -1,7 +1,8 @@
 import math
 import os
 from datetime import datetime
-from typing import Optional, Tuple, Union
+from pathlib import Path
+from typing import Generator, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
@@ -151,6 +152,15 @@ def check_list(List, list_to_compare):
         print("Following elements not found: {}".format(", ".join(not_in)), flush=True)
 
     return List
+
+def glob_visible(path: Path, pattern: str) -> Generator:
+    """Like ``Path.glob()``, but silently skips hidden files (names starting with ``'.'``).
+
+    This is useful on Windows when directories contain macOS resource-fork files
+    (e.g. ``._foo.geojson``) created by Finder when copying data across file systems.
+    """
+    return (f for f in path.glob(pattern) if not f.name.startswith("."))
+
 
 def _generate_time_based_uid():
     time_str = datetime.now().strftime("%y%m%d-%H%M%S%f")
