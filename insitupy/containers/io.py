@@ -26,7 +26,8 @@ from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.utils.utils import (_generate_time_based_uid,
-                                  convert_int_to_xenium_hex, convert_to_list)
+                                  convert_int_to_xenium_hex, convert_to_list,
+                                  glob_visible)
 
 
 def _read_baysor_cells(
@@ -302,7 +303,7 @@ def _read_shapesdata(
     # metadata = read_json(path / "metadata.json")
     # keys = metadata.keys()
     # files = [path / f"{k}.geojson" for k in keys]
-    files_dict = {f.stem: f for f in path.glob("*.geojson") if f.stem != "metadata"}
+    files_dict = {f.stem: f for f in glob_visible(path, "*.geojson") if f.stem != "metadata"}
 
     # check which type of ShapesData is read here
     if mode == "annotations":

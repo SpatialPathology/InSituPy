@@ -1749,16 +1749,44 @@ class InSituData:
             If *add_to_obs* is ``False``: a :class:`pandas.Series` of per-cell
             signal values indexed by cell name.  Otherwise ``None``.
         """
+        import dask.array as da
+        from scipy.ndimage import zoom as ndimage_zoom
         from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
                                           summarize_tile_measurements)
-        img = self.images[image_name]
-        pixel_size = self.images.metadata[image_name]["pixel_size"]
-        if isinstance(img, list):
-            img = img[0]
+
+        # --- image: keep full pyramid to allow level selection ---
+        img_pyramid = self.images[image_name]
+        img_pixel_size = self.images.metadata[image_name]["pixel_size"]
+        if not isinstance(img_pyramid, list):
+            img_pyramid = [img_pyramid]
+
+        # --- mask: level 0 (highest resolution) + pixel size ---
         cellsdata = _get_cell_layer(self.cells, cells_layer=cells_layer)
-        mask = cellsdata.boundaries[cells_compartment]
-        if isinstance(mask, list):
-            mask = mask[0]
+        mask_pyramid = cellsdata.boundaries[cells_compartment]
+        mask_pixel_size = cellsdata.boundaries.metadata[cells_compartment]["pixel_size"]
+        if not isinstance(mask_pyramid, list):
+            mask_pyramid = [mask_pyramid]
+        mask = mask_pyramid[0]
+
+        # --- select the image pyramid level whose pixel size is closest to the mask ---
+        level_pixel_sizes = [img_pixel_size * (2 ** i) for i in range(len(img_pyramid))]
+        best_level = int(np.argmin([abs(ps - mask_pixel_size) for ps in level_pixel_sizes]))
+        img = img_pyramid[best_level]
+        pixel_size = level_pixel_sizes[best_level]
+
+        if best_level > 0:
+            print(
+                f"Using image pyramid level {best_level} (pixel size {pixel_size:.4f} µm/px) "
+                f"to match mask pixel size ({mask_pixel_size:.4f} µm/px).",
+                flush=True
+            )
+
+        # --- resize mask to match selected image level using nearest-neighbour ---
+        zoom_factor = mask_pixel_size / pixel_size
+        if abs(zoom_factor - 1.0) > 1e-3:
+            mask_dtype = mask.dtype
+            mask_np = ndimage_zoom(mask.compute(), zoom=zoom_factor, order=0)
+            mask = da.from_array(mask_np.astype(mask_dtype))
 
         if tile_size is None:
             measurements, cell_ids = quantify_fluorescence(

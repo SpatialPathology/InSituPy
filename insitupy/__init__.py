@@ -1,6 +1,3 @@
-from ._version import __author__, __email__, __version__
-from ._constants import WITH_NAPARI
-
 from . import _core, containers, datasets, experiment
 from . import images as im
 from . import io
@@ -8,8 +5,9 @@ from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
-from ._constants import CACHE
+from ._constants import CACHE, WITH_NAPARI
 from ._core.data import InSituData
+from ._version import __author__, __email__, __version__
 from .experiment.data import InSituExperiment
 
 try:
@@ -37,5 +35,6 @@ __all__ = [
 
 # configure logging
 from ._logging import setup_logging as _setup_logging
+
 _setup_logging()
 del _setup_logging
