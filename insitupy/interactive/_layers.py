@@ -56,6 +56,7 @@ if WITH_NAPARI:
         uid_list = {"Points": [], "Shapes": []}
         type_list = {"Points": [], "Shapes": []} # list to store whether the polygon is exterior or interior
         names_list = {"Points": [], "Shapes": []}
+        geometry_type = mode.lower().rstrip('s')  # "Annotations" → "annotation", "Regions" → "region"
 
         # get the config
         viewer_config = config_manager[_get_viewer_uid(viewer)]
@@ -200,10 +201,11 @@ if WITH_NAPARI:
                     names_list["Points"].append(row["name"])
 
         if len(shape_list) > 0:
-            properties_dict = {
+            features_dict = {
                     'uid': uid_list["Shapes"],
                     'type': type_list["Shapes"],
                     'name': names_list["Shapes"],
+                    'geometry_type': [geometry_type] * len(uid_list["Shapes"]),
                 }
             text_dict = {
                 'string': '{name}',
@@ -225,19 +227,23 @@ if WITH_NAPARI:
                     edge_color=color_list["Shapes"],
                     face_color='transparent',
                 )
-
-                # add properties
-                layer.properties["uid"][-len(shape_list):] = properties_dict["uid"]
-                layer.properties["type"][-len(shape_list):] = properties_dict["type"]
-                layer.properties["name"][-len(shape_list):] = properties_dict["name"]
-
                 viewer_config._auto_set_uid = True
+
+                # layer.add() already appended empty rows to layer.features; fill them in
+                # and reassign so the Features Table widget is notified via features_update signal
+                updated = layer.features.copy()
+                n = len(shape_list)
+                updated.loc[updated.index[-n:], 'uid'] = features_dict['uid']
+                updated.loc[updated.index[-n:], 'type'] = features_dict['type']
+                updated.loc[updated.index[-n:], 'name'] = features_dict['name']
+                updated.loc[updated.index[-n:], 'geometry_type'] = features_dict['geometry_type']
+                layer.features = updated
 
             else:
                 viewer.add_shapes(
                     data=shape_list,
                     name=shapes_layer_name_with_symbol,
-                    properties=properties_dict,
+                    features=features_dict,
                     shape_type=shape_type_list,
                     edge_width=edge_width, # µm
                     edge_color=color_list["Shapes"],
@@ -250,19 +256,11 @@ if WITH_NAPARI:
 
         point_data = np.stack([point_x_list, point_y_list]).T
         if len(point_data) > 0:
-            # add points to viewer
-            # if not points_layer_name_with_symbol in viewer.layers:
-            #     add = True
-            # elif allow_duplicate_layers:
-            #     add = True
-            # else:
-            #     add = False
-
-            # if add:
-
-            properties_dict = {
-                        'uid': uid_list["Points"], # list with uids
-                        'type': type_list["Points"] # list giving information on whether the polygon is interior or exterior
+            features_dict = {
+                        'uid': uid_list["Points"],
+                        'type': type_list["Points"],
+                        'name': names_list["Points"],
+                        'geometry_type': [geometry_type] * len(uid_list["Points"]),
                     }
 
             if points_layer_name_with_symbol in viewer.layers:
@@ -271,17 +269,26 @@ if WITH_NAPARI:
 
                 layer.add(
                     coords=point_data,
-                    # face_color=color_list["Points"]
                 )
 
                 # change colors of the newly added data
                 layer.face_color[-len(point_data):] = color_list["Points"]
                 layer.refresh() # refresh layer to show new colors
+
+                # layer.add() already appended empty rows to layer.features; fill them in
+                # and reassign so the Features Table widget is notified via features_update signal
+                updated = layer.features.copy()
+                n = len(point_data)
+                updated.loc[updated.index[-n:], 'uid'] = features_dict['uid']
+                updated.loc[updated.index[-n:], 'type'] = features_dict['type']
+                updated.loc[updated.index[-n:], 'name'] = features_dict['name']
+                updated.loc[updated.index[-n:], 'geometry_type'] = features_dict['geometry_type']
+                layer.features = updated
             else:
                 viewer.add_points(
                     data=point_data,
                     name=points_layer_name_with_symbol,
-                    properties=properties_dict,
+                    features=features_dict,
                     size=10,
                     border_color="black",
                     face_color=color_list["Points"],
@@ -521,35 +528,3 @@ if WITH_NAPARI:
         )
         return layer
 
-
-#TODO: Why is this function not used anywhere?
-# def _determine_color_settings(
-#     color_values,
-#     cmap,
-#     upper_climit_pct
-#     ):
-#     # check if the data should be plotted categorical or continous
-#     if is_numeric_dtype(color_values):
-#         is_categorical = False # if the data is numeric it should be plotted continous
-#     else:
-#         is_categorical = True # if the data is not numeric it should be plotted categorically
-
-#     if is_categorical:
-#         # get color cycle for categorical data
-#         color_mode = "cycle"
-#         # palettes = CustomPalettes()
-#         # color_cycle = getattr(palettes, "tab20_mod").colors
-#         color_cycle = DEFAULT_CATEGORICAL_CMAP.colors
-#         color_map = None
-#         climits = None
-#     else:
-#         color_mode = "colormap"
-#         color_map = cmap
-#         color_cycle = None
-
-#         climits = _determine_climits(
-#             color_values=color_values,
-#             upper_climit_pct=upper_climit_pct
-#         )
-
-#     return color_mode, color_cycle, color_map, climits

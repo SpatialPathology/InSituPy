@@ -9,7 +9,7 @@ from scipy.sparse import issparse
 
 from insitupy._version import __version__
 from insitupy._constants import WITH_NAPARI
-from insitupy._constants import FLUO_CMAP
+from insitupy._constants import ANNOTATIONS_SYMBOL, FLUO_CMAP, REGIONS_SYMBOL
 from insitupy._exceptions import InSituDataMissingObject
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.images.axes import ImageAxes
@@ -359,22 +359,38 @@ if WITH_NAPARI:
                             geom_type = "line"
                         else:
                             show_warning(f"Unsupported shape type '{type_last}' for UID assignment. Only 'polygon' and 'path' are supported.")
+                            return
                     elif isinstance(layer, Points):
                         geom_type = "point"
-                    #if 'uid' in layer.properties:
+                        type_last = "point"
+                    else:
+                        return
+
                     uid = str(uuid4())
                     logger.debug(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
-                    try:
-                        layer.properties['uid'][-1] = uid
-                        layer.properties['type'][-1] = geom_type
-                    except KeyError:
-                        layer.properties['uid'] = np.array([uid], dtype='object')
-                        layer.properties['uid'] = np.array([geom_type], dtype='object')
+
+                    if layer.name.startswith(ANNOTATIONS_SYMBOL):
+                        geometry_type_label = "annotation"
+                    elif layer.name.startswith(REGIONS_SYMBOL):
+                        geometry_type_label = "region"
+                    else:
+                        geometry_type_label = ""
+
+                    # update via layer.features assignment to fire the features_update signal
+                    # so the Features Table widget refreshes automatically
+                    updated = layer.features.copy()
+                    updated.loc[updated.index[-1], 'uid'] = uid
+                    updated.loc[updated.index[-1], 'type'] = geom_type
+                    if 'name' not in updated.columns:
+                        updated['name'] = ""
+                    updated.loc[updated.index[-1], 'name'] = ""
+                    updated.loc[updated.index[-1], 'geometry_type'] = geometry_type_label
+                    layer.features = updated
 
                 elif event.action == "removing":
-                    uids_before_removal = set(layer.properties['uid'])
+                    uids_before_removal = set(layer.features['uid'])
                 elif event.action == "removed":
-                    removed_uids = uids_before_removal ^ set(layer.properties['uid'])
+                    removed_uids = uids_before_removal ^ set(layer.features['uid'])
                     logger.debug(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
                     viewer_config._removal_tracker += list(removed_uids)
                 else:

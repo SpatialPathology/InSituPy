@@ -336,17 +336,3 @@ if WITH_NAPARI:
             # update obs in filter widget
             filter_widget.obs_key.choices = viewer_config.key_dict["obs"]
 
-        # # set only the last cell layer visible
-        # cell_layers = []
-        # for elem in viewer.layers:
-        #     if isinstance(elem, napari.layers.points.points.Points):
-        #         if not elem.name.startswith(POINTS_SYMBOL):
-        #             # only if the layer is not a point annotation layer, it is added
-        #             cell_layers.append(elem)
-        # #point_layers = [elem for elem in xdata.viewer.layers if isinstance(elem, napari.layers.points.points.Points)]
-        # n_cell_layers = len(cell_layers)
-
-        # # make only last cell layer visible
-        # for i, l in enumerate(cell_layers):
-        #     if i < n_cell_layers-1:
-        #         l.visible = False

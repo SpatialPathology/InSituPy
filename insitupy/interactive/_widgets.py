@@ -370,14 +370,6 @@ if WITH_NAPARI:
         #viewer = xdata.viewer
         data = viewer_config.data
 
-        # Initialize cell-related widgets only if cells are present
-        # if not viewer_config.has_cells:
-        #     show_cells_widget = None
-        #     move_to_cell_widget = None
-        #     show_boundaries_widget = None
-        #     filter_cells_widget = None
-        #     select_data_widget = None
-
         show_cells_widget = None
         move_to_cell_widget = None
         show_geometries_widget = None
@@ -876,116 +868,95 @@ if WITH_NAPARI:
 
             show_units_widget.call_button.clicked.connect(callback_update_legend)
 
-        # if data.annotations.is_empty and data.regions.is_empty:
-        #     show_geometries_widget = None
-        # else:
-        if not (data.annotations.is_empty and data.regions.is_empty):
-            #TODO: The following section is weirdly complicated and should be simplified.
-            # check which geometries are available
-            if not data.annotations.is_empty:
-                if not data.regions.is_empty:
-                    choices = ["Annotations", "Regions"]
+        choices = [
+            c for c in ["Annotations", "Regions"]
+            if not getattr(data, c.lower()).is_empty
+            and len(getattr(data, c.lower()).keys()) > 0
+        ]
+
+        if len(choices) == 0:
+            show_geometries_widget = None
+        else:
+            geom = getattr(data, choices[0].lower())
+            annot_keys = list(geom.keys())
+            first_annot_key = annot_keys[0]
+            first_classes = ["all"] + sorted(geom.metadata[first_annot_key]['classes'])
+
+            @magicgui(
+                call_button='Show',
+                geom_type={"choices": choices, "label": "Type:"},
+                key={"choices": annot_keys, "label": "Key:"},
+                annot_class={"choices": first_classes, "label": "Class:"},
+                edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
+                # opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
+                # tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
+                show_names={'label': 'Show names'}
+            )
+            def show_geometries_widget(
+                geom_type,
+                key,
+                annot_class,
+                edge_width: int = 4,
+                # opacity: float = 1,
+                # tolerance: int = 1,
+                show_names: bool = False
+                ):
+                opacity = 1
+                tolerance = 1
+
+                if geom_type == "Annotations":
+                    # get annotation dataframe
+                    annot_df = data.annotations[key]
+                    all_keys = list(data.annotations.metadata.keys())
+                elif geom_type == "Regions":
+                    # get regions dataframe
+                    annot_df = data.regions[key]
+                    all_keys = list(data.regions.metadata.keys())
                 else:
-                    choices = ["Annotations"]
-            else:
-                choices = ["Regions"]
+                    TypeError(f"Unknown geometry type: {geom_type}")
 
-            for c in choices:
-                if len(getattr(data, c.lower()).keys()) == 0:
-                    choices.remove(c)
+                # disconnect event callbacks to avoid redundant legend redraws
+                viewer.layers.selection.events.active.disconnect(callback_update_legend)
+                viewer.layers.events.inserted.disconnect(update_annotation_widget_after_changes)
 
-            if len(choices) == 0:
-                show_geometries_widget = None
-            else:
-
-                # extract geometry object
-                geom = getattr(data, choices[0].lower())
-
-                # extract annotations keys
-                annot_keys = list(geom.keys())
-                try:
-                    first_annot_key = list(annot_keys)[0] # for dropdown menu
-                except IndexError:
-                    show_geometries_widget = None
+                if annot_class == "all":
+                    df_to_add = annot_df
                 else:
-                    first_classes = ["all"] + sorted(geom.metadata[first_annot_key]['classes'])
+                    df_to_add = annot_df[annot_df["name"] == annot_class].copy()
 
-                    @magicgui(
-                        call_button='Show',
-                        geom_type={"choices": choices, "label": "Type:"},
-                        key={"choices": annot_keys, "label": "Key:"},
-                        annot_class={"choices": first_classes, "label": "Class:"},
-                        edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
-                        # opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
-                        # tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
-                        show_names={'label': 'Show names'}
-                    )
-                    def show_geometries_widget(
-                        geom_type,
-                        key,
-                        annot_class,
-                        edge_width: int = 4,
-                        # opacity: float = 1,
-                        # tolerance: int = 1,
-                        show_names: bool = False
-                        ):
-                        opacity = 1
-                        tolerance = 1
+                if not "color" in df_to_add.columns:
+                    rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
+                else:
+                    rgb_color = None
 
-                        if geom_type == "Annotations":
-                            # get annotation dataframe
-                            annot_df = data.annotations[key]
-                            all_keys = list(data.annotations.metadata.keys())
-                        elif geom_type == "Regions":
-                            # get regions dataframe
-                            annot_df = data.regions[key]
-                            all_keys = list(data.regions.metadata.keys())
-                        else:
-                            TypeError(f"Unknown geometry type: {geom_type}")
+                _add_geometries_as_layer(
+                    dataframe=df_to_add,
+                    viewer=viewer,
+                    layer_name=key,
+                    edge_width=edge_width,
+                    opacity=opacity,
+                    rgb_color=rgb_color,
+                    show_names=show_names,
+                    mode=geom_type,
+                    tolerance=tolerance
+                )
 
-                        # disconnect event callbacks to avoid redundant legend redraws
-                        viewer.layers.selection.events.active.disconnect(callback_update_legend)
-                        viewer.layers.events.inserted.disconnect(update_annotation_widget_after_changes)
+                # reconnect event callbacks and fire once to update UI
+                viewer.layers.selection.events.active.connect(callback_update_legend)
+                viewer.layers.events.inserted.connect(update_annotation_widget_after_changes)
+                callback_update_legend()
+                update_annotation_widget_after_changes()
 
-                        if annot_class == "all":
-                            df_to_add = annot_df
-                        else:
-                            df_to_add = annot_df[annot_df["name"] == annot_class].copy()
-
-                        if not "color" in df_to_add.columns:
-                            rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
-                        else:
-                            rgb_color = None
-
-                        _add_geometries_as_layer(
-                            dataframe=df_to_add,
-                            viewer=viewer,
-                            layer_name=key,
-                            edge_width=edge_width,
-                            opacity=opacity,
-                            rgb_color=rgb_color,
-                            show_names=show_names,
-                            mode=geom_type,
-                            tolerance=tolerance
-                        )
-
-                        # reconnect event callbacks and fire once to update UI
-                        viewer.layers.selection.events.active.connect(callback_update_legend)
-                        viewer.layers.events.inserted.connect(update_annotation_widget_after_changes)
-                        callback_update_legend()
-                        update_annotation_widget_after_changes()
-
-                    # connect key change with update function
-                    @show_geometries_widget.geom_type.changed.connect
-                    @show_geometries_widget.key.changed.connect
-                    @show_geometries_widget.call_button.clicked.connect
-                    @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
-                    @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
-                    def update_annotation_widget_after_changes(event=None):
-                        _update_keys_based_on_geom_type(show_geometries_widget, xdata=data)
-                        _update_classes_on_key_change(show_geometries_widget, xdata=data)
-                        _set_show_names_based_on_geom_type(show_geometries_widget)
-                        #_update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
+            # connect key change with update function
+            @show_geometries_widget.geom_type.changed.connect
+            @show_geometries_widget.key.changed.connect
+            @show_geometries_widget.call_button.clicked.connect
+            @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
+            @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
+            def update_annotation_widget_after_changes(event=None):
+                _update_keys_based_on_geom_type(show_geometries_widget, xdata=data)
+                _update_classes_on_key_change(show_geometries_widget, xdata=data)
+                _set_show_names_based_on_geom_type(show_geometries_widget)
 
         return (
             show_cells_widget,
@@ -1153,44 +1124,6 @@ if WITH_NAPARI:
                     f"To show them use the 'Show geometries' widget."
                     ))
 
-    class SyncButton(QWidget):
-        def __init__(self):
-            super().__init__()
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
-
-            # create the sync button
-            self.sync_button = QPushButton("Sync Geometries")
-            self.sync_button.clicked.connect(self._sync_geometries)
-            self.layout.addWidget(self.sync_button)
-
-        def _sync_geometries(self):
-            sync_geometries()
-
-
-    class RefreshLabelsButton(QWidget):
-        """Button that forces text-label refresh on all geometry Shapes layers."""
-
-        def __init__(self):
-            super().__init__()
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
-
-            self.refresh_button = QPushButton("Refresh labels")
-            self.refresh_button.clicked.connect(self._refresh_labels)
-            self.layout.addWidget(self.refresh_button)
-
-        def _refresh_labels(self):
-            viewer = napari.current_viewer()
-            if viewer is None:
-                show_warning("No active napari viewer found.")
-                return
-            for layer in viewer.layers:
-                if isinstance(layer, napari.layers.shapes.shapes.Shapes):
-                    if 'name' in layer.features.columns:
-                        layer.features = layer.features.copy()
-
-
     class ResetWidgetsButton(QWidget):
         """Button widget to reset/restore all closed widgets in the napari viewer."""
 
@@ -1276,10 +1209,6 @@ if WITH_NAPARI:
             sync_btn.clicked.connect(self._sync_geometries)
             layout.addWidget(sync_btn)
 
-            refresh_btn = QPushButton("Refresh labels")
-            refresh_btn.clicked.connect(self._refresh_labels)
-            layout.addWidget(refresh_btn)
-
             reset_btn = QPushButton("Reset Widgets")
             reset_btn.setToolTip("Restore all closed widgets")
             reset_btn.clicked.connect(self._reset_widgets)
@@ -1287,16 +1216,6 @@ if WITH_NAPARI:
 
         def _sync_geometries(self):
             sync_geometries()
-
-        def _refresh_labels(self):
-            viewer = napari.current_viewer()
-            if viewer is None:
-                show_warning("No active napari viewer found.")
-                return
-            for layer in viewer.layers:
-                if isinstance(layer, napari.layers.shapes.shapes.Shapes):
-                    if 'name' in layer.features.columns:
-                        layer.features = layer.features.copy()
 
         def _reset_widgets(self):
             viewer = napari.current_viewer()

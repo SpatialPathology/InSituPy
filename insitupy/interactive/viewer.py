@@ -181,7 +181,7 @@ if WITH_NAPARI:
         class_name: str = None
     ):
         # remove entries in InSituData that are not present in viewer
-        current_ids = layer.properties['uid'] # get ids from current layer
+        current_ids = layer.features['uid'].values
 
         try:
             geom_df = shapesdata[annot_key]
@@ -193,6 +193,12 @@ if WITH_NAPARI:
         elif 'name' in layer.features.columns:
             unique_names = layer.features['name'].unique()
         else:
+            import warnings
+            warnings.warn(
+                f"Layer '{layer.name}' has no 'name' column in features — cannot determine "
+                "which geometries to remove. Skipping removal for this layer.",
+                RuntimeWarning
+            )
             return
 
         for name in unique_names:
@@ -237,7 +243,7 @@ if WITH_NAPARI:
             shape_types = layer.shape_type
             # build annotation GeoDataFrame
             geom_df = {
-                uid_col: layer.properties["uid"],
+                uid_col: layer.features["uid"].values,
                 "objectType": object_type,
                 "geometry": [convert_napari_shape_to_polygon_or_line(napari_shape_data=ar, shape_type=st) for ar, st in zip(layer_data, shape_types)],
                 "name": name_values,
@@ -247,7 +253,7 @@ if WITH_NAPARI:
         elif isinstance(layer, Points):
             # build annotation GeoDataFrame
             geom_df = {
-                uid_col: layer.properties["uid"],
+                uid_col: layer.features["uid"].values,
                 "objectType": object_type,
                 "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
                 "name": name_values,
