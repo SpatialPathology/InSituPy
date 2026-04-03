@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
 _FILTERS_SCHEMA_VERSION = 1
+_METADATA_SCHEMA_VERSION = 1
+_METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -1483,7 +1485,7 @@ class InSituExperiment:
         # Reload experiment metadata
         metadata_path = path / "metadata.csv"
         if metadata_path.exists():
-            self._metadata = pd.read_csv(metadata_path, index_col=0)
+            self._metadata = self._read_metadata_with_schema(path)
             if verbose:
                 logger.info("Reloaded metadata, colors, and filters from disk.")
 
@@ -1632,16 +1634,16 @@ class InSituExperiment:
         path: Optional[Union[str, os.PathLike, Path]] = None,
         overwrite: bool = True,
     ):
-        """Save only experiment metadata to ``metadata.csv``.
+        """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
 
         Args:
-            path: Directory where ``metadata.csv`` should be written.
+            path: Directory where metadata files should be written.
                 If None, uses ``self.path``.
-            overwrite: If True, overwrite an existing ``metadata.csv``.
+            overwrite: If True, overwrite existing metadata files.
 
         Raises:
             ValueError: If neither ``path`` nor ``self.path`` is set.
-            FileExistsError: If ``metadata.csv`` exists and ``overwrite`` is False.
+            FileExistsError: If metadata files exist and ``overwrite`` is False.
         """
         if path is None:
             if self.path is None:
@@ -1653,13 +1655,127 @@ class InSituExperiment:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         metadata_path = path / "metadata.csv"
+        metadata_schema_path = self._metadata_schema_path(path)
 
-        if metadata_path.exists() and not overwrite:
+        if (metadata_path.exists() or metadata_schema_path.exists()) and not overwrite:
             raise FileExistsError(
-                f"File already exists: {metadata_path}. Set `overwrite=True` to replace it."
+                "Metadata file(s) already exist. "
+                f"Found: {metadata_path} and/or {metadata_schema_path}. "
+                "Set `overwrite=True` to replace them."
             )
 
         self._metadata.to_csv(metadata_path, index=True)
+        self._save_metadata_schema(path, self._metadata)
+
+    @staticmethod
+    def _metadata_schema_path(path: Path) -> Path:
+        """Return the path to metadata schema sidecar file."""
+        return path / _METADATA_SCHEMA_FILENAME
+
+    @staticmethod
+    def _metadata_dtype_map(metadata: pd.DataFrame) -> Dict[str, str]:
+        """Serialize DataFrame dtypes to JSON-compatible strings."""
+        return {str(column): str(dtype) for column, dtype in metadata.dtypes.items()}
+
+    @classmethod
+    def _save_metadata_schema(cls, path: Path, metadata: pd.DataFrame) -> None:
+        """Write metadata dtype schema used for safe round-trip casting on reload."""
+        schema_path = cls._metadata_schema_path(path)
+        schema_payload = {
+            "version": _METADATA_SCHEMA_VERSION,
+            "column_dtypes": cls._metadata_dtype_map(metadata),
+        }
+        with open(schema_path, 'w') as f:
+            json.dump(schema_payload, f, indent=2, sort_keys=True)
+
+    @classmethod
+    def _load_metadata_dtype_map(cls, path: Path) -> Optional[Dict[str, str]]:
+        """Load metadata dtype map if available and valid, else return None."""
+        schema_path = cls._metadata_schema_path(path)
+        if not schema_path.exists():
+            return None
+
+        try:
+            with open(schema_path, 'r') as f:
+                schema_payload = json.load(f)
+        except Exception as err:
+            logger.warning(
+                "Could not parse metadata schema at '%s': %s. Falling back to CSV dtype inference.",
+                schema_path,
+                err,
+            )
+            return None
+
+        if not isinstance(schema_payload, dict):
+            logger.warning(
+                "Invalid metadata schema at '%s': expected a JSON object. Falling back to CSV dtype inference.",
+                schema_path,
+            )
+            return None
+
+        version = schema_payload.get("version", None)
+        if version != _METADATA_SCHEMA_VERSION:
+            logger.warning(
+                "Unsupported metadata schema version at '%s': %s (expected %s). "
+                "Falling back to CSV dtype inference.",
+                schema_path,
+                version,
+                _METADATA_SCHEMA_VERSION,
+            )
+            return None
+
+        column_dtypes = schema_payload.get("column_dtypes", None)
+        if not isinstance(column_dtypes, dict):
+            logger.warning(
+                "Invalid metadata schema at '%s': 'column_dtypes' must be a dictionary. "
+                "Falling back to CSV dtype inference.",
+                schema_path,
+            )
+            return None
+
+        return {
+            str(column): str(dtype)
+            for column, dtype in column_dtypes.items()
+        }
+
+    @classmethod
+    def _read_metadata_with_schema(cls, path: Path) -> pd.DataFrame:
+        """Read metadata.csv and restore dtypes from optional schema sidecar."""
+        metadata_path = path / "metadata.csv"
+        dtype_map = cls._load_metadata_dtype_map(path)
+
+        # Force string-like columns at CSV parse time to preserve values such as
+        # leading-zero IDs before post-load casting is applied.
+        read_csv_kwargs: Dict[str, Any] = {}
+        if dtype_map:
+            string_like_dtypes = {"str", "string", "object", "category"}
+            csv_dtypes = {
+                column: "string"
+                for column, dtype in dtype_map.items()
+                if dtype.lower() in string_like_dtypes
+            }
+            if csv_dtypes:
+                read_csv_kwargs["dtype"] = csv_dtypes
+
+        metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
+
+        if not dtype_map:
+            return metadata
+
+        for column, dtype in dtype_map.items():
+            if column not in metadata.columns:
+                continue
+            try:
+                metadata[column] = metadata[column].astype(dtype)
+            except Exception as err:
+                logger.warning(
+                    "Could not cast metadata column '%s' to dtype '%s': %s. Keeping inferred dtype.",
+                    column,
+                    dtype,
+                    err,
+                )
+
+        return metadata
 
     def save_colors(
         self,
@@ -2620,7 +2736,7 @@ class InSituExperiment:
 
         # Load metadata
         metadata_path = path / "metadata.csv"
-        metadata = pd.read_csv(metadata_path, index_col=0)
+        metadata = cls._read_metadata_with_schema(path)
 
         try:
             # load colors
