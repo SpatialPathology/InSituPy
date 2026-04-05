@@ -931,6 +931,14 @@ if WITH_NAPARI:
             self.features_btn.clicked.connect(self._open_features_table)
             layout.addWidget(self.features_btn)
 
+            # Refresh text labels button
+            self.refresh_btn = QPushButton("Refresh text labels")
+            self.refresh_btn.setToolTip(
+                "Re-apply text labels and colors after editing names in the Features Table"
+            )
+            self.refresh_btn.clicked.connect(self._refresh_text_labels)
+            layout.addWidget(self.refresh_btn)
+
             # Connect signals
             self.type_combo.currentIndexChanged.connect(self._refresh_key_combo)
             self.key_combo.currentIndexChanged.connect(self._refresh_name_combo)
@@ -1210,6 +1218,23 @@ if WITH_NAPARI:
             else:
                 show_warning("Layer not found in viewer. Add it first.")
 
+        def _refresh_text_labels(self):
+            key_text = self.key_combo.currentText().strip()
+            type_text = self.type_combo.currentText()
+            if type_text == "Annotations":
+                layer_name = f"{ANNOTATIONS_SYMBOL} {key_text}"
+            elif type_text == "Point annotations":
+                layer_name = f"{POINTS_SYMBOL} {key_text}"
+            else:
+                layer_name = f"{REGIONS_SYMBOL} {key_text}"
+
+            if layer_name in self.viewer.layers:
+                layer = self.viewer.layers[layer_name]
+                # Reassigning triggers events.features → refresh_text + _apply_colors_from_features
+                # → edge_color/border_color event → legend update
+                layer.features = layer.features
+            else:
+                show_warning("Layer not found in viewer. Add it first.")
 
 
     class ResetWidgetsButton(QWidget):

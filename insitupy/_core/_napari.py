@@ -43,6 +43,7 @@ if WITH_NAPARI:
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
 
+    from insitupy.interactive._callbacks import _update_colorlegend
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.interactive._layers import _apply_colors_from_features, _create_points_layer
     from insitupy.interactive._transcript_viewer import (
@@ -390,23 +391,30 @@ if WITH_NAPARI:
             _l.refresh_text()
             _apply_colors_from_features(_l, viewer_config)
 
+        def _on_colors_changed(e, v=viewer):
+            _update_colorlegend(v, viewer_config)
+
+        def _connect_layer_events(layer):
+            layer.events.data.connect(_update_uid)
+            layer.events.features.connect(
+                lambda e, _l=layer: _on_features_changed(e, _l)
+            )
+            if isinstance(layer, Shapes):
+                layer.events.edge_color.connect(_on_colors_changed)
+            elif isinstance(layer, Points):
+                layer.events.border_color.connect(_on_colors_changed)
+
         # Assign the function to data of all existing layers
         for layer in viewer.layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
-                layer.events.data.connect(_update_uid)
-                layer.events.features.connect(
-                    lambda e, _l=layer: _on_features_changed(e, _l)
-                )
+                _connect_layer_events(layer)
 
         # Connect the function to the data of existing shapes and points layers in the viewer
         def connect_to_all_shapes_layers(event):
             layer = event.source[event.index]
             if event is not None:
                 if isinstance(layer, Shapes) or isinstance(layer, Points):
-                    layer.events.data.connect(_update_uid)
-                    layer.events.features.connect(
-                        lambda e, _l=layer: _on_features_changed(e, _l)
-                    )
+                    _connect_layer_events(layer)
 
         # Connect the function to any new layers added to the viewer
         viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
