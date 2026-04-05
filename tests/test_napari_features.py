@@ -53,7 +53,10 @@ def _make_polygon_gdf_for_shapesdata(uid: str, name: str) -> GeoDataFrame:
 def _register_config(viewer, uid: str, verbose: bool = False, **extra):
     """Register a minimal ViewerConfig stub and wire it to the viewer title."""
     config = SimpleNamespace(
-        verbose=verbose, _auto_set_uid=True, _removal_tracker=[], **extra
+        verbose=verbose, _auto_set_uid=True, _removal_tracker=[],
+        annot_point_colors={}, region_colors={},
+        _annot_point_color_idx=0, _region_color_idx=0,
+        **extra
     )
     config_manager._configs[uid] = config
     viewer.title = f"InSituPy#{uid}"
@@ -278,6 +281,10 @@ def test_sync_geometries_keeps_present_geometries(make_napari_viewer):
             verbose=False,
             _auto_set_uid=True,
             _removal_tracker=[],
+            annot_point_colors={},
+            region_colors={},
+            _annot_point_color_idx=0,
+            _region_color_idx=0,
             data=SimpleNamespace(
                 annotations=shapesdata,
                 regions=ShapesData(shape_name="regions"),

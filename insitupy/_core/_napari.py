@@ -44,14 +44,13 @@ if WITH_NAPARI:
     from napari.utils.notifications import show_info, show_warning
 
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
-    from insitupy.interactive._layers import _create_points_layer
+    from insitupy.interactive._layers import _apply_colors_from_features, _create_points_layer
     from insitupy.interactive._transcript_viewer import (
         TranscriptViewerConfig, create_transcript_viewer_widget)
     from insitupy.interactive._widgets import (ColorLegendWidget, UtilityButtonsWidget)
 
     #from napari.layers.shapes.shapes import Shapes
-    from ..interactive._widgets import (_initialize_widgets,
-                                        add_new_geometries_widget)
+    from ..interactive._widgets import (_initialize_widgets, GeometriesWidget)
 
 ################################
 ### NAPARI-RELATED FUNCTIONS ###
@@ -277,67 +276,51 @@ if WITH_NAPARI:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        if data.cells.is_empty and data.units is None:
-            # add annotation widget to napari
-            add_geom_widget = add_new_geometries_widget()
-            add_geom_widget.max_height = 120
-            add_geom_widget.max_width = widgets_max_width
-            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
-        else:
-            # initialize the widgets
-            (
-                show_cells_widget,
-                locate_cells_widget,
-                show_geometries_widget,
-                show_boundaries_widget,
-                select_data,
-                filter_cells_widget,
-                show_units_widget,
-            ) = _initialize_widgets(
-                viewer=viewer,
-                viewer_config=viewer_config
-                )
+        # initialize the widgets
+        (
+            show_cells_widget,
+            locate_cells_widget,
+            geometries_widget,
+            show_boundaries_widget,
+            select_data,
+            filter_cells_widget,
+            show_units_widget,
+        ) = _initialize_widgets(
+            viewer=viewer,
+            viewer_config=viewer_config
+            )
 
-            # add widgets to napari window
-            if select_data is not None:
-                viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
-                select_data.max_height = 80
-                select_data.max_width = widgets_max_width
+        # add widgets to napari window
+        if select_data is not None:
+            viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
+            select_data.max_height = 80
+            select_data.max_width = widgets_max_width
 
-            if show_cells_widget is not None:
-                viewer.window.add_dock_widget(show_cells_widget, name="Show cells", area="right", tabify=False)
-                show_cells_widget.max_height = 200
-                show_cells_widget.max_width = widgets_max_width
+        if show_cells_widget is not None:
+            viewer.window.add_dock_widget(show_cells_widget, name="Show cells", area="right", tabify=False)
+            show_cells_widget.max_height = 200
+            show_cells_widget.max_width = widgets_max_width
 
-            if show_units_widget is not None:
-                viewer.window.add_dock_widget(show_units_widget, name="Show spatial units", area="right", tabify=True)
-                show_units_widget.max_width = widgets_max_width
+        if show_units_widget is not None:
+            viewer.window.add_dock_widget(show_units_widget, name="Show spatial units", area="right", tabify=True)
+            show_units_widget.max_width = widgets_max_width
 
-            if show_boundaries_widget is not None:
-                viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
-                #show_boundaries_widget.max_height = 80
-                show_boundaries_widget.max_width = widgets_max_width
+        if show_boundaries_widget is not None:
+            viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
+            show_boundaries_widget.max_width = widgets_max_width
 
-            if locate_cells_widget is not None:
-                viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
-                #locate_cells_widget.max_height = 130
-                locate_cells_widget.max_width = widgets_max_width
+        if locate_cells_widget is not None:
+            viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
+            locate_cells_widget.max_width = widgets_max_width
 
-            if filter_cells_widget is not None:
-                viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
-                filter_cells_widget.max_height = 150
-                show_cells_widget.max_width = widgets_max_width
+        if filter_cells_widget is not None:
+            viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
+            filter_cells_widget.max_height = 150
+            filter_cells_widget.max_width = widgets_max_width
 
-            # add annotation widget to napari
-            add_geom_widget = add_new_geometries_widget()
-            #annot_widget.max_height = 100
-            add_geom_widget.max_width = widgets_max_width
-            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
-                                                )
-
-            if show_geometries_widget is not None:
-                viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
-                show_geometries_widget.max_width = widgets_max_width
+        # add unified geometries widget
+        viewer.window.add_dock_widget(geometries_widget, name="Geometries", area="right", tabify=True)
+        geometries_widget.max_width = widgets_max_width
 
 
     def _add_events_to_viewer(viewer: napari.Viewer):
@@ -379,11 +362,18 @@ if WITH_NAPARI:
                     # update via layer.features assignment to fire the features_update signal
                     # so the Features Table widget refreshes automatically
                     updated = layer.features.copy()
+                    # Read the intended name from current_properties if set
+                    cp = getattr(layer, 'current_properties', {})
+                    intended_name = ""
+                    if 'name' in cp:
+                        val = cp['name']
+                        intended_name = val[0] if hasattr(val, '__len__') and len(val) else str(val)
+
                     updated.loc[updated.index[-1], 'uid'] = uid
                     updated.loc[updated.index[-1], 'type'] = geom_type
                     if 'name' not in updated.columns:
                         updated['name'] = ""
-                    updated.loc[updated.index[-1], 'name'] = ""
+                    updated.loc[updated.index[-1], 'name'] = intended_name
                     updated.loc[updated.index[-1], 'geometry_type'] = geometry_type_label
                     layer.features = updated
 
@@ -396,10 +386,17 @@ if WITH_NAPARI:
                 else:
                     pass
 
+        def _on_features_changed(e, _l=None):
+            _l.refresh_text()
+            _apply_colors_from_features(_l, viewer_config)
+
         # Assign the function to data of all existing layers
         for layer in viewer.layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
                 layer.events.data.connect(_update_uid)
+                layer.events.features.connect(
+                    lambda e, _l=layer: _on_features_changed(e, _l)
+                )
 
         # Connect the function to the data of existing shapes and points layers in the viewer
         def connect_to_all_shapes_layers(event):
@@ -407,6 +404,9 @@ if WITH_NAPARI:
             if event is not None:
                 if isinstance(layer, Shapes) or isinstance(layer, Points):
                     layer.events.data.connect(_update_uid)
+                    layer.events.features.connect(
+                        lambda e, _l=layer: _on_features_changed(e, _l)
+                    )
 
         # Connect the function to any new layers added to the viewer
         viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)

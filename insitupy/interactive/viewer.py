@@ -216,8 +216,7 @@ if WITH_NAPARI:
             geom_df.drop(ids_to_remove, inplace=True)
 
             if n_removed > 0:
-                object_str = object_type + "s" if n_removed > 1 else object_type
-                show_info(f"Removed {n_removed} {object_str} with key {annot_key} and class {name}.")
+                show_info(f"Removed {n_removed} geometries from '{annot_key}' during sync.")
 
     def _store_geometries(
         layer,

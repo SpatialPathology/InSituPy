@@ -62,7 +62,11 @@ if WITH_NAPARI:
             '_auto_set_uid',
             'key_dict',
             'masks',
-            'pixel_size'
+            'pixel_size',
+            'annot_point_colors',
+            'region_colors',
+            '_annot_point_color_idx',
+            '_region_color_idx',
         ]
 
         def __init__(self, data):
@@ -88,6 +92,12 @@ if WITH_NAPARI:
             self.recent_selections = []
             self.verbose = False
             self._auto_set_uid = True
+
+            # colour registries for geometry layers: (key, name) -> hex colour
+            self.annot_point_colors: dict = {}
+            self.region_colors: dict = {}
+            self._annot_point_color_idx: int = 0
+            self._region_color_idx: int = 0
 
             # Initialize masks, key_dict, and pixel_size
             self.refresh_variables()

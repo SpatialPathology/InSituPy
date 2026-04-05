@@ -14,7 +14,7 @@ if WITH_NAPARI:
     import numpy as np
     import pandas as pd
     from geopandas import GeoDataFrame
-    from matplotlib.colors import rgb2hex
+    from matplotlib.colors import rgb2hex, to_rgba
     from napari.types import LayerDataTuple
     from napari.utils.notifications import show_info, show_warning
     from pandas.api.types import is_numeric_dtype
@@ -26,20 +26,115 @@ if WITH_NAPARI:
                                      DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
                                      REGIONS_SYMBOL)
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
+    from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
     from insitupy.utils._checks import check_rgb_column
     from insitupy.utils._colors import _data_to_rgba, _determine_climits
+
+    def _get_or_assign_color(registry: dict, palette: list, idx_attr: str,
+                              config, key: str, name: str) -> str:
+        """Return the registered hex colour for (key, name), assigning a new one if needed."""
+        if name is None or name == "":
+            return "#808080"  # grey for unnamed geometries
+        pair = (key, name)
+        if pair not in registry:
+            idx = getattr(config, idx_attr)
+            registry[pair] = palette[idx % len(palette)]
+            setattr(config, idx_attr, idx + 1)
+        return registry[pair]
+
+    def _connect_color_propagation(layer, config, key: str, geom_type: str):
+        """Propagate manual colour changes to all shapes/points with the same name."""
+        if layer is None:
+            return
+        is_points = isinstance(layer, napari.layers.Points)
+        event = (layer.events.current_border_color if is_points
+                 else layer.events.current_edge_color)
+
+        def _on_color_change(event=None):
+            # Skip during drawing modes — emitting edge_color there corrupts
+            # napari's mid-draw state (_moving_shape / _last_cursor_position).
+            if hasattr(layer, 'mode') and layer.mode not in ('select', 'direct'):
+                return
+            selected = list(layer.selected_data)
+            if not selected:
+                return
+            new_color = (layer.current_border_color if is_points
+                         else layer.current_edge_color)
+            if 'name' not in layer.features.columns:
+                return
+            names = layer.features.loc[selected, 'name'].unique()
+            for name in names:
+                if name == "" or name is None:
+                    continue
+                mask = layer.features['name'] == name
+                indices = list(layer.features.index[mask])
+                if is_points:
+                    layer.border_color[indices] = new_color
+                    layer.events.border_color()
+                else:
+                    for i in indices:
+                        layer._data_view.update_edge_color(i, new_color)
+                    layer.events.edge_color()
+                registry = (config.region_colors if geom_type == "Regions"
+                            else config.annot_point_colors)
+                registry[(key, name)] = new_color
+
+        event.connect(_on_color_change)
+
+    def _apply_colors_from_features(layer, viewer_config):
+        """Re-apply palette colors to all shapes/points based on the current 'name' feature column.
+
+        Called on layer.events.features so that editing a name (e.g. via the Features Table)
+        immediately updates the visible edge/border colors.
+        """
+        if 'name' not in layer.features.columns:
+            return
+        n = len(layer.data)
+        if n == 0:
+            return
+
+        # Strip symbol prefix to recover the bare key
+        key = layer.name
+        for sym in (REGIONS_SYMBOL, ANNOTATIONS_SYMBOL, POINTS_SYMBOL):
+            if key.startswith(sym + " "):
+                key = key[len(sym) + 1:]
+                break
+
+        is_region = layer.name.startswith(REGIONS_SYMBOL + " ")
+        is_points = isinstance(layer, napari.layers.Points)
+
+        if is_region:
+            registry = viewer_config.region_colors
+            palette = REGIONS_PALETTE
+            idx_attr = '_region_color_idx'
+        else:
+            registry = viewer_config.annot_point_colors
+            palette = ANNOTATIONS_PALETTE
+            idx_attr = '_annot_point_color_idx'
+
+        names = layer.features['name'].tolist()
+        if len(names) != n:
+            return
+
+        colors = [_get_or_assign_color(registry, palette, idx_attr, viewer_config, key, nm)
+                  for nm in names]
+        try:
+            if is_points:
+                layer.border_color = [to_rgba(c) for c in colors]
+                layer.events.border_color()
+            else:
+                for i, hex_c in enumerate(colors):
+                    layer._data_view.update_edge_color(i, to_rgba(hex_c))
+                layer.events.edge_color()
+        except Exception:
+            pass
 
     def _add_geometries_as_layer(
         dataframe: pd.DataFrame,
         viewer: napari.Viewer,
         layer_name: str,
-        #scale_factor: Union[Tuple, List, np.ndarray],
-        edge_width: Number = 10, # µm
         opacity: float = 1,
-        rgb_color: Optional[Tuple] = None,
-        show_names: bool = False,
-        allow_duplicate_layers: bool = False,
-        mode: Literal["Annotations", "Regions"] = "Annotations",
+        mode: Literal["Annotations", "Point annotations", "Regions"] = "Annotations",
         tolerance: Number = 5
         ):
 
@@ -56,7 +151,15 @@ if WITH_NAPARI:
         uid_list = {"Points": [], "Shapes": []}
         type_list = {"Points": [], "Shapes": []} # list to store whether the polygon is exterior or interior
         names_list = {"Points": [], "Shapes": []}
-        geometry_type = mode.lower().rstrip('s')  # "Annotations" → "annotation", "Regions" → "region"
+
+        # hardcode edge_width based on type
+        edge_width = 10 if mode == "Regions" else 4
+
+        # determine geometry_type string for features column
+        if mode == "Regions":
+            geometry_type = "region"
+        else:
+            geometry_type = "annotation"
 
         # get the config
         viewer_config = config_manager[_get_viewer_uid(viewer)]
@@ -64,7 +167,7 @@ if WITH_NAPARI:
         # prepare layer names
         if mode == "Regions":
             shapes_layer_name_with_symbol = REGIONS_SYMBOL + " " + layer_name
-        elif mode == "Annotations":
+        elif mode in ("Annotations", "Point annotations"):
             shapes_layer_name_with_symbol = ANNOTATIONS_SYMBOL + " " + layer_name
         else:
             raise ValueError(f"Unknown value for `mode`: {mode}")
@@ -81,37 +184,43 @@ if WITH_NAPARI:
         else:
             points_layer_exists = False
 
-        # check if colors are given
-        if "color" in dataframe.columns:
-            # make sure the RGB column consists only of valid RGB tuples or lists
+        # check if per-row colors are given in the dataframe
+        has_df_colors = "color" in dataframe.columns
+        if has_df_colors:
             rgbs_valid = check_rgb_column(dataframe, "color")
             if not rgbs_valid:
-                warn('Not all RGB values given in column "color" are valid. Used blue for all geometries.')
-                dataframe["color"] = [(0,0,255)] * len(dataframe)
-        else:
-            if rgb_color is not None:
-                dataframe["color"] = [rgb_color] * len(dataframe)
-            else:
-                dataframe["color"] = [(0,0,255)] * len(dataframe)
+                warn('Not all RGB values given in column "color" are valid. Used grey for all geometries.')
+                dataframe = dataframe.copy()
+                dataframe["color"] = [(128, 128, 128)] * len(dataframe)
 
         # pre-compute sets for O(1) duplicate UID lookups
-        existing_shape_uids = set(viewer.layers[shapes_layer_name_with_symbol].properties["uid"]) if shapes_layer_exists else set()
-        existing_point_uids = set(viewer.layers[points_layer_name_with_symbol].properties["uid"]) if points_layer_exists else set()
+        existing_shape_uids = set(viewer.layers[shapes_layer_name_with_symbol].features["uid"]) if shapes_layer_exists else set()
+        existing_point_uids = set(viewer.layers[points_layer_name_with_symbol].features["uid"]) if points_layer_exists else set()
 
-        # pre-compute color conversion once if all rows share the same color
-        first_color = dataframe["color"].iloc[0]
-        has_per_row_color = not all(c == first_color for c in dataframe["color"])
-        if not has_per_row_color:
-            hexcolor = rgb2hex([elem / 255 for elem in first_color])
-            rgbacolor = [elem / 255 for elem in first_color] + [1]
+        # colour registry for this call
+        if mode == "Regions":
+            _registry = viewer_config.region_colors
+            _palette = REGIONS_PALETTE
+            _idx_attr = '_region_color_idx'
+        else:
+            _registry = viewer_config.annot_point_colors
+            _palette = ANNOTATIONS_PALETTE
+            _idx_attr = '_annot_point_color_idx'
 
         for uid, row in dataframe.iterrows():
             # get coordinates
             geometry = row["geometry"]
-            #uid = row["id"]
-            if has_per_row_color:
-                hexcolor = rgb2hex([elem / 255 for elem in row["color"]])
-                rgbacolor = [elem / 255 for elem in row["color"]] + [1] # scale to range 0-1 and add opacity value
+
+            if has_df_colors:
+                rgb = row["color"]
+                hexcolor = rgb2hex([elem / 255 for elem in rgb])
+                rgbacolor = [elem / 255 for elem in rgb] + [1]
+            else:
+                name_val = row["name"] if "name" in dataframe.columns else ""
+                hexcolor = _get_or_assign_color(
+                    _registry, _palette, _idx_attr, viewer_config, layer_name, name_val
+                )
+                rgbacolor = list(to_rgba(hexcolor))
 
             # check if polygon is a MultiPolygon or just a simple Polygon object
             if isinstance(geometry, MultiPolygon):
@@ -253,6 +362,10 @@ if WITH_NAPARI:
                     text=text_dict
                     )
                 show_info(f"New layer '{shapes_layer_name_with_symbol}' created.")
+                _connect_color_propagation(
+                    viewer.layers[shapes_layer_name_with_symbol],
+                    viewer_config, layer_name, mode
+                )
 
         point_data = np.stack([point_x_list, point_y_list]).T
         if len(point_data) > 0:
@@ -293,6 +406,10 @@ if WITH_NAPARI:
                     border_color="black",
                     face_color=color_list["Points"],
                     #scale=scale_factor
+                )
+                _connect_color_propagation(
+                    viewer.layers[points_layer_name_with_symbol],
+                    viewer_config, layer_name, mode
                 )
 
     def _create_points_layer(points,
