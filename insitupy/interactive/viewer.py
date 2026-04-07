@@ -13,6 +13,7 @@ if WITH_NAPARI:
     from parse import parse
     from shapely import Point
 
+    from insitupy._constants import REGIONS_SYMBOL
     from insitupy.interactive._checks import _check_geometry_symbol_and_layer
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.utils.utils import convert_napari_shape_to_polygon_or_line
@@ -56,8 +57,36 @@ if WITH_NAPARI:
 
         data = config.data
 
-        # iterate through layers and save them as annotation or region if they meet requirements
+        # Abort if any region layer contains duplicate names
         layers = viewer.layers
+        for layer in layers:
+            if not isinstance(layer, Shapes):
+                continue
+            name_parsed = parse(new_pattern, layer.name)
+            if name_parsed is None:
+                continue
+            type_symbol = name_parsed.named["type_symbol"]
+            if type_symbol != REGIONS_SYMBOL:
+                continue
+            annot_key = name_parsed.named["annot_key"]
+            if 'name' not in layer.features.columns:
+                continue
+            names = [n for n in layer.features['name'] if isinstance(n, str) and n != ""]
+            seen: set = set()
+            duplicates: list = []
+            for n in names:
+                if n in seen and n not in duplicates:
+                    duplicates.append(n)
+                seen.add(n)
+            if duplicates:
+                show_warning(
+                    f"Sync aborted: duplicate region names in key '{annot_key}': "
+                    + ", ".join(f"'{d}'" for d in duplicates)
+                    + ". Please resolve duplicates before syncing."
+                )
+                return
+
+        # iterate through layers and save them as annotation or region if they meet requirements
         for layer in layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
                 name_parsed = parse(new_pattern, layer.name)

@@ -931,14 +931,6 @@ if WITH_NAPARI:
             self.features_btn.clicked.connect(self._open_features_table)
             layout.addWidget(self.features_btn)
 
-            # Refresh text labels button
-            self.refresh_btn = QPushButton("Refresh text labels")
-            self.refresh_btn.setToolTip(
-                "Re-apply text labels and colors after editing names in the Features Table"
-            )
-            self.refresh_btn.clicked.connect(self._refresh_text_labels)
-            layout.addWidget(self.refresh_btn)
-
             # Connect signals
             self.type_combo.currentIndexChanged.connect(self._refresh_key_combo)
             self.key_combo.currentIndexChanged.connect(self._refresh_name_combo)
@@ -1010,6 +1002,30 @@ if WITH_NAPARI:
                 self.name_combo.clearEditText()
             self.name_combo.blockSignals(False)
 
+        def _get_next_region_name(self, key_text: str) -> str:
+            """Return the next auto-incremented region name ("Region 1", "Region 2", …)."""
+            import re
+            existing: set = set()
+            layer_name = f"{REGIONS_SYMBOL} {key_text}"
+            if layer_name in self.viewer.layers:
+                layer = self.viewer.layers[layer_name]
+                for n in layer.features.get('name', []):
+                    if isinstance(n, str):
+                        existing.add(n)
+            data = self.viewer_config.data
+            if not data.regions.is_empty and key_text in data.regions.keys():
+                df = data.regions[key_text]
+                if 'name' in df.columns:
+                    for n in df['name'].dropna():
+                        if isinstance(n, str):
+                            existing.add(n)
+            max_n = 0
+            for n in existing:
+                m = re.match(r'^Region (\d+)$', n)
+                if m:
+                    max_n = max(max_n, int(m.group(1)))
+            return f"Region {max_n + 1}"
+
         def _on_add(self):
             import warnings
             name_text = self.name_combo.currentText().strip()
@@ -1061,8 +1077,11 @@ if WITH_NAPARI:
                 name_exists = load_all and key_exists
 
             if not (key_exists and name_exists):
-                # Create new empty layer; use "" when <ALL> was the sentinel
-                effective_name = "" if load_all else name_text
+                # Annotations always start unnamed; regions get an auto-incremented name.
+                if type_text in ("Annotations", "Point annotations"):
+                    effective_name = ""
+                else:
+                    effective_name = self._get_next_region_name(key_text)
                 self._create_new_layer(type_text, key_text, effective_name,
                                        layer_name, internal_mode, config)
                 return
@@ -1218,23 +1237,6 @@ if WITH_NAPARI:
             else:
                 show_warning("Layer not found in viewer. Add it first.")
 
-        def _refresh_text_labels(self):
-            key_text = self.key_combo.currentText().strip()
-            type_text = self.type_combo.currentText()
-            if type_text == "Annotations":
-                layer_name = f"{ANNOTATIONS_SYMBOL} {key_text}"
-            elif type_text == "Point annotations":
-                layer_name = f"{POINTS_SYMBOL} {key_text}"
-            else:
-                layer_name = f"{REGIONS_SYMBOL} {key_text}"
-
-            if layer_name in self.viewer.layers:
-                layer = self.viewer.layers[layer_name]
-                # Reassigning triggers events.features → refresh_text + _apply_colors_from_features
-                # → edge_color/border_color event → legend update
-                layer.features = layer.features
-            else:
-                show_warning("Layer not found in viewer. Add it first.")
 
 
     class ResetWidgetsButton(QWidget):
@@ -1303,7 +1305,7 @@ if WITH_NAPARI:
 
 
     class UtilityButtonsWidget(QWidget):
-        """Combined dock widget grouping Sync, Refresh labels, and Reset Widgets buttons."""
+        """Combined dock widget grouping Sync, Refresh, and Reset Widgets buttons."""
 
         def __init__(self, widgets_max_width: int = 500):
             super().__init__()
@@ -1311,9 +1313,20 @@ if WITH_NAPARI:
             layout = QVBoxLayout()
             self.setLayout(layout)
 
-            sync_btn = QPushButton("Sync Geometries")
+            # Sync + Refresh in a shared row
+            sync_refresh_row = QHBoxLayout()
+            sync_btn = QPushButton("Sync")
+            sync_btn.setToolTip("Sync geometries to data, then refresh text labels and colors")
             sync_btn.clicked.connect(self._sync_geometries)
-            layout.addWidget(sync_btn)
+            sync_refresh_row.addWidget(sync_btn)
+
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.setToolTip(
+                "Re-apply text labels and colors after editing names in the Features Table"
+            )
+            refresh_btn.clicked.connect(self._refresh_all_geometry_layers)
+            sync_refresh_row.addWidget(refresh_btn)
+            layout.addLayout(sync_refresh_row)
 
             reset_btn = QPushButton("Reset Widgets")
             reset_btn.setToolTip("Restore all closed widgets")
@@ -1322,6 +1335,16 @@ if WITH_NAPARI:
 
         def _sync_geometries(self):
             sync_geometries()
+            self._refresh_all_geometry_layers()
+
+        def _refresh_all_geometry_layers(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                return
+            for layer in viewer.layers:
+                if (isinstance(layer, (napari.layers.Shapes, napari.layers.Points))
+                        and 'name' in layer.features.columns):
+                    layer.features = layer.features
 
         def _reset_widgets(self):
             viewer = napari.current_viewer()
