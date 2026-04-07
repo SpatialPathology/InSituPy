@@ -39,8 +39,8 @@ if WITH_NAPARI:
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.utils._helpers import _get_expression_values
 
-    from ._layers import (_add_geometries_as_layer, _connect_color_propagation,
-                          _get_or_assign_color)
+    from ._layers import (_add_geometries_as_layer, _apply_colors_from_features,
+                          _connect_color_propagation, _get_or_assign_color)
     from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
 
     # Maximum number of unique colors for labels (napari limitation)
@@ -941,6 +941,11 @@ if WITH_NAPARI:
             # Initial population
             self._refresh_key_combo()
 
+        def closeEvent(self, event):
+            self.viewer.layers.events.inserted.disconnect(self._refresh_key_combo)
+            self.viewer.layers.events.removed.disconnect(self._refresh_key_combo)
+            super().closeEvent(event)
+
         def _get_geom_container(self):
             type_text = self.type_combo.currentText()
             data = self.viewer_config.data
@@ -982,7 +987,6 @@ if WITH_NAPARI:
                             f"Geometry metadata for key '{key_text}' uses deprecated field "
                             "'classes'. Please resave the data to upgrade to the new format.",
                             DeprecationWarning,
-                            stacklevel=2,
                         )
                         names = meta['classes']
                     else:
@@ -1044,12 +1048,10 @@ if WITH_NAPARI:
                 geom_attr = "annotations"
                 symbol = (ANNOTATIONS_SYMBOL if type_text == "Annotations"
                           else POINTS_SYMBOL)
-                geom_mode = type_text  # passed to _add_geometries_as_layer
                 internal_mode = "Annotations"  # for the shapes function
             else:
                 geom_attr = "regions"
                 symbol = REGIONS_SYMBOL
-                geom_mode = "Regions"
                 internal_mode = "Regions"
 
             geom_container = getattr(data, geom_attr)
@@ -1334,17 +1336,19 @@ if WITH_NAPARI:
             layout.addWidget(reset_btn)
 
         def _sync_geometries(self):
-            sync_geometries()
             self._refresh_all_geometry_layers()
+            sync_geometries()
 
         def _refresh_all_geometry_layers(self):
             viewer = napari.current_viewer()
             if viewer is None:
                 return
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
             for layer in viewer.layers:
                 if (isinstance(layer, (napari.layers.Shapes, napari.layers.Points))
                         and 'name' in layer.features.columns):
-                    layer.features = layer.features
+                    layer.refresh_text()
+                    _apply_colors_from_features(layer, viewer_config)
 
         def _reset_widgets(self):
             viewer = napari.current_viewer()
@@ -1441,90 +1445,3 @@ if WITH_NAPARI:
             else:
                 self.label.setText("Please select a folder first.")
 
-
-    class SaveWidget(QWidget):
-        def __init__(self):
-            super().__init__()
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
-
-            self.path_layout = QHBoxLayout()
-
-            self.label = QLabel("No folder selected")
-            self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            self.label.setMinimumWidth(150)
-            self.label.setMaximumWidth(200)
-            self.label.setToolTip("No folder selected")
-            self.path_layout.addWidget(self.label)
-
-            self.select_button = QPushButton()
-            self.select_button.setText("Select")
-            self.select_button.setIconSize(QSize(16, 16))
-            self.select_button.setToolTip("Select Output Folder")
-            self.select_button.clicked.connect(self.select_folder)
-            self.path_layout.addWidget(self.select_button)
-
-            self.layout.addLayout(self.path_layout)
-
-            self.save_button = QPushButton("Save")
-            self.save_button.clicked.connect(self.save_data)
-            self.layout.addWidget(self.save_button)
-
-            self.output_folder = None
-
-        def select_folder(self):
-            folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-            if folder:
-                self.output_folder = folder
-                self.update_label(folder)
-
-        def update_label(self, text):
-            metrics = QFontMetrics(self.label.font())
-            elided_text = metrics.elidedText(text, Qt.ElideMiddle, self.label.width())
-            self.label.setText(elided_text)
-            self.label.setToolTip(text)
-
-        def save_data(self):
-            if self.output_folder:
-                save_colorlegends(output_folder=self.output_folder)
-            else:
-                self.label.setText("Please select a folder first.")
-
-
-    # class SaveWidget(QWidget):
-    #     def __init__(self):
-    #         super().__init__()
-    #         self.layout = QVBoxLayout()
-    #         self.setLayout(self.layout)
-
-    #         self.label = QLabel("No folder selected")
-    #         self.layout.addWidget(self.label)
-
-    #         self.select_button = QPushButton("Select Output Folder")
-    #         self.select_button.clicked.connect(self.select_folder)
-    #         self.layout.addWidget(self.select_button)
-
-    #         self.save_button = QPushButton("Save")
-    #         self.save_button.clicked.connect(self.save_data)
-    #         self.layout.addWidget(self.save_button)
-
-    #         self.output_folder = None
-
-    #     def select_folder(self):
-    #         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-    #         if folder:
-    #             self.output_folder = folder
-    #             # Truncate the path if it's too long
-    #             max_length = 40  # Adjust as needed
-    #             if len(folder) > max_length:
-    #                 truncated = "..." + folder[-(max_length - 3):]
-    #             else:
-    #                 truncated = folder
-    #             self.label.setText(f"{truncated}")
-
-    #     def save_data(self):
-    #         if self.output_folder:
-    #             # Replace this with your actual saving function
-    #             save_colorlegends(output_folder=self.output_folder)
-    #         else:
-    #             self.label.setText("Please select a folder first.")

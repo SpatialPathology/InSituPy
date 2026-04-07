@@ -328,9 +328,11 @@ if WITH_NAPARI:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
+        # Per-layer UID snapshots taken before shape removal, keyed by id(layer).
+        _uids_snapshot: dict = {}
+
         # Assign function to an layer addition event
         def _update_uid(event):
-            global uids_before_removal
             if event is not None:
                 layer = event.source
                 logger.debug(event.action) if viewer_config.verbose else None
@@ -379,9 +381,9 @@ if WITH_NAPARI:
                     layer.features = updated
 
                 elif event.action == "removing":
-                    uids_before_removal = set(layer.features['uid'])
+                    _uids_snapshot[id(layer)] = set(layer.features['uid'])
                 elif event.action == "removed":
-                    removed_uids = uids_before_removal ^ set(layer.features['uid'])
+                    removed_uids = _uids_snapshot.pop(id(layer), set()) ^ set(layer.features['uid'])
                     logger.debug(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
                     viewer_config._removal_tracker += list(removed_uids)
                 else:

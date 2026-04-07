@@ -166,22 +166,6 @@ if WITH_NAPARI:
             return X.toarray() if issparse(X) else X
 
         @property
-        def X(self):
-            if not self.adata is None:
-                """Return the data matrix as a dense array."""
-                if self.layer_name == "main":
-                    X = self.adata.X
-                else:
-                    X = self.adata.layers[self.layer_name]
-
-                # converting it to non-sparse array in this step might cause memory problems!
-                # if issparse(X):
-                #     return X.toarray()
-                return X
-            else:
-                None
-
-        @property
         def units(self):
             """Return SpatialUnitsData object if available."""
             if self.has_units:
@@ -261,9 +245,6 @@ if WITH_NAPARI:
                 return self.data.images.metadata[first_key]["pixel_size"]
             return None
 
-            first_key = metadata_keys[0]
-            return self.data.images.metadata[first_key].get("pixel_size")
-
     class ViewerConfigManager:
         """
         Manages multiple ViewerConfig instances, each associated with a unique identifier.
@@ -311,5 +292,4 @@ if WITH_NAPARI:
                 config_ids += ', ...'
             return f"<ViewerConfigManager with {config_count} configs: [{config_ids}]>"
 
-    if 'config_manager' not in globals():
-        config_manager = ViewerConfigManager()
+    config_manager = ViewerConfigManager()

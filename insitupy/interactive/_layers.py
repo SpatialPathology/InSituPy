@@ -77,7 +77,7 @@ if WITH_NAPARI:
                     layer.events.edge_color()
                 registry = (config.region_colors if geom_type == "Regions"
                             else config.annot_point_colors)
-                registry[(key, name)] = new_color
+                registry[(key, name)] = rgb2hex(to_rgba(new_color)[:3])
 
         event.connect(_on_color_change)
 
@@ -127,7 +127,7 @@ if WITH_NAPARI:
                     layer._data_view.update_edge_color(i, to_rgba(hex_c))
                 layer.events.edge_color()
         except Exception:
-            pass
+            logger.exception("_apply_colors_from_features failed")
 
     def _add_geometries_as_layer(
         dataframe: pd.DataFrame,
@@ -279,7 +279,7 @@ if WITH_NAPARI:
                                 names_list["Shapes"].append(row["name"])
                                 shape_type_list.append("polygon")
                             else:
-                                ValueError(f"Input must be a LinearRing object. Received: {type(linear_ring)}")
+                                raise ValueError(f"Input must be a LinearRing object. Received: {type(linear_ring)}")
 
             elif annotation_type == "line_like":
                 line_array = np.array([data.coords.xy[1].tolist(), data.coords.xy[0].tolist()]).T

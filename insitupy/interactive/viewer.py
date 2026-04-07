@@ -57,8 +57,9 @@ if WITH_NAPARI:
 
         data = config.data
 
-        # Abort if any region layer contains duplicate names
+        # Abort if any region layer contains duplicate names; collect all offending keys first
         layers = viewer.layers
+        duplicate_warnings: list = []
         for layer in layers:
             if not isinstance(layer, Shapes):
                 continue
@@ -79,12 +80,16 @@ if WITH_NAPARI:
                     duplicates.append(n)
                 seen.add(n)
             if duplicates:
-                show_warning(
-                    f"Sync aborted: duplicate region names in key '{annot_key}': "
-                    + ", ".join(f"'{d}'" for d in duplicates)
-                    + ". Please resolve duplicates before syncing."
+                duplicate_warnings.append(
+                    f"key '{annot_key}': " + ", ".join(f"'{d}'" for d in duplicates)
                 )
-                return
+        if duplicate_warnings:
+            show_warning(
+                "Sync aborted: duplicate region names found in "
+                + "; ".join(duplicate_warnings)
+                + ". Please resolve duplicates before syncing."
+            )
+            return
 
         # iterate through layers and save them as annotation or region if they meet requirements
         for layer in layers:
