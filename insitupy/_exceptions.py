@@ -19,6 +19,24 @@ class ModuleNotFoundOnWindows(ModuleNotFoundError):
                        "This package could be problematic to install on Windows."
         super().__init__(self.message)
 
+class NoImageOverlapError(Exception):
+    """Raised when a crop region does not overlap with the image at all.
+
+    Args:
+        xlim: x-axis limits of the crop region.
+        ylim: y-axis limits of the crop region.
+    """
+
+    def __init__(self, xlim, ylim):
+        self.xlim = xlim
+        self.ylim = ylim
+        self.message = (
+            f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap "
+            f"with the image extent. No image data can be cropped."
+        )
+        super().__init__(self.message)
+
+
 class InSituDataRepeatedCropError(Exception):
     """Exception raised if it is attempted to crop a
     InSituData object multiple times with the same cropping window.

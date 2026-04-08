@@ -29,7 +29,8 @@ from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  with_insitupy_style)
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
-                                  ModalityNotFoundWarning)
+                                  ModalityNotFoundWarning,
+                                  NoImageOverlapError)
 from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                 write_dict_to_json)
 from insitupy._textformat import textformat as tf
@@ -45,6 +46,26 @@ from insitupy.containers.io import (_read_multicelldata, _read_shapesdata,
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
+
+
+def _region_overlaps_image(images, xlim, ylim) -> bool:
+    """Return True if the crop region overlaps with any image in *images*.
+
+    Args:
+        images: :class:`~insitupy.containers.ImageData` instance.
+        xlim: ``(x_min, x_max)`` of the crop region in physical units.
+        ylim: ``(y_min, y_max)`` of the crop region in physical units.
+    """
+    for name in images.names:
+        meta = images._metadata[name]
+        pixel_size = meta['pixel_size']
+        shape = meta['shape']
+        img_h, img_w = shape[0], shape[1]
+        img_xmax = img_w * pixel_size
+        img_ymax = img_h * pixel_size
+        if xlim[0] < img_xmax and xlim[1] > 0 and ylim[0] < img_ymax and ylim[1] > 0:
+            return True
+    return False
 
 
 class InSituData:
@@ -745,8 +766,10 @@ class InSituData:
 
             # extract x and y limits from the geometry
             minx, miny, maxx, maxy = shape.bounds # (minx, miny, maxx, maxy)
-            xlim = (minx, maxx)
-            ylim = (miny, maxy)
+            # clip lower bounds to 0: physical coordinates are always non-negative,
+            # and negative values cause index wrap-around in numpy/dask slicing
+            xlim = (max(0.0, minx), maxx)
+            ylim = (max(0.0, miny), maxy)
 
         try:
             # if the object was previously cropped, check if the current window is identical with the previous one
@@ -756,6 +779,11 @@ class InSituData:
                     raise InSituDataRepeatedCropError(xlim, ylim)
         except TypeError:
             pass
+
+        # record which omic modalities were loaded before cropping so we can
+        # later distinguish "not loaded" from "loaded but nothing in region"
+        cells_were_loaded = not self.cells.is_empty
+        transcripts_were_loaded = self._transcripts is not None
 
         if not _self.cells.is_empty:
             _self.cells.crop(
@@ -772,8 +800,52 @@ class InSituData:
                 materialize=materialize_transcripts
             )
 
+        # check image overlap before attempting to crop; if the region is entirely
+        # outside the image extent we skip the image crop rather than raise an error
         if not self._images.is_empty:
-            _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
+            image_overlap = _region_overlaps_image(self._images, xlim, ylim)
+            if image_overlap:
+                _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
+        else:
+            image_overlap = False
+
+        # post-crop omic presence check
+        has_cells = cells_were_loaded and not _self.cells.is_empty
+        has_transcripts = (
+            transcripts_were_loaded
+            and _self.transcripts is not None
+            and len(_self.transcripts) > 0
+        )
+        has_omic_data = has_cells or has_transcripts
+
+        if not image_overlap and not has_omic_data:
+            if not cells_were_loaded and not transcripts_were_loaded:
+                raise ValueError(
+                    f"The crop region (xlim={xlim}, ylim={ylim}) is entirely outside the "
+                    f"image extent and no omic data is loaded. Nothing to crop."
+                )
+            else:
+                raise ValueError(
+                    f"The crop region (xlim={xlim}, ylim={ylim}) does not contain any "
+                    f"image data or omic data. No cells or transcripts were found within "
+                    f"the region boundaries."
+                )
+
+        if not has_omic_data and (cells_were_loaded or transcripts_were_loaded):
+            warn(
+                f"No omic data (cells/transcripts) found within the crop region "
+                f"(xlim={xlim}, ylim={ylim}). The returned object contains image data only.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        if not image_overlap and not self._images.is_empty:
+            warn(
+                f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap with any "
+                f"loaded image. The returned object contains omic data only.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if not self._annotations.is_empty:
 

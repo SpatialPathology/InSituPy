@@ -20,7 +20,7 @@ from scipy.ndimage import zoom
 from skimage.color import hed2rgb, rgb2hed
 
 from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
-from insitupy._exceptions import InvalidDataTypeError
+from insitupy._exceptions import InvalidDataTypeError, NoImageOverlapError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 
 
@@ -371,8 +371,18 @@ def crop_dask_array_or_pyramid(
                 xlim_scaled = (int(xlim_scaled[0] / sf), int(xlim_scaled[1] / sf))
                 ylim_scaled = (int(ylim_scaled[0] / sf), int(ylim_scaled[1] / sf))
 
+                # clamp to valid pixel range to handle regions that extend beyond
+                # image boundaries; negative indices would wrap around in numpy/dask
+                img_h, img_w = img.shape[0], img.shape[1]
+                x0 = max(0, xlim_scaled[0])
+                x1 = min(img_w, xlim_scaled[1])
+                y0 = max(0, ylim_scaled[0])
+                y1 = min(img_h, ylim_scaled[1])
+                if x0 >= x1 or y0 >= y1:
+                    raise NoImageOverlapError(xlim, ylim)
+
                 # do the cropping
-                cdata = img[ylim_scaled[0]:ylim_scaled[1], xlim_scaled[0]:xlim_scaled[1]]
+                cdata = img[y0:y1, x0:x1]
 
                 # rechunk the array to prevent irregular chunking
                 cdata = cdata.rechunk()
@@ -381,11 +391,17 @@ def crop_dask_array_or_pyramid(
                 cropped_data.append(cdata)
     else:
         if isinstance(data, da.core.Array):
-            # convert to metric unit
-            xlim_um = tuple([int(elem / pixel_size) for elem in xlim])
-            ylim_um = tuple([int(elem / pixel_size) for elem in ylim])
+            # convert to pixel units and clamp to valid range; without clamping,
+            # negative indices wrap around in numpy/dask producing zero-size arrays
+            img_h, img_w = data.shape[0], data.shape[1]
+            x0 = max(0, int(xlim[0] / pixel_size))
+            x1 = min(img_w, int(xlim[1] / pixel_size))
+            y0 = max(0, int(ylim[0] / pixel_size))
+            y1 = min(img_h, int(ylim[1] / pixel_size))
+            if x0 >= x1 or y0 >= y1:
+                raise NoImageOverlapError(xlim, ylim)
 
-            cropped_data = data[ylim_um[0]:ylim_um[1], xlim_um[0]:xlim_um[1]]
+            cropped_data = data[y0:y1, x0:x1]
 
             # rechunk the array to prevent irregular chunking
             cropped_data = cropped_data.rechunk()
