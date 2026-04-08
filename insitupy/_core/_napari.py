@@ -426,7 +426,7 @@ if WITH_NAPARI:
             if isinstance(layer, Shapes):
                 layer.events.edge_color.connect(_on_colors_changed)
             elif isinstance(layer, Points):
-                layer.events.border_color.connect(_on_colors_changed)
+                layer.events.face_color.connect(_on_colors_changed)
 
         # Assign the function to data of all existing layers
         for layer in viewer.layers:

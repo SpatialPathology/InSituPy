@@ -1221,8 +1221,10 @@ if WITH_NAPARI:
                     name=layer_name,
                     size=10,
                     border_color='black',
-                    face_color='blue',
+                    face_color='#808080',
                     features=features,
+                    text={'string': '{name}', 'anchor': 'upper_left',
+                          'size': 8, 'color': 'white'},
                 )
             elif type_text == "Regions":
                 self.viewer.add_shapes(
@@ -1261,7 +1263,7 @@ if WITH_NAPARI:
                 )
             try:
                 if isinstance(layer, _nl.Points):
-                    layer.current_border_color = color
+                    layer.current_face_color = color
                 else:
                     layer.current_edge_color = color
             except Exception:

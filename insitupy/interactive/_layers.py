@@ -47,7 +47,8 @@ if WITH_NAPARI:
         if layer is None:
             return
         is_points = isinstance(layer, napari.layers.Points)
-        event = (layer.events.current_border_color if is_points
+        # Points encode name-color in face_color (analogous to edge_color for Shapes).
+        event = (layer.events.current_face_color if is_points
                  else layer.events.current_edge_color)
 
         def _on_color_change(event=None):
@@ -58,7 +59,7 @@ if WITH_NAPARI:
             selected = list(layer.selected_data)
             if not selected:
                 return
-            new_color = (layer.current_border_color if is_points
+            new_color = (layer.current_face_color if is_points
                          else layer.current_edge_color)
             if 'name' not in layer.features.columns:
                 return
@@ -69,8 +70,8 @@ if WITH_NAPARI:
                 mask = layer.features['name'] == name
                 indices = list(layer.features.index[mask])
                 if is_points:
-                    layer.border_color[indices] = new_color
-                    layer.events.border_color()
+                    layer.face_color[indices] = new_color
+                    layer.events.face_color()
                 else:
                     for i in indices:
                         layer._data_view.update_edge_color(i, new_color)
@@ -120,8 +121,8 @@ if WITH_NAPARI:
                   for nm in names]
         try:
             if is_points:
-                layer.border_color = [to_rgba(c) for c in colors]
-                layer.events.border_color()
+                layer.face_color = [to_rgba(c) for c in colors]
+                layer.events.face_color()
             else:
                 for i, hex_c in enumerate(colors):
                     layer._data_view.update_edge_color(i, to_rgba(hex_c))
@@ -405,6 +406,8 @@ if WITH_NAPARI:
                     size=10,
                     border_color="black",
                     face_color=color_list["Points"],
+                    text={'string': '{name}', 'anchor': 'upper_left',
+                          'size': 8, 'color': 'white'},
                     #scale=scale_factor
                 )
                 _connect_color_propagation(

@@ -135,54 +135,57 @@ if WITH_NAPARI:
         layer = _resolve_legend_layer(viewer, layer)
 
         if isinstance(layer, napari.layers.points.points.Points):
-            try:
-                # get values
-                values = layer.properties["value"]
-                color_values = layer.face_color
-            except KeyError:
-                first_char = layer.name[:1]
-                if first_char == POINTS_SYMBOL:
-                    # collect the layer names and edge colors of the respective layer
-                    layer_names = []
-                    face_colors = []
-                    for elem in viewer.layers:
-                        if elem.name.startswith(first_char):
-                            layer_names.append(elem.name.strip(first_char + " "))
-                            face_colors.append(elem.current_face_color)
-
-                    # create mapping from collected values
-                    mapping = dict(zip(layer_names, face_colors))
-
-                    _update_categorical_legend(
-                        static_canvas=viewer_config.static_canvas,
-                        mapping=mapping,
-                        label="Points",
-                        marker="o",
-                        marker_mode="face"
+            first_char = layer.name[:1]
+            if first_char == POINTS_SYMBOL:
+                # Point annotation layer: build legend from features['name'] + face_color
+                # per point, analogous to the Shapes annotation branch below.
+                mapping = {}
+                for elem in viewer.layers:
+                    if not (elem.name.startswith(POINTS_SYMBOL)
+                            and isinstance(elem, napari.layers.Points)):
+                        continue
+                    if 'name' in elem.features.columns:
+                        for name, color in zip(elem.features['name'], elem.face_color):
+                            if name and name != "":
+                                mapping.setdefault(str(name), tuple(color))
+                    else:
+                        mapping.setdefault(
+                            elem.name[len(POINTS_SYMBOL) + 1:],
+                            tuple(elem.current_face_color)
                         )
+                mapping = {k: mapping[k] for k in sorted(mapping.keys())}
+                _update_categorical_legend(
+                    static_canvas=viewer_config.static_canvas,
+                    mapping=mapping,
+                    label="Point annotations",
+                    marker="o",
+                    marker_mode="face"
+                    )
             else:
-                if is_numeric_dtype(values):
-                    rgba_list, mapping = continuous_data_to_rgba(data=values,
-                                            cmap=layer.face_colormap.name,
-                                            #upper_climit_pct=upper_climit_pct,
-                                            return_mapping=True
-                                            )
-
-                    _update_continuous_legend(
-                        static_canvas=viewer_config.static_canvas,
-                        mapping=mapping,
-                        label=layer.name)
-
+                # Non-annotation Points layer (e.g. cell layer with continuous values).
+                try:
+                    values = layer.properties["value"]
+                    color_values = layer.face_color
+                except KeyError:
+                    pass
                 else:
-                    # substitute pd.NA with np.nan
-                    values = pd.Series(values).fillna(np.nan).values
-                    mapping = _categorical_mapping_without_missing(values, color_values)
-
-                    _update_categorical_legend(
-                        static_canvas=viewer_config.static_canvas,
-                        mapping=mapping,
-                        label=layer.name
-                        )
+                    if is_numeric_dtype(values):
+                        rgba_list, mapping = continuous_data_to_rgba(data=values,
+                                                cmap=layer.face_colormap.name,
+                                                return_mapping=True
+                                                )
+                        _update_continuous_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name)
+                    else:
+                        values = pd.Series(values).fillna(np.nan).values
+                        mapping = _categorical_mapping_without_missing(values, color_values)
+                        _update_categorical_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name
+                            )
 
         elif isinstance(layer, napari.layers.labels.labels.Labels):
             try:
