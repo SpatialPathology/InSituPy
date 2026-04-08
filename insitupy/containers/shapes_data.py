@@ -128,7 +128,7 @@ class ShapesData(DeepCopyMixin):
         for key, df in self._data.items():
             meta[key] = {
                 f"n_{self._shape_name}": len(df),
-                "classes": sorted(df[self._name_col].unique().tolist()) if self._name_col in df.columns else ["unnamed"],
+                "names": sorted(df[self._name_col].unique().tolist()) if self._name_col in df.columns else ["unnamed"],
             }
         return meta
 

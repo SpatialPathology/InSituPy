@@ -378,7 +378,29 @@ if WITH_NAPARI:
                         updated['name'] = ""
                     updated.loc[updated.index[-1], 'name'] = intended_name
                     updated.loc[updated.index[-1], 'geometry_type'] = geometry_type_label
+
+                    # Compute next region name from `updated` *before* assigning
+                    # layer.features, which fires callbacks that may read layer.features.
+                    next_region_name = None
+                    if (layer.name.startswith(REGIONS_SYMBOL + " ")
+                            and hasattr(viewer_config, 'data')):
+                        import re as _re
+                        _existing = {n for n in updated.get('name', []) if isinstance(n, str)}
+                        _max_n = 0
+                        for _n in _existing:
+                            _m = _re.match(r'^Region (\d+)$', _n)
+                            if _m:
+                                _max_n = max(_max_n, int(_m.group(1)))
+                        next_region_name = f"Region {_max_n + 1}"
+
                     layer.features = updated
+
+                    # Advance current_properties so the next drawn shape gets the
+                    # pre-computed incremented name.
+                    if next_region_name is not None:
+                        cp = dict(layer.current_properties)
+                        cp['name'] = np.array([next_region_name], dtype='object')
+                        layer.current_properties = cp
 
                 elif event.action == "removing":
                     _uids_snapshot[id(layer)] = set(layer.features['uid'])
