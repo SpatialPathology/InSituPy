@@ -922,11 +922,11 @@ if WITH_NAPARI:
             layout = QVBoxLayout()
             self.setLayout(layout)
 
-            # Type row
+            # Type row — Annotations vs Regions only; shapes/points is an Add-time choice
             type_row = QHBoxLayout()
             type_row.addWidget(QLabel("Type:"))
             self.type_combo = QComboBox()
-            self.type_combo.addItems(["Annotations", "Point annotations", "Regions"])
+            self.type_combo.addItems(["Annotations", "Regions"])
             type_row.addWidget(self.type_combo)
             layout.addLayout(type_row)
 
@@ -949,17 +949,23 @@ if WITH_NAPARI:
             name_row.addWidget(self.name_combo)
             layout.addLayout(name_row)
 
-            # Show / Add new buttons
-            btn_row = QHBoxLayout()
+            # Show button (geometry type handled internally)
             self.show_btn = QPushButton("Show")
-            self.show_btn.setToolTip("Load shapes from InSituData into the viewer")
+            self.show_btn.setToolTip("Load geometries from InSituData into the viewer")
             self.show_btn.clicked.connect(self._on_show)
-            btn_row.addWidget(self.show_btn)
-            self.add_new_btn = QPushButton("Add new")
-            self.add_new_btn.setToolTip("Create a new empty layer for drawing")
-            self.add_new_btn.clicked.connect(self._on_add_new)
-            btn_row.addWidget(self.add_new_btn)
-            layout.addLayout(btn_row)
+            layout.addWidget(self.show_btn)
+
+            # Add buttons — shapes always available; points only for Annotations
+            add_row = QHBoxLayout()
+            self.add_shapes_btn = QPushButton("Add shapes")
+            self.add_shapes_btn.setToolTip("Create a new empty shapes layer for drawing")
+            self.add_shapes_btn.clicked.connect(self._on_add_shapes)
+            add_row.addWidget(self.add_shapes_btn)
+            self.add_points_btn = QPushButton("Add points")
+            self.add_points_btn.setToolTip("Create a new empty points layer for drawing")
+            self.add_points_btn.clicked.connect(self._on_add_points)
+            add_row.addWidget(self.add_points_btn)
+            layout.addLayout(add_row)
 
             # Features Table button
             self.features_btn = QPushButton("Open Features Table")
@@ -982,14 +988,13 @@ if WITH_NAPARI:
             super().closeEvent(event)
 
         def _get_geom_container(self):
-            type_text = self.type_combo.currentText()
             data = self.viewer_config.data
-            if type_text in ("Annotations", "Point annotations"):
+            if self.type_combo.currentText() == "Annotations":
                 return data.annotations
             return data.regions
 
         def _on_type_changed(self, event=None):
-            """Reset Key and Name to defaults when the type selection changes."""
+            """Reset Key/Name and update Add points availability on type change."""
             self.key_combo.blockSignals(True)
             self.key_combo.setCurrentIndex(-1)
             self.key_combo.clearEditText()
@@ -997,6 +1002,8 @@ if WITH_NAPARI:
             self.name_combo.blockSignals(True)
             self.name_combo.setCurrentIndex(0)  # (all)
             self.name_combo.blockSignals(False)
+            is_annotations = self.type_combo.currentText() == "Annotations"
+            self.add_points_btn.setEnabled(is_annotations)
             self._refresh_key_combo()
 
         def _refresh_key_combo(self, event=None):
@@ -1057,7 +1064,12 @@ if WITH_NAPARI:
             return _get_next_region_name_for_layer(self.viewer, key_text, self.viewer_config)
 
         def _on_show(self):
-            """Load existing shapes from InSituData into the viewer."""
+            """Load existing geometries from InSituData into the viewer.
+
+            For Annotations the geometry type (shapes vs points) is determined
+            automatically from the stored data — both layers are created/updated
+            in one call. For Regions only a shapes layer is created.
+            """
             name_text = self.name_combo.currentText().strip()
             key_text = self.key_combo.currentText().strip()
             type_text = self.type_combo.currentText()
@@ -1068,31 +1080,19 @@ if WITH_NAPARI:
                 return
 
             load_all = (name_text == _ALL)
-
-            if type_text in ("Annotations", "Point annotations"):
-                geom_attr = "annotations"
-                symbol = (ANNOTATIONS_SYMBOL if type_text == "Annotations"
-                          else POINTS_SYMBOL)
-                internal_mode = type_text  # "Annotations" or "Point annotations"
-            else:
-                geom_attr = "regions"
-                symbol = REGIONS_SYMBOL
-                internal_mode = "Regions"
-
+            is_annotations = (type_text == "Annotations")
+            geom_attr = "annotations" if is_annotations else "regions"
             geom_container = getattr(data, geom_attr)
-            layer_name = f"{symbol} {key_text}"
 
             key_exists = (not geom_container.is_empty
                           and key_text in geom_container.keys())
-
             if not key_exists:
                 show_warning(
                     f"Key '{key_text}' not found in {geom_attr}. "
-                    "Use 'Add new' to create a new layer."
+                    "Use 'Add shapes' or 'Add points' to create a new layer."
                 )
                 return
 
-            # Load data, filtered by name if requested
             df = geom_container[key_text]
             if not load_all:
                 df = df[df['name'] == name_text]
@@ -1100,80 +1100,78 @@ if WITH_NAPARI:
                     show_info(f"No shapes with name '{name_text}' in key '{key_text}'.")
                     return
 
-            if type_text == "Regions":
+            if not is_annotations:
+                # Regions: single shapes layer — warn if already present
+                layer_name = f"{REGIONS_SYMBOL} {key_text}"
                 if layer_name in self.viewer.layers:
-                    filter_hint = (f" (filter: '{name_text}')"
-                                   if not load_all else "")
+                    filter_hint = f" (filter: '{name_text}')" if not load_all else ""
                     show_warning(
                         f"Layer '{layer_name}' already exists{filter_hint}. Use Sync to update."
                     )
                     return
+                _add_geometries_as_layer(
+                    dataframe=df,
+                    viewer=self.viewer,
+                    layer_name=key_text,
+                    mode="Regions",
+                )
             else:
-                # Annotations: merge new UIDs into existing layer if present.
-                # Only check the layer that matches the current type to avoid
-                # deduplicating against UIDs from a different geometry type.
-                existing_ln = layer_name
-                if existing_ln in self.viewer.layers:
-                    if 'uid' in df.columns:
-                        existing_uids = set(
-                            self.viewer.layers[existing_ln].features['uid']
-                        )
-                        df = df[~df['uid'].isin(existing_uids)]
-                        if df.empty:
-                            show_info(
-                                "No new geometries to add — all are already in the viewer."
-                            )
-                            return
-
-            _add_geometries_as_layer(
-                dataframe=df,
-                viewer=self.viewer,
-                layer_name=key_text,
-                mode=internal_mode,
-            )
-
-            # napari derives current_properties from the last row of the
-            # features table whenever layer.features is assigned (see
-            # _get_default_column in layer_utils.py: value = column.iloc[-1]).
-            # For annotation layers this would carry the last loaded shape's
-            # name into subsequent draws. Reset it to "" so new shapes start
-            # unnamed.
-            if type_text in ("Annotations", "Point annotations"):
-                if layer_name in self.viewer.layers:
-                    layer = self.viewer.layers[layer_name]
-                    cp = dict(layer.current_properties)
-                    cp['name'] = np.array([''], dtype='object')
-                    layer.current_properties = cp
+                # Annotations: _add_geometries_as_layer handles shapes and points
+                # internally; existing-layer dedup is done per-UID inside that function.
+                _add_geometries_as_layer(
+                    dataframe=df,
+                    viewer=self.viewer,
+                    layer_name=key_text,
+                    mode="Annotations",
+                )
+                # Reset current_properties name to "" on both possible annotation layers
+                # (napari promotes column.iloc[-1] to defaults on every features assignment).
+                for sym in (ANNOTATIONS_SYMBOL, POINTS_SYMBOL):
+                    ln = f"{sym} {key_text}"
+                    if ln in self.viewer.layers:
+                        layer = self.viewer.layers[ln]
+                        cp = dict(layer.current_properties)
+                        cp['name'] = np.array([''], dtype='object')
+                        layer.current_properties = cp
 
 
-        def _on_add_new(self):
-            """Create a new empty layer for drawing, prompting for a key name."""
-            type_text = self.type_combo.currentText()
+        def _on_add_shapes(self):
+            """Create a new empty shapes layer for drawing."""
+            type_text = self.type_combo.currentText()  # "Annotations" or "Regions"
             config = self.viewer_config
 
-            if type_text in ("Annotations", "Point annotations"):
-                symbol = (ANNOTATIONS_SYMBOL if type_text == "Annotations"
-                          else POINTS_SYMBOL)
-                internal_mode = "Annotations"
-                effective_name = ""
-            else:
-                symbol = REGIONS_SYMBOL
-                internal_mode = "Regions"
-                effective_name = None  # determined after key is known
-
-            key_text, ok = QInputDialog.getText(
-                self, "Add new layer", "Key:"
-            )
+            key_text, ok = QInputDialog.getText(self, "Add shapes layer", "Key:")
             key_text = key_text.strip()
             if not ok or not key_text:
                 return
 
-            if effective_name is None:
+            if type_text == "Regions":
+                symbol = REGIONS_SYMBOL
+                internal_mode = "Regions"
                 effective_name = self._get_next_region_name(key_text)
+            else:
+                symbol = ANNOTATIONS_SYMBOL
+                internal_mode = "Annotations"
+                effective_name = ""
 
             layer_name = f"{symbol} {key_text}"
             self._create_new_layer(type_text, key_text, effective_name,
                                    layer_name, internal_mode, config)
+
+        def _on_add_points(self):
+            """Create a new empty points layer for drawing (Annotations only)."""
+            config = self.viewer_config
+
+            key_text, ok = QInputDialog.getText(self, "Add points layer", "Key:")
+            key_text = key_text.strip()
+            if not ok or not key_text:
+                return
+
+            layer_name = f"{POINTS_SYMBOL} {key_text}"
+            # Use "Point annotations" as the internal type string so _create_new_layer
+            # calls viewer.add_points instead of viewer.add_shapes.
+            self._create_new_layer("Point annotations", key_text, "",
+                                   layer_name, "Annotations", config)
 
         def _create_new_layer(self, type_text, key_text, name_text,
                               layer_name, internal_mode, config):
@@ -1281,8 +1279,6 @@ if WITH_NAPARI:
                 type_text = self.type_combo.currentText()
                 if type_text == "Annotations":
                     layer_name = f"{ANNOTATIONS_SYMBOL} {key_text}"
-                elif type_text == "Point annotations":
-                    layer_name = f"{POINTS_SYMBOL} {key_text}"
                 else:
                     layer_name = f"{REGIONS_SYMBOL} {key_text}"
 
@@ -1407,7 +1403,13 @@ if WITH_NAPARI:
                 return
             viewer_config = config_manager[_get_viewer_uid(viewer)]
             for layer in viewer.layers:
-                if (isinstance(layer, (napari.layers.Shapes, napari.layers.Points))
+                if isinstance(layer, napari.layers.Points) and 'name' in layer.features.columns:
+                    # layer.size is authoritative — overwrite any Features Table edits
+                    # and fire features_update (which triggers refresh_text + colors)
+                    updated = layer.features.copy()
+                    updated['size'] = np.array(layer.size, dtype=float)
+                    layer.features = updated
+                elif (isinstance(layer, napari.layers.Shapes)
                         and 'name' in layer.features.columns):
                     layer.refresh_text()
                     _apply_colors_from_features(layer, viewer_config)

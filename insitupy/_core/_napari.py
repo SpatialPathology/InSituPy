@@ -378,6 +378,10 @@ if WITH_NAPARI:
                         updated['name'] = ""
                     updated.loc[updated.index[-1], 'name'] = intended_name
                     updated.loc[updated.index[-1], 'geometry_type'] = geometry_type_label
+                    if isinstance(layer, Points):
+                        if 'size' not in updated.columns:
+                            updated['size'] = np.nan
+                        updated.loc[updated.index[-1], 'size'] = float(layer.size[-1])
 
                     # Compute next region name from `updated` *before* assigning
                     # layer.features, which fires callbacks that may read layer.features.
@@ -418,6 +422,14 @@ if WITH_NAPARI:
         def _on_colors_changed(e, v=viewer):
             _update_colorlegend(v, viewer_config)
 
+        def _on_size_changed(event=None, _layer=None):
+            """Sync layer.size → features['size'] so the Features Table stays current."""
+            if _layer is None or 'size' not in _layer.features.columns:
+                return
+            updated = _layer.features.copy()
+            updated['size'] = np.array(_layer.size, dtype=float)
+            _layer.features = updated
+
         def _connect_layer_events(layer):
             layer.events.data.connect(_update_uid)
             layer.events.features.connect(
@@ -427,6 +439,9 @@ if WITH_NAPARI:
                 layer.events.edge_color.connect(_on_colors_changed)
             elif isinstance(layer, Points):
                 layer.events.face_color.connect(_on_colors_changed)
+                layer.events.size.connect(
+                    lambda e, _l=layer: _on_size_changed(e, _layer=_l)
+                )
 
         # Assign the function to data of all existing layers
         for layer in viewer.layers:

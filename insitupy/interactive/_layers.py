@@ -73,6 +73,10 @@ if WITH_NAPARI:
                     layer.face_color[indices] = new_color
                     layer.events.face_color()
                 else:
+                    # _data_view.update_edge_color is used intentionally here instead of
+                    # layer.edge_color = [...]: the public setter may fire
+                    # events.current_edge_color as a side effect, which would re-trigger
+                    # this very callback and cause an infinite loop.
                     for i in indices:
                         layer._data_view.update_edge_color(i, new_color)
                     layer.events.edge_color()
@@ -122,11 +126,9 @@ if WITH_NAPARI:
         try:
             if is_points:
                 layer.face_color = [to_rgba(c) for c in colors]
-                layer.events.face_color()
             else:
-                for i, hex_c in enumerate(colors):
-                    layer._data_view.update_edge_color(i, to_rgba(hex_c))
-                layer.events.edge_color()
+                # Use the public edge_color setter (fires events.edge_color automatically).
+                layer.edge_color = [to_rgba(c) for c in colors]
         except Exception:
             logger.exception("_apply_colors_from_features failed")
 
@@ -152,6 +154,7 @@ if WITH_NAPARI:
         uid_list = {"Points": [], "Shapes": []}
         type_list = {"Points": [], "Shapes": []} # list to store whether the polygon is exterior or interior
         names_list = {"Points": [], "Shapes": []}
+        size_list = {"Points": []}
 
         # hardcode edge_width based on type
         edge_width = 10 if mode == "Regions" else 4
@@ -301,6 +304,8 @@ if WITH_NAPARI:
                     # a normal Point object does not have multiple geometries and coordinates can be accessed directly
                     point_coords = [geometry.coords.xy]
 
+                row_size = float(row["size"]) if "size" in dataframe.columns else 10.0
+
                 # collect coordinates and other data on the points
                 for coord in point_coords:
                     point_x_list.append(coord[1].tolist()[0])
@@ -309,6 +314,7 @@ if WITH_NAPARI:
                     uid_list["Points"].append(uid)  # collect corresponding unique id
                     type_list["Points"].append("point") # information on type of coordinates - important for interior/exterior of polygons
                     names_list["Points"].append(row["name"])
+                    size_list["Points"].append(row_size)
 
         if len(shape_list) > 0:
             features_dict = {
@@ -375,6 +381,7 @@ if WITH_NAPARI:
                         'type': type_list["Points"],
                         'name': names_list["Points"],
                         'geometry_type': [geometry_type] * len(uid_list["Points"]),
+                        'size': size_list["Points"],
                     }
 
             if points_layer_name_with_symbol in viewer.layers:
@@ -385,8 +392,9 @@ if WITH_NAPARI:
                     coords=point_data,
                 )
 
-                # change colors of the newly added data
+                # change colors and sizes of the newly added data
                 layer.face_color[-len(point_data):] = color_list["Points"]
+                layer.size[-len(point_data):] = size_list["Points"]
                 layer.refresh() # refresh layer to show new colors
 
                 # layer.add() already appended empty rows to layer.features; fill them in
@@ -397,13 +405,14 @@ if WITH_NAPARI:
                 updated.loc[updated.index[-n:], 'type'] = features_dict['type']
                 updated.loc[updated.index[-n:], 'name'] = features_dict['name']
                 updated.loc[updated.index[-n:], 'geometry_type'] = features_dict['geometry_type']
+                updated.loc[updated.index[-n:], 'size'] = features_dict['size']
                 layer.features = updated
             else:
                 viewer.add_points(
                     data=point_data,
                     name=points_layer_name_with_symbol,
                     features=features_dict,
-                    size=10,
+                    size=size_list["Points"],
                     border_color="black",
                     face_color=color_list["Points"],
                     text={'string': '{name}', 'anchor': 'upper_left',
