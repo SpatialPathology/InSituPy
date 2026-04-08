@@ -10,13 +10,14 @@ from typing import List, Literal, Optional, Union
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from shapely import MultiPoint, Point, Polygon, affinity
+
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI
 from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._io.geo import parse_geopandas, write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.utils.utils import convert_to_list
-from shapely import MultiPoint, Point, Polygon, affinity
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ class ShapesData(DeepCopyMixin):
             for l, m in self.metadata.items():
                 # get metadata
                 n = m[f"n_{self._shape_name}"]
-                classes = m["classes"]
+                classes = m["names"]
                 classes_str = [f"'{elem}'" for elem in classes]
                 lc = len(classes)
 
@@ -103,7 +104,7 @@ class ShapesData(DeepCopyMixin):
                 r = (
                     f'{tf.Bold}{l}:{tf.ResetAll}\t{n} '
                     f'{self._shape_name}, {lc} '
-                    f'{"classes" if lc>1 else "class"} '
+                    f'{"names" if lc>1 else "name"} '
                 )
                 if lc < 10:
                     r += f'({", ".join(classes_str)})'
@@ -128,7 +129,7 @@ class ShapesData(DeepCopyMixin):
         for key, df in self._data.items():
             meta[key] = {
                 f"n_{self._shape_name}": len(df),
-                "classes": sorted(df[self._name_col].unique().tolist()) if self._name_col in df.columns else ["unnamed"],
+                "names": sorted(df[self._name_col].unique().tolist()) if self._name_col in df.columns else ["unnamed"],
             }
         return meta
 
@@ -595,4 +596,5 @@ class RegionsData(ShapesData):
             RegionsData: The loaded RegionsData object.
         """
         from insitupy.containers.io import _read_shapesdata
+        return _read_shapesdata(path, mode="regions", scale_factor=scale_factor)
         return _read_shapesdata(path, mode="regions", scale_factor=scale_factor)

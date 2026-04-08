@@ -291,6 +291,7 @@ if WITH_NAPARI:
                 "geometry": [Point(d[1], d[0]) for d in layer_data],  # switch x/y
                 "name": name_values,
                 "color": [[int(elem[e]*255) for e in range(3)] for elem in colors],
+                "size": layer.size.tolist(),
             }
 
         # generate GeoDataFrame
