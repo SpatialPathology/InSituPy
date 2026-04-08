@@ -198,8 +198,16 @@ if WITH_NAPARI:
                 dataframe["color"] = [(128, 128, 128)] * len(dataframe)
 
         # pre-compute sets for O(1) duplicate UID lookups
-        existing_shape_uids = set(viewer.layers[shapes_layer_name_with_symbol].features["uid"]) if shapes_layer_exists else set()
-        existing_point_uids = set(viewer.layers[points_layer_name_with_symbol].features["uid"]) if points_layer_exists else set()
+        # Guard: layers loaded from synced data may lack a 'uid' column — fall
+        # back to an empty set so all rows are treated as new (no dedup).
+        _shape_feats = viewer.layers[shapes_layer_name_with_symbol].features if shapes_layer_exists else None
+        existing_shape_uids = (set(_shape_feats["uid"])
+                               if (_shape_feats is not None and "uid" in _shape_feats.columns)
+                               else set())
+        _point_feats = viewer.layers[points_layer_name_with_symbol].features if points_layer_exists else None
+        existing_point_uids = (set(_point_feats["uid"])
+                               if (_point_feats is not None and "uid" in _point_feats.columns)
+                               else set())
 
         # colour registry for this call
         if mode == "Regions":

@@ -882,6 +882,7 @@ if WITH_NAPARI:
             )
 
     _ALL = "(all)"
+    _NO_KEY = "-----"
 
     # NOTE: must remain inside the `if WITH_NAPARI:` block — napari types are
     # referenced in the signature and body.
@@ -1013,15 +1014,16 @@ if WITH_NAPARI:
             self.key_combo.blockSignals(True)
             current = self.key_combo.currentText()
             self.key_combo.clear()
+            self.key_combo.addItem(_NO_KEY)
+            self.key_combo.addItem(_ALL)
             self.key_combo.addItems(keys)
             idx = self.key_combo.findText(current)
             if idx >= 0:
                 self.key_combo.setCurrentIndex(idx)
-            elif current:
+            elif current and current not in (_NO_KEY, _ALL):
                 self.key_combo.setEditText(current)
             else:
-                self.key_combo.setCurrentIndex(-1)
-                self.key_combo.clearEditText()
+                self.key_combo.setCurrentIndex(0)  # default to _NO_KEY
             self.key_combo.blockSignals(False)
             # Explicit call required: setEditText above fires no signal while
             # blocked, so _refresh_name_combo would not run otherwise.
@@ -1035,7 +1037,7 @@ if WITH_NAPARI:
             current = self.name_combo.currentText()
             self.name_combo.clear()
             self.name_combo.addItem(_ALL)
-            if key_text and not geom.is_empty:
+            if key_text and key_text not in (_NO_KEY, _ALL) and not geom.is_empty:
                 try:
                     meta = geom.metadata.get(key_text, {})
                     if 'names' in meta:
@@ -1070,19 +1072,48 @@ if WITH_NAPARI:
             automatically from the stored data — both layers are created/updated
             in one call. For Regions only a shapes layer is created.
             """
+            # Refresh first so the combo reflects the current InSituData state.
+            self._refresh_key_combo()
+
             name_text = self.name_combo.currentText().strip()
             key_text = self.key_combo.currentText().strip()
             type_text = self.type_combo.currentText()
             data = self.viewer_config.data
 
-            if not key_text:
-                show_warning("Please enter a key.")
+            if not key_text or key_text == _NO_KEY:
+                show_warning("Please select a key.")
                 return
 
             load_all = (name_text == _ALL)
             is_annotations = (type_text == "Annotations")
             geom_attr = "annotations" if is_annotations else "regions"
             geom_container = getattr(data, geom_attr)
+
+            if key_text == _ALL:
+                # Show all keys — iterate and load each one.
+                if geom_container.is_empty:
+                    show_warning(f"No {geom_attr} available.")
+                    return
+                for k in list(geom_container.keys()):
+                    if not is_annotations:
+                        layer_name = f"{REGIONS_SYMBOL} {k}"
+                        if layer_name in self.viewer.layers:
+                            show_info(f"Layer '{layer_name}' already exists. Skipped.")
+                            continue
+                        _add_geometries_as_layer(
+                            dataframe=geom_container[k],
+                            viewer=self.viewer,
+                            layer_name=k,
+                            mode="Regions",
+                        )
+                    else:
+                        _add_geometries_as_layer(
+                            dataframe=geom_container[k],
+                            viewer=self.viewer,
+                            layer_name=k,
+                            mode="Annotations",
+                        )
+                return
 
             key_exists = (not geom_container.is_empty
                           and key_text in geom_container.keys())
