@@ -31,8 +31,8 @@ SHRT_MIN = -(2**15-1) # -32767
 CACHE = Path.home() / ".cache/InSituPy/"
 
 # modalities
-MODALITIES = ["cells", "images", "transcripts", "annotations", "regions"]
-MODALITIES_ABBR = "CITAR"
+MODALITIES = ["cells", "units", "images", "transcripts", "annotations", "regions"]
+MODALITIES_ABBR = "CUITAR"
 LOAD_FUNCS = [
     'load_annotations',
     'load_cells',
