@@ -4,6 +4,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
+from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.tools import registration
 
 
@@ -243,4 +244,45 @@ def test_image_path_and_legacy_name_together_raises(dummy_data, image_file):
             image_to_be_registered=image_file,
             image_path=image_file,
             channel_names=["HE"],
+        )
+
+
+def _raise_not_enough_matches(*args, **kwargs):
+    raise NotEnoughFeatureMatchesError(number=1, threshold=5)
+
+
+def test_insufficient_matches_warns_and_returns_when_configured(dummy_data, image_file, monkeypatch):
+    monkeypatch.setattr(
+        registration,
+        "read_image",
+        lambda _p: (np.zeros((8, 8, 3), dtype=np.uint8), {}, "YXS", 1.0),
+    )
+    monkeypatch.setattr(registration, "register_images_standalone", _raise_not_enough_matches)
+
+    with pytest.warns(UserWarning, match="Registration skipped"):
+        registration.register_images(
+            data=dummy_data,
+            image_to_be_registered=image_file,
+            channel_names=["HE"],
+            save_registered_images=False,
+            raise_on_insufficient_matches=False,
+        )
+
+    assert len(dummy_data.images.added_images) == 0
+
+
+def test_insufficient_matches_raises_by_default(dummy_data, image_file, monkeypatch):
+    monkeypatch.setattr(
+        registration,
+        "read_image",
+        lambda _p: (np.zeros((8, 8, 3), dtype=np.uint8), {}, "YXS", 1.0),
+    )
+    monkeypatch.setattr(registration, "register_images_standalone", _raise_not_enough_matches)
+
+    with pytest.raises(NotEnoughFeatureMatchesError):
+        registration.register_images(
+            data=dummy_data,
+            image_to_be_registered=image_file,
+            channel_names=["HE"],
+            save_registered_images=False,
         )

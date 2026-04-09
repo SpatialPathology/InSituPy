@@ -142,6 +142,7 @@ def register_images(
     force_failure_qc: bool = False,
     *,
     image_to_be_registered: Optional[Union[str, os.PathLike, Path]] = None,
+    raise_on_insufficient_matches: bool = False,
     ):
     """
     Register images stored in an InSituData object.
@@ -178,6 +179,10 @@ def register_images(
         force_failure_qc (bool, optional): If True, simulate a "not enough matches" failure even when
             sufficient matches are found. The QC images are saved and NotEnoughFeatureMatchesError is
             raised. Useful for testing the failure-path output without needing a bad image pair. Defaults to False.
+        raise_on_insufficient_matches (bool, optional): Controls behavior when registration
+            fails due to insufficient feature matches. If True, re-raises
+            NotEnoughFeatureMatchesError. If False (default), emits a warning and aborts registration
+            for the current image, allowing outer loops to continue.
 
     Raises:
         ValueError: If neither `image_to_be_registered` nor `image_path` is provided,
@@ -412,7 +417,28 @@ def register_images(
                     plt.imshow(partial.matchedVis)
                     plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
                     plt.close()
-            raise
+            if raise_on_insufficient_matches:
+                raise
+
+            warnings.warn(
+                (
+                    f"Registration skipped for {data.slide_id}/{data.sample_id} ({channel_names[0]}): "
+                    f"{exc}"
+                ),
+                UserWarning,
+                stacklevel=2,
+            )
+            logger.warning(
+                "%s%s%s Registration skipped for %s/%s (%s): %s",
+                _LSIGN,
+                _HLINE,
+                _HLINE,
+                data.slide_id,
+                data.sample_id,
+                channel_names[0],
+                exc,
+            )
+            return
 
         if save_registered_images:
             _outfile = save_registered_image_tiff(
@@ -477,7 +503,28 @@ def register_images(
                     plt.imshow(partial.matchedVis)
                     plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
                     plt.close()
-            raise
+            if raise_on_insufficient_matches:
+                raise
+
+            warnings.warn(
+                (
+                    f"Registration skipped for {data.slide_id}/{data.sample_id} ({_qc_ref_name}): "
+                    f"{exc}"
+                ),
+                UserWarning,
+                stacklevel=2,
+            )
+            logger.warning(
+                "%s%s%s Registration skipped for %s/%s (%s): %s",
+                _LSIGN,
+                _HLINE,
+                _HLINE,
+                data.slide_id,
+                data.sample_id,
+                _qc_ref_name,
+                exc,
+            )
+            return
 
         del nuclei_img
 
