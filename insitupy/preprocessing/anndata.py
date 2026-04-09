@@ -6,8 +6,8 @@ import scanpy as sc
 from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
-from insitupy._version import __version__
 from insitupy._textformat import textformat as tf
+from insitupy._version import __version__
 from insitupy.utils._checks import check_integer_counts
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ def cluster_anndata(
     # clustering
     if method.lower() == "leiden":
         logger.info("Leiden clustering...") if verbose else None
-        sc.tl.leiden(adata)
+        sc.tl.leiden(adata, flavor='igraph')
     elif method.lower() == "louvain":
         logger.info("Louvain clustering...") if verbose else None
         sc.tl.louvain(adata)

@@ -29,8 +29,7 @@ from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  with_insitupy_style)
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
-                                  ModalityNotFoundWarning,
-                                  NoImageOverlapError)
+                                  ModalityNotFoundWarning, NoImageOverlapError)
 from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                 write_dict_to_json)
 from insitupy._textformat import textformat as tf
@@ -1823,6 +1822,7 @@ class InSituData:
         """
         import dask.array as da
         from scipy.ndimage import zoom as ndimage_zoom
+
         from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
                                           summarize_tile_measurements)
 
@@ -2131,7 +2131,7 @@ class InSituData:
                 "Use load_cells(), load_images(), etc. to load modalities from disk."
             )
 
-    def unload(self, modalities: Optional[List] = None, verbose: bool = True):
+    def unload(self, modalities: Optional[Union[str, List]] = None, verbose: bool = True):
         """Unload modality data from memory, keeping only the path reference.
 
         Resets the specified modalities to their empty state without touching
@@ -2167,7 +2167,10 @@ class InSituData:
             "units":       (None,            "_units"),
         }
 
-        target_set = set(modalities) if modalities is not None else set(_resets.keys())
+        if modalities is None:
+            target_set = set(_resets.keys())
+        else:
+            target_set = set(convert_to_list(modalities))
 
         # Early-exit if none of the requested modalities are actually loaded
         loaded = set(self.get_loaded_modalities())
