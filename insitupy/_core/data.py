@@ -2321,6 +2321,10 @@ class InSituData:
         if verbose:
             logger.info("Updating project in %s", path)
 
+        # sync identifiers into metadata before writing
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
+
         # save images
         if sync_images and not self._images.is_empty:
             if verbose:
