@@ -10,7 +10,7 @@ from typing import List, Literal, Optional, Union
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely import MultiPoint, Point, Polygon, affinity
+from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
 
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI
 from insitupy._io.files import check_overwrite_and_remove_if_true
@@ -540,6 +540,93 @@ class AnnotationsData(ShapesData):
         from insitupy.containers.io import _read_shapesdata
         return _read_shapesdata(path, mode="annotations", scale_factor=scale_factor)
 
+    def to_regions(
+        self,
+        keys: Optional[Union[str, List[str]]] = None,
+        name_filter: Optional[Union[str, List[str]]] = None,
+    ) -> "RegionsData":
+        """Convert annotations to a new :class:`RegionsData` object.
+
+        Only Polygon geometries are carried over.  Each key must have unique
+        names after polygon filtering (and optional ``name_filter``) because
+        ``RegionsData`` enforces uniqueness — a ``ValueError`` is raised if
+        duplicates remain.
+
+        Args:
+            keys: Which annotation keys to include.  ``None`` converts all
+                keys.
+            name_filter: Keep only annotations whose name matches this value
+                or list of values.  ``None`` keeps all names.
+
+        Returns:
+            RegionsData: A new object containing the converted regions.
+
+        Raises:
+            ValueError: If any key contains duplicate names after filtering.
+        """
+        target_keys = convert_to_list(keys) if keys is not None else list(self.keys())
+        name_filter_list = convert_to_list(name_filter) if name_filter is not None else None
+
+        result = RegionsData()
+        for key in target_keys:
+            if key not in self._data:
+                warnings.warn(f"Key '{key}' not found in annotations — skipped.", UserWarning, stacklevel=2)
+                continue
+
+            df = self._data[key].copy()
+
+            # Keep only Polygon geometries
+            poly_mask = df.geometry.apply(lambda g: isinstance(g, Polygon))
+            df = df.loc[poly_mask]
+            if len(df) == 0:
+                warnings.warn(f"Key '{key}' had no Polygon geometries — skipped.", UserWarning, stacklevel=2)
+                continue
+
+            # Optional name filter
+            if name_filter_list is not None:
+                df = df.loc[df[self._name_col].isin(name_filter_list)]
+                if len(df) == 0:
+                    warnings.warn(
+                        f"Key '{key}' was empty after name_filter — skipped.",
+                        UserWarning, stacklevel=2,
+                    )
+                    continue
+
+            # Require unique names — RegionsData does not allow duplicates
+            dup_names = [n for n, cnt in df[self._name_col].value_counts().items() if cnt > 1]
+            if dup_names:
+                raise ValueError(
+                    f"Key '{key}' contains duplicate annotation names: {dup_names}. "
+                    "RegionsData requires unique names per key. Rename or remove the "
+                    "duplicate annotations before converting."
+                )
+
+            result.add_data(data=df, key=key, scale_factor=1.0)
+
+        return result
+
+    @classmethod
+    def from_regions(
+        cls,
+        regions: "RegionsData",
+        keys: Optional[Union[str, List[str]]] = None,
+        on_forbidden: Literal["error", "rename", "skip"] = "error",
+    ) -> "AnnotationsData":
+        """Construct an :class:`AnnotationsData` from a :class:`RegionsData`.
+
+        Delegates to :meth:`RegionsData.to_annotations`.
+
+        Args:
+            regions: Source ``RegionsData`` object.
+            keys: Which keys to include.  ``None`` converts all keys.
+            on_forbidden: How to handle region names that clash with
+                :data:`~insitupy._constants.FORBIDDEN_ANNOTATION_NAMES`.
+
+        Returns:
+            AnnotationsData: A new object containing the converted annotations.
+        """
+        return regions.to_annotations(keys=keys, on_forbidden=on_forbidden)
+
 
 class RegionsData(ShapesData):
     """Container for spatial region shapes (unique names, polygons only).
@@ -597,4 +684,91 @@ class RegionsData(ShapesData):
         """
         from insitupy.containers.io import _read_shapesdata
         return _read_shapesdata(path, mode="regions", scale_factor=scale_factor)
-        return _read_shapesdata(path, mode="regions", scale_factor=scale_factor)
+
+    def to_annotations(
+        self,
+        keys: Optional[Union[str, List[str]]] = None,
+        on_forbidden: Literal["error", "rename", "skip"] = "error",
+    ) -> "AnnotationsData":
+        """Convert regions to a new :class:`AnnotationsData` object.
+
+        Since ``RegionsData`` is already filtered to unique-named Polygons,
+        the structural conversion is straightforward.  The only complication
+        is region names that clash with
+        :data:`~insitupy._constants.FORBIDDEN_ANNOTATION_NAMES`.
+
+        Args:
+            keys: Which region keys to include.  ``None`` converts all keys.
+            on_forbidden: How to handle names that appear in
+                ``FORBIDDEN_ANNOTATION_NAMES``.
+
+                - ``"error"`` — raise ``ValueError`` listing the offending
+                  names (default; safest choice).
+                - ``"rename"`` — append ``"_region"`` suffix and warn.
+                - ``"skip"`` — drop the offending rows and warn.
+
+        Returns:
+            AnnotationsData: A new object containing the converted annotations.
+        """
+        target_keys = convert_to_list(keys) if keys is not None else list(self.keys())
+        forbidden = set(FORBIDDEN_ANNOTATION_NAMES)
+
+        result = AnnotationsData()
+        for key in target_keys:
+            if key not in self._data:
+                warnings.warn(f"Key '{key}' not found in regions — skipped.", UserWarning, stacklevel=2)
+                continue
+
+            df = self._data[key].copy()
+
+            bad_names = [n for n in df[self._name_col].unique() if n in forbidden]
+            if bad_names:
+                if on_forbidden == "error":
+                    raise ValueError(
+                        f"Key '{key}' contains forbidden annotation names: {bad_names}. "
+                        "Use on_forbidden='rename' or 'skip' to handle them automatically."
+                    )
+                elif on_forbidden == "rename":
+                    rename_map = {n: f"{n}_region" for n in bad_names}
+                    df[self._name_col] = df[self._name_col].replace(rename_map)
+                    warnings.warn(
+                        f"Renamed forbidden names in key '{key}': {rename_map}",
+                        UserWarning, stacklevel=2,
+                    )
+                elif on_forbidden == "skip":
+                    df = df.loc[~df[self._name_col].isin(bad_names)]
+                    warnings.warn(
+                        f"Dropped forbidden names from key '{key}': {bad_names}",
+                        UserWarning, stacklevel=2,
+                    )
+                    if len(df) == 0:
+                        warnings.warn(
+                            f"Key '{key}' was empty after dropping forbidden names — skipped.",
+                            UserWarning, stacklevel=2,
+                        )
+                        continue
+
+            result.add_data(data=df, key=key, scale_factor=1.0)
+
+        return result
+
+    @classmethod
+    def from_annotations(
+        cls,
+        annotations: "AnnotationsData",
+        keys: Optional[Union[str, List[str]]] = None,
+        name_filter: Optional[Union[str, List[str]]] = None,
+    ) -> "RegionsData":
+        """Construct a :class:`RegionsData` from an :class:`AnnotationsData`.
+
+        Delegates to :meth:`AnnotationsData.to_regions`.
+
+        Args:
+            annotations: Source ``AnnotationsData`` object.
+            keys: Which keys to include.  ``None`` converts all keys.
+            name_filter: Keep only annotations with these names.
+
+        Returns:
+            RegionsData: A new object containing the converted regions.
+        """
+        return annotations.to_regions(keys=keys, name_filter=name_filter)
