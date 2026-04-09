@@ -1541,12 +1541,15 @@ class InSituExperiment:
                 Defaults to ``None``, which unloads all modalities.
 
         Raises:
-            ValueError: If any dataset has no save path set.
+            ValueError: If any dataset has no save path set and has loaded
+                modalities, because unloading would make that data unrecoverable.
         """
         self._check_mode_compatibility("unload")
 
+        target = set(convert_to_list(modalities)) if modalities is not None else set(MODALITIES)
         missing = [
-            i for i, xd in enumerate(self._data) if xd._path is None
+            i for i, xd in enumerate(self._data)
+            if xd._path is None and bool(set(xd.get_loaded_modalities()) & target)
         ]
         if missing:
             raise ValueError(
@@ -1554,7 +1557,7 @@ class InSituExperiment:
                 f"path. Call saveas() first to avoid permanent data loss."
             )
 
-        all_modalities = ["images", "cells", "transcripts", "annotations", "regions", "units"]
+        all_modalities = list(MODALITIES)
         active = modalities if modalities is not None else all_modalities
         logger.info(
             "Unloading %d dataset(s) [modalities: %s]...",

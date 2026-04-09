@@ -67,6 +67,19 @@ def _region_overlaps_image(images, xlim, ylim) -> bool:
     return False
 
 
+# Maps modality name → (factory_callable_or_None, private_attr_name).
+# Used by _clear_modality and unload as the single source of truth for
+# how each modality is reset to its empty sentinel.
+_RESET_MAP: dict = {
+    "cells":       (MultiCellData,   "_cells"),
+    "units":       (None,            "_units"),
+    "images":      (ImageData,       "_images"),
+    "transcripts": (None,            "_transcripts"),
+    "annotations": (AnnotationsData, "_annotations"),
+    "regions":     (RegionsData,     "_regions"),
+}
+
+
 class InSituData:
     """
     InSituData class for managing and analyzing spatially resolved transcriptomics data.
@@ -391,8 +404,8 @@ class InSituData:
     @images.deleter
     def images(self):
         """Clear all image data from this object."""
-        self._images = ImageData()
-        logger.info("Cleared all data from 'images'.")
+        self._clear_modality("images", verbose=True)
+        import gc; gc.collect()
 
     @property
     def cells(self):
@@ -410,8 +423,8 @@ class InSituData:
     @cells.deleter
     def cells(self):
         """Clear all cell data from this object."""
-        self._cells = MultiCellData()
-        logger.info("Cleared all data from 'cells'.")
+        self._clear_modality("cells", verbose=True)
+        import gc; gc.collect()
 
     @property
     def units(self):
@@ -429,8 +442,8 @@ class InSituData:
     @units.deleter
     def units(self):
         """Clear all spatial units data from this object."""
-        self._units = None
-        logger.info("Cleared all data from 'units'.")
+        self._clear_modality("units", verbose=True)
+        import gc; gc.collect()
 
     def add_units(self, data: SpatialUnitsData):
         """
@@ -463,8 +476,8 @@ class InSituData:
     @annotations.deleter
     def annotations(self):
         """Clear all annotation data from this object."""
-        self._annotations = AnnotationsData()
-        logger.info("Cleared all data from 'annotations'.")
+        self._clear_modality("annotations", verbose=True)
+        import gc; gc.collect()
 
     @property
     def regions(self):
@@ -482,8 +495,8 @@ class InSituData:
     @regions.deleter
     def regions(self):
         """Clear all region data from this object."""
-        self._regions = RegionsData()
-        logger.info("Cleared all data from 'regions'.")
+        self._clear_modality("regions", verbose=True)
+        import gc; gc.collect()
 
     @property
     def transcripts(self):
@@ -507,7 +520,8 @@ class InSituData:
     @transcripts.deleter
     def transcripts(self):
         """Clear all transcript data from this object."""
-        self._transcripts = None
+        self._clear_modality("transcripts", verbose=True)
+        import gc; gc.collect()
 
 
     def assign_geometries(self,
@@ -2131,6 +2145,33 @@ class InSituData:
                 "Use load_cells(), load_images(), etc. to load modalities from disk."
             )
 
+    def _clear_modality(self, modality: str, verbose: bool = True) -> bool:
+        """Reset one modality to its empty sentinel.
+
+        Args:
+            modality: Name of the modality to clear (must be a key in
+                :data:`_RESET_MAP`).
+            verbose: If ``True``, emit a log line when the modality is
+                cleared.  Defaults to ``True``.
+
+        Returns:
+            bool: ``True`` if the modality was cleared, ``False`` if it was
+            already empty (no-op).
+        """
+        factory, attr = _RESET_MAP[modality]
+        current = getattr(self, attr)
+        try:
+            if current.is_empty:
+                return False
+        except AttributeError:
+            # transcripts and units use None as the empty sentinel
+            if current is None:
+                return False
+        setattr(self, attr, factory() if factory is not None else None)
+        if verbose:
+            logger.info("Cleared modality '%s'.", modality)
+        return True
+
     def unload(self, modalities: Optional[Union[str, List]] = None, verbose: bool = True):
         """Unload modality data from memory, keeping only the path reference.
 
@@ -2142,6 +2183,10 @@ class InSituData:
         Useful for freeing RAM after a :meth:`save` call, or as a preparatory
         step before moving data on disk.
 
+        .. note::
+            Use ``del xd.<modality>`` (e.g. ``del xd.images``) to clear a
+            modality on an object that has not been saved to disk yet.
+
         Args:
             modalities: Modality name(s) to unload (e.g. ``["cells", "images"]``).
                 Defaults to ``None``, which unloads all modalities.
@@ -2149,44 +2194,31 @@ class InSituData:
                 Defaults to ``True``.
 
         Raises:
-            ValueError: If no save path is set, because unloading without a
-                save path would make the in-memory data unrecoverable.
+            ValueError: If no save path is set and at least one target
+                modality is loaded, because unloading would make the
+                in-memory data unrecoverable.
         """
-        if self._path is None:
-            raise ValueError(
-                "Cannot unload: no save path is set. Save the object with "
-                "'saveas()' first to avoid permanent data loss."
-            )
+        target_set = set(_RESET_MAP.keys()) if modalities is None else set(convert_to_list(modalities))
 
-        _resets = {
-            "images":      (ImageData,       "_images"),
-            "cells":       (MultiCellData,   "_cells"),
-            "transcripts": (None,            "_transcripts"),
-            "annotations": (AnnotationsData, "_annotations"),
-            "regions":     (RegionsData,     "_regions"),
-            "units":       (None,            "_units"),
-        }
-
-        if modalities is None:
-            target_set = set(_resets.keys())
-        else:
-            target_set = set(convert_to_list(modalities))
-
-        # Early-exit if none of the requested modalities are actually loaded
+        # Early-exit if none of the requested modalities are actually loaded —
+        # also skips the path guard when there is nothing to lose.
         loaded = set(self.get_loaded_modalities())
-        if self._units is not None:
-            loaded.add("units")
         if not loaded & target_set:
             return
 
-        # Reset each modality to its empty sentinel — mirrors what the property
-        # deleters do but without emitting a log line per modality.
+        if self._path is None:
+            raise ValueError(
+                "Cannot unload: no save path is set. Save the object with "
+                "'saveas()' first to avoid permanent data loss. "
+                "To discard in-memory data intentionally, use 'del xd.<modality>'."
+            )
+
         cleared = []
-        for modality, (factory, attr) in _resets.items():
+        for modality in _RESET_MAP:
             if modality not in target_set:
                 continue
-            setattr(self, attr, factory() if factory is not None else None)
-            cleared.append(modality)
+            if self._clear_modality(modality, verbose=False):
+                cleared.append(modality)
 
         import gc
         gc.collect()
