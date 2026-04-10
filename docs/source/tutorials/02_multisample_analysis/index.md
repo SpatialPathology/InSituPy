@@ -37,6 +37,12 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 
     Notebook introducing a multi-sample analysis workflow based on AnnData objects.
 
+.. card:: Cross-sample concatenated table (`.table`)
+    :link: InSituPy_table_workflow
+    :link-type: doc
+
+    Build a zarr-backed concatenated AnnData across all samples, run scanpy workflows on it, and transfer results back into per-sample objects. Includes a memory-efficient ``concat_on_disk`` mode for large experiments.
+
 .. card:: Import workflow based on the Vannan et al. paper
     :link: InSituPy_Vannan_paper_import
     :link-type: doc
@@ -53,5 +59,6 @@ InSituPy_split_datasets
 InSituPy_Pseudobulk
 InSituPy_extract_individual_images
 InSituPy_Anndata_workflow
+InSituPy_table_workflow
 InSituPy_Vannan_paper_import
 ```
