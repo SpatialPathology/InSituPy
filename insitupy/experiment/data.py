@@ -1180,6 +1180,72 @@ class InSituExperiment:
             fill_missing=fill_missing,
         )
 
+    def import_from_table(
+        self,
+        obs_columns: Optional[List[str]] = None,
+        obsm_keys: Optional[List[str]] = None,
+        cells_layer: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> "InSituExperiment":
+        """Import data from the concatenated table back into per-sample AnnData objects.
+
+        Transfers selected obs columns and obsm keys from :attr:`table` back to
+        the individual per-sample AnnData objects. This is the reverse operation
+        of :meth:`build_table`.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+
+        Args:
+            obs_columns: Column names in ``table.obs`` to transfer.
+            obsm_keys: Keys in ``table.obsm`` to transfer.
+            cells_layer: Cell layer to transfer data into.
+            overwrite: If True, overwrite existing columns/keys.
+
+        Returns:
+            Self, for method chaining.
+
+        Raises:
+            ValueError: If no table has been built yet, or if both ``obs_columns``
+                and ``obsm_keys`` are None.
+        """
+        self._check_mode_compatibility("import_from_table")
+
+        if obs_columns is None and obsm_keys is None:
+            raise ValueError(
+                "Both `obs_columns` and `obsm_keys` are None. "
+                "At least one must be provided."
+            )
+
+        table_path = self._get_table_path()
+        if table_path is None or not table_path.exists():
+            raise ValueError(
+                "No concatenated table found. Call `build_table()` first."
+            )
+
+        # Load the full table into memory for cell matching
+        table_adata = anndata.read_zarr(table_path)
+
+        # Retrieve the label column used during build_table
+        label_col = table_adata.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
+
+        if label_col not in table_adata.obs.columns:
+            raise ValueError(
+                f"Label column '{label_col}' not found in table.obs. "
+                "The table may have been built with a different label_col."
+            )
+
+        return self._transfer_to_samples(
+            adata=table_adata,
+            uid_column=label_col,
+            uid_column_adata=label_col,
+            obs_columns_to_transfer=obs_columns,
+            obsm_keys_to_transfer=obsm_keys,
+            cells_layer=cells_layer,
+            overwrite=overwrite,
+            strip_uid_prefix=True,
+            fill_missing=True,
+        )
 
     def iterdata(self):
         """
@@ -1347,6 +1413,124 @@ class InSituExperiment:
             join="inner",
         )
 
+    # ── Table (cross-sample concatenated AnnData) ─────────────────────────────
+
+    def _get_table_path(self) -> Optional[Path]:
+        """Return the path to ``tables/concat.zarr``, or None if no experiment path is set."""
+        if self.path is None:
+            return None
+        return Path(self.path) / "tables" / "concat.zarr"
+
+    @property
+    def table(self) -> Optional[AnnData]:
+        """Lazily-loaded concatenated AnnData from ``tables/concat.zarr``.
+
+        Returns the concatenated AnnData spanning all samples. Call
+        :meth:`build_table` first to create it.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+
+        Returns:
+            AnnData or None if no table has been built.
+        """
+        table_path = self._get_table_path()
+        if table_path is None or not table_path.exists():
+            warnings.warn(
+                "No concatenated table found. Call `build_table()` to create one.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
+        return anndata.experimental.read_lazy(table_path)
+
+    def build_table(
+        self,
+        cells_layer: Optional[str] = None,
+        label_col: str = "uid",
+        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
+        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        make_obs_names_unique: bool = True,
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: Optional[int] = None,
+        overwrite: bool = False,
+    ) -> None:
+        """Build a zarr-backed concatenated AnnData across all samples.
+
+        Concatenates all per-sample AnnData objects and writes the result to
+        ``{experiment_path}/tables/concat.zarr``. After building, access the
+        result via :attr:`table`.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+
+        Args:
+            cells_layer: Cell layer to extract from each sample.
+            label_col: Metadata column used as the sample identifier label.
+                Defaults to ``"uid"``.
+            obs_keys: Obs columns to retain in each sample's AnnData.
+            var_keys: Var columns to retain.
+            obsm_keys: Obsm keys to retain. Defaults to ``"spatial"``.
+            varm_keys: Varm keys to retain.
+            uns_keys: Uns keys to retain.
+            layer_keys: Layer keys to retain.
+            metadata_keys: Metadata columns to add to obs.
+            make_obs_names_unique: Prepend ``"{index}-"`` to obs names.
+            join: How to join variables. ``"inner"`` (default) keeps only shared
+                genes; ``"outer"`` keeps all genes with fill values.
+            min_shared_genes: Warn when fewer than this many genes remain after
+                an inner join.
+            overwrite: If True, overwrite an existing table.
+
+        Raises:
+            ValueError: If the experiment has no save path set.
+            FileExistsError: If a table already exists and ``overwrite=False``.
+        """
+        self._check_mode_compatibility("build_table")
+
+        if self.path is None:
+            raise ValueError(
+                "Cannot build table: experiment has no save path. "
+                "Call `saveas()` first to give the experiment a path."
+            )
+
+        output_path = self._get_table_path()
+        check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # TODO: For very large experiments, switch to anndata.experimental.concat_on_disk()
+        #       to reduce peak memory usage.
+        adata = self._concatenate_samples(
+            cells_layer=cells_layer,
+            label_col=label_col,
+            obs_keys=obs_keys,
+            var_keys=var_keys,
+            obsm_keys=obsm_keys,
+            varm_keys=varm_keys,
+            uns_keys=uns_keys,
+            layer_keys=layer_keys,
+            metadata_keys=metadata_keys,
+            make_obs_names_unique=make_obs_names_unique,
+            join=join,
+            min_shared_genes=min_shared_genes,
+        )
+
+        # Store build parameters for round-trip (import_from_table)
+        adata.uns["_insitupy_build_params"] = {"label_col": label_col}
+
+        adata.write_zarr(output_path)
+        logger.info(
+            "Built concatenated table at '%s' (%d cells, %d genes).",
+            output_path,
+            adata.n_obs,
+            adata.n_vars,
+        )
 
     def load_all(self,
                  skip: Optional[str] = None,
@@ -3075,3 +3259,55 @@ class InSituExperimentView(InSituExperiment):
     def is_view(self) -> bool:
         """Return True; this object is a linked view of a parent experiment."""
         return True
+
+    @property
+    def table(self) -> Optional[AnnData]:
+        """Row-sliced view of the parent experiment's concatenated table.
+
+        Returns an AnnData filtered to only the samples present in this view.
+        Requires the parent experiment to have called :meth:`build_table` first.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+
+        Returns:
+            AnnData filtered to this view's samples, or None if no table exists.
+        """
+        table_path = self._get_table_path()
+        if table_path is None or not table_path.exists():
+            warnings.warn(
+                "No concatenated table found. Call `build_table()` on the parent "
+                "experiment first.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
+
+        full_table = anndata.experimental.read_lazy(table_path)
+
+        # Retrieve the label column used during build_table
+        label_col = full_table.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
+
+        # Get the sample identifiers present in this view
+        if label_col not in self._metadata.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in view metadata. "
+                "Cannot filter table by view samples.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return full_table
+
+        view_sample_ids = set(self._metadata[label_col].values)
+
+        if label_col not in full_table.obs.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in concatenated table obs. "
+                "Cannot filter by view samples.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return full_table
+
+        mask = full_table.obs[label_col].isin(view_sample_ids)
+        return full_table[mask]
