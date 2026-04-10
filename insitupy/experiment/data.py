@@ -981,6 +981,134 @@ class InSituExperiment:
         return n_cells
 
 
+    def _transfer_to_samples(
+        self,
+        adata: AnnData,
+        uid_column: str,
+        uid_column_adata: str,
+        obs_columns_to_transfer: Optional[List[str]] = None,
+        obsm_keys_to_transfer: Optional[List[str]] = None,
+        cells_layer: Optional[str] = None,
+        overwrite: bool = False,
+        strip_uid_prefix: bool = True,
+        fill_missing: bool = True,
+    ) -> "InSituExperiment":
+        """Transfer obs columns and obsm keys from an AnnData to per-sample AnnData objects.
+
+        Datasets are matched using unique identifiers in the metadata and
+        ``adata.obs``. Both ``.obs`` annotations and ``.obsm`` embeddings can
+        be transferred.
+
+        Args:
+            adata: Source AnnData object.
+            uid_column: Column in the InSituExperiment metadata that identifies
+                each sample.
+            uid_column_adata: Column in ``adata.obs`` that identifies each
+                sample.
+            obs_columns_to_transfer: ``adata.obs`` columns to copy into each
+                per-sample AnnData.
+            obsm_keys_to_transfer: ``adata.obsm`` keys to copy.
+            cells_layer: Cell layer to receive the transferred data.
+            overwrite: If True, overwrite existing columns/keys.
+            strip_uid_prefix: If True, strip the ``"{index}-"`` prefix from
+                obs_names before matching.
+            fill_missing: If True, allow partial matches (missing cells filled
+                with NaN).
+
+        Returns:
+            Self, for method chaining.
+        """
+        for meta, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            current_uid = meta[uid_column]
+            mask = adata.obs[uid_column_adata] == current_uid
+            subset = adata[mask].copy()
+
+            if len(subset) == 0:
+                warnings.warn(
+                    f"No matching data found in `adata` for ID '{current_uid}'. "
+                    f"Skipping this dataset.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                continue
+
+            # Handle cell name matching
+            if strip_uid_prefix:
+                if len(subset.obs_names) > 0:
+                    sample_name = str(subset.obs_names[0])
+                    if '-' in sample_name:
+                        subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
+                                                    for name in subset.obs_names])
+
+            # Check for cell name matches
+            matching_cells = celldata.table.obs_names.isin(subset.obs_names)
+            n_matching = matching_cells.sum()
+            n_total = len(celldata.table)
+
+            if n_matching == 0:
+                raise ValueError(
+                    f"No matching cell names found for dataset '{current_uid}'. "
+                    f"Ensure cell names match between adata and InSituData."
+                )
+
+            if n_matching < n_total:
+                if not fill_missing:
+                    raise ValueError(
+                        f"Cell name mismatch for dataset '{current_uid}': "
+                        f"Only {n_matching}/{n_total} cells found. "
+                        f"Set `fill_missing=True` to allow partial matches."
+                    )
+                else:
+                    warnings.warn(
+                        f"Partial match for dataset '{current_uid}': "
+                        f"Only {n_matching}/{n_total} cells found. "
+                        f"Missing cells will be filled with NaN.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+
+            # Transfer obs columns
+            if obs_columns_to_transfer:
+                for col in obs_columns_to_transfer:
+                    if col in celldata.table.obs.columns and not overwrite:
+                        raise ValueError(
+                            f"Column '{col}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
+                        )
+                    celldata.table.obs[col] = subset.obs[col]
+
+            # Transfer obsm keys
+            if obsm_keys_to_transfer:
+                for key in obsm_keys_to_transfer:
+                    if key in celldata.table.obsm.keys() and not overwrite:
+                        raise ValueError(
+                            f"Key '{key}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
+                        )
+
+                    # Create empty array with NaN
+                    n_cells_target = len(celldata.table)
+                    n_features = subset.obsm[key].shape[1]
+                    target_array = np.full((n_cells_target, n_features), np.nan)
+
+                    # Fill with matching values
+                    subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
+                    for target_idx, cell_name in enumerate(celldata.table.obs_names):
+                        if cell_name in subset_index_map:
+                            subset_idx = subset_index_map[cell_name]
+                            target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
+
+                    if np.isnan(target_array).any() and not fill_missing:
+                        raise ValueError(
+                            f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
+                            f"Missing values. Set `fill_missing=True`."
+                        )
+
+                    celldata.table.obsm[key] = target_array
+
+        return self
+
     def import_from_anndata(
         self,
         adata: AnnData,
@@ -1040,96 +1168,17 @@ class InSituExperiment:
                 f"Available columns: {list(adata.obs.columns)}"
             )
 
-        for meta, xd in self.iterdata():
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            current_uid = meta[uid_column]
-            mask = adata.obs[uid_column_adata] == current_uid
-            subset = adata[mask].copy()
-
-            if len(subset) == 0:
-                warnings.warn(
-                    f"No matching data found in `adata` for ID '{current_uid}'. "
-                    f"Skipping this dataset.",
-                    UserWarning,
-                    stacklevel=2
-                )
-                continue
-
-            # Handle cell name matching
-            if strip_uid_prefix:
-                if len(subset.obs_names) > 0:
-                    sample_name = str(subset.obs_names[0])
-                    if '-' in sample_name:
-                        subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
-                                                    for name in subset.obs_names])
-
-            # Check for cell name matches
-            matching_cells = celldata.table.obs_names.isin(subset.obs_names)
-            n_matching = matching_cells.sum()
-            n_total = len(celldata.table)
-
-            if n_matching == 0:
-                raise ValueError(
-                    f"No matching cell names found for dataset '{current_uid}'. "
-                    f"Ensure cell names match between adata and InSituData."
-                )
-
-            if n_matching < n_total:
-                if not fill_missing:
-                    raise ValueError(
-                        f"Cell name mismatch for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells found. "
-                        f"Set `fill_missing=True` to allow partial matches."
-                    )
-                else:
-                    warnings.warn(
-                        f"Partial match for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells found. "
-                        f"Missing cells will be filled with NaN.",
-                        UserWarning,
-                        stacklevel=2
-                    )
-
-            # Transfer obs columns
-            if obs_columns_to_transfer:
-                for col in obs_columns_to_transfer:
-                    if col in celldata.table.obs.columns and not overwrite:
-                        raise ValueError(
-                            f"Column '{col}' already exists for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite."
-                        )
-                    celldata.table.obs[col] = subset.obs[col]
-
-            # Transfer obsm keys
-            if obsm_keys_to_transfer:
-                for key in obsm_keys_to_transfer:
-                    if key in celldata.table.obsm.keys() and not overwrite:
-                        raise ValueError(
-                            f"Key '{key}' already exists for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite."
-                        )
-
-                    # Create empty array with NaN
-                    n_cells_target = len(celldata.table)
-                    n_features = subset.obsm[key].shape[1]
-                    target_array = np.full((n_cells_target, n_features), np.nan)
-
-                    # Fill with matching values
-                    subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
-                    for target_idx, cell_name in enumerate(celldata.table.obs_names):
-                        if cell_name in subset_index_map:
-                            subset_idx = subset_index_map[cell_name]
-                            target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
-
-                    if np.isnan(target_array).any() and not fill_missing:
-                        raise ValueError(
-                            f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
-                            f"Missing values. Set `fill_missing=True`."
-                        )
-
-                    celldata.table.obsm[key] = target_array
-
-        return self
+        return self._transfer_to_samples(
+            adata=adata,
+            uid_column=uid_column,
+            uid_column_adata=uid_column_adata,
+            obs_columns_to_transfer=obs_columns_to_transfer,
+            obsm_keys_to_transfer=obsm_keys_to_transfer,
+            cells_layer=cells_layer,
+            overwrite=overwrite,
+            strip_uid_prefix=strip_uid_prefix,
+            fill_missing=fill_missing,
+        )
 
 
     def iterdata(self):
@@ -1143,7 +1192,7 @@ class InSituExperiment:
             yield row, self._data[idx]
 
 
-    def to_anndata(
+    def _concatenate_samples(
         self,
         cells_layer: Optional[str] = None,
         label_col: str = "uid",
@@ -1155,9 +1204,10 @@ class InSituExperiment:
         layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
         make_obs_names_unique: bool = True,
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: Optional[int] = None,
     ) -> anndata.AnnData:
-        """
-        Concatenate all datasets into a single AnnData object.
+        """Concatenate all sample AnnData objects into a single AnnData.
 
         Args:
             cells_layer: The layer name to extract cell data from.
@@ -1168,14 +1218,16 @@ class InSituExperiment:
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
-            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
-            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
+            metadata_keys: Metadata columns to add to obs dataframe.
+            make_obs_names_unique: If True, prepends dataset index to obs names.
+            join: How to join variables. ``"inner"`` keeps only shared genes;
+                ``"outer"`` keeps all genes with fill values.
+            min_shared_genes: If set and ``join="inner"``, warn when the
+                number of shared genes falls below this threshold.
 
         Returns:
             AnnData: A concatenated AnnData object.
         """
-        self._check_mode_compatibility("to_anndata")
-
         # Validate label_col exists in metadata
         if label_col not in self._metadata.columns:
             raise ValueError(
@@ -1225,10 +1277,22 @@ class InSituExperiment:
         adata_concat = anndata.concat(
             adatas,
             axis='obs',
-            join='inner',
+            join=join,
             label=label_col,
             merge="unique"
         )
+
+        # Warn if inner join result has fewer shared genes than threshold
+        if join == "inner" and min_shared_genes is not None:
+            n_genes = adata_concat.n_vars
+            if n_genes < min_shared_genes:
+                warnings.warn(
+                    f"Only {n_genes} shared genes after inner join "
+                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
+                    "to retain all genes.",
+                    UserWarning,
+                    stacklevel=3,
+                )
 
         # Move label_col to first position in obs columns
         if label_col in adata_concat.obs.columns:
@@ -1236,6 +1300,52 @@ class InSituExperiment:
             adata_concat.obs = adata_concat.obs[cols]
 
         return adata_concat
+
+    def to_anndata(
+        self,
+        cells_layer: Optional[str] = None,
+        label_col: str = "uid",
+        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
+        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        make_obs_names_unique: bool = True,
+    ) -> anndata.AnnData:
+        """
+        Concatenate all datasets into a single AnnData object.
+
+        Args:
+            cells_layer: The layer name to extract cell data from.
+            label_col: Column name in metadata to use as labels. Defaults to "uid".
+            obs_keys: Keys to select from obs dataframe.
+            var_keys: Keys to select from var dataframe.
+            obsm_keys: Keys to select from obsm dictionary.
+            varm_keys: Keys to select from varm dictionary.
+            uns_keys: Keys to select from uns dictionary.
+            layer_keys: Keys to select from layers dictionary.
+            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
+            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
+
+        Returns:
+            AnnData: A concatenated AnnData object.
+        """
+        self._check_mode_compatibility("to_anndata")
+        return self._concatenate_samples(
+            cells_layer=cells_layer,
+            label_col=label_col,
+            obs_keys=obs_keys,
+            var_keys=var_keys,
+            obsm_keys=obsm_keys,
+            varm_keys=varm_keys,
+            uns_keys=uns_keys,
+            layer_keys=layer_keys,
+            metadata_keys=metadata_keys,
+            make_obs_names_unique=make_obs_names_unique,
+            join="inner",
+        )
 
 
     def load_all(self,
