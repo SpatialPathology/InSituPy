@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 import warnings
 from collections import defaultdict
 from copy import deepcopy
@@ -27,13 +28,13 @@ from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils.utils import (_crop_transcripts, convert_to_list,
+                                  get_nrows_maxcols, remove_empty_subplots)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ logger = logging.getLogger(__name__)
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
 _FILTERS_SCHEMA_VERSION = 1
+_METADATA_SCHEMA_VERSION = 1
+_METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -152,10 +155,12 @@ class InSituExperiment:
 
     @property
     def is_view(self) -> bool:
+        """Return False; this is the base experiment, not a view."""
         return False
 
     @property
     def applied_filters(self) -> List[str]:
+        """Return the list of filter labels that have been applied to this experiment."""
         return list(self._applied_filters)
 
     def _subset(
@@ -358,9 +363,9 @@ class InSituExperiment:
         Returns:
             pandas.DataFrame: A copy of the metadata DataFrame.
         """
-        print(
-            f"{tf.Yellow}You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            f"Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata.{tf.ResetAll}"
+        logger.warning(
+            "You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
+            "Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata."
         )
         return self._metadata.copy()
 
@@ -480,7 +485,8 @@ class InSituExperiment:
                 raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
 
         # checks whether dataset is an instance of InSituData or any subclass of it, and avoids issues with direct object identity comparison
-        assert dataset.__class__ is InSituData, f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'"
+        if dataset.__class__ is not InSituData:
+            raise TypeError(f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'")
 
         # Add the dataset to the data collection
         self._data.append(dataset)
@@ -791,6 +797,56 @@ class InSituExperiment:
             # Single value - broadcast to all indices
             self._metadata.loc[indices, column_name] = values
 
+    def update_metadata(self):
+        """Sync ``slide_id`` and ``sample_id`` from child datasets into the experiment metadata.
+
+        Reads :attr:`~insitupy._core.data.InSituData.slide_id` and
+        :attr:`~insitupy._core.data.InSituData.sample_id` from every dataset in
+        :attr:`data` and overwrites the corresponding values in :attr:`metadata`.
+        All other metadata columns are left untouched.
+
+        Call this method after changing ``slide_id`` or ``sample_id`` on one or more
+        :class:`~insitupy._core.data.InSituData` objects that belong to this experiment.
+
+        Examples:
+            >>> exp.data[0].slide_id = '0005405'
+            >>> exp.update_metadata()
+        """
+        changed = 0
+        for i, dataset in enumerate(self._data):
+            old_slide = self._metadata.at[i, 'slide_id']
+            old_sample = self._metadata.at[i, 'sample_id']
+            new_slide = dataset.slide_id
+            new_sample = dataset.sample_id
+            if old_slide != new_slide or old_sample != new_sample:
+                self._metadata.at[i, 'slide_id'] = new_slide
+                self._metadata.at[i, 'sample_id'] = new_sample
+                changed += 1
+        if changed:
+            logger.info("update_metadata: synced slide_id/sample_id for %d dataset(s).", changed)
+        else:
+            logger.info("update_metadata: all slide_id/sample_id values already in sync.")
+
+    def rename_metadata_column(self, old_name: str, new_name: str):
+        """Rename a column in the experiment metadata.
+
+        Args:
+            old_name (str): Current column name.
+            new_name (str): New column name.
+
+        Raises:
+            KeyError: If ``old_name`` does not exist in the metadata.
+            ValueError: If ``new_name`` already exists in the metadata.
+
+        Examples:
+            >>> exp.rename_metadata_column("old_col", "new_col")
+        """
+        if old_name not in self._metadata.columns:
+            raise KeyError(f"Column '{old_name}' not found in metadata.")
+        if new_name in self._metadata.columns:
+            raise ValueError(f"Column '{new_name}' already exists in metadata.")
+        self._metadata.rename(columns={old_name: new_name}, inplace=True)
+
     def remove_metadata_columns(self, columns):
         """
         Remove specified columns from the internal metadata.
@@ -993,7 +1049,9 @@ class InSituExperiment:
             if len(subset) == 0:
                 warnings.warn(
                     f"No matching data found in `adata` for ID '{current_uid}'. "
-                    f"Skipping this dataset."
+                    f"Skipping this dataset.",
+                    UserWarning,
+                    stacklevel=2
                 )
                 continue
 
@@ -1027,7 +1085,9 @@ class InSituExperiment:
                     warnings.warn(
                         f"Partial match for dataset '{current_uid}': "
                         f"Only {n_matching}/{n_total} cells found. "
-                        f"Missing cells will be filled with NaN."
+                        f"Missing cells will be filled with NaN.",
+                        UserWarning,
+                        stacklevel=2
                     )
 
             # Transfer obs columns
@@ -1196,7 +1256,7 @@ class InSituExperiment:
                     try:
                         func()
                     except ModalityNotFoundError as err:
-                        print(err)
+                        logger.warning(str(err))
 
     def load_annotations(self):
         """Load annotations for all datasets."""
@@ -1374,6 +1434,139 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.remove_history(verbose=False)
 
+    def reload(
+        self,
+        skip: Optional[List] = None,
+        verbose: bool = True,
+    ):
+        """Reload all datasets and experiment-level files from disk.
+
+        Calls :meth:`~insitupy._core.data.InSituData.reload` on every child
+        dataset, then re-reads ``metadata.csv``, ``colors.json``, and
+        ``filters.json`` from the experiment's save path.  Useful after a
+        :meth:`save` call to replace in-memory data with fresh on-disk state.
+
+        Args:
+            skip: Modality name(s) forwarded to each dataset's
+                :meth:`~insitupy._core.data.InSituData.reload` (e.g.
+                ``["images"]``).  Defaults to ``None``.
+            verbose: If ``True``, log progress.  Defaults to ``True``.
+
+        Raises:
+            ValueError: If no experiment save path is set.
+        """
+        self._check_mode_compatibility("reload")
+
+        if self.path is None:
+            raise ValueError(
+                "No save path available. Cannot reload without a save path. "
+                "Save the experiment with `saveas()` first."
+            )
+
+        path = Path(self.path)
+
+        # Collect the union of loaded modalities across all datasets for the summary log
+        if verbose:
+            all_modalities: set = set()
+            for xd in self._data:
+                all_modalities.update(xd.get_loaded_modalities())
+            skip_set = set(skip) if skip else set()
+            active_modalities = [m for m in all_modalities if m not in skip_set]
+            logger.info(
+                "Reloading %d dataset(s) [modalities: %s]...",
+                len(self._data),
+                ", ".join(active_modalities) if active_modalities else "none",
+            )
+
+        # Reload each child dataset (suppress per-dataset messages to keep progress bar clean)
+        for xd in tqdm(self._data):
+            xd.reload(skip=skip, verbose=False)
+
+        # Reload experiment metadata
+        metadata_path = path / "metadata.csv"
+        if metadata_path.exists():
+            self._metadata = self._read_metadata_with_schema(path)
+            if verbose:
+                logger.info("Reloaded metadata, colors, and filters from disk.")
+
+        # Reload colors
+        colors_path = path / "colors.json"
+        if colors_path.exists():
+            with open(colors_path, 'r') as f:
+                self._colors = json.load(f)
+        else:
+            self._colors = {}
+
+        # Reload filters
+        self._filters = {}
+        self._applied_filters = []
+        filters_path = path / "filters.json"
+        if filters_path.exists():
+            try:
+                with open(filters_path, 'r') as f:
+                    filters_payload = json.load(f)
+                version = filters_payload.get("version", None)
+                filters = filters_payload.get("filters", None)
+                if version != _FILTERS_SCHEMA_VERSION:
+                    raise ValueError(
+                        f"Unsupported filters schema version: {version}. "
+                        f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                    )
+                if isinstance(filters, dict):
+                    for name, entry in filters.items():
+                        spec = FilterSpec.from_entry(name, entry)
+                        mask_arr = np.asarray(spec.mask, dtype=bool)
+                        if len(mask_arr) != len(self._metadata):
+                            warnings.warn(
+                                f"Filter '{name}' length ({len(mask_arr)}) does not match "
+                                f"metadata length ({len(self._metadata)}). Skipping.",
+                                UserWarning,
+                                stacklevel=2,
+                            )
+                            continue
+                        self._filters[name] = {"mask": mask_arr.tolist(), "note": spec.note}
+            except Exception as err:
+                warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
+
+    def unload(self, modalities: Optional[List] = None):
+        """Unload modality data from memory for every dataset in this experiment.
+
+        Calls :meth:`~insitupy._core.data.InSituData.unload` on every child
+        dataset.  The experiment object itself (metadata, colors, filters) is
+        unaffected.  Call the corresponding ``load_*()`` methods to bring
+        modalities back into memory.
+
+        Args:
+            modalities: Modality name(s) to unload (e.g. ``["cells", "images"]``).
+                Defaults to ``None``, which unloads all modalities.
+
+        Raises:
+            ValueError: If any dataset has no save path set and has loaded
+                modalities, because unloading would make that data unrecoverable.
+        """
+        self._check_mode_compatibility("unload")
+
+        target = set(convert_to_list(modalities)) if modalities is not None else set(MODALITIES)
+        missing = [
+            i for i, xd in enumerate(self._data)
+            if xd._path is None and bool(set(xd.get_loaded_modalities()) & target)
+        ]
+        if missing:
+            raise ValueError(
+                f"Cannot unload: dataset(s) at index {missing} have no save "
+                f"path. Call saveas() first to avoid permanent data loss."
+            )
+
+        all_modalities = list(MODALITIES)
+        active = modalities if modalities is not None else all_modalities
+        logger.info(
+            "Unloading %d dataset(s) [modalities: %s]...",
+            len(self._data),
+            ", ".join(active) if active else "none",
+        )
+        for xd in tqdm(self._data):
+            xd.unload(modalities=modalities, verbose=False)
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
@@ -1444,16 +1637,16 @@ class InSituExperiment:
         path: Optional[Union[str, os.PathLike, Path]] = None,
         overwrite: bool = True,
     ):
-        """Save only experiment metadata to ``metadata.csv``.
+        """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
 
         Args:
-            path: Directory where ``metadata.csv`` should be written.
+            path: Directory where metadata files should be written.
                 If None, uses ``self.path``.
-            overwrite: If True, overwrite an existing ``metadata.csv``.
+            overwrite: If True, overwrite existing metadata files.
 
         Raises:
             ValueError: If neither ``path`` nor ``self.path`` is set.
-            FileExistsError: If ``metadata.csv`` exists and ``overwrite`` is False.
+            FileExistsError: If metadata files exist and ``overwrite`` is False.
         """
         if path is None:
             if self.path is None:
@@ -1465,13 +1658,127 @@ class InSituExperiment:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         metadata_path = path / "metadata.csv"
+        metadata_schema_path = self._metadata_schema_path(path)
 
-        if metadata_path.exists() and not overwrite:
+        if (metadata_path.exists() or metadata_schema_path.exists()) and not overwrite:
             raise FileExistsError(
-                f"File already exists: {metadata_path}. Set `overwrite=True` to replace it."
+                "Metadata file(s) already exist. "
+                f"Found: {metadata_path} and/or {metadata_schema_path}. "
+                "Set `overwrite=True` to replace them."
             )
 
         self._metadata.to_csv(metadata_path, index=True)
+        self._save_metadata_schema(path, self._metadata)
+
+    @staticmethod
+    def _metadata_schema_path(path: Path) -> Path:
+        """Return the path to metadata schema sidecar file."""
+        return path / _METADATA_SCHEMA_FILENAME
+
+    @staticmethod
+    def _metadata_dtype_map(metadata: pd.DataFrame) -> Dict[str, str]:
+        """Serialize DataFrame dtypes to JSON-compatible strings."""
+        return {str(column): str(dtype) for column, dtype in metadata.dtypes.items()}
+
+    @classmethod
+    def _save_metadata_schema(cls, path: Path, metadata: pd.DataFrame) -> None:
+        """Write metadata dtype schema used for safe round-trip casting on reload."""
+        schema_path = cls._metadata_schema_path(path)
+        schema_payload = {
+            "version": _METADATA_SCHEMA_VERSION,
+            "column_dtypes": cls._metadata_dtype_map(metadata),
+        }
+        with open(schema_path, 'w') as f:
+            json.dump(schema_payload, f, indent=2, sort_keys=True)
+
+    @classmethod
+    def _load_metadata_dtype_map(cls, path: Path) -> Optional[Dict[str, str]]:
+        """Load metadata dtype map if available and valid, else return None."""
+        schema_path = cls._metadata_schema_path(path)
+        if not schema_path.exists():
+            return None
+
+        try:
+            with open(schema_path, 'r') as f:
+                schema_payload = json.load(f)
+        except Exception as err:
+            logger.warning(
+                "Could not parse metadata schema at '%s': %s. Falling back to CSV dtype inference.",
+                schema_path,
+                err,
+            )
+            return None
+
+        if not isinstance(schema_payload, dict):
+            logger.warning(
+                "Invalid metadata schema at '%s': expected a JSON object. Falling back to CSV dtype inference.",
+                schema_path,
+            )
+            return None
+
+        version = schema_payload.get("version", None)
+        if version != _METADATA_SCHEMA_VERSION:
+            logger.warning(
+                "Unsupported metadata schema version at '%s': %s (expected %s). "
+                "Falling back to CSV dtype inference.",
+                schema_path,
+                version,
+                _METADATA_SCHEMA_VERSION,
+            )
+            return None
+
+        column_dtypes = schema_payload.get("column_dtypes", None)
+        if not isinstance(column_dtypes, dict):
+            logger.warning(
+                "Invalid metadata schema at '%s': 'column_dtypes' must be a dictionary. "
+                "Falling back to CSV dtype inference.",
+                schema_path,
+            )
+            return None
+
+        return {
+            str(column): str(dtype)
+            for column, dtype in column_dtypes.items()
+        }
+
+    @classmethod
+    def _read_metadata_with_schema(cls, path: Path) -> pd.DataFrame:
+        """Read metadata.csv and restore dtypes from optional schema sidecar."""
+        metadata_path = path / "metadata.csv"
+        dtype_map = cls._load_metadata_dtype_map(path)
+
+        # Force string-like columns at CSV parse time to preserve values such as
+        # leading-zero IDs before post-load casting is applied.
+        read_csv_kwargs: Dict[str, Any] = {}
+        if dtype_map:
+            string_like_dtypes = {"str", "string", "object", "category"}
+            csv_dtypes = {
+                column: "string"
+                for column, dtype in dtype_map.items()
+                if dtype.lower() in string_like_dtypes
+            }
+            if csv_dtypes:
+                read_csv_kwargs["dtype"] = csv_dtypes
+
+        metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
+
+        if not dtype_map:
+            return metadata
+
+        for column, dtype in dtype_map.items():
+            if column not in metadata.columns:
+                continue
+            try:
+                metadata[column] = metadata[column].astype(dtype)
+            except Exception as err:
+                logger.warning(
+                    "Could not cast metadata column '%s' to dtype '%s': %s. Keeping inferred dtype.",
+                    column,
+                    dtype,
+                    err,
+                )
+
+        return metadata
 
     def save_colors(
         self,
@@ -1602,7 +1909,7 @@ class InSituExperiment:
         # check overwrite
         check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
 
-        print(f"Saving InSituExperiment to {str(path)}") if verbose else None
+        logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
         if collect_warnings_mode:
             with collect_warnings() as collector:
@@ -1624,7 +1931,7 @@ class InSituExperiment:
         self.save_colors(path=path, overwrite=True)
         self.save_filters(path=path)
 
-        print("Saved.") if verbose else None
+        logger.info("Saved.") if verbose else None
 
     def save_filters(
         self,
@@ -1690,7 +1997,7 @@ class InSituExperiment:
                 elif modality == "regions":
                     repr_string += f"{tf.SPACER}   " + data._regions.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
 
-        print(repr_string)
+        logger.info(repr_string)
 
     def sync_colors(
         self,
@@ -1728,7 +2035,7 @@ class InSituExperiment:
 
             if is_numeric:
                 if verbose:
-                    print(f"Skipping sync_colors for numeric column '{obs_col}'.")
+                    logger.info(f"Skipping sync_colors for numeric column '{obs_col}'.")
                 continue
 
             if obs_col not in self.colors or overwrite:
@@ -1761,23 +2068,60 @@ class InSituExperiment:
                     self.colors[obs_col] = color_dict
 
                     if verbose:
-                        print(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+                        logger.info(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
             else:
-                print(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
+                logger.info(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
 
 
     @classmethod
-    def concat(cls, objs, new_col_name=None):
+    def concat(
+        cls,
+        objs,
+        new_col_name=None,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        mode: Literal["copy", "move"] = "copy",
+    ):
         """Concatenate multiple InSituExperiment objects.
 
         Args:
             objs (Union[List[InSituExperiment], Dict[str, InSituExperiment]]):
-                A list of InSituExperiment objects or a dictionary where keys are added as a new column.
+                A list of InSituExperiment objects or a dictionary where keys
+                are added as a new column.
             new_col_name (str, optional):
-                The name of the new column to add when objs is a dictionary. Defaults to None.
+                The name of the new column to add when objs is a dictionary.
+                Defaults to None.
+            path (Union[str, os.PathLike, Path], optional):
+                Destination directory for the concatenated experiment.
+                Required when ``mode="move"``.
+            mode (str):
+                ``"copy"`` (default) — datasets remain at their original paths
+                and the new experiment object is in-memory only (no save path
+                is set unless you call :meth:`saveas` afterwards).
+
+                ``"move"`` — each dataset directory is moved (not copied) to
+                ``path``, the experiment-level files (``metadata.csv``,
+                ``colors.json``, ``filters.json``) are written there, and the
+                original experiment root directories are removed.  This is
+                disk-efficient because no data is duplicated.
+
+                .. warning::
+                    ``mode="move"`` is **destructive and irreversible**.
+                    All source experiments must have a save path set and must
+                    reside on the same filesystem as ``path``.
 
         Returns:
-            InSituExperiment: A new InSituExperiment object containing the concatenated data.
+            InSituExperiment: A new InSituExperiment object.
+
+        Raises:
+            ValueError: For invalid arguments or precondition violations in
+                ``mode="move"``.
+
+        Notes:
+            Existing filter masks are **always dropped** after concatenation
+            because their lengths no longer match the merged metadata.
+            Colors from all source experiments are merged with a first-wins
+            strategy: the first experiment whose color dict contains a given
+            key takes precedence.
         """
         if isinstance(objs, dict):
             if new_col_name is None:
@@ -1785,6 +2129,15 @@ class InSituExperiment:
             keys, objs = zip(*objs.items())
         else:
             keys = [None] * len(objs)
+
+        objs = list(objs)
+
+        # Validate mode
+        if mode not in ("copy", "move"):
+            raise ValueError(f"mode must be 'copy' or 'move', got '{mode}'.")
+
+        if mode == "move" and path is None:
+            raise ValueError("path must be provided when mode='move'.")
 
         # Check that all objects have the same data type
         data_types = [obj._data_type for obj in objs]
@@ -1794,12 +2147,47 @@ class InSituExperiment:
             )
         data_type = data_types[0]
 
-        # Initialize a new InSituExperiment object
+        # --- mode="move" precondition checks ---
+        if mode == "move":
+            for i, obj in enumerate(objs):
+                if not isinstance(obj, InSituExperiment):
+                    raise TypeError("All objects must be instances of InSituExperiment.")
+                if obj._path is None:
+                    raise ValueError(
+                        f"mode='move' requires all experiments to have a save path set, "
+                        f"but experiment at index {i} has no path. "
+                        f"Call saveas() first."
+                    )
+
+            path = Path(path)
+
+            # Verify same filesystem: compare the device of the destination
+            # parent (creating it if needed) against each source dataset.
+            path.mkdir(parents=True, exist_ok=True)
+            dst_dev = os.stat(path).st_dev
+            for obj in objs:
+                src_dev = os.stat(obj._path).st_dev
+                if src_dev != dst_dev:
+                    raise ValueError(
+                        f"mode='move' requires source and destination to be on the "
+                        f"same filesystem. Source '{obj._path}' and destination '{path}' "
+                        f"are on different devices. Use mode='copy' + saveas() instead."
+                    )
+
+            return cls._concat_move(
+                objs=objs,
+                keys=list(keys),
+                new_col_name=new_col_name,
+                data_type=data_type,
+                path=path,
+            )
+
+        # --- mode="copy" (original behaviour + colors merge) ---
         new_experiment = cls(data_type=data_type)
 
-        # Concatenate data and metadata
         new_data = []
         new_metadata = []
+        merged_colors: dict = {}
 
         for key, obj in zip(keys, objs):
             if not isinstance(obj, InSituExperiment):
@@ -1809,14 +2197,85 @@ class InSituExperiment:
             if key is not None:
                 metadata[new_col_name] = key
             new_metadata.append(metadata)
+            # Merge colors: first-wins per key
+            for k, v in obj._colors.items():
+                if k not in merged_colors:
+                    merged_colors[k] = v
 
         new_experiment._data = new_data
         new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
-
-        # Disconnect object from save path
+        new_experiment._colors = merged_colors
+        # Filters are intentionally dropped: masks are sized to individual
+        # experiment metadata and cannot be meaningfully merged.
         new_experiment._path = None
 
         # check if observation names are unique (only for insitupy mode)
+        if data_type == "insitupy":
+            new_experiment._check_obs_uniqueness()
+
+        return new_experiment
+
+    @classmethod
+    def _concat_move(
+        cls,
+        objs: list,
+        keys: list,
+        new_col_name,
+        data_type: str,
+        path: Path,
+    ) -> "InSituExperiment":
+        """Back-end for ``concat(..., mode='move')``.
+
+        Moves each source dataset directory to ``path/data-NNN``, updates
+        ``InSituData._path``, detaches in-memory data, writes experiment-level
+        files to ``path``, and removes the now-empty source experiment roots.
+        """
+        new_experiment = cls(data_type=data_type)
+        new_metadata: list = []
+        merged_colors: dict = {}
+        global_idx = 0
+
+        for key, obj in zip(keys, objs):
+            # Release in-memory data before moving so the move loop stays clean
+            obj.unload()
+
+            for xd in tqdm(obj._data, desc=f"Moving datasets from {obj._path.name}"):
+                dst = path / f"data-{str(global_idx).zfill(3)}"
+                shutil.move(str(xd._path), str(dst))
+                xd._path = dst
+                new_experiment._data.append(xd)
+                global_idx += 1
+
+            metadata = obj._metadata.copy()
+            if key is not None:
+                metadata[new_col_name] = key
+            new_metadata.append(metadata)
+
+            # Merge colors first-wins
+            for k, v in obj._colors.items():
+                if k not in merged_colors:
+                    merged_colors[k] = v
+
+        new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
+        new_experiment._colors = merged_colors
+        new_experiment._path = path
+
+        # Write experiment-level files
+        new_experiment.save_metadata(path=path, overwrite=True)
+        new_experiment.save_colors(path=path, overwrite=True)
+        new_experiment.save_filters(path=path)
+
+        # Remove source experiment roots (datasets have already been moved out)
+        for obj in objs:
+            remaining = list(obj._path.iterdir())
+            if remaining:
+                logger.info(
+                    "Removing source experiment root '%s' (%d item(s) remaining).",
+                    obj._path, len(remaining),
+                )
+            shutil.rmtree(str(obj._path))
+            obj._path = None
+
         if data_type == "insitupy":
             new_experiment._check_obs_uniqueness()
 
@@ -1913,7 +2372,9 @@ class InSituExperiment:
     def from_regions(cls,
                     data: InSituData,
                     region_key: str,
-                    region_names: Optional[Union[List[str], str]] = None
+                    region_names: Optional[Union[List[str], str]] = None,
+                    lazy: bool = False,
+                    detach_transcripts: bool = True
                     ):
         """Creates an `InSituExperiment` object from specified regions in the given `InSituData`.
 
@@ -1921,6 +2382,16 @@ class InSituExperiment:
             data (InSituData): The input data containing regions to extract.
             region_key (str): The key identifying the region of interest in `data.regions`.
             region_names (Optional[Union[List[str], str]]): Region names to include.
+            lazy (bool): If ``False`` (default), transcript data is loaded into memory
+                once before cropping, making per-region crops fast (pandas boolean mask
+                instead of repeated Dask task-graph traversal). If ``True``, transcripts
+                remain lazy; each crop reads from disk. Slower but uses less peak RAM.
+            detach_transcripts (bool): If ``True`` (default), transcripts are detached
+                from ``data`` before the loop so that ``deepcopy()`` inside ``crop()``
+                does not copy the full transcript array on every iteration. Cropping is
+                then applied directly on the shared pandas DataFrame. Set to ``False``
+                to let ``crop()`` handle transcripts normally (useful for benchmarking
+                or if detaching causes unexpected side-effects).
 
         Returns:
             InSituExperiment: An instance containing the cropped data and metadata for the specified regions.
@@ -1935,19 +2406,62 @@ class InSituExperiment:
             # make sure region_names is a list
             region_names = convert_to_list(region_names)
 
+        # When lazy=False, load transcripts into memory.
+        # When detach_transcripts=True: compute directly to pandas and detach from
+        # data so deepcopy() inside crop() does not copy the array each iteration.
+        # Transcripts are restored to their original state in the finally-block.
+        # When detach_transcripts=False: materialize into an in-memory Dask DF so
+        # deepcopy is cheaper; data._transcripts is mutated (in-memory after return).
+        transcripts_pdf = None
+        original_transcripts = None
+        if not lazy and data.transcripts is not None:
+            warnings.warn(
+                "Transcript data will be loaded into memory to speed up region cropping. "
+                "This may require substantial RAM for large datasets.",
+                stacklevel=2
+            )
+            if detach_transcripts:
+                logger.info("Loading transcripts into memory...")
+                transcripts_pdf = data._transcripts.compute()
+                logger.info(f"Transcripts loaded: {len(transcripts_pdf):,} rows.")
+                original_transcripts = data._transcripts
+                data._transcripts = None                     # detach — crop() skips it
+            else:
+                data.materialize(layers=["transcripts"], verbose=True)
+
         # Initialize a new InSituExperiment object
         experiment = cls(data_type="insitupy")
 
-        for n in sorted(region_df["name"].tolist()):
-            if n in region_names:
-                # crop data by region
-                cropped_data = data.crop(region_tuple=(region_key, n))
+        try:
+            for n in tqdm(sorted(region_df["name"].tolist()), desc="Iterating regions"):
+                if n in region_names:
+                    cropped_data = data.crop(
+                        region_tuple=(region_key, n),
+                        materialize_transcripts=not detach_transcripts
+                    )
 
-                # create metadata
-                metadata = {"region_key": region_key, "region_name": n}
+                    # when detached, apply transcript crop separately on the shared pandas DF
+                    if detach_transcripts and transcripts_pdf is not None:
+                        shape = region_df[region_df["name"] == n]["geometry"].item()
+                        cropped_data.transcripts = _crop_transcripts(
+                            transcript_df=transcripts_pdf,
+                            shape=shape,
+                        )
 
-                # add to InSituExperiment
-                experiment.add(data=cropped_data, metadata=metadata)
+                    # skip regions with no cells
+                    if not cropped_data.cells.is_empty and cropped_data.cells.table.n_obs == 0:
+                        logger.warning(f"Region '{n}' contains no cells and will be skipped.")
+                        continue
+
+                    # create metadata
+                    metadata = {"region_key": region_key, "region_name": n}
+
+                    # add to InSituExperiment
+                    experiment.add(data=cropped_data, metadata=metadata)
+        finally:
+            # Restore detached transcripts so the caller's object is unchanged.
+            if original_transcripts is not None:
+                data._transcripts = original_transcripts
 
         return experiment
 
@@ -2023,14 +2537,14 @@ class InSituExperiment:
         experiment._path = path
 
         # Read the SpatialData zarr store
-        print(f"Reading SpatialData from {path}...")
+        logger.info(f"Reading SpatialData from {path}...")
         # sdata = read_zarr(path)
         sdata = _silent_read_zarr(path)
 
         # Extract samples from the SpatialData object
         samples = cls._extract_samples_from_spatialdata(sdata)
 
-        print(f"Found {len(samples)} sample(s)")
+        logger.info(f"Found {len(samples)} sample(s)")
 
         # Create StructuredSpatialData for each sample
         for sample_id, sample_elements in tqdm(samples.items(), desc="Loading samples"):
@@ -2064,7 +2578,7 @@ class InSituExperiment:
                 with open(colors_path, 'r') as f:
                     experiment._colors = json.load(f)
             except Exception as e:
-                warnings.warn(f"Could not load colors.json: {e}")
+                logger.warning(f"Could not load colors.json: {e}")
 
         return experiment
 
@@ -2099,7 +2613,7 @@ class InSituExperiment:
         # If we have multi-sample data, remove the 'single' key
         if has_multi_sample and 'single' in samples:
             if len(samples['single']) > 0:
-                warnings.warn(
+                logger.warning(
                     "Found both multi-sample (with 'sample.' prefix) and single-sample elements. "
                     "Single-sample elements will be ignored."
                 )
@@ -2130,7 +2644,7 @@ class InSituExperiment:
                 parts = key.split('.')
 
             if len(parts) == 0:
-                warnings.warn(f"Could not parse key: {key}")
+                logger.warning(f"Could not parse key: {key}")
                 continue
 
             modality = parts[0]
@@ -2146,7 +2660,7 @@ class InSituExperiment:
                         scale_obj = get_transformation(elem)
                         struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
                     except Exception as e:
-                        warnings.warn(f"Could not add image {image_name}: {e}")
+                        logger.warning(f"Could not add image {image_name}: {e}")
 
             elif modality == "CELLS":
                 if len(parts) >= 2:
@@ -2181,7 +2695,7 @@ class InSituExperiment:
                     struct_data._regions[region_name] = elem
 
             else:
-                warnings.warn(f"Unknown modality in key: {key}")
+                logger.warning(f"Unknown modality in key: {key}")
 
     @staticmethod
     def _get_loaded_modalities_spatialdata(data) -> List[str]:
@@ -2225,7 +2739,7 @@ class InSituExperiment:
 
         # Load metadata
         metadata_path = path / "metadata.csv"
-        metadata = pd.read_csv(metadata_path, index_col=0)
+        metadata = cls._read_metadata_with_schema(path)
 
         try:
             # load colors
@@ -2353,9 +2867,11 @@ class InSituExperiment:
                 obs_list.append(celldata.table.obs)
 
         # concatenate the obs dataframes
+        if not obs_list:
+            return
         all_obs = pd.concat(obs_list, axis=0, ignore_index=False)
         if not all_obs.index.is_unique:
-            warnings.warn("Observation names are not unique across all datasets.")
+            logger.warning("Observation names are not unique across all datasets.")
 
     def _create_categorical_color_dict(
         self,
@@ -2412,7 +2928,7 @@ class InSituExperiment:
 
         for _, dataset in self.iterdata():
             if dataset.cells.is_empty:
-                warnings.warn("Cells were not loaded. Loading cells.")
+                logger.warning("Cells were not loaded. Loading cells.")
                 dataset.load_cells()
 
             celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
@@ -2447,4 +2963,5 @@ class InSituExperimentView(InSituExperiment):
 
     @property
     def is_view(self) -> bool:
+        """Return True; this object is a linked view of a parent experiment."""
         return True

@@ -1,3 +1,4 @@
+import logging
 from typing import Literal, Optional
 
 import numpy as np
@@ -5,9 +6,11 @@ import scanpy as sc
 from scipy.sparse import csr_matrix, issparse
 from tqdm import tqdm
 
-from insitupy import __version__
 from insitupy._textformat import textformat as tf
+from insitupy._version import __version__
 from insitupy.utils._checks import check_integer_counts
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_and_transform_anndata(
@@ -17,7 +20,36 @@ def normalize_and_transform_anndata(
     target_sum: int = None, # defaults to median of total counts of cells
     scale: bool = False,
     assert_integer_counts: bool = True,
-    verbose: bool = True) -> None:
+    verbose: bool = False) -> None:
+    """
+    Normalize and transform a single AnnData object in place.
+
+    Stores raw counts in ``adata.layers['counts']``, normalizes to ``target_sum``,
+    saves normalized counts in ``adata.layers['norm_counts']``, then applies the
+    requested transformation. Optionally scales the data to unit variance.
+
+    Args:
+        adata: AnnData object to process. Modified in place.
+        layer (Optional[str], optional): Name of the layer containing raw integer counts.
+            If None, ``adata.X`` is used. Defaults to None.
+        transformation_method (Literal['log1p', 'sqrt'], optional):
+            Transformation applied after normalization. ``'log1p'`` applies
+            ``sc.pp.log1p``; ``'sqrt'`` applies the Freeman-Tukey transform
+            (``sqrt(x) + sqrt(x+1)``). Defaults to ``'log1p'``.
+        target_sum (int, optional): Total counts to normalize each cell to.
+            Defaults to None (normalizes to the median total count across cells).
+        scale (bool, optional): If True, scale each gene to zero mean and unit
+            variance after transformation. Defaults to False.
+        assert_integer_counts (bool, optional): If True, raise an error when the
+            count matrix does not contain integer values. Defaults to True.
+        verbose (bool, optional): If True, print progress messages. Defaults to False.
+
+    Raises:
+        ValueError: If ``transformation_method`` is not one of ``['log1p', 'sqrt']``.
+
+    Returns:
+        None: Modifies ``adata`` in place.
+    """
 
     if layer is None:
         if assert_integer_counts:
@@ -25,11 +57,11 @@ def normalize_and_transform_anndata(
             check_integer_counts(adata.X)
 
         # store raw counts in layer
-        print("Store raw counts in .layers['counts'].") if verbose else None
+        logger.info("Store raw counts in .layers['counts'].") if verbose else None
         counts = adata.X.copy()
         adata.layers['counts'] = counts
     else:
-        print(f"Retrieve raw counts from .layers['{layer}'].") if verbose else None
+        logger.info("Retrieve raw counts from .layers['%s'].", layer) if verbose else None
         if assert_integer_counts:
             # check if the matrix consists of raw integer counts
             check_integer_counts(adata.layers[layer])
@@ -38,7 +70,7 @@ def normalize_and_transform_anndata(
         adata.X = adata.layers[layer].copy()
 
     # preprocessing according to napari tutorial in squidpy
-    print(f"Normalization with target sum {target_sum}.") if verbose else None
+    logger.info("Normalization with target sum %s.", target_sum) if verbose else None
     sc.pp.normalize_total(adata, target_sum=target_sum)
 
     # make sure the matrix is saved as sparse array
@@ -48,7 +80,7 @@ def normalize_and_transform_anndata(
     adata.layers['norm_counts'] = adata.X.copy()
 
     # transform either using log transformation or square root transformation
-    print(f"Perform {transformation_method}-transformation.") if verbose else None
+    logger.info("Perform %s-transformation.", transformation_method) if verbose else None
     if transformation_method == "log1p":
         sc.pp.log1p(adata)
 
@@ -67,7 +99,7 @@ def normalize_and_transform_anndata(
 
 
     if scale:
-        print(f"Scale data.") if verbose else None
+        logger.info("Scale data.") if verbose else None
         adata.layers[f'{transformation_method}'] = adata.X.copy()
         sc.pp.scale(adata)
 
@@ -79,43 +111,44 @@ def reduce_dimensions_anndata(
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
     n_pcs: int = 0,
-    verbose: bool = True,
+    verbose: bool = False,
     **kwargs
     ) -> None:
     """
-    Reduce the dimensionality of the data using PCA, UMAP, and t-SNE techniques, optionally performing batch correction.
+    Reduce the dimensionality of data using PCA followed by UMAP or t-SNE.
+
+    Computes a PCA, builds a nearest-neighbor graph, then runs the chosen
+    embedding method. All results are stored in ``adata`` in place.
 
     Args:
-        umap (bool, optional):
-            If True, perform UMAP dimensionality reduction. Default is True.
-        tsne (bool, optional):
-            If True, perform t-SNE dimensionality reduction. Default is True.
+        adata: AnnData object to reduce. Modified in place.
+        method (Literal['umap', 'tsne'], optional):
+            Dimensionality reduction method to apply after PCA and neighbor
+            graph computation. Defaults to ``'umap'``.
+        n_neighbors (int, optional):
+            Number of neighbors for ``sc.pp.neighbors``. Defaults to 16.
+        n_pcs (int, optional):
+            Number of principal components to use when computing the neighbor
+            graph. 0 means use all PCs. Defaults to 0.
         verbose (bool, optional):
-            If True, print progress messages during dimensionality reduction. Default is True.
-        tsne_lr (int, optional):
-            Learning rate for t-SNE. Default is 1000.
-        tsne_jobs (int, optional):
-            Number of CPU cores to use for t-SNE computation. Default is 8.
+            If True, print progress messages. Defaults to False.
         **kwargs:
-            Additional keyword arguments to be passed to scanorama function if batch correction is performed.
-
-    Raises:
-        ValueError: If an invalid `batch_correction_key` is provided.
+            Additional keyword arguments forwarded to ``sc.tl.umap()`` or
+            ``sc.tl.tsne()``.
 
     Returns:
-        None: This method modifies the input matrix in place, reducing its dimensionality using specified techniques and
-            batch correction if applicable. It does not return any value.
+        None: Modifies ``adata`` in place.
     """
     # dimensionality reduction
-    print("Calculate PCA...") if verbose else None
+    logger.info("Calculate PCA...") if verbose else None
     sc.pp.pca(adata)
 
     # calculate neighbors
-    print("Calculate neighbors...") if verbose else None
+    logger.info("Calculate neighbors...") if verbose else None
     sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
     # dimensionality reduction
-    print(f"Calculate {method}...") if verbose else None
+    logger.info("Calculate %s...", method) if verbose else None
     if method.lower() == "umap":
         sc.tl.umap(adata, **kwargs)
     elif method.lower() == "tsne":
@@ -124,14 +157,33 @@ def reduce_dimensions_anndata(
 def cluster_anndata(
     adata,
     method: Literal["leiden", "louvain"] = "leiden",
-    verbose: bool = True
+    verbose: bool = False
 ):
+    """
+    Cluster cells in an AnnData object using Leiden or Louvain community detection.
+
+    Requires a precomputed neighbor graph (e.g. from ``reduce_dimensions_anndata``).
+    Cluster labels are stored in ``adata.obs['leiden']`` or ``adata.obs['louvain']``.
+
+    Args:
+        adata: AnnData object with a precomputed neighbor graph. Modified in place.
+        method (Literal['leiden', 'louvain'], optional):
+            Clustering algorithm. Defaults to ``'leiden'``.
+        verbose (bool, optional):
+            If True, print progress messages. Defaults to False.
+
+    Raises:
+        ValueError: If ``method`` is not one of ``['leiden', 'louvain']``.
+
+    Returns:
+        None: Modifies ``adata`` in place.
+    """
     # clustering
     if method.lower() == "leiden":
-        print("Leiden clustering...") if verbose else None
-        sc.tl.leiden(adata)
+        logger.info("Leiden clustering...") if verbose else None
+        sc.tl.leiden(adata, flavor='igraph')
     elif method.lower() == "louvain":
-        print("Louvain clustering...") if verbose else None
+        logger.info("Louvain clustering...") if verbose else None
         sc.tl.louvain(adata)
     else:
         raise ValueError(f'`type` is not one of ["leiden", "louvain"]')

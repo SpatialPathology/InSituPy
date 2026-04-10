@@ -1,3 +1,4 @@
+import logging
 import os
 from math import ceil
 from numbers import Number
@@ -16,6 +17,8 @@ from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from insitupy.utils._shapely import scale_polygon
+
+logger = logging.getLogger(__name__)
 
 
 def _read_baysor_polygons(
@@ -68,14 +71,27 @@ def _read_baysor_polygons(
 def read_baysor_transcripts(
     baysor_output: Union[str, os.PathLike, Path]
     ) -> pd.DataFrame:
+    """Read the transcript-level assignment CSV produced by Baysor.
 
+    Reads ``segmentation.csv`` from the Baysor output directory and returns
+    a :class:`~pandas.DataFrame` indexed by the transcript identifier column
+    (``transcript_id`` or ``molecule_id``).
+
+    Args:
+        baysor_output: Path to the Baysor output directory containing
+            ``segmentation.csv``.
+
+    Returns:
+        A :class:`~pandas.DataFrame` with one row per transcript and
+        Baysor-assigned cell IDs (and other columns) as columns.
+    """
     # convert to pathlib path
     baysor_output = Path(baysor_output)
 
     # read transcripts from Baysor results
-    print("Parsing transcripts data...", flush=True)
+    logger.info("Parsing transcripts data...")
 
-    print("\tRead data", flush=True)
+    logger.info("Read data")
     segcsv_file = baysor_output / "segmentation.csv"
     baysor_transcript_dataframe = pd.read_csv(segcsv_file)
 
@@ -153,7 +169,7 @@ def _read_proseg_counts(
         raise ValueError(f"Unexpected file ending of path_counts: {path_counts_suffix}.")
 
     # convert counts to float32
-    print("Convert counts to float32.", flush=True)
+    logger.info("Convert counts to float32.")
     counts = counts.astype(np.float32)
 
     # Read metadata based on file extension

@@ -9,7 +9,7 @@ from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
 from insitupy._constants import with_insitupy_style
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import _calculate_single_metrics
@@ -148,7 +148,7 @@ def overview(
     list_transcript_count = []
     for _, data in data.iterdata():
         if data.cells.is_empty:
-            warnings.warn("Cells were not loaded. Loading cells.")
+            warnings.warn("Cells were not loaded. Loading cells.", UserWarning, stacklevel=2)
             data.load_cells()
 
         # get CellData
@@ -210,5 +210,6 @@ def overview(
 
 # deprecated version
 def plot_overview(*args, **kwargs):
+    """Deprecated. Use :func:`overview` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="overview")

@@ -1,3 +1,4 @@
+import logging
 from typing import List, Literal, Optional, Tuple, Union
 
 import numpy as np
@@ -5,8 +6,10 @@ from anndata import AnnData
 
 from insitupy._core._checks import _check_assignment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 
 # Define the function
@@ -63,7 +66,7 @@ def _select_data_for_dge(
             raise ValueError(f"Region '{region_tuple[1]}' not found in key '{region_tuple[0]}'.")
 
         if verbose:
-            print(f"Restrict analysis to region '{region_tuple[1]}' from key '{region_tuple[0]}'.", flush=True)
+            logger.info(f"Restrict analysis to region '{region_tuple[1]}' from key '{region_tuple[0]}'.")
         #adata_selected = adata_selected[region_mask].copy()
     else:
         region_mask = np.ones(len(adata_selected), dtype=bool)
@@ -83,7 +86,7 @@ def _select_data_for_dge(
             raise ValueError(f"annotation_name '{annotation_tuple[1]}' not found under annotation_key '{annotation_tuple[0]}'.")
 
         if verbose:
-            print(f"Restrict analysis to annotation '{annotation_tuple[1]}' from key '{annotation_tuple[0]}'.", flush=True)
+            logger.info(f"Restrict analysis to annotation '{annotation_tuple[1]}' from key '{annotation_tuple[0]}'.")
 
         # do filtering
         #adata_selected = adata_selected[annot_mask].copy()
@@ -113,7 +116,7 @@ def _select_data_for_dge(
             raise ValueError(f"Cell type '{cell_type_tuple[1]}' not found in .obs column '{cell_type_tuple[0]}'.")
 
         if verbose:
-            print(f"Restrict analysis to cell type '{cell_type_tuple[1]}' from .obs column '{cell_type_tuple[0]}'.", flush=True)
+            logger.info(f"Restrict analysis to cell type '{cell_type_tuple[1]}' from .obs column '{cell_type_tuple[0]}'.")
         adata_selected = adata_selected[cell_type_mask].copy()
 
     if return_all_celltypes:

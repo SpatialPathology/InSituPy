@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass, field
@@ -9,9 +10,18 @@ from typing import Any, Dict, Literal, Optional, Tuple, Union
 import pandas as pd
 import toml
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DiffExprConfigCollector:
+    """Dataclass collecting all parameters that define a differential expression run.
+
+    Stores target and reference group specifications alongside the analysis
+    mode (``"single-cell"`` or ``"pseudobulk"``) and method parameters, so
+    that results can be faithfully reproduced and provenance is recorded.
+    Serialisable to/from TOML via :meth:`save_as_toml` / :meth:`read_from_toml`.
+    """
     # General
     mode: Literal["single-cell", "pseudobulk"]
     method_params: dict
@@ -83,9 +93,15 @@ class DiffExprConfigCollector:
         return "\n".join(lines)
 
     def to_dict(self):
+        """Serialise config to a nested dict with General / Target / Reference sections.
 
+        Returns:
+            A ``dict`` with three top-level keys (``"General"``, ``"Target"``,
+            ``"Reference"``), each mapping field names to their values.  NumPy
+            scalar types are converted to native Python types.
+        """
         def convert(value):
-            # Convert NumPy scalars to native Python types
+            """Convert NumPy scalars to native Python types."""
             return value.item() if hasattr(value, "item") else value
 
         config_dict = {
@@ -103,12 +119,27 @@ class DiffExprConfigCollector:
         return config_dict
 
     def save_as_toml(self, filepath: Union[str, os.PathLike, Path]):
+        """Serialise this config to a TOML file.
+
+        Args:
+            filepath: Output file path.  The file is created or overwritten.
+        """
         config_dict = self.to_dict()
         with open(filepath, 'w') as f:
             toml.dump(config_dict, f)
 
     @classmethod
     def read_from_toml(cls, filepath: Union[str, os.PathLike, Path]) -> "DiffExprConfigCollector":
+        """Load a :class:`DiffExprConfigCollector` from a TOML file.
+
+        Args:
+            filepath: Path to a TOML file previously written by
+                :meth:`save_as_toml`.
+
+        Returns:
+            A new :class:`DiffExprConfigCollector` instance populated with
+            the values from the file.
+        """
         with open(filepath, 'r') as f:
             config = toml.load(f)
 
@@ -260,7 +291,7 @@ class DiffExprResults:
                     "Set `overwrite=True` to overwrite its contents."
                 )
             else:
-                print(f"Warning: Overwriting existing directory '{directory}'.")
+                logger.warning(f"Overwriting existing directory '{directory}'.")
                 shutil.rmtree(directory)
 
         directory.mkdir(exist_ok=True)

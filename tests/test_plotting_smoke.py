@@ -64,12 +64,12 @@ def test_embedding_raises_for_one_dimensional_basis():
         scatter_module.embedding(adata=adata, basis="X_umap", color=None)
 
 
-def test_embedding_static_requires_datashader(monkeypatch):
+def test_embedding_static_works_without_datashader(monkeypatch):
     adata = _make_adata_with_umap()
     monkeypatch.setattr(scatter_module, "_check_datashader", lambda: False)
 
-    with pytest.raises(ImportError, match="datashader and matplotlib are required"):
-        scatter_module.embedding(adata=adata, basis="X_umap", color=None, interactive=False)
+    # Static mode falls back to matplotlib when datashader is unavailable — must not raise
+    scatter_module.embedding(adata=adata, basis="X_umap", color=None, interactive=False)
 
 
 def test_spatial_smoke_calls_subplot_pipeline(monkeypatch):
@@ -99,8 +99,8 @@ def test_spatial_smoke_calls_subplot_pipeline(monkeypatch):
     monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
     monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", _DummyColorConfig)
     monkeypatch.setattr(spatial_module.LayoutConfig, "calc_subplot_params", _fake_calc_subplot_params)
-    monkeypatch.setattr(spatial_module, "setup_subplots", _fake_setup_subplots)
-    monkeypatch.setattr(spatial_module, "plot_to_subplots", _fake_plot_to_subplots)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", _fake_plot_to_subplots)
     monkeypatch.setattr(spatial_module, "save_and_show_figure", _fake_save_and_show_figure)
 
     spatial_module.spatial(data=object(), keys=["gene_a"], show=False)

@@ -28,6 +28,17 @@ class lowess_prediction:
         self.smooths = smooths
 
     def confidence(self, alpha=0.05, percentile_method=False):
+        """Compute confidence intervals from bootstrap smooths.
+
+        Args:
+            alpha: Significance level; ``1 - alpha`` is the confidence level.
+            percentile_method: If True, use the 2.5 / 97.5 percentiles of the
+                bootstrap smooths.  Otherwise use the normal-approximation CI.
+
+        Returns:
+            A :class:`confidence_intervals` object with ``lower`` and ``upper``
+            bound arrays.
+        """
         if percentile_method:
             # use 2.5 and 97.5% percentiles to calculate the 95% confidence interval
             # This approach is mentioned here: https://acclab.github.io/bootstrap-confidence-intervals.html
@@ -54,8 +65,26 @@ class lowess:
         self.fitted = False
 
     def predict(self, newdata, stderror=False, verbose=False, K=100, **kwargs):
+        """Predict LOWESS values at *newdata* points, optionally with bootstrap standard errors.
+
+        Args:
+            newdata: X-coordinates at which to evaluate the fitted LOWESS curve.
+            stderror: If True, compute bootstrap standard errors (runs ``K``
+                bootstrap replicates via :meth:`calc_stderror`).
+            verbose: If False (default), suppress NumPy division-by-NaN warnings.
+            K: Number of bootstrap replicates when *stderror* is True.
+            **kwargs: Forwarded to :meth:`calc_stderror`.
+
+        Returns:
+            A :class:`lowess_prediction` with the interpolated values, optional
+            standard errors, and optional bootstrap smooths.
+
+        Raises:
+            RuntimeError: If :meth:`fit` has not been called first.
+        """
         # make sure the fit() function was run before
-        assert self.fitted, "Values have not been fitted yet. Run .fit() first."
+        if not self.fitted:
+            raise RuntimeError("Values have not been fitted yet. Run .fit() first.")
 
         # regularly sample it onto the grid (statsmodel does not provide the solution on interpolated values)
         # for the statistics later it is important that the same grid of x values is used
@@ -75,7 +104,17 @@ class lowess:
         return lowess_prediction(values, self.stderr, self.bootstrap_result)
 
     def bootstrap(self, x, y, newdata, sample_frac=0.5):
+        """Run one LOWESS bootstrap replicate on a random subsample of ``(x, y)``.
 
+        Args:
+            x: Full x-coordinate array.
+            y: Full y-coordinate array.
+            newdata: X-coordinates at which to evaluate the replicate curve.
+            sample_frac: Fraction of observations to include in each subsample.
+
+        Returns:
+            A 1-D array of LOWESS values evaluated at *newdata*.
+        """
         samples = np.random.choice(len(x), int(len(x)*sample_frac), replace=True)
 
         y_s = y[samples]
@@ -99,6 +138,13 @@ class lowess:
         self.stderr = np.nanstd(self.bootstrap_result, axis=1, ddof=0) # OR std
 
     def fit(self, frac=0.3, **kwargs):
+        """Fit a LOWESS regression using statsmodels.
+
+        Args:
+            frac: Smoothing span as a fraction of the data (0–1).  Smaller
+                values produce a less-smooth fit.
+            **kwargs: Forwarded to :func:`~statsmodels.nonparametric.smoothers_lowess.lowess`.
+        """
         self.pred_x, self.pred_y = sm_lowess(endog=self.y, exog=self.x, frac=frac,
                                it=3, return_sorted=True, **kwargs).T
 
@@ -108,6 +154,20 @@ class lowess:
 
 
 def bootstrap_loess(x, y, newdata, sample_frac=0.5):
+    """Run one LOESS bootstrap replicate using scikit-misc.
+
+    Args:
+        x: Full x-coordinate array.
+        y: Full y-coordinate array.
+        newdata: X-coordinates at which to evaluate the replicate curve.
+        sample_frac: Fraction of observations to include in the subsample.
+
+    Returns:
+        A 1-D array of LOESS predicted values at *newdata*.
+
+    Raises:
+        ImportError: If ``scikit-misc`` is not installed.
+    """
     try:
         from skmisc.loess import loess
     except ImportError:
@@ -189,6 +249,17 @@ class bootstrap_loess:
         self.stderr = np.nanstd(self.bootstrap_result, axis=1, ddof=0) # OR std
 
     def confidence(self, alpha=0.05, percentile_method=False):
+        """Compute confidence intervals from LOESS bootstrap replicates.
+
+        Args:
+            alpha: Significance level; ``1 - alpha`` is the confidence level.
+            percentile_method: If True, use the 2.5 / 97.5 percentiles of the
+                bootstrap results.  Otherwise use the normal-approximation CI.
+
+        Returns:
+            A :class:`confidence_intervals` object with ``lower`` and ``upper``
+            bound arrays.
+        """
         if percentile_method:
             # use 2.5 and 97.5% percentiles to calculate the 95% confidence interval
             # This approach is mentioned here: https://acclab.github.io/bootstrap-confidence-intervals.html

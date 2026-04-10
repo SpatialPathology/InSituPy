@@ -1,4 +1,5 @@
 import os
+import warnings
 from numbers import Number
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -10,19 +11,56 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.font_manager import FontProperties
 
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.plotting.save import save_and_show_figure
 
 
-def facs_plot(data,
+def facs(data,
               gene1: str = 'gene1',
               gene2: str = 'gene2',
               cluster_key: str = 'None',
               threshold_gene1: Number = 1,
-              threshold_gene2: Number =1,
-              layer: str = 'main'
+              threshold_gene2: Number = 1,
+              cells_layer: str = None,
+              layer: str = None,
               ):
+    """
+    Create a FACS-style scatter plot of two genes and classify double-positive cells.
 
-    adata=data.cells[layer].table
+    Plots expression of ``gene1`` (x-axis) against ``gene2`` (y-axis) as a scatter
+    plot, with dashed threshold lines. Points can optionally be colored by a
+    cluster annotation column.
+
+    **Side effect:** Adds a boolean column named ``'{gene1}/{gene2} double pos.'``
+    to ``data.cells[layer].table.obs`` marking cells that exceed both thresholds.
+
+    Args:
+        data (InSituData): The data object containing cell expression tables.
+        gene1 (str, optional): Name of the gene to plot on the x-axis.
+            Defaults to ``'gene1'``.
+        gene2 (str, optional): Name of the gene to plot on the y-axis.
+            Defaults to ``'gene2'``.
+        cluster_key (str, optional): Name of the ``obs`` column to use for
+            coloring points. Pass ``None`` to plot all points in a single color.
+            Defaults to ``'None'``.
+        threshold_gene1 (Number, optional): Expression threshold for ``gene1``.
+            Cells above this value are counted as gene1-positive. Defaults to 1.
+        threshold_gene2 (Number, optional): Expression threshold for ``gene2``.
+            Cells above this value are counted as gene2-positive. Defaults to 1.
+        cells_layer (str, optional): Name of the cell segmentation layer to use.
+            Defaults to None (main layer).
+        layer (str, optional): Deprecated. Use ``cells_layer`` instead.
+
+    Returns:
+        None: Displays the plot and modifies the cell table's ``obs`` in place.
+    """
+    if layer is not None:
+        warnings.warn("'layer' is deprecated, use 'cells_layer' instead.",
+                      DeprecationWarning, stacklevel=2)
+        cells_layer = layer
+
+    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+    adata = celldata.table
 
     expr1 = adata[:, gene1].X.toarray().flatten()
     expr2 = adata[:, gene2].X.toarray().flatten()

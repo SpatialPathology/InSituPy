@@ -14,7 +14,7 @@ import numpy as np
 
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses import CellData, SpatialUnitsData
+from insitupy.containers import CellData, SpatialUnitsData
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata, _create_boundaries_from_spatialdata,
     _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,
@@ -178,17 +178,35 @@ def convert_to_spatialdata(
     ):
 
     """
-    Converts an InSituData object to a SpatialData object.
+    Convert an InSituData or InSituExperiment object to a SpatialData object.
 
-    This function integrates various data elements such as images, labels, transcripts, and annotations
-    into a SpatialData object. It requires the spatialdata framework to be installed.
+    Integrates images, cell tables, cell shapes, transcripts, annotations, regions,
+    and cell boundary labels into a single SpatialData object. Automatically detects
+    and resolves case-insensitive key conflicts that would cause problems when writing
+    to disk.
 
-    The function automatically checks for and fixes case-insensitive key conflicts that could cause
-    issues when writing to disk.
+    Requires the ``spatialdata`` package (``pip install spatialdata``).
+
+    Args:
+        data (Union[InSituData, InSituExperiment]): Source data object to convert.
+            For an ``InSituExperiment``, all samples are merged into one SpatialData
+            object with sample-prefixed element keys.
+        n_pyramids (int, optional): Number of resolution pyramid levels to generate
+            for image elements. Defaults to 5.
 
     Returns:
-        SpatialData: A SpatialData object containing the integrated data elements.
+        SpatialData: A SpatialData object whose elements are keyed as follows
+            (all keys are prefixed with ``'<sample_uid>/'`` when converting an
+            ``InSituExperiment``):
 
+            - **images**: one entry per image channel (e.g. ``'nuclei'``, ``'morphology_focus'``).
+            - **labels**: cell boundary label images (e.g. ``'cell_boundaries'``).
+            - **shapes**: cell polygon shapes (e.g. ``'cells'``) and annotation/region shapes.
+            - **tables**: cell expression table under key ``'table'``.
+            - **points**: transcript coordinates under key ``'transcripts'`` (if available).
+
+    Raises:
+        ImportError: If the ``spatialdata`` package is not installed.
     """
     # is_experiment = _is_experiment(data)
 
@@ -299,7 +317,7 @@ def convert_from_spatialdata(
         _validate_image_data_format(image_data)
 
         if verbose:
-            print("Adding images...", flush=True)
+            logger.info("Adding images...")
         _add_images_to_insitudata(data, sdata, image_data, verbose)
 
     if cells_key:
@@ -311,7 +329,7 @@ def convert_from_spatialdata(
         if table_key is not None:
             if table_key in sdata:
                 if verbose:
-                    print("Adding cell data...", flush=True)
+                    logger.info("Adding cell data...")
             table = sdata[table_key]
             cell_names = np.array(table.obs_names)
 
@@ -334,7 +352,7 @@ def convert_from_spatialdata(
             cd = CellData(table=table, boundaries=boundaries)
             data.cells.add_celldata(cd=cd, key="main", is_main=True)
         elif verbose:
-            logger.warning(f"Warning: Table key '{table_key}' not found in SpatialData", flush=True)
+            logger.warning(f"Table key '{table_key}' not found in SpatialData")
 
     if units_key:
         data.add_units(
@@ -349,7 +367,7 @@ def convert_from_spatialdata(
     # LOAD TRANSCRIPTS
     if transcripts_key and transcripts_key in sdata:
         if verbose:
-            print("Adding transcripts...", flush=True)
+            logger.info("Adding transcripts...")
 
         # Rename coordinate columns lazily
         transcripts_df = sdata[transcripts_key]
@@ -368,6 +386,6 @@ def convert_from_spatialdata(
 
         data.transcripts = transcripts_df
     elif verbose and transcripts_key:
-        print(f"Warning: Transcripts key '{transcripts_key}' not found in SpatialData", flush=True)
+        logger.warning(f"Transcripts key '{transcripts_key}' not found in SpatialData")
 
     return data

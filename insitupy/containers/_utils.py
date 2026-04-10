@@ -1,6 +1,9 @@
+import logging
 from typing import Optional
 
-from insitupy.dataclasses.dataclasses import MultiCellData
+from insitupy.containers.multi_cell_data import MultiCellData
+
+logger = logging.getLogger(__name__)
 
 
 def _get_cell_layer(
@@ -16,7 +19,8 @@ def _get_cell_layer(
         if cells_layer not in all_keys:
             raise ValueError(f"cells_layer {cells_layer} not in layers: {all_keys}")
 
-    print(f"Using CellData from MultiCellData layer '{cells_layer}'.") if verbose else None
+    if verbose:
+        logger.info(f"Using CellData from MultiCellData layer '{cells_layer}'.")
     layer = cells[cells_layer]
 
     if return_layer_name:

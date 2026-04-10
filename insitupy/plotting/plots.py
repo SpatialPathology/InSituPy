@@ -1,3 +1,4 @@
+import logging
 import math
 import os
 from numbers import Number
@@ -10,17 +11,19 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.colors import ListedColormap
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, with_insitupy_style
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_colorlegend_layer(viewer, layer):
@@ -154,6 +157,46 @@ def colorlegend(
     verbose: bool = True,
     return_status: bool = False
     ):
+    """Render a standalone color legend for a napari layer or an explicit mapping.
+
+    Exactly one of *viewer* or *mapping* must be provided.  When *viewer* is
+    given, the color information is read from the active napari layer.  When
+    *mapping* is given directly it must be either:
+
+    - a ``dict`` mapping category labels to color strings (categorical legend), or
+    - a :class:`matplotlib.cm.ScalarMappable` (continuous colorbar).
+
+    Args:
+        viewer: Active :class:`napari.Viewer` instance.  The layer to use
+            is resolved from *layer_name* or auto-detected.  Mutually
+            exclusive with *mapping*.
+        mapping: Explicit color mapping — a ``dict`` for categorical data or
+            a :class:`~matplotlib.cm.ScalarMappable` for continuous data.
+            Mutually exclusive with *viewer*.
+        layer_name: Name of the napari layer to read colors from when
+            *viewer* is provided.  If None, the first matching layer is
+            used automatically.
+        max_per_col: Maximum number of legend entries per column for
+            categorical legends.  Defaults to 10.
+        title: Title displayed above the legend.  If None, the layer name
+            is used as the title.
+        savepath: File path to save the figure.  If None, the figure is
+            only displayed.
+        save_only: If True, save the figure without displaying it.
+            Defaults to False.
+        dpi_save: Resolution in dots per inch for the saved figure.
+            Defaults to 300.
+        verbose: If True, log the save path.  Defaults to True.
+        return_status: If True, return a boolean indicating whether
+            plotting was performed.  Defaults to False.
+
+    Returns:
+        bool or None: ``True`` / ``False`` when *return_status* is True,
+        indicating whether the legend was plotted; otherwise None.
+
+    Raises:
+        ValueError: If both or neither of *viewer* / *mapping* are provided.
+    """
     do_plotting = True
     if viewer is None and mapping is None:
         raise ValueError("Both `viewer` and `mapping` are None. One of both must not be None.")
@@ -272,7 +315,54 @@ def calc_cellular_composition(
     force_assignment: bool = False,
     fill_missing_categories: bool = True
     ) -> pd.DataFrame:
+    """Compute per-region / per-annotation cell-type composition tables.
 
+    For each dataset in *data*, counts (or fractions) of cells belonging to
+    each cell-type category are computed, optionally broken down by a spatial
+    geometry key (regions or annotations).  Results across datasets are
+    concatenated into a multi-level :class:`pandas.DataFrame`.
+
+    Args:
+        data: An :class:`~insitupy._core.data.InSituData` or
+            :class:`~insitupy.experiment.data.InSituExperiment` object.
+        cell_type_col: Column name in ``.obs`` of the AnnData table holding
+            cell-type labels.
+        cell_type_values: Subset of cell-type labels to keep.  All other
+            types are aggregated into an "Others" category.  If None, all
+            categories are included.
+        cells_layer: Key of the cell segmentation layer to use when
+            multiple layers are available.  If None, the main layer is used.
+        mask_col: Boolean column in ``.obs`` used to pre-filter cells.
+            If None, all cells are included.
+        geom_key: Key within the selected spatial modality used to group
+            cells.  If None, overall composition is computed without spatial
+            grouping.
+        geom_values: Subset of geometry class names to include when
+            *geom_key* is set.  If None, all classes are included.
+        modality: Spatial modality to use for grouping, either
+            ``"regions"`` or ``"annotations"``.  Ignored when *geom_key*
+            is None.
+        groupby: Column in :attr:`~insitupy.experiment.data.InSituExperiment.metadata`
+            used to identify individual datasets (becomes a column-index
+            level in the result).
+        normalize: If True, compute fractions multiplied by 100 (percent).
+            If False, compute absolute cell counts.
+        force_assignment: If True, re-assign cells to the selected
+            geometry even if prior assignments already exist.
+        fill_missing_categories: If True, insert NaN columns for
+            geometry–dataset combinations that are missing data so that
+            the returned DataFrame has a complete rectangular MultiIndex.
+
+    Returns:
+        A :class:`pandas.DataFrame` with a two-level column index
+        ``(geom_key, groupby)`` and cell-type names as the row index.
+        Values are percentages (when *normalize* is True) or counts.
+
+    Raises:
+        ValueError: If *geom_key* is set but *modality* is None, if the
+            *groupby* column contains non-unique values, or if no
+            compositions could be collected.
+    """
     if geom_values is not None:
         geom_values = convert_to_list(geom_values)
 
@@ -423,12 +513,60 @@ def cellular_composition(
     dpi_save: int = 300,
     ):
 
-    """
-    Plots the composition of cell types for specified regions or annotations.
+    """Plot the composition of cell types for specified regions or annotations.
 
-    This function generates pie charts or a single stacked bar plot to visualize the proportions of different cell types
-    within specified regions or annotations. It can optionally save the plot to a file and
-    return the composition data.
+    Generates stacked bar plots to visualize the proportions of different
+    cell types within specified regions or annotations. Can optionally save
+    the plot to a file and return the underlying composition data.
+
+    Args:
+        data: An InSituData or InSituExperiment object containing the
+            cell-level data to plot.
+        cell_type_col: Column name in ``.obs`` of the AnnData table that
+            holds cell-type labels.
+        cell_type_values: Subset of cell types to include.  All other
+            types are aggregated into an "Others" category.  If None,
+            all cell types are shown.
+        cells_layer: Key of the cell segmentation layer to use when
+            multiple layers are available. If None, the main layer is
+            used.
+        mask_col: Boolean column in ``.obs`` used to filter cells before
+            computing composition.  If None, all cells are included.
+        geom_key: Key within the selected modality (regions or
+            annotations) to group cells by.  If None, the overall
+            composition is shown without spatial grouping.
+        geom_values: Subset of geometry classes to include when
+            ``geom_key`` is set.  If None, all classes are shown.
+        modality: Which spatial modality to use for grouping cells.
+            Required when ``geom_key`` is not None.  Must be
+            ``"regions"`` or ``"annotations"``.
+        plot_type: Type of bar plot.  ``"bar"`` for vertical bars,
+            ``"barh"`` for horizontal bars.
+        groupby: Column name in InSituExperiment metadata used to
+            identify individual datasets (x-axis labels).
+        normalize: If True, show percentages (0--100).  If False, show
+            absolute counts.
+        force_assignment: If True, force re-assignment of cells to the
+            selected geometry even if assignments already exist.
+        max_cols: Maximum number of subplot columns.
+        aspect_factor: Scaling factor applied to the subplot width (for
+            ``"bar"``) or height (for ``"barh"``).
+        legend_max_per_col: Maximum number of legend entries per column.
+            ``"auto"`` chooses 10 for vertical bars and 5 for horizontal
+            bars.
+        savepath: File path to save the figure.  If None, the figure is
+            only displayed.
+        palette: Color palette for cell types.  Accepts a
+            ``ListedColormap``, a list of color strings, a dict mapping
+            cell-type names to colors, or None to use the default palette.
+        return_data: If True, return the composition DataFrame after
+            plotting.
+        save_only: If True, save the figure without displaying it.
+        dpi_save: Resolution in dots per inch for the saved figure.
+
+    Returns:
+        pd.DataFrame or None: The composition DataFrame when
+            ``return_data=True``, otherwise None.
     """
     if palette is None:
         palette_is_dict = False
@@ -472,7 +610,7 @@ def cellular_composition(
     cell_type_names = compositions_df.index.values
 
     if len(data_names) == 1:
-        print("Since only one dataset is given, all regions are plotted into one figure.")
+        logger.info("Since only one dataset is given, all regions are plotted into one figure.")
         compositions_df = compositions_df.swaplevel(axis=1)
         geom_names, data_names = data_names, geom_names # swap values of the two variables
 
@@ -492,7 +630,7 @@ def cellular_composition(
         # Check and convert to category if needed
         if not pd.api.types.is_categorical_dtype(celldata.table.obs[cell_type_col]):
             celldata.table.obs[cell_type_col] = celldata.table.obs[cell_type_col].astype('category')
-            print(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
+            logger.info(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
 
         if palette_is_dict:
             color_dict = palette
@@ -627,10 +765,12 @@ def cellular_composition(
 
 # deprecated version
 def plot_cellular_composition(*args, **kwargs):
+    """Deprecated. Use :func:`cellular_composition` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="cellular_composition")
 
 # deprecated version
 def plot_colorlegend(*args, **kwargs):
+    """Deprecated. Use :func:`colorlegend` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="colorlegend")

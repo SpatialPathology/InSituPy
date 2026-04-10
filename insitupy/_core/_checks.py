@@ -1,6 +1,9 @@
+import logging
 from typing import Literal
 
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
+
+logger = logging.getLogger(__name__)
 
 
 def _check_assignment(
@@ -31,7 +34,7 @@ def _check_assignment(
             data.assign_regions(keys=key, cells_layers=cells_layer)
     else:
         if verbose:
-            print(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")
+            logger.info(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")
 
 
 def _is_experiment(obj):

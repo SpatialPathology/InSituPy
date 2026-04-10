@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Tuple
 
 import anndata as ad
@@ -6,9 +7,11 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
+from insitupy.containers.results import (DiffExprConfigCollector,
                                           DiffExprResults)
 from insitupy.utils._helpers import suppress_output
+
+logger = logging.getLogger(__name__)
 
 
 def _obs_qc_plot(
@@ -67,6 +70,18 @@ def _feature_qc_plot(
     plt.show()
 
 def _preprocess_psbulk_data(adata):
+    """Preprocess an AnnData for pseudobulk DESeq2 by normalising, scaling, and computing PCA.
+
+    Saves raw counts to ``adata.layers["counts"]``, runs normalisation,
+    log1p, scaling, and PCA via scanpy, then restores raw counts to
+    ``adata.X`` so that DESeq2 receives integer count data.
+
+    Args:
+        adata: AnnData with raw counts in ``X``.
+
+    Returns:
+        The same *adata* object (modified in-place) with raw counts back in ``X``.
+    """
     # Store raw counts in layers
     adata.layers["counts"] = adata.X.copy()
 
@@ -82,6 +97,26 @@ def _preprocess_psbulk_data(adata):
     return adata
 
 def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
+    """Run DESeq2 pseudobulk differential expression via pydeseq2.
+
+    Builds a :class:`~pydeseq2.dds.DeseqDataSet`, runs the DESeq2 pipeline,
+    and extracts Wald-test statistics for the specified contrast.
+
+    Args:
+        adata: Pseudobulk AnnData with raw counts in ``X`` and the design
+            factor in ``obs``.
+        dge_setup: Three-element list ``[factor, numerator, denominator]``
+            passed to :class:`~pydeseq2.ds.DeseqStats` as the contrast.
+        return_params: If True, also return a dictionary of all estimated
+            DESeq2 parameters (dispersions, LFCs, etc.).
+
+    Returns:
+        The :class:`~pydeseq2.ds.DeseqStats` result object, or a tuple
+        ``(stat_res, params)`` if *return_params* is True.
+
+    Raises:
+        ImportError: If ``pydeseq2`` is not installed.
+    """
     try:
         from pydeseq2.dds import DefaultInference, DeseqDataSet
         from pydeseq2.ds import DeseqStats
@@ -123,7 +158,7 @@ def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
     after = pdata.shape[0]
 
     if verbose:
-        print(f"Filtered pseudobulk samples: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
+        logger.info("Filtered pseudobulk samples: %d removed, %d remaining (out of %d total).", before - after, after, before)
 
 def _verbose_filter_features(
     pdata: AnnData,
@@ -148,7 +183,7 @@ def _verbose_filter_features(
     after = pdata.shape[1]
 
     if verbose:
-        print(f"Filtered features: {before - after} removed, {after} remaining (out of {before} total).", flush=True)
+        logger.info("Filtered features: %d removed, %d remaining (out of %d total).", before - after, after, before)
 
 
 def pseudobulk_dge(
@@ -200,7 +235,7 @@ def pseudobulk_dge(
 
     if plot_qc:
         # plot QC
-        print("Sample filtering QC:", flush=True)
+        logger.info("Sample filtering QC:")
         _obs_qc_plot(
             pdata=pdata, pdata_nb=pdata_nb,
             celltype_col=celltype_col,
@@ -221,7 +256,7 @@ def pseudobulk_dge(
 
     if plot_qc:
         # plot feature QC
-        print("Feature filtering QC:", flush=True)
+        logger.info("Feature filtering QC:")
         _feature_qc_plot(pdata_ct, condition_str=dge_setup[0])
 
     _verbose_filter_features(

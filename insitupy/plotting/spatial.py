@@ -1,6 +1,8 @@
 
 import gc
+import logging
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple, Union
 
@@ -19,9 +21,8 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
-                                              RegionsData)
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers import AnnotationsData, ImageData, RegionsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
@@ -30,6 +31,8 @@ from insitupy.utils._colors import (_add_colorlegend_to_axis,
                                     create_cmap_mapping)
 from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
                                   remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
 
 FilterMode = Literal[
     "contains", "not contains", "starts with", "ends with",
@@ -178,6 +181,20 @@ class LayoutConfig(_UpdatablePlottingConfig):
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
     def calc_subplot_params(self, keys, n_data, color_config):
+        """Compute subplot grid dimensions and layout flags from the number of keys and data objects.
+
+        Sets ``self.n_rows``, ``self.n_cols``, ``self.n_plots``,
+        ``self.multikeys``, ``self.multidata``, and
+        ``self.add_legend_to_last_subplot`` in-place based on the combination
+        of *keys* and *n_data*.
+
+        Args:
+            keys: Sequence of colour/feature keys to plot.
+            n_data: Number of data objects (samples / experiments) to show.
+            color_config: Mapping from key to colour configuration dict; used
+                to detect categorical vs. continuous data when laying out
+                categorical legends.
+        """
         # set multiplot variables
         if len(keys) > 1:
             self.multikeys = True
@@ -240,6 +257,7 @@ def spatial(
 
     # data attribute keys
     region_tuple: Optional[Tuple[str, str]] = None,
+    annotation_tuple: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
     annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
     image_key: Optional[str] = None,
 
@@ -277,82 +295,55 @@ def spatial(
     It supports categorical and continuous features, overlays images and annotations, and provides flexible configuration
     for plotting, layout, and saving.
 
-    Parameters
-    ----------
-    Main
-        data : InSituData or InSituExperiment
-            Input dataset or experiment.
-        keys : str or list of str
-            Feature key(s) to plot (e.g., gene names or annotations).
-        cells_layer : str, optional
-            Name of the cell layer to extract data from.
-        layer : str, optional
-            AnnData layer to extract values from.
-        region_tuple : tuple of (str, str), optional
-            Region identifier (dataset key, region name).
-        annotations_key : tuple or str, optional
-            Key(s) for annotations to overlay.
-        image_key : str, optional
-            Key for associated images to overlay.
-        filter_mode : str, optional
-            Mode used for filtering cells (e.g., "contains", "greater than").
-        filter_tuple : tuple, optional
-            Parameters for filtering (depends on ``filter_mode``).
+    Args:
+        data (InSituData or InSituExperiment): Input dataset or experiment.
+        keys (str or list of str): Feature key(s) to plot (e.g., gene names or annotations).
+        cells_layer (str, optional): Name of the cell layer to extract data from.
+        layer (str, optional): AnnData layer to extract values from.
+        region_tuple (tuple of (str, str), optional): Region identifier (dataset key, region name).
+        annotation_tuple (tuple of (str, str or list of str), optional):
+            Annotation overlay specifier as ``(key, name)`` where ``key`` is the
+            annotation category and ``name`` is the specific annotation class (or
+            a list of classes) to overlay. Pass just the key as a plain string to
+            overlay all classes in that category.
+        annotations_key (tuple or str, optional): Deprecated. Use ``annotation_tuple`` instead.
+        image_key (str, optional): Key for associated images to overlay.
+        filter_mode (str, optional): Mode used for filtering cells (e.g., "contains", "greater than").
+        filter_tuple (tuple, optional): Parameters for filtering (depends on ``filter_mode``).
+        xlim (tuple of float, optional): X-axis limits.
+        ylim (tuple of float, optional): Y-axis limits.
+        spot_size (float): Marker size for cells. Default is 10.
+        alpha (float): Transparency for plotted markers. Default is 1.0.
+        max_cols (int, optional): Maximum number of subplot columns. Default is 4.
+        savepath (str, optional): Path to save the figure (if None, figure is not saved).
+        save_only (bool): If True, save figure without displaying. Default is False.
+        dpi_save (int): Resolution in DPI for saving the figure. Default is 300.
+        show (bool): Whether to display the plot. Default is True.
+        plot_config (PlotConfig, optional): Plot configuration object (overrides defaults if provided).
+        layout_config (LayoutConfig, optional): Layout configuration object (overrides defaults if provided).
+        data_config (DataConfig, optional): Data configuration object (overrides defaults if provided).
+        verbose (bool): If True, print progress messages. Default is False.
 
-    Plotting
-        xlim : tuple of float, optional
-            X-axis limits.
-        ylim : tuple of float, optional
-            Y-axis limits.
-        spot_size : float, default=10
-            Marker size for cells.
-        alpha : float, default=1.0
-            Transparency for plotted markers.
+    Returns:
+        None: Displays and/or saves the generated spatial plot(s).
 
-    Layout
-        max_cols : int, optional, default=4
-            Maximum number of subplot columns.
+    Raises:
+        ValueError: If filter parameters or layout arguments are invalid.
+        ValueError: If mixed categorical and continuous values are encountered for a key.
 
-    Save
-        savepath : str, optional
-            Path to save the figure (if None, figure is not saved).
-        save_only : bool, default=False
-            If True, save figure without displaying.
-        dpi_save : int, default=300
-            Resolution in DPI for saving the figure.
-        show : bool, default=True
-            Whether to display the plot.
-
-    Configuration
-        plot_config : PlotConfig, optional
-            Plot configuration object (overrides defaults if provided).
-        layout_config : LayoutConfig, optional
-            Layout configuration object (overrides defaults if provided).
-        data_config : DataConfig, optional
-            Data configuration object (overrides defaults if provided).
-
-    Miscellaneous
-        verbose : bool, default=False
-            If True, print progress messages.
-
-    Returns
-    -------
-    None
-        Displays and/or saves the generated spatial plot(s).
-
-    Raises
-    ------
-    ValueError
-        If filter parameters or layout arguments are invalid.
-    ValueError
-        If mixed categorical and continuous values are encountered for a key.
-
-    Examples
-    --------
+    Examples:
     >>> import insitupy as isp
     >>> isp.pl.spatial(data, keys="GeneA")
     >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
     """
+
+    if annotations_key is not None:
+        warnings.warn(
+            "'annotations_key' is deprecated, use 'annotation_tuple' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        annotation_tuple = annotations_key
 
     # convert arguments to lists
     keys = convert_to_list(keys)
@@ -368,7 +359,7 @@ def spatial(
     # update some values depending on function arguments
     data_config.update_values(
         layer=layer,
-        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
+        region_tuple=region_tuple, annotations_key=annotation_tuple, image_key=image_key,
         filter_mode=filter_mode, filter_tuple=filter_tuple
         )
     plot_config.update_values(
@@ -408,12 +399,12 @@ def spatial(
         )
 
     # setup the subplots
-    fig, axs = setup_subplots(
+    fig, axs = _setup_subplots(
         layout_config=layout_config,
         verbose=verbose
     )
 
-    plot_to_subplots(
+    _plot_to_subplots(
         data,
         keys,
         cells_layer,
@@ -438,14 +429,15 @@ def spatial(
 
 # deprecated version
 def plot_spatial(*args, **kwargs):
+    """Deprecated. Use :func:`spatial` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="spatial")
 
-def setup_subplots(
+def _setup_subplots(
     layout_config: LayoutConfig,
     verbose: bool = False
     ):
-    print("Setup subplots.") if verbose else None
+    logger.info("Setup subplots.") if verbose else None
 
     fig, axs = plt.subplots(
         layout_config.n_rows, layout_config.n_cols,
@@ -475,7 +467,7 @@ def setup_subplots(
 
     return fig, axs
 
-def plot_to_subplots(
+def _plot_to_subplots(
     data,
     keys,
     cells_layer,
@@ -487,7 +479,7 @@ def plot_to_subplots(
     color_config,
     verbose: bool = False
 ):
-    print("Do plotting.") if verbose else None
+    logger.info("Do plotting.") if verbose else None
 
     if _is_experiment(data):
         n_data = len(data)
@@ -562,7 +554,7 @@ def _single_spatial(
     )
 
     if color_values is None:
-        print("Key '{}' not found.".format(key), flush=True)
+        logger.warning("Key '{}' not found.".format(key))
         ax.set_axis_off()
 
     else:
@@ -779,9 +771,11 @@ class _ColorConfigMultiPlot:
 
     @property
     def dict(self):
+        """Return the underlying colour configuration dictionary."""
         return self._dict
 
     def keys(self):
+        """Return the keys of the colour configuration dictionary."""
         return self._dict.keys()
 
     def _add_color_entry(

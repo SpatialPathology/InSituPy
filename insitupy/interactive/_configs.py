@@ -8,7 +8,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 
 def _get_viewer_uid(viewer):
@@ -62,7 +62,11 @@ if WITH_NAPARI:
             '_auto_set_uid',
             'key_dict',
             'masks',
-            'pixel_size'
+            'pixel_size',
+            'annot_point_colors',
+            'region_colors',
+            '_annot_point_color_idx',
+            '_region_color_idx',
         ]
 
         def __init__(self, data):
@@ -88,6 +92,12 @@ if WITH_NAPARI:
             self.recent_selections = []
             self.verbose = False
             self._auto_set_uid = True
+
+            # colour registries for geometry layers: (key, name) -> hex colour
+            self.annot_point_colors: dict = {}
+            self.region_colors: dict = {}
+            self._annot_point_color_idx: int = 0
+            self._region_color_idx: int = 0
 
             # Initialize masks, key_dict, and pixel_size
             self.refresh_variables()
@@ -154,22 +164,6 @@ if WITH_NAPARI:
 
             X = self.adata.X if self.layer_name == "main" else self.adata.layers[self.layer_name]
             return X.toarray() if issparse(X) else X
-
-        @property
-        def X(self):
-            if not self.adata is None:
-                """Return the data matrix as a dense array."""
-                if self.layer_name == "main":
-                    X = self.adata.X
-                else:
-                    X = self.adata.layers[self.layer_name]
-
-                # converting it to non-sparse array in this step might cause memory problems!
-                # if issparse(X):
-                #     return X.toarray()
-                return X
-            else:
-                None
 
         @property
         def units(self):
@@ -251,9 +245,6 @@ if WITH_NAPARI:
                 return self.data.images.metadata[first_key]["pixel_size"]
             return None
 
-            first_key = metadata_keys[0]
-            return self.data.images.metadata[first_key].get("pixel_size")
-
     class ViewerConfigManager:
         """
         Manages multiple ViewerConfig instances, each associated with a unique identifier.
@@ -301,5 +292,4 @@ if WITH_NAPARI:
                 config_ids += ', ...'
             return f"<ViewerConfigManager with {config_count} configs: [{config_ids}]>"
 
-    if 'config_manager' not in globals():
-        config_manager = ViewerConfigManager()
+    config_manager = ViewerConfigManager()

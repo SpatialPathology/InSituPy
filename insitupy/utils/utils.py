@@ -1,14 +1,19 @@
+import logging
 import math
 import os
 from datetime import datetime
-from typing import Optional, Tuple, Union
+from pathlib import Path
+from typing import Generator, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
+
+logger = logging.getLogger(__name__)
 
 import dask.dataframe as dd
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely as _shapely
 from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
 from shapely import LineString, Point, Polygon, affinity
@@ -18,11 +23,24 @@ from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
 
 
 def create_ansi_color_code_from_rgb(rgb_color):
+    """Return an ANSI 24-bit foreground colour escape code for the given RGB tuple.
+
+    Args:
+        rgb_color: A 3-element sequence of integers ``(R, G, B)`` in 0–255.
+
+    Returns:
+        The ANSI escape string ``\\033[38;2;R;G;Bm``.
+    """
     # Create the ANSI escape code
     ansi_escape_code = f'\033[38;2;{rgb_color[0]};{rgb_color[1]};{rgb_color[2]}m'
     return ansi_escape_code
 
 def remove_last_line_from_csv(filename):
+    """Strip the trailing newline from the last line of a CSV file in-place.
+
+    Args:
+        filename: Path to the CSV file to modify.
+    """
     with open(filename) as myFile:
         lines = myFile.readlines()
         last_line = lines[len(lines)-1]
@@ -31,6 +49,17 @@ def remove_last_line_from_csv(filename):
         myFile.writelines(lines)
 
 def decode_robust(s, encoding="utf-8"):
+    """Decode *s* with the given *encoding*, returning *s* unchanged on failure.
+
+    Args:
+        s: Bytes-like object to decode, or a value that will be returned as-is
+            if it is already a string or decoding fails.
+        encoding: Character encoding to use for decoding.
+
+    Returns:
+        The decoded string, or the original *s* if decoding raised
+        :exc:`UnicodeDecodeError` or :exc:`AttributeError`.
+    """
     try:
         return s.decode(encoding)
     except (UnicodeDecodeError, AttributeError):
@@ -63,11 +92,58 @@ def convert_to_list(elem):
     return [elem] if (isinstance(elem, str) or isinstance(elem, os.PathLike) or isinstance(elem, int)) else list(elem)
 
 def nested_dict_numpy_to_list(dictionary):
+    """Recursively convert all NumPy arrays in a nested dict to plain Python lists.
+
+    Modifies *dictionary* in-place.
+
+    Args:
+        dictionary: A possibly-nested dict whose ``ndarray`` values should be
+            converted to lists.
+    """
     for key, value in dictionary.items():
         if isinstance(value, ndarray):
             dictionary[key] = value.tolist()
         elif isinstance(value, dict):
             nested_dict_numpy_to_list(value)
+
+
+def make_json_serializable(value):
+    """Recursively convert common non-JSON types to JSON-safe Python objects.
+
+    Handles nested mappings/sequences and converts NumPy scalar/array types
+    into native Python primitives so that ``json.dumps`` can serialize them.
+
+    Args:
+        value: Any Python object.
+
+    Returns:
+        A JSON-serializable representation of *value*.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if isinstance(value, np.ndarray):
+        return [make_json_serializable(v) for v in value.tolist()]
+
+    if isinstance(value, dict):
+        return {str(k): make_json_serializable(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [make_json_serializable(v) for v in value]
+
+    if isinstance(value, os.PathLike):
+        return os.fspath(value)
+
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+
+    if isinstance(value, np.datetime64):
+        return str(value)
+
+    return str(value)
 
 def get_nrows_maxcols(n_keys, max_cols):
     '''
@@ -87,7 +163,19 @@ def get_nrows_maxcols(n_keys, max_cols):
     return n_keys, n_rows, max_cols
 
 def remove_empty_subplots(axes, nplots, nrows, ncols):
-    assert len(axes.shape) == 1, "Axis object must have only one dimension."
+    """Hide trailing empty axes in a flat subplot array.
+
+    Args:
+        axes: 1-D array of :class:`~matplotlib.axes.Axes` objects.
+        nplots: Number of subplots that were actually populated.
+        nrows: Total number of rows in the subplot grid.
+        ncols: Total number of columns in the subplot grid.
+
+    Raises:
+        ValueError: If *axes* is not 1-D.
+    """
+    if len(axes.shape) != 1:
+        raise ValueError("Axis object must have only one dimension.")
     if nplots > 1:
         # check if there are empty plots remaining
         i = nplots
@@ -109,9 +197,18 @@ def check_list(List, list_to_compare):
     List = [elem for elem in List if elem is not None]
 
     if len(not_in) > 0:
-        print("Following elements not found: {}".format(", ".join(not_in)), flush=True)
+        logger.warning("Following elements not found: {}".format(", ".join(not_in)))
 
     return List
+
+def glob_visible(path: Path, pattern: str) -> Generator:
+    """Like ``Path.glob()``, but silently skips hidden files (names starting with ``'.'``).
+
+    This is useful on Windows when directories contain macOS resource-fork files
+    (e.g. ``._foo.geojson``) created by Finder when copying data across file systems.
+    """
+    return (f for f in path.glob(pattern) if not f.name.startswith("."))
+
 
 def _generate_time_based_uid():
     time_str = datetime.now().strftime("%y%m%d-%H%M%S%f")
@@ -276,46 +373,73 @@ def _crop_transcripts(
     shape: Optional[Polygon] = None,
     xlim: Optional[Tuple[int, int]] = None,
     ylim: Optional[Tuple[int, int]] = None,
-    verbose: bool = True
+    verbose: bool = True,
+    materialize: bool = True
     ):
+
+    # Compute Dask → pandas BEFORE filtering to avoid task-graph overhead.
+    # On an in-memory-backed Dask DF this is nearly free; on disk-backed it
+    # loads the data once, which is the same total work as the old approach.
+    if materialize and isinstance(transcript_df, dd.DataFrame):
+        transcript_df = transcript_df.compute()
 
     if shape is not None:
         if xlim is not None and ylim is not None:
             if verbose:
                 warn("Both xlim/ylim and shape are provided. Shape will be used for cropping.")
 
+        # Detect column layout
         try:
-            points = gpd.points_from_xy(
-                x=transcript_df.loc[:, ("coordinates", "x")].values,
-                y=transcript_df.loc[:, ("coordinates", "y")].values
-                )
-            warn("Filtering transcripts based on a shape may take longer if transcripts are stored as pandas dataframe instead of dask dataframe.")
+            x_vals = transcript_df.loc[:, ("coordinates", "x")]
+            y_vals = transcript_df.loc[:, ("coordinates", "y")]
             grouped_df = True
         except KeyError:
-            try:
-                import dask_geopandas as dask_gpd
-            except ImportError:
-                warn("Filtering transcripts based on a shape may take longer if `dask-geopandas` is not installed.")
-
-                # load the dataframe into memory to generate points
-                print("Load transcript dataframe into memory...")
-                transcript_df = transcript_df.compute()
-                # generate points without dask_geopandas
-                points = gpd.points_from_xy(
-                    x=transcript_df.loc[:, "x_location"].values,
-                    y=transcript_df.loc[:, "y_location"].values
-                    )
-            else:
-                # generate points with dask_geopandas
-                points = dask_gpd.points_from_xy(df=transcript_df, x="x_location", y="y_location")
+            x_vals = transcript_df["x_location"]
+            y_vals = transcript_df["y_location"]
             grouped_df = False
 
-        # create mask
-        #mask = shape.contains(points)
-        mask = points.within(shape)
+        minx, miny, maxx, maxy = shape.bounds
 
-        # get minimum x and y values
-        minx, miny, _, _ = shape.bounds
+        if isinstance(transcript_df, pd.DataFrame):
+            # Step 1: bounding-box pre-filter — reduces 41M rows to ~region-size candidates
+            bbox_mask = (
+                (x_vals >= minx) & (x_vals <= maxx) &
+                (y_vals >= miny) & (y_vals <= maxy)
+            ).to_numpy()
+            # Step 2: shapely 2.0 vectorized containment on the candidate subset only
+            pts = _shapely.points(x_vals.to_numpy()[bbox_mask], y_vals.to_numpy()[bbox_mask])
+            within = _shapely.contains(shape, pts)
+            # Merge back into a full-length boolean mask
+            mask = bbox_mask.copy()
+            mask[mask] = within
+        else:
+            # Dask path (only reached when materialize=False).
+            # dask_geopandas only supports flat column names, so the grouped
+            # multi-level column case always falls through to compute-then-filter.
+            dask_mask_set = False
+            if not grouped_df:
+                try:
+                    import dask_geopandas as dask_gpd
+                    mask = dask_gpd.points_from_xy(
+                        df=transcript_df, x="x_location", y="y_location"
+                    ).within(shape)
+                    dask_mask_set = True
+                except ImportError:
+                    warn("dask-geopandas not installed; loading transcripts into memory.")
+
+            if not dask_mask_set:
+                # Compute to pandas and use the vectorized fast path
+                transcript_df = transcript_df.compute()
+                x_vals = transcript_df.loc[:, ("coordinates", "x")] if grouped_df else transcript_df["x_location"]
+                y_vals = transcript_df.loc[:, ("coordinates", "y")] if grouped_df else transcript_df["y_location"]
+                bbox_mask = (
+                    (x_vals >= minx) & (x_vals <= maxx) &
+                    (y_vals >= miny) & (y_vals <= maxy)
+                ).to_numpy()
+                pts = _shapely.points(x_vals.to_numpy()[bbox_mask], y_vals.to_numpy()[bbox_mask])
+                within = _shapely.contains(shape, pts)
+                mask = bbox_mask.copy()
+                mask[mask] = within
 
     else:
         if xlim is None or ylim is None:
@@ -349,6 +473,11 @@ def _crop_transcripts(
         # move origin again to 0 by subtracting the lower limits from the coordinates
         transcript_df["x_location"] -= minx
         transcript_df["y_location"] -= miny
+
+    # Re-wrap pandas result as Dask to satisfy the transcripts setter contract.
+    if isinstance(transcript_df, pd.DataFrame):
+        n_partitions = max(1, min(8, len(transcript_df) // 2_000_000))
+        transcript_df = dd.from_pandas(transcript_df, npartitions=n_partitions)
 
     return transcript_df
 

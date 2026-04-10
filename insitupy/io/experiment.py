@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from numbers import Number
 from pathlib import Path
@@ -8,6 +9,8 @@ from insitupy._io._qupath import (_get_pixel_size_from_qupath_metadata,
                                   _list_insitupy_data_folders)
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.data import read_qupath
+
+logger = logging.getLogger(__name__)
 
 
 def read_qupath_project(
@@ -57,10 +60,10 @@ def read_qupath_project(
     qp_project_file = path / "project.qpproj"
     if qp_project_file.exists():
         data_path = Path(path) / export_folder
-        print(f"QuPath project file 'project.qpproj' found in directory. Searching for data in:\n'{data_path}'")
+        logger.info(f"QuPath project file 'project.qpproj' found in directory. Searching for data in:\n'{data_path}'")
 
         if pixel_size is None:
-            print("Will try to automatically infer pixel sizes.")
+            logger.info("Will try to automatically infer pixel sizes.")
 
             # Replace 'your_file.json' with the path to your JSON file
             with open(qp_project_file, 'r') as file:
@@ -75,7 +78,7 @@ def read_qupath_project(
 
     exp = InSituExperiment()
     for dataset_name, path_list in data_dict.items():
-        print(f"Reading '{dataset_name}'...")
+        logger.info(f"Reading '{dataset_name}'...")
         for p in path_list:
             sample_name = p.name
 

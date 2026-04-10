@@ -364,4 +364,4 @@ class TestReadXeniumSpatialDataBackend:
         assert xd_roundtrip.transcripts is not None
         assert "feature_name" in xd_roundtrip.transcripts.columns
         assert "x_location" in xd_roundtrip.transcripts.columns
-        assert "y_location" in xd_roundtrip.transcripts.columns        assert "y_location" in xd_roundtrip.transcripts.columns
+        assert "y_location" in xd_roundtrip.transcripts.columns

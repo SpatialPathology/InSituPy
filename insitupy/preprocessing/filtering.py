@@ -7,26 +7,21 @@ from anndata import AnnData
 from scipy.stats import median_abs_deviation
 
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 
 
 def _compute_mad_threshold(values, n_mads, log1p_transform=True):
     """
     Core MAD threshold computation.
 
-    Parameters
-    ----------
-    values : array-like
-        Count values.
-    n_mads : Number
-        Number of MADs from median for threshold.
-    log1p_transform : bool
-        If True, compute MAD on log1p-transformed values. Default is True.
+    Args:
+        values (array-like): Count values.
+        n_mads (Number): Number of MADs from median for threshold.
+        log1p_transform (bool): If True, compute MAD on log1p-transformed values.
+            Default is True.
 
-    Returns
-    -------
-    tuple
-        (threshold_log1p, threshold_raw) - threshold in both scales.
+    Returns:
+        tuple: (threshold_log1p, threshold_raw) - threshold in both scales.
     """
     if log1p_transform:
         log_values = np.log1p(values)
@@ -56,23 +51,18 @@ def calculate_mad_thresholds(
     Thresholds are computed on log1p-transformed values for statistical validity
     (as recommended by sc-best-practices), then back-transformed to raw scale.
 
-    Parameters
-    ----------
-    data : InSituData or AnnData
-        Annotated data matrix with QC metrics calculated.
-    cells_layer : str, optional
-        Cell layer to use if data is InSituData.
-    batch : str, optional
-        Column in .obs to use for batch separation. If None, computes global thresholds.
-    n_mads : Number, optional
-        Number of MADs from median for threshold calculation. Default is 5.
+    Args:
+        data (InSituData or AnnData): Annotated data matrix with QC metrics calculated.
+        cells_layer (str, optional): Cell layer to use if data is InSituData.
+        batch (str, optional): Column in .obs to use for batch separation. If None,
+            computes global thresholds.
+        n_mads (Number, optional): Number of MADs from median for threshold calculation.
+            Default is 5.
 
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with columns: 'batch' (if batch is not None),
-        'total_counts_thresh', 'log1p_total_counts_thresh',
-        'n_genes_by_counts_thresh', 'log1p_n_genes_by_counts_thresh'.
+    Returns:
+        pd.DataFrame: DataFrame with columns: 'batch' (if batch is not None),
+            'total_counts_thresh', 'log1p_total_counts_thresh',
+            'n_genes_by_counts_thresh', 'log1p_n_genes_by_counts_thresh'.
     """
     if isinstance(data, AnnData):
         adata = data

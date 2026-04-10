@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
-from insitupy.dataclasses.dataclasses import BoundariesData, CellData
+from insitupy.containers.boundaries_data import BoundariesData
+from insitupy.containers.cell_data import CellData
 
 
 def _create_table(obs_names):

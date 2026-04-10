@@ -1,7 +1,10 @@
+import logging
 import math
 from numbers import Number
 from typing import List, Literal, Tuple, Union
 from warnings import warn
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -17,7 +20,7 @@ from scipy.ndimage import zoom
 from skimage.color import hed2rgb, rgb2hed
 
 from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
-from insitupy._exceptions import InvalidDataTypeError
+from insitupy._exceptions import InvalidDataTypeError, NoImageOverlapError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 
 
@@ -98,15 +101,18 @@ def resize_image(img: NDArray,
     image_axes = ImageAxes(pattern=axes)
     channel_axis = image_axes.C
 
-    assert image_axes.T is None, "Time-series images are not supported in `resize_image`."
+    if image_axes.T is not None:
+        raise ValueError("Time-series images are not supported in `resize_image`.")
 
     if (channel_axis is not None) & (channel_axis != len(img.shape)-1):
         # move channel axis to last position if it is not there already
         img = np.moveaxis(img, channel_axis, -1)
 
-    assert img.dtype in [np.dtype('uint16'), np.dtype('uint8')], \
-        "Image must have one of the following numpy data types: `dtype('uint8)` or `dtype('uint16)`. \
-        Otherwise cv2.resize shows an error."
+    if img.dtype not in [np.dtype('uint16'), np.dtype('uint8')]:
+        raise ValueError(
+            "Image must have one of the following numpy data types: `dtype('uint8)` or `dtype('uint16)`. "
+            "Otherwise cv2.resize shows an error."
+        )
 
     if isinstance(img, da.Array):
         img = img.compute() # load into memory
@@ -173,7 +179,7 @@ def convert_to_8bit_func(img, save_mem=True, verbose=False):
         img = np.uint8(img)
     else:
         if verbose:
-            print("Image is already 8-bit. Not changed.", flush=True)
+            logger.info("Image is already 8-bit. Not changed.")
     return img
 
 def scale_to_max_width(image: np.ndarray,
@@ -200,24 +206,13 @@ def scale_to_max_width(image: np.ndarray,
         # use the square area of the maximum width as measure for rescaling. Better for elongated images.
         max_square_area = max_width ** 2
 
-        # calculate new dimensions based on the maximum square area
-        long_idx = np.argmax(image_yx)  # search for position of longest dimension
-        short_idx = np.argmin(image_yx)  # same for shortest
-        long_side = image_yx[long_idx]  # extract longest side
-        short_side = image_yx[short_idx]  # extract shortest
-        dim_ratio = short_side / long_side  # calculate ratio between the two sides.
-        new_long_side = int(np.sqrt(max_square_area / dim_ratio))  # calculate the length of the new longer side based on area
-        new_short_side = int(new_long_side * dim_ratio) # calculate length of new shorter side based on the longer one
-
-        # create new shape
-        new_shape = [None, None]
-        new_shape[long_idx] = new_long_side
-        new_shape[short_idx] = new_short_side
-        new_shape = tuple(new_shape)
+        # scale both dimensions by the same factor so the resulting area equals max_square_area
+        sf = np.sqrt(max_square_area / (image_yx[0] * image_yx[1]))
+        new_shape = (int(image_yx[0] * sf), int(image_yx[1] * sf))
 
     # resizing - caution: order of dimensions is reversed in OpenCV compared to numpy
     image_scaled = resize_image(img=image, dim=(new_shape[1], new_shape[0]), axes=axes)
-    print(f"{print_spacer}{image.shape} \u2192 {image_scaled.shape}") if verbose else None
+    logger.info(f"{print_spacer}{image.shape} \u2192 {image_scaled.shape}") if verbose else None
 
     return image_scaled
 
@@ -338,6 +333,30 @@ def crop_dask_array_or_pyramid(
     ylim: Tuple[int, int],
     pixel_size: Number
     ):
+    """Crop a dask array or image pyramid to physical-unit bounding box.
+
+    Converts the physical-unit limits (*xlim*, *ylim*) to pixel coordinates
+    using *pixel_size*, then slices the spatial dimensions of *data*
+    accordingly.  For pyramids (list of dask arrays), each level is cropped
+    taking the accumulated downscale factor into account.
+
+    Args:
+        data: Single dask array with shape ``(Y, X[, ...])`` or a list of
+            dask arrays representing an image pyramid (index 0 = full
+            resolution, each subsequent level is downsampled).
+        xlim: ``(x_min, x_max)`` in physical units (e.g. micrometres).
+        ylim: ``(y_min, y_max)`` in physical units (e.g. micrometres).
+        pixel_size: Physical size of one pixel (in the same units as *xlim*
+            and *ylim*).  Used to convert coordinates to pixel indices.
+
+    Returns:
+        Cropped dask array or list of cropped dask arrays, rechunked to
+        avoid irregular chunks after slicing.
+
+    Raises:
+        InvalidDataTypeError: If *data* is neither a dask array nor a list
+            of dask arrays.
+    """
     # check if image data is one dask array or a pyramid of dask arrays
     if isinstance(data, list):
         if np.all([isinstance(elem, da.core.Array) for elem in data]):
@@ -352,8 +371,18 @@ def crop_dask_array_or_pyramid(
                 xlim_scaled = (int(xlim_scaled[0] / sf), int(xlim_scaled[1] / sf))
                 ylim_scaled = (int(ylim_scaled[0] / sf), int(ylim_scaled[1] / sf))
 
+                # clamp to valid pixel range to handle regions that extend beyond
+                # image boundaries; negative indices would wrap around in numpy/dask
+                img_h, img_w = img.shape[0], img.shape[1]
+                x0 = max(0, xlim_scaled[0])
+                x1 = min(img_w, xlim_scaled[1])
+                y0 = max(0, ylim_scaled[0])
+                y1 = min(img_h, ylim_scaled[1])
+                if x0 >= x1 or y0 >= y1:
+                    raise NoImageOverlapError(xlim, ylim)
+
                 # do the cropping
-                cdata = img[ylim_scaled[0]:ylim_scaled[1], xlim_scaled[0]:xlim_scaled[1]]
+                cdata = img[y0:y1, x0:x1]
 
                 # rechunk the array to prevent irregular chunking
                 cdata = cdata.rechunk()
@@ -362,11 +391,17 @@ def crop_dask_array_or_pyramid(
                 cropped_data.append(cdata)
     else:
         if isinstance(data, da.core.Array):
-            # convert to metric unit
-            xlim_um = tuple([int(elem / pixel_size) for elem in xlim])
-            ylim_um = tuple([int(elem / pixel_size) for elem in ylim])
+            # convert to pixel units and clamp to valid range; without clamping,
+            # negative indices wrap around in numpy/dask producing zero-size arrays
+            img_h, img_w = data.shape[0], data.shape[1]
+            x0 = max(0, int(xlim[0] / pixel_size))
+            x1 = min(img_w, int(xlim[1] / pixel_size))
+            y0 = max(0, int(ylim[0] / pixel_size))
+            y1 = min(img_h, int(ylim[1] / pixel_size))
+            if x0 >= x1 or y0 >= y1:
+                raise NoImageOverlapError(xlim, ylim)
 
-            cropped_data = data[ylim_um[0]:ylim_um[1], xlim_um[0]:xlim_um[1]]
+            cropped_data = data[y0:y1, x0:x1]
 
             # rechunk the array to prevent irregular chunking
             cropped_data = cropped_data.rechunk()
@@ -383,12 +418,45 @@ def clip_image_histogram(
     lower_perc: int = 2,
     upper_perc: int = 98
     ):
+    """Clip image intensity range and rescale to 8-bit.
+
+    Stretches the image histogram by clipping pixel values below the
+    *lower_perc*-th percentile and above the *upper_perc*-th percentile,
+    then linearly rescaling the clipped range to [0, 255] and casting to
+    ``uint8``.
+
+    Args:
+        image: Input image as a NumPy array of any numeric dtype.
+        lower_perc: Lower percentile used as the clip floor. Defaults to 2.
+        upper_perc: Upper percentile used as the clip ceiling. Defaults to 98.
+
+    Returns:
+        Contrast-adjusted image as a ``uint8`` NumPy array with the same
+        spatial shape as *image*.
+    """
     # Define the min and max intensity values
     lp, up = np.percentile(image, (lower_perc, upper_perc))
     image = np.clip((image - lp) * 255.0 / (up - lp), 0, 255).astype(np.uint8)
     return image
 
 def otsu_thresholding(image: np.ndarray) -> np.ndarray:
+    """Apply Otsu's thresholding to produce a binary image.
+
+    Uses OpenCV's implementation of Otsu's method to automatically select a
+    threshold value that minimises intra-class intensity variance, then
+    returns a binary mask where pixels above the threshold are 255 and
+    pixels below are 0.
+
+    Args:
+        image: Grayscale input image as a ``uint8`` NumPy array.
+
+    Returns:
+        Binary ``uint8`` NumPy array of the same shape as *image*, with
+        values 0 or 255.
+
+    Raises:
+        ImportError: If OpenCV (``cv2``) is not installed.
+    """
     if not HAS_OPENCV:
         raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python")
 

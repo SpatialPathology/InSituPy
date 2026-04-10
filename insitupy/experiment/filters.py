@@ -19,6 +19,7 @@ class FilterSpec:
     note: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise this filter spec to a JSON-compatible dict."""
         return {
             "mask": list(np.asarray(self.mask, dtype=bool)),
             "note": self.note,
@@ -26,6 +27,19 @@ class FilterSpec:
 
     @classmethod
     def from_entry(cls, key: str, entry: Dict[str, Any]) -> "FilterSpec":
+        """Deserialise a :class:`FilterSpec` from a stored dict entry.
+
+        Args:
+            key: The filter key.
+            entry: Dict with at least a ``"mask"`` key (boolean list) and
+                an optional ``"note"`` key.
+
+        Returns:
+            A new :class:`FilterSpec` instance.
+
+        Raises:
+            ValueError: If *entry* is not a dict or is missing ``"mask"``.
+        """
         if not isinstance(entry, dict):
             raise ValueError(
                 "Invalid filter entry: expected a dictionary with keys 'mask' and optional 'note'."
@@ -54,9 +68,17 @@ class FilterManager:
         self._experiment = experiment
 
     def keys(self) -> List[str]:
+        """Return the names of all stored filters."""
         return list(self._experiment._filters.keys())
 
     def summary(self) -> pd.DataFrame:
+        """Return a summary table of all filters.
+
+        Returns:
+            A :class:`pandas.DataFrame` with columns ``filter_key``,
+            ``n_selected``, ``n_total``, ``n_excluded``,
+            ``selected_fraction``, and ``note``.
+        """
         if not self._experiment._filters:
             return pd.DataFrame(columns=["filter_key", "n_selected", "n_total", "n_excluded", "selected_fraction", "note"])
 
@@ -87,6 +109,7 @@ class FilterManager:
         return pd.DataFrame(rows)
 
     def masks(self) -> Dict[str, List[bool]]:
+        """Return a dict mapping each filter key to its boolean mask list."""
         out = {}
         for key, entry in self._experiment._filters.items():
             spec = FilterSpec.from_entry(key, entry)
@@ -104,6 +127,33 @@ class FilterManager:
         in_: Optional[Union[List[str], str]] = None,
         out: Optional[Union[List[str], str]] = None,
     ) -> str:
+        """Create and store a new filter based on a metadata column.
+
+        Builds a boolean mask by matching values in the experiment metadata
+        column *by* against the *include* or *exclude* list, then stores it
+        under *key*.
+
+        Args:
+            by: Name of the metadata column to filter on.
+            include: Value(s) to include.  Exactly one of *include* or
+                *exclude* must be provided.
+            exclude: Value(s) to exclude.  Exactly one of *include* or
+                *exclude* must be provided.
+            key: Name under which the filter is stored. Required.
+            note: Optional free-text description of the filter.
+            overwrite: If ``True``, replace an existing filter with the same
+                key. Defaults to ``False``.
+            in_: Deprecated alias for *include*.
+            out: Deprecated alias for *exclude*.
+
+        Returns:
+            A confirmation string ``"Added filter '<key>' (n/N selected)."``.
+
+        Raises:
+            ValueError: If *key* is not provided, both or neither of
+                *include*/*exclude* are given, or *by* is not a valid column.
+            KeyError: If *by* is not found in the experiment metadata.
+        """
         if key is None:
             raise ValueError("`key` must be provided to store the filter.")
 
@@ -157,6 +207,21 @@ class FilterManager:
         return f"Added filter '{key}' ({n_selected}/{n_total} selected)."
 
     def apply(self, key: str) -> "InSituExperiment":
+        """Return a new :class:`InSituExperiment` containing only the filtered samples.
+
+        Creates a permanent (non-view) subset of the experiment using the
+        boolean mask stored under *key*.
+
+        Args:
+            key: Name of the filter to apply.
+
+        Returns:
+            A new :class:`InSituExperiment` with only the selected samples.
+
+        Raises:
+            KeyError: If *key* is not a stored filter.
+            ValueError: If the mask length does not match the metadata length.
+        """
         if key not in self._experiment._filters:
             raise KeyError(
                 f"Filter '{key}' not found. Available filters: {self.keys()}"
@@ -174,6 +239,21 @@ class FilterManager:
         )
 
     def view(self, key: str) -> "InSituExperiment":
+        """Return a lazy view of the experiment containing only the filtered samples.
+
+        Unlike :meth:`apply`, this returns a *view* that remembers which filter
+        was used, without creating a full copy of the data.
+
+        Args:
+            key: Name of the filter to apply as a view.
+
+        Returns:
+            A view :class:`InSituExperiment` with only the selected samples.
+
+        Raises:
+            KeyError: If *key* is not a stored filter.
+            ValueError: If the mask length does not match the metadata length.
+        """
         if key not in self._experiment._filters:
             raise KeyError(
                 f"Filter '{key}' not found. Available filters: {self.keys()}"
@@ -192,6 +272,14 @@ class FilterManager:
         )
 
     def remove(self, key: str):
+        """Delete a stored filter by name.
+
+        Args:
+            key: Name of the filter to remove.
+
+        Raises:
+            KeyError: If *key* is not a stored filter.
+        """
         if key not in self._experiment._filters:
             raise KeyError(
                 f"Filter '{key}' not found. Available filters: {self.keys()}"
@@ -199,9 +287,22 @@ class FilterManager:
         del self._experiment._filters[key]
 
     def clear(self):
+        """Remove all stored filters."""
         self._experiment._filters = {}
 
     def rename(self, old_key: str, new_key: str, overwrite: bool = False):
+        """Rename a stored filter.
+
+        Args:
+            old_key: Current name of the filter.
+            new_key: New name for the filter.
+            overwrite: If ``True``, replace an existing filter with name
+                *new_key*. Defaults to ``False``.
+
+        Raises:
+            KeyError: If *old_key* is not a stored filter.
+            ValueError: If *new_key* already exists and *overwrite* is ``False``.
+        """
         if old_key not in self._experiment._filters:
             raise KeyError(
                 f"Filter '{old_key}' not found. Available filters: {self.keys()}"

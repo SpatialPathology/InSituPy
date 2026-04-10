@@ -1,5 +1,6 @@
 
 import functools as ft
+import logging
 import os
 import shutil
 from copy import deepcopy
@@ -11,6 +12,8 @@ from typing import List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
+logger = logging.getLogger(__name__)
+
 import dask.dataframe as dd
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -21,28 +24,60 @@ from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
-from insitupy import __version__
 from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
                                  MODALITIES, MODALITIES_COLOR_DICT,
                                  with_insitupy_style)
 from insitupy._exceptions import (InSituDataRepeatedCropError,
                                   ModalityNotFoundError,
-                                  ModalityNotFoundWarning)
+                                  ModalityNotFoundWarning, NoImageOverlapError)
 from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
                                 write_dict_to_json)
 from insitupy._textformat import textformat as tf
+from insitupy._version import __version__
 from insitupy._warnings import NoProjectLoadWarning
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
-                                              MultiCellData, RegionsData,
-                                              SpatialUnitsData)
-from insitupy.dataclasses.io import (_save_annotations, _save_cells,
-                                     _save_images, _save_regions,
-                                     _save_transcripts, _save_units,
-                                     read_multicelldata, read_shapesdata)
+from insitupy.containers import (AnnotationsData, ImageData, MultiCellData,
+                                 RegionsData, SpatialUnitsData)
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.io import (_read_multicelldata, _read_shapesdata,
+                                    _save_annotations, _save_cells,
+                                    _save_images, _save_regions,
+                                    _save_transcripts, _save_units)
 from insitupy.utils._helpers import sort_paths_by_datetime
-from insitupy.utils.geo import fast_query_points_within_polygon
+from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
+
+
+def _region_overlaps_image(images, xlim, ylim) -> bool:
+    """Return True if the crop region overlaps with any image in *images*.
+
+    Args:
+        images: :class:`~insitupy.containers.ImageData` instance.
+        xlim: ``(x_min, x_max)`` of the crop region in physical units.
+        ylim: ``(y_min, y_max)`` of the crop region in physical units.
+    """
+    for name in images.names:
+        meta = images._metadata[name]
+        pixel_size = meta['pixel_size']
+        shape = meta['shape']
+        img_h, img_w = shape[0], shape[1]
+        img_xmax = img_w * pixel_size
+        img_ymax = img_h * pixel_size
+        if xlim[0] < img_xmax and xlim[1] > 0 and ylim[0] < img_ymax and ylim[1] > 0:
+            return True
+    return False
+
+
+# Maps modality name → (factory_callable_or_None, private_attr_name).
+# Used by _clear_modality and unload as the single source of truth for
+# how each modality is reset to its empty sentinel.
+_RESET_MAP: dict = {
+    "cells":       (MultiCellData,   "_cells"),
+    "units":       (None,            "_units"),
+    "images":      (ImageData,       "_images"),
+    "transcripts": (None,            "_transcripts"),
+    "annotations": (AnnotationsData, "_annotations"),
+    "regions":     (RegionsData,     "_regions"),
+}
 
 
 class InSituData:
@@ -172,7 +207,8 @@ class InSituData:
             self._metadata = metadata
 
         # add method parameters
-        assert isinstance(method_params, dict), "`method_params` must be a dictionary."
+        if not isinstance(method_params, dict):
+            raise TypeError("`method_params` must be a dictionary.")
         self._metadata["method_params"] = method_params
 
         # modalities
@@ -283,6 +319,7 @@ class InSituData:
 
     @metadata.setter
     def metadata(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'metadata' attribute after initialization.")
 
     @property
@@ -293,6 +330,22 @@ class InSituData:
         """
         return self._slide_id
 
+    @slide_id.setter
+    def slide_id(self, value):
+        """Set the slide id.
+
+        Args:
+            value (str or None): New slide id.
+
+        Note:
+            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
+            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
+            metadata in sync.
+        """
+        if value is not None and not isinstance(value, str):
+            raise TypeError(f"slide_id must be a str or None, got {type(value).__name__!r}")
+        self._slide_id = value
+
     @property
     def sample_id(self):
         """Return sample id of the InSituData object.
@@ -301,13 +354,36 @@ class InSituData:
         """
         return self._sample_id
 
+    @sample_id.setter
+    def sample_id(self, value):
+        """Set the sample id.
+
+        Args:
+            value (str or None): New sample id.
+
+        Note:
+            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
+            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
+            metadata in sync.
+        """
+        if value is not None and not isinstance(value, str):
+            raise TypeError(f"sample_id must be a str or None, got {type(value).__name__!r}")
+        self._sample_id = value
+
     @property
     def from_insitudata(self):
+        """Return whether this object was loaded from a saved InSituPy project.
+
+        Returns:
+            ``True`` if a valid project path is set and the directory exists,
+            ``False`` otherwise (e.g. object created in-memory via
+            :func:`~insitupy.io.read_xenium`).
+        """
         if self._path is not None:
             if Path(self._path).exists():
                 return True
             else:
-                print(f"Path {str(self._path)} does not exist.")
+                logger.warning("Path %s does not exist.", self._path)
                 return False
         else:
             return False
@@ -322,12 +398,14 @@ class InSituData:
 
     @images.setter
     def images(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @images.deleter
     def images(self):
-        self._images = ImageData()
-        print("Cleared all data from 'images'.")
+        """Clear all image data from this object."""
+        self._clear_modality("images", verbose=True)
+        import gc; gc.collect()
 
     @property
     def cells(self):
@@ -339,12 +417,14 @@ class InSituData:
 
     @cells.setter
     def cells(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'cells' attribute after initialization.")
 
     @cells.deleter
     def cells(self):
-        self._cells = MultiCellData()
-        print("Cleared all data from 'cells'.")
+        """Clear all cell data from this object."""
+        self._clear_modality("cells", verbose=True)
+        import gc; gc.collect()
 
     @property
     def units(self):
@@ -356,12 +436,14 @@ class InSituData:
 
     @units.setter
     def units(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'units' attribute after initialization.")
 
     @units.deleter
     def units(self):
-        self._units = None
-        print("Cleared all data from 'units'.")
+        """Clear all spatial units data from this object."""
+        self._clear_modality("units", verbose=True)
+        import gc; gc.collect()
 
     def add_units(self, data: SpatialUnitsData):
         """
@@ -388,12 +470,14 @@ class InSituData:
 
     @annotations.setter
     def annotations(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'annotations' attribute after initialization.")
 
     @annotations.deleter
     def annotations(self):
-        self._annotations = AnnotationsData()
-        print("Cleared all data from 'annotations'.")
+        """Clear all annotation data from this object."""
+        self._clear_modality("annotations", verbose=True)
+        import gc; gc.collect()
 
     @property
     def regions(self):
@@ -405,12 +489,14 @@ class InSituData:
 
     @regions.setter
     def regions(self, value):
+        """Read-only; raises :exc:`AttributeError`."""
         raise AttributeError("Cannot modify 'regions' attribute after initialization.")
 
     @regions.deleter
     def regions(self):
-        self._regions = RegionsData()
-        print("Cleared all data from 'regions'.")
+        """Clear all region data from this object."""
+        self._clear_modality("regions", verbose=True)
+        import gc; gc.collect()
 
     @property
     def transcripts(self):
@@ -422,16 +508,20 @@ class InSituData:
 
     @transcripts.setter
     def transcripts(self, value: dd.DataFrame):
+        """Set transcript data, converting a :class:`pandas.DataFrame` to Dask if needed."""
         if isinstance(value, dd.DataFrame):
             self._transcripts = value
         elif isinstance(value, pd.DataFrame):
-            self._transcripts = dd.from_pandas(value, npartitions=8)
+            n_partitions = max(1, min(8, len(value) // 2_000_000))
+            self._transcripts = dd.from_pandas(value, npartitions=n_partitions)
         else:
             raise ValueError(f"Value must be of type dask.dataframe.DataFrame, but got {type(value)} instead.")
 
     @transcripts.deleter
     def transcripts(self):
-        self._transcripts = None
+        """Clear all transcript data from this object."""
+        self._clear_modality("transcripts", verbose=True)
+        import gc; gc.collect()
 
 
     def assign_geometries(self,
@@ -473,7 +563,7 @@ class InSituData:
 
         # iterate through annotation keys
         for key in keys:
-            print(f"Assigning key '{key}'...")
+            logger.info("Assigning key '%s'...", key)
             if key not in geom_attr.keys():
                 raise KeyError(f"Key '{key}' not found in {geometry_type}.")
 
@@ -499,7 +589,7 @@ class InSituData:
                 polygons = geom_df[geom_df["name"] == n]["geometry"].tolist()
 
                 #in_poly = [poly.contains(cells) for poly in polygons]
-                in_poly = [fast_query_points_within_polygon(poly, cells) for poly in polygons]
+                in_poly = [_fast_query_points_within_polygon(poly, cells) for poly in polygons]
 
                 # check if points were in any of the polygons
                 in_poly_res = np.array(in_poly).any(axis=0)
@@ -521,7 +611,7 @@ class InSituData:
                 if col_name in celldata.table.obs:
                     if overwrite:
                         celldata.table.obs.drop(col_name, axis=1, inplace=True)
-                        print(f'Existing column "{col_name}" is overwritten.', flush=True)
+                        logger.warning('Existing column "%s" is overwritten.', col_name)
                         add = True
                     else:
                         warn(f'Column "{col_name}" exists already in `{name}.table.obs`. Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
@@ -549,7 +639,7 @@ class InSituData:
                 # save that the current key was analyzed
                 geom_attr.metadata[key]["analyzed"] = tf.TICK
 
-                print(f"Added results to `{name}.table.obsm['{geometry_type}']", flush=True)
+                logger.info("Added results to `%s.table.obsm['%s']`", name, geometry_type)
 
 
     def assign_annotations(
@@ -559,6 +649,22 @@ class InSituData:
         add_masks: bool = False,
         overwrite: bool = True
     ):
+        """Assign annotation geometries to cell layers.
+
+        For each cell layer, spatial point-in-polygon assignment is performed
+        and the result is stored in ``.cells[layer].table.obs``.  Wraps
+        :meth:`assign_geometries` with ``geometry_type="annotations"``.
+
+        Args:
+            keys: Annotation key(s) to assign, or ``"all"`` to assign every
+                available annotation. Defaults to ``"all"``.
+            cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
+                all available layers. Defaults to ``None``.
+            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+                Defaults to ``False``.
+            overwrite: If ``True``, overwrite existing assignment columns.
+                Defaults to ``True``.
+        """
         if cells_layers is None:
             layers_list = self._cells.keys()
         else:
@@ -580,6 +686,22 @@ class InSituData:
         add_masks: bool = False,
         overwrite: bool = True
     ):
+        """Assign region geometries to cell layers.
+
+        Identical to :meth:`assign_annotations` but operates on
+        ``geometry_type="regions"``.  Results are stored in
+        ``.cells[layer].table.obs``.
+
+        Args:
+            keys: Region key(s) to assign, or ``"all"`` to assign every
+                available region. Defaults to ``"all"``.
+            cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
+                all available layers. Defaults to ``None``.
+            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+                Defaults to ``False``.
+            overwrite: If ``True``, overwrite existing assignment columns.
+                Defaults to ``True``.
+        """
         if cells_layers is None:
             layers_list = self._cells.keys()
         else:
@@ -610,7 +732,8 @@ class InSituData:
              xlim: Optional[Tuple[int, int]] = None,
              ylim: Optional[Tuple[int, int]] = None,
              inplace: bool = False,
-             verbose: bool = False
+             verbose: bool = False,
+             materialize_transcripts: bool = True
             ):
         """
         Crop the data based on the provided parameters.
@@ -620,6 +743,9 @@ class InSituData:
             xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
             ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
             inplace (bool): If True, modify the data in place. Otherwise, return a new cropped data.
+            materialize_transcripts (bool): If True (default), compute and re-wrap the transcript
+                Dask DataFrame after cropping to avoid accumulating a deep lazy task graph.
+                Set to False to defer computation (e.g., when chaining multiple crops).
 
         Raises:
             ValueError: If none of region_tuple, layer_name, or xlim/ylim are provided.
@@ -653,8 +779,10 @@ class InSituData:
 
             # extract x and y limits from the geometry
             minx, miny, maxx, maxy = shape.bounds # (minx, miny, maxx, maxy)
-            xlim = (minx, maxx)
-            ylim = (miny, maxy)
+            # clip lower bounds to 0: physical coordinates are always non-negative,
+            # and negative values cause index wrap-around in numpy/dask slicing
+            xlim = (max(0.0, minx), maxx)
+            ylim = (max(0.0, miny), maxy)
 
         try:
             # if the object was previously cropped, check if the current window is identical with the previous one
@@ -664,6 +792,11 @@ class InSituData:
                     raise InSituDataRepeatedCropError(xlim, ylim)
         except TypeError:
             pass
+
+        # record which omic modalities were loaded before cropping so we can
+        # later distinguish "not loaded" from "loaded but nothing in region"
+        cells_were_loaded = not self.cells.is_empty
+        transcripts_were_loaded = self._transcripts is not None
 
         if not _self.cells.is_empty:
             _self.cells.crop(
@@ -676,11 +809,56 @@ class InSituData:
             _self.transcripts = _crop_transcripts(
                 transcript_df=_self.transcripts,
                 shape=shape,
-                xlim=xlim, ylim=ylim, verbose=verbose
+                xlim=xlim, ylim=ylim, verbose=verbose,
+                materialize=materialize_transcripts
             )
 
+        # check image overlap before attempting to crop; if the region is entirely
+        # outside the image extent we skip the image crop rather than raise an error
         if not self._images.is_empty:
-            _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
+            image_overlap = _region_overlaps_image(self._images, xlim, ylim)
+            if image_overlap:
+                _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
+        else:
+            image_overlap = False
+
+        # post-crop omic presence check
+        has_cells = cells_were_loaded and not _self.cells.is_empty
+        has_transcripts = (
+            transcripts_were_loaded
+            and _self.transcripts is not None
+            and len(_self.transcripts) > 0
+        )
+        has_omic_data = has_cells or has_transcripts
+
+        if not image_overlap and not has_omic_data:
+            if not cells_were_loaded and not transcripts_were_loaded:
+                raise ValueError(
+                    f"The crop region (xlim={xlim}, ylim={ylim}) is entirely outside the "
+                    f"image extent and no omic data is loaded. Nothing to crop."
+                )
+            else:
+                raise ValueError(
+                    f"The crop region (xlim={xlim}, ylim={ylim}) does not contain any "
+                    f"image data or omic data. No cells or transcripts were found within "
+                    f"the region boundaries."
+                )
+
+        if not has_omic_data and (cells_were_loaded or transcripts_were_loaded):
+            warn(
+                f"No omic data (cells/transcripts) found within the crop region "
+                f"(xlim={xlim}, ylim={ylim}). The returned object contains image data only.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        if not image_overlap and not self._images.is_empty:
+            warn(
+                f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap with any "
+                f"loaded image. The returned object contains omic data only.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if not self._annotations.is_empty:
 
@@ -756,7 +934,7 @@ class InSituData:
         # Transform images
         if not _self.images.is_empty:
             if verbose:
-                print("Transforming images...")
+                logger.info("Transforming images...")
             _self.images.transform(
                 transformation_matrix=transformation_matrix,
                 reference_pixel_size=reference_pixel_size,
@@ -769,7 +947,7 @@ class InSituData:
         # Transform units
         if _self.units is not None:
             if verbose:
-                print("Transforming units...")
+                logger.info("Transforming units...")
             _self.units.transform(
                 transformation_matrix=transformation_matrix,
                 reference_pixel_size=reference_pixel_size,
@@ -852,7 +1030,7 @@ class InSituData:
 
         # Transform units
         if verbose:
-            print("Transforming and aligning spatial units...")
+            logger.info("Transforming and aligning spatial units...")
 
         units_to_add.transform(
             transformation_matrix=transformation_matrix,
@@ -866,12 +1044,12 @@ class InSituData:
         self._units = units_to_add
 
         if verbose:
-            print("Spatial units aligned and added to InSituData object.")
+            logger.info("Spatial units aligned and added to InSituData object.")
 
         # Align images
         if transfer_images and not other.images.is_empty:
             if verbose:
-                print("Transforming and aligning images...")
+                logger.info("Transforming and aligning images...")
 
             images_to_add = other.images.copy()
             images_to_add.transform(
@@ -898,7 +1076,7 @@ class InSituData:
                 )
 
             if verbose:
-                print("Images aligned and added to InSituData object.")
+                logger.info("Images aligned and added to InSituData object.")
 
     @with_insitupy_style
     def plot_dimred(self, save: Optional[str] = None):
@@ -935,6 +1113,19 @@ class InSituData:
                  skip: Optional[str] = None,
                  verbose: bool = False
                  ):
+        """Load all available modalities from the project directory.
+
+        Calls every ``load_*`` method in sequence (cells, images, transcripts,
+        annotations, regions, units).  Silently skips modalities that are not
+        stored on disk.
+
+        Args:
+            skip: Optional modality name to skip (e.g. ``"images"``).
+                Substring matching is used, so ``"image"`` also skips
+                ``"images"``. Defaults to ``None``.
+            verbose: If ``True``, log progress for each modality.
+                Defaults to ``False``.
+        """
         # # extract read functions
         # read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
         # read_funcs = [elem for elem in read_funcs if elem not in ["load_all", "load_quicksave"]]
@@ -948,8 +1139,18 @@ class InSituData:
                 #         print(err)
 
     def load_annotations(self, verbose: bool = False):
+        """Load annotations from the project directory into :attr:`annotations`.
+
+        Reads the most recently saved annotations sub-folder.  If no
+        annotations are found on disk, a warning is issued when
+        ``verbose=True`` and the attribute remains empty.
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                annotations are found. Defaults to ``False``.
+        """
         if verbose:
-            print("Loading annotations...", flush=True)
+            logger.info("Loading annotations...")
         # try:
         #     p = self._metadata["data"]["annotations"]
         # except KeyError:
@@ -965,17 +1166,33 @@ class InSituData:
         else:
             # extract the latest entry
             path = sort_paths_by_datetime(paths)[0]
-            self._annotations = read_shapesdata(path=path, mode="annotations")
+            self._annotations = _read_shapesdata(path=path, mode="annotations")
 
 
     def import_annotations(self,
                            files: Optional[Union[str, os.PathLike, Path]],
                            keys: Optional[str],
-                           scale_factor: Number, # µm/pixel - can be used to convert the pixel coordinates into µm coordinates
+                           scale_factor: Number,
                            verbose: bool = False
                            ):
+        """Import external annotation files into :attr:`annotations`.
+
+        Use this to load annotation geometries from files that were not
+        originally saved by InSituPy (e.g. GeoJSON or QuPath exports).
+
+        Args:
+            files: Path or list of paths to annotation files.
+            keys: Key or list of keys to assign to each file.  Must have the
+                same length as *files*.
+            scale_factor: Conversion factor in µm/pixel used to transform
+                pixel coordinates to µm coordinates.
+            verbose: If ``True``, log progress. Defaults to ``False``.
+
+        Raises:
+            ValueError: If *files* and *keys* have different lengths.
+        """
         if verbose:
-            print("Importing annotations...", flush=True)
+            logger.info("Importing annotations...")
 
         # add annotations object
         files = convert_to_list(files)
@@ -998,8 +1215,17 @@ class InSituData:
         #self._remove_empty_modalities()
 
     def load_regions(self, verbose: bool = False):
+        """Load regions from the project directory into :attr:`regions`.
+
+        Reads the most recently saved regions sub-folder.  If no regions are
+        found on disk, a warning is issued when ``verbose=True``.
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                regions are found. Defaults to ``False``.
+        """
         if verbose:
-            print("Loading regions...", flush=True)
+            logger.info("Loading regions...")
         # try:
         #     p = self._metadata["data"]["regions"]
         # except KeyError:
@@ -1015,16 +1241,32 @@ class InSituData:
         else:
             # extract the latest entry
             path = sort_paths_by_datetime(paths)[0]
-            self._regions = read_shapesdata(path=path, mode="regions")
+            self._regions = _read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
                     files: Optional[Union[str, os.PathLike, Path]],
                     keys: Optional[str],
-                    scale_factor: Number, # µm/pixel - used to convert the pixel coordinates into µm coordinates
+                    scale_factor: Number,
                     verbose: bool = False
                     ):
+        """Import external region files into :attr:`regions`.
+
+        Use this to load region geometries from files not originally saved by
+        InSituPy (e.g. GeoJSON exports).
+
+        Args:
+            files: Path or list of paths to region files.
+            keys: Key or list of keys to assign to each file.  Must have the
+                same length as *files*.
+            scale_factor: Conversion factor in µm/pixel used to transform
+                pixel coordinates to µm coordinates.
+            verbose: If ``True``, log progress. Defaults to ``False``.
+
+        Raises:
+            ValueError: If *files* and *keys* have different lengths.
+        """
         if verbose:
-            print("Importing regions...", flush=True)
+            logger.info("Importing regions...")
 
         # add regions object
         files = convert_to_list(files)
@@ -1048,8 +1290,18 @@ class InSituData:
 
 
     def load_cells(self, verbose: bool = False):
+        """Load cell data from the project directory into :attr:`cells`.
+
+        Reads the most recently saved cells sub-folder, which contains the
+        expression matrix and segmentation boundaries.  Requires the object to
+        have been loaded from a saved project (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                cell data is found. Defaults to ``False``.
+        """
         if verbose:
-            print("Loading cells...", flush=True)
+            logger.info("Loading cells...")
 
         if self.from_insitudata:
             # try:
@@ -1067,19 +1319,37 @@ class InSituData:
             else:
                 # extract the latest entry
                 path = sort_paths_by_datetime(paths)[0]
-                self._cells = read_multicelldata(path=path)
+                self._cells = _read_multicelldata(path=path)
         else:
             NoProjectLoadWarning()
 
     def load_images(
         self,
-        names: Union[Literal["all", "nuclei"], str] = "all", # here a specific image can be chosen
+        names: Union[Literal["all", "nuclei"], str] = "all",
         overwrite: bool = True,
-        verbose: bool = False
-        ):
+        verbose: bool = False,
+    ):
+        """Load image pyramids from the project directory into :attr:`images`.
+
+        Discovers all ``.zarr`` files inside the ``images/`` sub-folder and
+        loads them lazily as Dask arrays.  Requires the object to have been
+        loaded from a saved project (:attr:`from_insitudata`).
+
+        Args:
+            names: Image name(s) to load, or ``"all"`` to load every available
+                image. Common values: ``"morphology_focus"``, ``"nuclei"``.
+                Defaults to ``"all"``.
+            overwrite: If ``True``, replace any already-loaded image with the
+                same name. Defaults to ``True``.
+            verbose: If ``True``, log progress and emit a warning when no
+                images are found. Defaults to ``False``.
+
+        Raises:
+            ValueError: If any name in *names* is not found in the project.
+        """
         # load image into ImageData object
         if verbose:
-            print("Loading images...", flush=True)
+            logger.info("Loading images...")
 
         if self.from_insitudata:
             # check if image data is stored in this InSituData
@@ -1115,9 +1385,26 @@ class InSituData:
                         verbose: bool = False,
                         mode: Literal["pandas", "dask"] = "dask",
                         ):
+        """Load transcript data from the project directory into :attr:`transcripts`.
+
+        Reads ``transcripts/transcripts.parquet`` from the project folder.
+        Requires the object to have been loaded from a saved project
+        (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                transcript data is found. Defaults to ``False``.
+            mode: Backend used to read the Parquet file.  ``"dask"`` (default)
+                returns a lazy :class:`dask.dataframe.DataFrame`, which is
+                recommended for large datasets.  ``"pandas"`` reads the entire
+                file into memory as a :class:`pandas.DataFrame`.
+
+        Raises:
+            ValueError: If *mode* is not ``"pandas"`` or ``"dask"``.
+        """
         # read transcripts
         if verbose:
-            print("Loading transcripts...", flush=True)
+            logger.info("Loading transcripts...")
 
         if self.from_insitudata:
             # # check if transcript data is stored in this InSituData
@@ -1148,12 +1435,45 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
+    def materialize(self, layers=None, verbose: bool = True):
+        """Compute lazy Dask DataFrames and replace with well-partitioned equivalents.
+
+        This is useful after operations that accumulate deep task graphs
+        (e.g., repeated cropping, manual filtering), which can cause
+        performance bottlenecks in downstream operations.
+
+        Args:
+            layers: List of layer names to materialize (e.g., ``["transcripts"]``).
+                If ``None``, materializes all supported lazy layers.
+            verbose: If ``True``, log progress messages. Defaults to ``True``.
+        """
+        if layers is None or "transcripts" in layers:
+            if self._transcripts is not None and isinstance(self._transcripts, dd.DataFrame):
+                if verbose:
+                    logger.info("Materializing transcripts...")
+                pdf = self._transcripts.compute()
+                n_partitions = max(1, min(8, len(pdf) // 2_000_000))
+                self._transcripts = dd.from_pandas(pdf, npartitions=n_partitions)
+                if verbose:
+                    logger.info(f"Transcripts materialized: {len(pdf):,} rows, {n_partitions} partition(s).")
+
     def load_units(self,
                      verbose: bool = False
                      ):
+        """Load spatial units data from the project directory into :attr:`units`.
+
+        Reads shapes (``units/shapes.parquet``), optional expression data
+        (``units/data.h5ad``), and metadata (``units/metadata.json``) from the
+        project folder.  Requires the object to have been loaded from a saved
+        project (:attr:`from_insitudata`).
+
+        Args:
+            verbose: If ``True``, log progress and emit a warning when no
+                units data is found. Defaults to ``False``.
+        """
         # read units
         if verbose:
-            print("Loading spatial units...", flush=True)
+            logger.info("Loading spatial units...")
 
         if self.from_insitudata:
             # extract available paths
@@ -1239,14 +1559,31 @@ class InSituData:
             images_as_zarr: bool = True,
             zarr_zipped: bool = False,
             images_max_resolution: Optional[Number] = None, # in µm per pixel
+            debug: bool = False,
             verbose: bool = True
             ):
-        '''
-        Function to save the InSituData object.
+        """Save the InSituData object to a new directory.
+
+        Writes all modalities (images, cells, transcripts, spatial units,
+        annotations, regions) and metadata to ``path``.  Use this method
+        when you want to create a new, standalone copy of the dataset.
 
         Args:
-            path: Path to save the data to.
-        '''
+            path: Destination directory for the saved project.
+            overwrite: If True, remove ``path`` first if it already exists.
+            zip_output: If True, compress the output directory into a
+                ``.zip`` archive and delete the uncompressed directory.
+            images_as_zarr: If True, save images in zarr format.  If False,
+                images are saved as TIFF files.
+            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
+            images_max_resolution: Maximum spatial resolution for saved images,
+                in micrometers per pixel.  Images with finer resolution are
+                downsampled.  If None, images are saved at their original
+                resolution.
+            debug: If True, enable detailed debug logging for image metadata
+                serialization during save.
+            verbose: If True, log progress messages.
+        """
         # check if the path already exists
         path = Path(path)
 
@@ -1257,7 +1594,8 @@ class InSituData:
             zippath = path / (path.stem + ".zip")
             check_overwrite_and_remove_if_true(path=zippath, overwrite=overwrite)
 
-        print(f"Saving data to {str(path)}") if verbose else None
+        if verbose:
+            logger.info("Saving data to %s", path)
 
         # create output directory if it does not exist yet
         path.mkdir(parents=True, exist_ok=True)
@@ -1279,6 +1617,7 @@ class InSituData:
                 images_as_zarr=images_as_zarr,
                 zipped=zarr_zipped,
                 max_resolution=images_max_resolution,
+                debug=debug,
                 verbose=False
                 )
 
@@ -1289,7 +1628,7 @@ class InSituData:
                 cells=cells,
                 path=path,
                 metadata=self._metadata,
-                boundaries_zipped=zarr_zipped,
+                zipped=zarr_zipped,
                 max_resolution_boundaries=images_max_resolution
             )
 
@@ -1351,7 +1690,8 @@ class InSituData:
         # # reload the modalities
         # self.reload(verbose=False)
 
-        print("Saved.") if verbose else None
+        if verbose:
+            logger.info("Saved.")
 
     def save(self,
              path: Optional[Union[str, os.PathLike, Path]] = None,
@@ -1362,7 +1702,29 @@ class InSituData:
              images_only: bool = False,
              overwrite_images: bool = False
              ):
+        """Save the InSituData object to an existing InSituPy project or a new path.
 
+        If no ``path`` is given, the object is saved back to the project it was
+        loaded from.  When a ``path`` is provided and does not yet exist, the
+        data is written to a new directory via :meth:`saveas`.  When ``path``
+        points to an existing InSituPy project whose UID matches, only the
+        changed components are updated in place.
+
+        Args:
+            path: Destination directory.  If None, saves to the original project
+                path. Raises ``RuntimeError`` when no project is linked and
+                ``path`` is None.
+            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
+            verbose: If True, log progress messages.
+            keep_history: If True, retain the undo-history snapshots that are
+                normally cleaned up after saving.
+            sync_images: If True, synchronize images on disk with the current
+                in-memory state (e.g. after adding or removing image layers).
+            images_only: If True, only synchronize images (implies
+                ``sync_images=True``).  All other modalities are skipped.
+            overwrite_images: If True, overwrite existing image files on disk
+                when synchronizing images.
+        """
         # check path
         if path is not None:
             path = Path(path)
@@ -1371,11 +1733,9 @@ class InSituData:
                 #path = Path(self._metadata["path"])
                 path = self.path
             else:
-                warn(
-                    f"Data is not linked to an InSituPy project folder (link can be lost by copy for example). "
-                    f"Use `saveas()` instead to save the data to a new project folder."
-                    )
-                return
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
 
         # if images_only is True, sync_images must also be True
         if images_only:
@@ -1383,7 +1743,7 @@ class InSituData:
 
         if path.exists():
             if verbose:
-                print(f"Saving to existing path: {str(path)}", flush=True)
+                logger.info("Saving to existing path: %s", path)
 
             # check if path is a valid directory
             if not path.is_dir():
@@ -1417,10 +1777,8 @@ class InSituData:
                     if not keep_history:
                         self.remove_history(verbose=False)
                 else:
-                    warn(
-                        f"UID of current object {current_uid} not identical with UID in project path {path}: {project_uid}.\n"
-                        f"Project is neither saved nor updated. Try `saveas()` instead to save the data to a new project folder. "
-                        f"A reason for this could be the data has been cropped in the meantime."
+                    raise RuntimeError(
+                        "Cannot save: dataset UID mismatch. The save target was created by a different dataset."
                     )
             else:
                 warn(
@@ -1431,7 +1789,7 @@ class InSituData:
 
         else:
             if verbose:
-                print(f"Saving to new path: {str(path)}", flush=True)
+                logger.info("Saving to new path: %s", path)
 
             # save to the respective directory
             self.saveas(path=path)
@@ -1446,16 +1804,75 @@ class InSituData:
         tile_size: Optional[int] = None,
         add_to_obs: bool = True
     ):
+        """Quantify image fluorescence signal per cell using segmentation masks.
+
+        Extracts per-cell signal intensities from a multiplexed image by
+        applying cell or nucleus segmentation masks.  For large images a tiled
+        approach can be used to limit memory usage.
+
+        Args:
+            image_name: Key of the image in :attr:`images` to quantify.
+            cells_layer: Name of the cell layer whose masks to use.  ``None``
+                uses the default (main) layer. Defaults to ``None``.
+            cells_compartment: Whether to use whole-cell or nucleus masks for
+                quantification. One of ``"cells"`` or ``"nuclei"``.
+                Defaults to ``"cells"``.
+            method: Aggregation method applied within each mask.
+                One of ``"mean"`` or ``"median"``. Defaults to ``"median"``.
+            downsample_factor: Optional integer factor by which to downsample
+                the image before quantification, to reduce memory and compute.
+                Defaults to ``None`` (no downsampling).
+            tile_size: If set, process the image in square tiles of this pixel
+                size with a 100 µm overlap to avoid edge artefacts.  Recommended
+                for images that do not fit into RAM. Defaults to ``None``.
+            add_to_obs: If ``True`` (default), add results directly to
+                ``.cells[layer].table.obs`` under the key
+                ``{image_name}_signal_{compartment}_{method}``.  If ``False``,
+                return a :class:`pandas.Series` indexed by cell name.
+
+        Returns:
+            If *add_to_obs* is ``False``: a :class:`pandas.Series` of per-cell
+            signal values indexed by cell name.  Otherwise ``None``.
+        """
+        import dask.array as da
+        from scipy.ndimage import zoom as ndimage_zoom
+
         from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
                                           summarize_tile_measurements)
-        img = self.images[image_name]
-        pixel_size = self.images.metadata[image_name]["pixel_size"]
-        if isinstance(img, list):
-            img = img[0]
+
+        # --- image: keep full pyramid to allow level selection ---
+        img_pyramid = self.images[image_name]
+        img_pixel_size = self.images.metadata[image_name]["pixel_size"]
+        if not isinstance(img_pyramid, list):
+            img_pyramid = [img_pyramid]
+
+        # --- mask: level 0 (highest resolution) + pixel size ---
         cellsdata = _get_cell_layer(self.cells, cells_layer=cells_layer)
-        mask = cellsdata.boundaries[cells_compartment]
-        if isinstance(mask, list):
-            mask = mask[0]
+        mask_pyramid = cellsdata.boundaries[cells_compartment]
+        mask_pixel_size = cellsdata.boundaries.metadata[cells_compartment]["pixel_size"]
+        if not isinstance(mask_pyramid, list):
+            mask_pyramid = [mask_pyramid]
+        mask = mask_pyramid[0]
+
+        # --- select the image pyramid level whose pixel size is closest to the mask ---
+        level_pixel_sizes = [img_pixel_size * (2 ** i) for i in range(len(img_pyramid))]
+        best_level = int(np.argmin([abs(ps - mask_pixel_size) for ps in level_pixel_sizes]))
+        img = img_pyramid[best_level]
+        pixel_size = level_pixel_sizes[best_level]
+
+        if best_level > 0:
+            print(
+                f"Using image pyramid level {best_level} (pixel size {pixel_size:.4f} µm/px) "
+                f"to match mask pixel size ({mask_pixel_size:.4f} µm/px).",
+                flush=True
+            )
+
+        # --- resize mask to match selected image level using nearest-neighbour ---
+        zoom_factor = mask_pixel_size / pixel_size
+        if abs(zoom_factor - 1.0) > 1e-3:
+            mask_dtype = mask.dtype
+            mask_np = ndimage_zoom(mask.compute(), zoom=zoom_factor, order=0)
+            mask = da.from_array(mask_np.astype(mask_dtype))
 
         if tile_size is None:
             measurements, cell_ids = quantify_fluorescence(
@@ -1468,7 +1885,7 @@ class InSituData:
 
             # Tiled approach
             overlap = int(100 / pixel_size)
-            print(f"Quantification using tiled approach with overlap {overlap}...", flush=True)
+            logger.info("Quantification using tiled approach with overlap %d...", overlap)
             img_tiles = create_tiles(img, tile_size=tile_size, overlap=overlap)
             mask_tiles = create_tiles(mask, tile_size=tile_size, overlap=overlap)
 
@@ -1484,7 +1901,7 @@ class InSituData:
                 ))
 
             # extract measurements from tiled results
-            print("Collecting results...", flush=True)
+            logger.info("Collecting results...")
             measurements, cell_ids = summarize_tile_measurements(quant_results)
 
         name_mapping = dict(zip(
@@ -1499,7 +1916,7 @@ class InSituData:
         if add_to_obs:
             obs_col = f"{image_name}_signal_{cells_compartment}_{method}"
             cellsdata.table.obs[obs_col] = res_series
-            print(f"Added quantification results to `.cells['{cells_layer}'].table.obs['{obs_col}']`.", flush=True)
+            logger.info("Added quantification results to `.cells['%s'].table.obs['%s']`.", cells_layer, obs_col)
         else:
             return res_series
 
@@ -1508,13 +1925,25 @@ class InSituData:
     def quicksave(self,
                   note: Optional[str] = None
                   ):
+        """Save the current annotations to a time-stamped cache directory.
+
+        Creates a snapshot of :attr:`annotations` in a dedicated quicksave
+        cache (``~/.insitupy/quicksaves/``).  Each snapshot is identified by a
+        short UID and can be restored with :meth:`load_quicksave`.  Useful for
+        preserving intermediate annotation states without triggering a full
+        :meth:`save`.
+
+        Args:
+            note: Optional free-text note saved alongside the snapshot as
+                ``note.txt``. Defaults to ``None``.
+        """
         # create quicksave directory if it does not exist already
         self._quicksave_dir = CACHE / "quicksaves"
         self._quicksave_dir.mkdir(parents=True, exist_ok=True)
 
         # save annotations
         if self._annotations.is_empty:
-            print("No annotations found. Quicksave skipped.", flush=True)
+            logger.warning("No annotations found. Quicksave skipped.")
         else:
             annotations = self._annotations
             # create filename
@@ -1543,6 +1972,12 @@ class InSituData:
 
 
     def list_quicksaves(self):
+        """List all available quicksaves for this object.
+
+        Returns:
+            A :class:`pandas.DataFrame` with columns ``slide_id``,
+            ``sample_id``, ``savetime``, ``uid``, and ``note``.
+        """
         pattern = "{slide_id}__{sample_id}__{savetime}__{uid}"
 
         # collect results
@@ -1571,13 +2006,22 @@ class InSituData:
     def load_quicksave(self,
                        uid: str
                        ):
+        """Restore annotations from a previously saved quicksave snapshot.
+
+        Merges the annotation keys from the snapshot into the current
+        :attr:`annotations`.  Use :meth:`list_quicksaves` to obtain available
+        UIDs.
+
+        Args:
+            uid: The 8-character UID of the quicksave to restore.
+        """
         # find files with the uid
         files = list(self._quicksave_dir.glob(f"*{uid}*"))
 
         if len(files) == 1:
-            ad = read_shapesdata(files[0] / "annotations", mode="annotations")
+            ad = _read_shapesdata(files[0] / "annotations", mode="annotations")
         elif len(files) == 0:
-            print(f"No quicksave with uid '{uid}' found. Use `.list_quicksaves()` to list all available quicksaves.")
+            logger.warning("No quicksave with uid '%s' found. Use `.list_quicksaves()` to list all available quicksaves.", uid)
         else:
             raise ValueError(f"More than one quicksave with uid '{uid}' found.")
 
@@ -1649,6 +2093,20 @@ class InSituData:
         skip: Optional[List] = None,
         verbose: bool = True
         ):
+        """Reload all currently loaded modalities from disk.
+
+        Re-reads every modality that was previously loaded (i.e. is non-empty)
+        by calling the corresponding ``load_*`` method.  Useful after an
+        in-place operation such as :func:`~insitupy.tools.register_images`
+        followed by :meth:`save`, to replace in-memory arrays with fresh lazy
+        Dask arrays.  Triggers garbage collection afterwards to free memory.
+
+        Args:
+            skip: Modality name(s) to exclude from reloading (e.g.
+                ``["images"]``). Defaults to ``None``.
+            verbose: If ``True``, log which modalities are being reloaded.
+                Defaults to ``True``.
+        """
         data_meta = self._metadata["data"]
         loaded_modalities = [elem for elem in self.get_loaded_modalities() if elem in data_meta]
 
@@ -1662,7 +2120,8 @@ class InSituData:
                     pass
 
         if len(loaded_modalities) > 0:
-            print(f"Reloading following modalities: {', '.join(loaded_modalities)}") if verbose else None
+            if verbose:
+                logger.info("Reloading following modalities: %s", ', '.join(loaded_modalities))
             for cm in loaded_modalities:
                 func = getattr(self, f"load_{cm}")
                 # For images, pass overwrite=True so that in-memory arrays are
@@ -1681,12 +2140,111 @@ class InSituData:
             import gc
             gc.collect()
         else:
-            print("No modalities with existing save path found. Consider saving the data with `saveas()` first.")
+            logger.warning(
+                "Nothing currently loaded — nothing to refresh. "
+                "Use load_cells(), load_images(), etc. to load modalities from disk."
+            )
+
+    def _clear_modality(self, modality: str, verbose: bool = True) -> bool:
+        """Reset one modality to its empty sentinel.
+
+        Args:
+            modality: Name of the modality to clear (must be a key in
+                :data:`_RESET_MAP`).
+            verbose: If ``True``, emit a log line when the modality is
+                cleared.  Defaults to ``True``.
+
+        Returns:
+            bool: ``True`` if the modality was cleared, ``False`` if it was
+            already empty (no-op).
+        """
+        factory, attr = _RESET_MAP[modality]
+        current = getattr(self, attr)
+        try:
+            if current.is_empty:
+                return False
+        except AttributeError:
+            # transcripts and units use None as the empty sentinel
+            if current is None:
+                return False
+        setattr(self, attr, factory() if factory is not None else None)
+        if verbose:
+            logger.info("Cleared modality '%s'.", modality)
+        return True
+
+    def unload(self, modalities: Optional[Union[str, List]] = None, verbose: bool = True):
+        """Unload modality data from memory, keeping only the path reference.
+
+        Resets the specified modalities to their empty state without touching
+        the on-disk data.  The object remains fully usable: call the
+        corresponding ``load_*()`` method (e.g. :meth:`load_cells`) to bring
+        a modality back into memory.
+
+        Useful for freeing RAM after a :meth:`save` call, or as a preparatory
+        step before moving data on disk.
+
+        .. note::
+            Use ``del xd.<modality>`` (e.g. ``del xd.images``) to clear a
+            modality on an object that has not been saved to disk yet.
+
+        Args:
+            modalities: Modality name(s) to unload (e.g. ``["cells", "images"]``).
+                Defaults to ``None``, which unloads all modalities.
+            verbose: If ``True``, log which modalities were unloaded.
+                Defaults to ``True``.
+
+        Raises:
+            ValueError: If no save path is set and at least one target
+                modality is loaded, because unloading would make the
+                in-memory data unrecoverable.
+        """
+        target_set = set(_RESET_MAP.keys()) if modalities is None else set(convert_to_list(modalities))
+
+        # Early-exit if none of the requested modalities are actually loaded —
+        # also skips the path guard when there is nothing to lose.
+        loaded = set(self.get_loaded_modalities())
+        if not loaded & target_set:
+            return
+
+        if self._path is None:
+            raise ValueError(
+                "Cannot unload: no save path is set. Save the object with "
+                "'saveas()' first to avoid permanent data loss. "
+                "To discard in-memory data intentionally, use 'del xd.<modality>'."
+            )
+
+        cleared = []
+        for modality in _RESET_MAP:
+            if modality not in target_set:
+                continue
+            if self._clear_modality(modality, verbose=False):
+                cleared.append(modality)
+
+        import gc
+        gc.collect()
+
+        if cleared and verbose:
+            logger.info("Unloaded modalities: %s", ", ".join(cleared))
 
     def get_modality(self, modality: str):
+        """Return the data object for the specified modality.
+
+        Args:
+            modality: Name of the modality attribute (e.g. ``"cells"``,
+                ``"images"``, ``"annotations"``).
+
+        Returns:
+            The modality data object (type depends on modality).
+        """
         return getattr(self, modality)
 
     def get_loaded_modalities(self):
+        """Return a list of modality names that are currently loaded (non-empty).
+
+        Returns:
+            A :class:`list` of modality name strings, e.g.
+            ``["cells", "images", "annotations"]``.
+        """
         loaded_modalities = []
         for m in MODALITIES:
             try:
@@ -1703,7 +2261,16 @@ class InSituData:
     def remove_history(self,
                        verbose: bool = True
                        ):
+        """Delete all but the most recent save of each modality from disk.
 
+        InSituPy preserves previous saves as time-stamped sub-folders.  This
+        method removes all but the latest entry for ``annotations``, ``cells``,
+        and ``regions``, freeing disk space.
+
+        Args:
+            verbose: If ``True``, log how many entries were removed per
+                modality. Defaults to ``True``.
+        """
         for cat in ["annotations", "cells", "regions"]:
             dirs_to_remove = []
             #if hasattr(self, cat):
@@ -1714,13 +2281,24 @@ class InSituData:
                 for d in dirs_to_remove:
                     shutil.rmtree(d)
 
-                print(f"Removed {len(dirs_to_remove)} entries from '.{cat}'.") if verbose else None
+                if verbose:
+                    logger.info("Removed %d entries from '.%s'.", len(dirs_to_remove), cat)
             else:
-                print(f"No history found for '{cat}'.") if verbose else None
+                if verbose:
+                    logger.info("No history found for '%s'.", cat)
 
     def remove_modality(self,
                         modality: str
                         ):
+        """Remove a modality from the object and its metadata.
+
+        Deletes the attribute and its entry from ``metadata["data"]``.
+        If the modality does not exist, a warning is logged.
+
+        Args:
+            modality: Name of the modality to remove (e.g. ``"images"``,
+                ``"transcripts"``).
+        """
         if hasattr(self, modality):
             # delete attribute from InSituData object
             delattr(self, modality)
@@ -1729,7 +2307,7 @@ class InSituData:
             self.metadata["data"].pop(modality, None) # returns None if key does not exist
 
         else:
-            print(f"No modality '{modality}' found. Nothing removed.")
+            logger.warning("No modality '%s' found. Nothing removed.", modality)
 
     def _update_to_existing_project(
         self,
@@ -1741,18 +2319,22 @@ class InSituData:
         overwrite_images: bool = False
         ):
         if verbose:
-            print(f"Updating project in {path}")
+            logger.info("Updating project in %s", path)
+
+        # sync identifiers into metadata before writing
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
 
         # save images
         if sync_images and not self._images.is_empty:
             if verbose:
                 if overwrite_images:
-                    print("\tSyncing images (overwriting existing)...", flush=True)
+                    logger.info("Syncing images (overwriting existing)...")
                 else:
-                    print("\tSyncing images (saving new images only)...", flush=True)
+                    logger.info("Syncing images (saving new images only)...")
             img_path = path / "images"
             savepaths = self._images.save(
-                output_folder=img_path,
+                path=img_path,
                 as_zarr=True,
                 zipped=zarr_zipped,
                 return_savepaths=True,
@@ -1772,12 +2354,12 @@ class InSituData:
             if not self._cells.is_empty:
                 cells = self._cells
                 if verbose:
-                    print("\tUpdating cells...", flush=True)
+                    logger.info("Updating cells...")
                 _save_cells(
                     cells=cells,
                     path=path,
                     metadata=self._metadata,
-                    boundaries_zipped=zarr_zipped,
+                    zipped=zarr_zipped,
                     overwrite=True
                 )
 
@@ -1786,7 +2368,7 @@ class InSituData:
             if not self._annotations.is_empty:
                 annotations = self._annotations
                 if verbose:
-                    print("\tUpdating annotations...", flush=True)
+                    logger.info("Updating annotations...")
                 _save_annotations(
                     annotations=annotations,
                     path=path,
@@ -1797,7 +2379,7 @@ class InSituData:
             if not self._regions.is_empty:
                 regions = self._regions
                 if verbose:
-                    print("\tUpdating regions...", flush=True)
+                    logger.info("Updating regions...")
                 _save_regions(
                     regions=regions,
                     path=path,
@@ -1816,6 +2398,6 @@ class InSituData:
         write_dict_to_json(dictionary=self._metadata, file=xd_metadata_path)
 
         if verbose:
-            print("Saved.")
+            logger.info("Saved.")
 
 

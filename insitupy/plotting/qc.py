@@ -1,3 +1,4 @@
+import logging
 import warnings
 from numbers import Number
 from typing import Optional, Union
@@ -12,9 +13,11 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from insitupy._constants import with_insitupy_style
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.preprocessing.filtering import _compute_mad_threshold
 from insitupy.utils._checks import check_integer_counts
+
+logger = logging.getLogger(__name__)
 
 
 @with_insitupy_style
@@ -36,38 +39,30 @@ def plot_qc_metrics(
     """
     Plots the QC metrics calculated by sc.pp.calculate_qc_metrics.
 
-    Parameters
-    ----------
-    data : InSituData or AnnData
-        Annotated data matrix with QC metrics calculated.
-    cells_layer : str, optional
-        Cell layer to use if data is InSituData.
-    show_inset : bool, optional
-        Whether to show inset histograms. Default is True.
-    inset_fraction : Number, optional
-        Fraction of x-axis range to show in inset. Default is 0.2.
-    plot_obs : bool, optional
-        Whether to plot .obs metrics. Default is True.
-    plot_var : bool, optional
-        Whether to plot .var metrics. Default is True.
-    additional_obs : str or list of str, optional
-        Additional column(s) from .obs to plot as histograms. Must contain numeric data.
-    additional_var : str or list of str, optional
-        Additional column(s) from .var to plot as histograms. Must contain numeric data.
-    batch : str, optional
-        Column in .obs to use for batch separation. Only allowed if not both plot_obs
-        and plot_var are True. Default is None.
-    counts_thresh : Number, optional
-        Threshold to display as vertical line on total_counts plots. Default is None.
-    genes_thresh : Number, optional
-        Threshold to display as vertical line on n_genes_by_counts plots. Default is None.
-    log1p : bool, optional
-        Whether to plot log1p-transformed values for total_counts and n_genes_by_counts.
-        Uses log1p_total_counts and log1p_n_genes_by_counts from .obs. Default is False.
-    mad_thresh : Number, optional
-        Number of MADs from median to use for automatic threshold calculation.
-        Computes lower threshold as median - mad_thresh * MAD. Overrides counts_thresh
-        and genes_thresh if provided. Default is None.
+    Args:
+        data (InSituData or AnnData): Annotated data matrix with QC metrics calculated.
+        cells_layer (str, optional): Cell layer to use if data is InSituData.
+        show_inset (bool, optional): Whether to show inset histograms. Default is True.
+        inset_fraction (Number, optional): Fraction of x-axis range to show in inset.
+            Default is 0.2.
+        plot_obs (bool, optional): Whether to plot .obs metrics. Default is True.
+        plot_var (bool, optional): Whether to plot .var metrics. Default is True.
+        additional_obs (str or list of str, optional): Additional column(s) from .obs to
+            plot as histograms. Must contain numeric data.
+        additional_var (str or list of str, optional): Additional column(s) from .var to
+            plot as histograms. Must contain numeric data.
+        batch (str, optional): Column in .obs to use for batch separation. Only allowed if
+            not both plot_obs and plot_var are True. Default is None.
+        counts_thresh (Number, optional): Threshold to display as vertical line on
+            total_counts plots. Default is None.
+        genes_thresh (Number, optional): Threshold to display as vertical line on
+            n_genes_by_counts plots. Default is None.
+        log1p (bool, optional): Whether to plot log1p-transformed values for total_counts
+            and n_genes_by_counts. Uses log1p_total_counts and log1p_n_genes_by_counts
+            from .obs. Default is False.
+        mad_thresh (Number, optional): Number of MADs from median to use for automatic
+            threshold calculation. Computes lower threshold as median - mad_thresh * MAD.
+            Overrides counts_thresh and genes_thresh if provided. Default is None.
     """
     # Validate batch argument
     if batch is not None and plot_obs and plot_var:
@@ -102,7 +97,7 @@ def plot_qc_metrics(
 
     # Warn user about MAD computation on log1p scale when log1p=False
     if mad_thresh is not None and not log1p:
-        print(
+        logger.info(
             "Note: MAD thresholds are computed on log1p-transformed values for statistical "
             "validity (as recommended by sc-best-practices), then back-transformed to raw "
             "scale for display."
@@ -124,14 +119,14 @@ def plot_qc_metrics(
     if plot_obs:
         obs_metrics = [metric for metric in obs_metrics if metric in adata.obs]
         if len(obs_metrics) == 0:
-            print("Warning: No .obs metrics found in adata.obs")
+            logger.warning("No .obs metrics found in adata.obs")
     else:
         obs_metrics = []
 
     if plot_var:
         var_metrics = [metric for metric in var_metrics if metric in adata.var]
         if len(var_metrics) == 0:
-            print("Warning: No .var metrics found in adata.var")
+            logger.warning("No .var metrics found in adata.var")
     else:
         var_metrics = []
 
@@ -142,9 +137,9 @@ def plot_qc_metrics(
         additional_obs_metrics = []
         for metric in additional_obs:
             if metric not in adata.obs:
-                print(f"Warning: '{metric}' not found in adata.obs")
+                logger.warning(f"'{metric}' not found in adata.obs")
             elif not pd.api.types.is_numeric_dtype(adata.obs[metric]):
-                print(f"Warning: '{metric}' is not numeric and will be skipped")
+                logger.warning(f"'{metric}' is not numeric and will be skipped")
             else:
                 additional_obs_metrics.append(metric)
     else:
@@ -157,9 +152,9 @@ def plot_qc_metrics(
         additional_var_metrics = []
         for metric in additional_var:
             if metric not in adata.var:
-                print(f"Warning: '{metric}' not found in adata.var")
+                logger.warning(f"'{metric}' not found in adata.var")
             elif not pd.api.types.is_numeric_dtype(adata.var[metric]):
-                print(f"Warning: '{metric}' is not numeric and will be skipped")
+                logger.warning(f"'{metric}' is not numeric and will be skipped")
             else:
                 additional_var_metrics.append(metric)
     else:
@@ -171,14 +166,11 @@ def plot_qc_metrics(
         Compute lower threshold as median - n_mads * MAD.
         Always computes on log1p scale for statistical validity.
 
-        Parameters
-        ----------
-        values : array-like
-            Raw count values (will be log1p-transformed internally).
-        n_mads : Number
-            Number of MADs from median.
-        transform_back : bool
-            If True, return threshold in raw scale, else in log1p scale.
+        Args:
+            values (array-like): Raw count values (will be log1p-transformed internally).
+            n_mads (Number): Number of MADs from median.
+            transform_back (bool): If True, return threshold in raw scale, else in log1p
+                scale.
         """
         thresh_log, thresh_raw = _compute_mad_threshold(values, n_mads)
         return thresh_raw if transform_back else thresh_log
@@ -201,7 +193,7 @@ def plot_qc_metrics(
 
                 # Check if raw metric exists
                 if raw_metric not in adata_subset.obs:
-                    print(f"Warning: '{raw_metric}' not found in adata.obs, cannot compute MAD threshold")
+                    logger.warning(f"'{raw_metric}' not found in adata.obs, cannot compute MAD threshold")
                     return None
 
                 raw_values = adata_subset.obs[raw_metric].values
@@ -431,14 +423,23 @@ def test_transformations(
     scale: bool = False,
     assert_integer_counts: bool = True
         ):
-    """
-    Test normalization and transformation methods by plotting histograms of raw,
-    log1p-transformed, and sqrt-transformed counts.
+    """Test normalization and transformation methods by plotting histograms.
+
+    Generates three side-by-side histograms showing the distribution of raw counts,
+    log1p-transformed counts, and sqrt-transformed counts after normalization.
 
     Args:
-        adata (AnnData): Omics data as AnnData object.
-        target_sum (int, optional): Target sum for normalization. Defaults to 1e4.
-        layer (str, optional): Layer to use for transformation. Defaults to None.
+        data (InSituData): InSituData object containing cell expression data.
+        cells_layer (Optional[str]): Name of the cell layer to use. If None,
+            the default cell layer is used.
+        target_sum (Number): Target sum for normalization via
+            ``sc.pp.normalize_total``. Defaults to 250.
+        layer (Optional[str]): Layer key in the AnnData object to use as
+            the count matrix. If None, ``adata.X`` is used.
+        scale (bool): If True, apply ``sc.pp.scale`` after log1p and sqrt
+            transformations. Defaults to False.
+        assert_integer_counts (bool): If True, verify that the count matrix
+            contains integer values before transformation. Defaults to True.
     """
     # retrieve AnnData from cell layer
     celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)

@@ -23,9 +23,10 @@ import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import numpy as np
-from matplotlib import colormaps
 
-from insitupy import WITH_NAPARI
+from insitupy.palettes import TRANSCRIPTS_PALETTE
+
+from insitupy._constants import WITH_NAPARI
 
 if TYPE_CHECKING:
     import dask.dataframe as dd
@@ -182,10 +183,7 @@ def prepare_gene_colors(
 def _assign_gene_colors(
     genes: List[str],
 ) -> Dict[str, Tuple[float, float, float]]:
-    """Assign distinct colors to genes using shuffled HSV colormap.
-
-    Colors are shuffled so that alphabetically adjacent genes get
-    visually distinct colors.
+    """Assign distinct colors to genes using the static TRANSCRIPTS_PALETTE.
 
     Args:
         genes: List of gene names to assign colors to.
@@ -193,24 +191,19 @@ def _assign_gene_colors(
     Returns:
         Dict mapping gene names to RGB color tuples (values 0-1).
     """
-    n_genes = len(genes)
-    if n_genes == 0:
+    if not genes:
         return {}
 
-    # Use HSV colormap for maximum color distinction
-    cmap = colormaps["hsv"]
-
-    # Create shuffled color indices so neighboring genes get different colors
-    color_indices = np.arange(n_genes)
-    rng = np.random.default_rng(42)  # reproducible shuffle
-    rng.shuffle(color_indices)
-
-    gene_colors = {
-        gene: cmap(color_indices[i] / n_genes)[:3]
+    return {
+        gene: _hex_to_rgb(TRANSCRIPTS_PALETTE[i % len(TRANSCRIPTS_PALETTE)])
         for i, gene in enumerate(genes)
     }
 
-    return gene_colors
+
+def _hex_to_rgb(hex_color: str) -> Tuple[float, float, float]:
+    """Convert a hex colour string to an (R, G, B) tuple with values in 0–1."""
+    h = hex_color.lstrip('#')
+    return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
 
 if WITH_NAPARI:

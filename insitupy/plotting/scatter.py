@@ -21,6 +21,7 @@ Optional dependencies (install as needed):
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Literal, Sequence
 
 if TYPE_CHECKING:
@@ -238,6 +239,42 @@ def _plot_static_continuous(
         cmap=cmap,
         shade_hook=shade_hook,
         ax=ax
+    )
+
+
+def _plot_static_categorical_mpl(
+    ax: "plt.Axes",
+    df: pd.DataFrame,
+    color_key: str,
+    color_dict: dict,
+    point_size: float
+) -> None:
+    """Plot categorical data with matplotlib scatter (fallback when datashader unavailable)."""
+    col = df[color_key].astype(str)
+    for cat, color in color_dict.items():
+        mask = col == str(cat)
+        if mask.any():
+            ax.scatter(
+                df.loc[mask, "x"], df.loc[mask, "y"],
+                c=color, s=point_size, rasterized=True, linewidths=0, label=cat
+            )
+
+
+def _plot_static_continuous_mpl(
+    ax: "plt.Axes",
+    df: pd.DataFrame,
+    color_key: str,
+    cmap: str,
+    point_size: float,
+    vmin: float,
+    vmax: float
+) -> None:
+    """Plot continuous data with matplotlib scatter (fallback when datashader unavailable)."""
+    ax.scatter(
+        df["x"], df["y"],
+        c=df[color_key], cmap=cmap,
+        vmin=vmin, vmax=vmax,
+        s=point_size, rasterized=True, linewidths=0
     )
 
 
@@ -475,6 +512,7 @@ def _plot_interactive_matplotlib(
 def embedding(
     adata: ad.AnnData,
     basis: str = "X_umap",
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     cmap: str | None = None,
     vmin: float | None = None,
@@ -496,100 +534,84 @@ def embedding(
     wspace: float | None = None,
     hspace: float | None = None,
     show_tick_labels: bool = False,
+    savepath: str | Path | None = None,
     save: str | Path | None = None,
     save_dpi: int = 150,
-    show: bool | None = None,
+    show: bool = True,
     return_fig: bool = False
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
     """
     Fast embedding plot using datashader for large datasets.
 
-    Parameters
-    ----------
-    adata
-        Annotated data matrix.
-    basis
-        Key in adata.obsm for coordinates (e.g., "X_umap", "X_pca").
-    color
-        Key(s) for color encoding. Searches adata.obs first, then adata.var_names.
-        Can be single key or list of keys for multiple panels.
-    cmap
-        Colormap for continuous values. Default: "viridis".
-    vmin
-        Minimum value for continuous color scale. Default: data minimum.
-    vmax
-        Maximum value for continuous color scale. Default: data maximum.
-        Ignored if vmax_percentile is set.
-    vmax_percentile
-        Percentile (0-100) to use for vmax. Useful for clipping outliers.
-        E.g., 95 uses the 95th percentile as vmax. Overrides vmax if set.
-    point_size
-        Point size control.
-        For plotly/jscatter it sets marker size directly.
-        For datashader modes it controls pixel spreading (larger values make points appear thicker).
-    interactive
-        If True, return interactive plot.
-    interactive_backend
-        Backend for datashader interactive plots: "bokeh" or "matplotlib".
-        Ignored when render_mode="jscatter" or "plotly".
-    interactive_resolution
-        Pixel resolution for interactive plots (default: 800).
-    render_mode
-        Rendering mode for interactive plots:
-        - "datashader": Rasterized, fastest for static/overview
-        - "jscatter": WebGL vector, best for zooming/selection (Jupyter)
-        - "plotly": WebGL vector, works on clusters/remote servers
-    plotly_renderer
-        Plotly renderer to use (default: "notebook"). Options include:
-        "iframe", "notebook", "jupyterlab", "browser", "png", "svg".
-        Only used when render_mode="plotly".
-    tooltip
-        Column(s) to show in tooltip (jscatter only).
-    legend_mode
-        How to handle legends for categorical data:
-        - "full": Show all categories
-        - "truncate": Show max_categories, indicate remaining
-        - "separate": Create separate legend figure
-        - "none": No legend
-    legend_max_categories
-        Maximum categories to show when legend_mode="truncate".
-    legend_entries_per_col
-        Maximum legend entries per column.
-    title
-        Plot title. If None, uses color key.
-    figsize
-        Figure size (width, height) in inches.
-    ncols
-        Number of columns for multi-panel plots.
-    wspace
-        Horizontal spacing between subplots (fraction of subplot width).
-        Default: None (uses matplotlib default).
-    hspace
-        Vertical spacing between subplots (fraction of subplot height).
-        Default: None (uses matplotlib default).
-    show_tick_labels
-        Whether to show x/y tick labels. Default: False.
-    save
-        Path to save figure. If None, not saved.
-    save_dpi
-        DPI used when saving figures. Default: 150.
-    show
-        Whether to show figure. Default: True if save is None.
-    return_fig
-        If True, return the figure object.
+    Args:
+        adata (ad.AnnData): Annotated data matrix.
+        basis (str): Key in adata.obsm for coordinates (e.g., "X_umap", "X_pca").
+        keys (str or Sequence[str], optional): Key(s) for color encoding. Searches
+            adata.obs first, then adata.var_names. Can be single key or list of keys
+            for multiple panels.
+        color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
+        cmap (str, optional): Colormap for continuous values. Default is "viridis".
+        vmin (float, optional): Minimum value for continuous color scale. Default is
+            data minimum.
+        vmax (float, optional): Maximum value for continuous color scale. Default is
+            data maximum. Ignored if vmax_percentile is set.
+        vmax_percentile (float, optional): Percentile (0-100) to use for vmax. Useful
+            for clipping outliers. E.g., 95 uses the 95th percentile as vmax. Overrides
+            vmax if set.
+        point_size (float): Point size control. For plotly/jscatter it sets marker size
+            directly. For datashader modes it controls pixel spreading (larger values make
+            points appear thicker). Default is 1.0.
+        interactive (bool): If True, return interactive plot. Default is False.
+        interactive_backend (str): Backend for datashader interactive plots: "bokeh" or
+            "matplotlib". Ignored when render_mode="jscatter" or "plotly".
+            Default is "bokeh".
+        interactive_resolution (int): Pixel resolution for interactive plots. Default is 800.
+        render_mode (str): Rendering mode for interactive plots: "datashader" (rasterized,
+            fastest for static/overview), "jscatter" (WebGL vector, best for
+            zooming/selection in Jupyter), or "plotly" (WebGL vector, works on
+            clusters/remote servers). Default is "datashader".
+        plotly_renderer (str, optional): Plotly renderer to use. Options include "iframe",
+            "notebook", "jupyterlab", "browser", "png", "svg". Only used when
+            render_mode="plotly". Default is "notebook".
+        tooltip (str or Sequence[str], optional): Column(s) to show in tooltip
+            (jscatter only).
+        legend_mode (str): How to handle legends for categorical data: "full" (show all
+            categories), "truncate" (show max_categories, indicate remaining), "separate"
+            (create separate legend figure), or "none" (no legend). Default is "full".
+        legend_max_categories (int): Maximum categories to show when
+            legend_mode="truncate". Default is 20.
+        legend_entries_per_col (int): Maximum legend entries per column. Default is 10.
+        title (str, optional): Plot title. If None, uses color key.
+        figsize (tuple[float, float], optional): Figure size (width, height) in inches.
+        ncols (int): Number of columns for multi-panel plots. Default is 3.
+        wspace (float, optional): Horizontal spacing between subplots (fraction of subplot
+            width). Default is None (uses matplotlib default).
+        hspace (float, optional): Vertical spacing between subplots (fraction of subplot
+            height). Default is None (uses matplotlib default).
+        show_tick_labels (bool): Whether to show x/y tick labels. Default is False.
+        savepath (str or Path, optional): Path to save figure. If None, not saved.
+        save (str or Path, optional): Deprecated. Use ``savepath`` instead.
+        save_dpi (int): DPI used when saving figures. Default is 150.
+        show (bool): Whether to show figure. Default is True.
+        return_fig (bool): If True, return the figure object. Default is False.
 
-    Returns
-    -------
-    Figure object if return_fig=True, else None.
-    For interactive mode with datashader, returns holoviews object.
-    For interactive mode with jscatter, returns Scatter widget(s).
-    For interactive mode with plotly, returns Figure or list of Figures.
+    Returns:
+        Figure object if return_fig=True, else None. For interactive mode with datashader,
+        returns holoviews object. For interactive mode with jscatter, returns Scatter
+        widget(s). For interactive mode with plotly, returns Figure or list of Figures.
 
-    Raises
-    ------
-    ImportError
-        If required optional dependencies are not installed.
+    Raises:
+        ImportError: If required optional dependencies are not installed.
     """
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    if save is not None:
+        warnings.warn("'save' is deprecated, use 'savepath' instead.",
+                      DeprecationWarning, stacklevel=2)
+        savepath = save
+
     # Validate basis
     if basis not in adata.obsm:
         raise KeyError(f"'{basis}' not found in adata.obsm")
@@ -598,15 +620,15 @@ def embedding(
     if coords.shape[1] < 2:
         raise ValueError(f"'{basis}' must have at least 2 dimensions")
 
-    # Normalize color to list
-    if color is None:
-        color = [None]
-    elif isinstance(color, str):
-        color = [color]
+    # Normalize keys to list
+    if keys is None:
+        keys = [None]
+    elif isinstance(keys, str):
+        keys = [keys]
     else:
-        color = list(color)
+        keys = list(keys)
 
-    n_panels = len(color)
+    n_panels = len(keys)
 
     # Normalize tooltip to list
     tooltip_keys = None
@@ -627,7 +649,7 @@ def embedding(
                 )
 
             figs = []
-            for c in color:
+            for c in keys:
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
@@ -671,7 +693,7 @@ def embedding(
             import jscatter
 
             plots = []
-            for c in color:
+            for c in keys:
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
@@ -759,17 +781,11 @@ def embedding(
 
         return plots[0] if len(plots) == 1 else hv.Layout(plots).cols(ncols)
 
-    # Static mode - requires datashader and matplotlib
-    if not _check_datashader():
-        raise ImportError(
-            "datashader and matplotlib are required for static plots. "
-            "Install with: pip install datashader matplotlib"
-        )
+    # Static mode - use datashader when available, fall back to matplotlib scatter
+    use_datashader = _check_datashader()
 
-    import datashader as ds
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
-    from datashader.mpl_ext import dsshow
 
     user_provided_figsize = figsize is not None
     ncols_plot = min(ncols, n_panels)
@@ -789,7 +805,7 @@ def embedding(
 
     legend_figs = []
 
-    for i, c in enumerate(color):
+    for i, c in enumerate(keys):
         ax = axes[i]
         df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
@@ -799,24 +815,35 @@ def embedding(
             colormap, _ = _get_colormap(values, color_type, cmap)
 
             if color_type == "categorical":
-                _plot_static_categorical(ax, df, c, colormap, point_size)
+                if use_datashader:
+                    _plot_static_categorical(ax, df, c, colormap, point_size)
+                else:
+                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size)
                 legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
                 if legend_fig:
                     legend_figs.append(legend_fig)
             else:
                 vmin_use, vmax_use = _get_vmin_vmax(df[c].values, vmin, vmax, vmax_percentile)
-                _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                if use_datashader:
+                    _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                else:
+                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use)
                 sm = plt.cm.ScalarMappable(
                     cmap=colormap,
                     norm=mcolors.Normalize(vmin=vmin_use, vmax=vmax_use)
                 )
                 plt.colorbar(sm, ax=ax, shrink=0.6)
         else:
-            import datashader.transfer_functions as tf
+            if use_datashader:
+                import datashader as ds
+                import datashader.transfer_functions as tf
+                from datashader.mpl_ext import dsshow
 
-            spread_px = max(1, int(round(point_size)))
-            shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
-            dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
+                spread_px = max(1, int(round(point_size)))
+                shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+                dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
+            else:
+                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=True, linewidths=0)
             c = "density"
 
         ax.set_title(title or c)
@@ -843,15 +870,12 @@ def embedding(
 
     fig.subplots_adjust(wspace=wspace, hspace=hspace)
 
-    if show is None:
-        show = save is None
-
-    if save is not None:
-        save = Path(save)
-        fig.savefig(save, dpi=save_dpi, bbox_inches="tight")
+    if savepath is not None:
+        savepath = Path(savepath)
+        fig.savefig(savepath, dpi=save_dpi, bbox_inches="tight")
 
         for j, leg_fig in enumerate(legend_figs):
-            leg_path = save.parent / f"{save.stem}_legend_{j}{save.suffix}"
+            leg_path = savepath.parent / f"{savepath.stem}_legend_{j}{savepath.suffix}"
             leg_fig.savefig(leg_path, dpi=save_dpi, bbox_inches="tight")
             plt.close(leg_fig)
 
@@ -868,6 +892,7 @@ def embedding(
 @with_insitupy_style
 def umap(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
@@ -876,12 +901,22 @@ def umap(
 
     Wrapper around embedding() with basis="X_umap".
     See embedding() for full parameter documentation.
+
+    Args:
+        keys (str or Sequence[str], optional): Key(s) for color encoding.
+            Deprecated alias: ``color``.
+        color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
     """
-    return embedding(adata=adata, basis="X_umap", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_umap", keys=keys, **kwargs)
 
 
 def pca(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | None":
@@ -891,11 +926,16 @@ def pca(
     Wrapper around embedding() with basis="X_pca".
     See embedding() for full parameter documentation.
     """
-    return embedding(adata=adata, basis="X_pca", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_pca", keys=keys, **kwargs)
 
 
 def tsne(
     adata: ad.AnnData,
+    keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
 ) -> "plt.Figure | hv.Layout | None":
@@ -905,4 +945,8 @@ def tsne(
     Wrapper around embedding() with basis="X_tsne".
     See embedding() for full parameter documentation.
     """
-    return embedding(adata=adata, basis="X_tsne", color=color, **kwargs)
+    if color is not None:
+        warnings.warn("'color' is deprecated, use 'keys' instead.",
+                      DeprecationWarning, stacklevel=2)
+        keys = color
+    return embedding(adata=adata, basis="X_tsne", keys=keys, **kwargs)

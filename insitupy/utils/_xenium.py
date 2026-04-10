@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,6 +13,8 @@ import seaborn as sns
 
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils.utils import get_nrows_maxcols
+
+logger = logging.getLogger(__name__)
 
 from .._io.files import read_json
 
@@ -29,7 +32,7 @@ def find_xenium_outputs(
     - Optionally parallelizing directory scanning with threads
     """
     path = Path(path)
-    print(f"Searching for directories starting with '{startswith}' in {path}")
+    logger.info(f"Searching for directories starting with '{startswith}' in {path}")
 
     results = []
 
@@ -59,13 +62,26 @@ def find_xenium_outputs(
         return found
 
     results = _scan(path, depth=0)
-    print(f"Found {len(results)} Xenium output directories.")
+    logger.info(f"Found {len(results)} Xenium output directories.")
     return results
 
 def collect_qc_data(
     data_folders: List[Union[str, os.PathLike, Path]]
     ) -> pd.DataFrame:
+    """Collect QC metadata from a list of Xenium output directories.
 
+    Parses the run date from the folder name and reads a fixed set of QC
+    fields (cell count, transcripts per cell, etc.) from each
+    ``experiment.xenium`` metadata file.
+
+    Args:
+        data_folders: Paths to Xenium output directories.
+
+    Returns:
+        A :class:`~pandas.DataFrame` with one row per directory and columns
+        for date, run name, slide ID, region, preservation method, and key
+        QC metrics.
+    """
     cats = ["date", "run_name", "slide_id", "region_name", "preservation_method",
             "num_cells", "transcripts_per_cell",
             "transcripts_per_100um", "panel_organism", "panel_tissue_type"]
@@ -93,6 +109,19 @@ def plot_qc(
     save_only: bool = False,
     dpi_save: int = 300
     ):
+    """Plot Xenium QC metrics as a strip-plot grid, grouped by a categorical column.
+
+    Args:
+        data: DataFrame returned by :func:`collect_qc_data`.
+        x: Column used for the x-axis grouping.
+        cats: Numeric columns to plot — one subplot per entry.
+        max_cols: Maximum number of columns in the subplot grid.
+        fontsize: Base font size applied globally via ``rcParams``.
+        size: Marker size for the strip plot.
+        savepath: If provided, save the figure to this path.
+        save_only: If True, close the figure after saving without displaying it.
+        dpi_save: Resolution used when saving.
+    """
     # set plotting parameters
     plt.rcParams.update({
     'font.size': fontsize,          # Base font size
@@ -174,7 +203,7 @@ def copy_files_from_xenium_output(
             # check if it is a Xenium output directory
             xenium_file = folder / xenium_filename
             if xenium_file.exists():
-                print(f"Found Xenium output directory: {folder}")
+                logger.info(f"Found Xenium output directory: {folder}")
                 # Check if the specified file exists in the current folder
                 file_path = folder / filename
 
@@ -184,7 +213,7 @@ def copy_files_from_xenium_output(
                 if file_path.exists():
                     # Copy the file to the target directory
                     shutil.copy(file_path, target_path / f"{slide_id}__{region_name}__{filename}")
-                    print(f"\tCopied {file_path} to {target_path}")
+                    logger.info(f"\tCopied {file_path} to {target_path}")
                 else:
-                    print("\tFile not found in directory.")
+                    logger.warning("File not found in directory.")
 

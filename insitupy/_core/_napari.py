@@ -7,10 +7,11 @@ import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI, __version__
-from insitupy._constants import FLUO_CMAP
+from insitupy._version import __version__
+from insitupy._constants import WITH_NAPARI
+from insitupy._constants import ANNOTATIONS_SYMBOL, FLUO_CMAP, REGIONS_SYMBOL
 from insitupy._exceptions import InSituDataMissingObject
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.images.axes import ImageAxes
 from insitupy.images.utils import _get_contrast_limits, create_img_pyramid
 from insitupy.utils._helpers import _get_expression_values
@@ -42,16 +43,15 @@ if WITH_NAPARI:
     from napari.layers import Layer, Points, Shapes
     from napari.utils.notifications import show_info, show_warning
 
+    from insitupy.interactive._callbacks import _update_colorlegend
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
-    from insitupy.interactive._layers import _create_points_layer
+    from insitupy.interactive._layers import _apply_colors_from_features, _create_points_layer
     from insitupy.interactive._transcript_viewer import (
         TranscriptViewerConfig, create_transcript_viewer_widget)
-    from insitupy.interactive._widgets import (ResetWidgetsButton, SaveWidget,
-                                               SyncButton)
+    from insitupy.interactive._widgets import (ColorLegendWidget, UtilityButtonsWidget)
 
     #from napari.layers.shapes.shapes import Shapes
-    from ..interactive._widgets import (_initialize_widgets,
-                                        add_new_geometries_widget)
+    from ..interactive._widgets import (_initialize_widgets, GeometriesWidget)
 
 ################################
 ### NAPARI-RELATED FUNCTIONS ###
@@ -277,79 +277,65 @@ if WITH_NAPARI:
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
-        if data.cells.is_empty and data.units is None:
-            # add annotation widget to napari
-            add_geom_widget = add_new_geometries_widget()
-            add_geom_widget.max_height = 120
-            add_geom_widget.max_width = widgets_max_width
-            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right")
-        else:
-            # initialize the widgets
-            (
-                show_cells_widget,
-                locate_cells_widget,
-                show_geometries_widget,
-                show_boundaries_widget,
-                select_data,
-                filter_cells_widget,
-                show_units_widget,
-            ) = _initialize_widgets(
-                viewer=viewer,
-                viewer_config=viewer_config
-                )
+        # initialize the widgets
+        (
+            show_cells_widget,
+            locate_cells_widget,
+            geometries_widget,
+            show_boundaries_widget,
+            select_data,
+            filter_cells_widget,
+            show_units_widget,
+        ) = _initialize_widgets(
+            viewer=viewer,
+            viewer_config=viewer_config
+            )
 
-            # add widgets to napari window
-            if select_data is not None:
-                viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
-                select_data.max_height = 80
-                select_data.max_width = widgets_max_width
+        # add widgets to napari window
+        if select_data is not None:
+            viewer.window.add_dock_widget(select_data, name="Select data", area="right", tabify=False)
+            select_data.max_height = 80
+            select_data.max_width = widgets_max_width
 
-            if show_cells_widget is not None:
-                viewer.window.add_dock_widget(show_cells_widget, name="Show cells", area="right", tabify=False)
-                show_cells_widget.max_height = 200
-                show_cells_widget.max_width = widgets_max_width
+        if show_cells_widget is not None:
+            viewer.window.add_dock_widget(show_cells_widget, name="Show cells", area="right", tabify=False)
+            show_cells_widget.max_height = 200
+            show_cells_widget.max_width = widgets_max_width
 
-            if show_units_widget is not None:
-                viewer.window.add_dock_widget(show_units_widget, name="Show spatial units", area="right", tabify=True)
-                show_units_widget.max_width = widgets_max_width
+        if show_units_widget is not None:
+            viewer.window.add_dock_widget(show_units_widget, name="Show spatial units", area="right", tabify=True)
+            show_units_widget.max_width = widgets_max_width
 
-            if show_boundaries_widget is not None:
-                viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
-                #show_boundaries_widget.max_height = 80
-                show_boundaries_widget.max_width = widgets_max_width
+        if show_boundaries_widget is not None:
+            viewer.window.add_dock_widget(show_boundaries_widget, name="Show boundaries", area="right", tabify=False)
+            show_boundaries_widget.max_width = widgets_max_width
 
-            if locate_cells_widget is not None:
-                viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
-                #locate_cells_widget.max_height = 130
-                locate_cells_widget.max_width = widgets_max_width
+        if locate_cells_widget is not None:
+            viewer.window.add_dock_widget(locate_cells_widget, name="Navigate to cell", area="right", tabify=False)
+            locate_cells_widget.max_width = widgets_max_width
 
-            if filter_cells_widget is not None:
-                viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
-                filter_cells_widget.max_height = 150
-                show_cells_widget.max_width = widgets_max_width
+        if filter_cells_widget is not None:
+            viewer.window.add_dock_widget(filter_cells_widget, name="Filter cells", area="right", tabify=True)
+            filter_cells_widget.max_height = 150
+            filter_cells_widget.max_width = widgets_max_width
 
-            # add annotation widget to napari
-            add_geom_widget = add_new_geometries_widget()
-            #annot_widget.max_height = 100
-            add_geom_widget.max_width = widgets_max_width
-            viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False, #add_vertical_stretch=True
-                                                )
-
-            if show_geometries_widget is not None:
-                viewer.window.add_dock_widget(show_geometries_widget, name="Show geometries", area="right", tabify=True)
-                show_geometries_widget.max_width = widgets_max_width
+        # add unified geometries widget
+        viewer.window.add_dock_widget(geometries_widget, name="Geometries", area="right", tabify=True)
+        geometries_widget.max_width = widgets_max_width
 
 
     def _add_events_to_viewer(viewer: napari.Viewer):
         # get viewer configuration from configuration manager
         viewer_config = config_manager[_get_viewer_uid(viewer)]
 
+        # Per-layer UID snapshots taken before shape removal, keyed by id(layer).
+        _uids_snapshot: dict = {}
+
         # Assign function to an layer addition event
         def _update_uid(event):
-            global uids_before_removal
             if event is not None:
                 layer = event.source
-                print(event.action) if viewer_config.verbose else None
+                logger.debug(event.action) if viewer_config.verbose else None
                 if event.action == "added" and viewer_config._auto_set_uid:
                     if isinstance(layer, Shapes):
                         type_last = layer.shape_type[-1]
@@ -359,63 +345,130 @@ if WITH_NAPARI:
                             geom_type = "line"
                         else:
                             show_warning(f"Unsupported shape type '{type_last}' for UID assignment. Only 'polygon' and 'path' are supported.")
+                            return
                     elif isinstance(layer, Points):
                         geom_type = "point"
-                    #if 'uid' in layer.properties:
+                        type_last = "point"
+                    else:
+                        return
+
                     uid = str(uuid4())
-                    print(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
-                    try:
-                        layer.properties['uid'][-1] = uid
-                        layer.properties['type'][-1] = geom_type
-                    except KeyError:
-                        layer.properties['uid'] = np.array([uid], dtype='object')
-                        layer.properties['uid'] = np.array([geom_type], dtype='object')
+                    logger.debug(f"Added '{type_last}' with UID '{uid}'") if viewer_config.verbose else None
+
+                    if layer.name.startswith(ANNOTATIONS_SYMBOL):
+                        geometry_type_label = "annotation"
+                    elif layer.name.startswith(REGIONS_SYMBOL):
+                        geometry_type_label = "region"
+                    else:
+                        geometry_type_label = ""
+
+                    # update via layer.features assignment to fire the features_update signal
+                    # so the Features Table widget refreshes automatically
+                    updated = layer.features.copy()
+                    # Read the intended name from current_properties if set
+                    cp = getattr(layer, 'current_properties', {})
+                    intended_name = ""
+                    if 'name' in cp:
+                        val = cp['name']
+                        intended_name = val[0] if hasattr(val, '__len__') and len(val) else str(val)
+
+                    updated.loc[updated.index[-1], 'uid'] = uid
+                    updated.loc[updated.index[-1], 'type'] = geom_type
+                    if 'name' not in updated.columns:
+                        updated['name'] = ""
+                    updated.loc[updated.index[-1], 'name'] = intended_name
+                    updated.loc[updated.index[-1], 'geometry_type'] = geometry_type_label
+                    if isinstance(layer, Points):
+                        if 'size' not in updated.columns:
+                            updated['size'] = np.nan
+                        updated.loc[updated.index[-1], 'size'] = float(layer.size[-1])
+
+                    # Compute next region name from `updated` *before* assigning
+                    # layer.features, which fires callbacks that may read layer.features.
+                    next_region_name = None
+                    if (layer.name.startswith(REGIONS_SYMBOL + " ")
+                            and hasattr(viewer_config, 'data')):
+                        import re as _re
+                        _existing = {n for n in updated.get('name', []) if isinstance(n, str)}
+                        _max_n = 0
+                        for _n in _existing:
+                            _m = _re.match(r'^Region (\d+)$', _n)
+                            if _m:
+                                _max_n = max(_max_n, int(_m.group(1)))
+                        next_region_name = f"Region {_max_n + 1}"
+
+                    layer.features = updated
+
+                    # Advance current_properties so the next drawn shape gets the
+                    # pre-computed incremented name.
+                    if next_region_name is not None:
+                        cp = dict(layer.current_properties)
+                        cp['name'] = np.array([next_region_name], dtype='object')
+                        layer.current_properties = cp
 
                 elif event.action == "removing":
-                    uids_before_removal = set(layer.properties['uid'])
+                    _uids_snapshot[id(layer)] = set(layer.features['uid'])
                 elif event.action == "removed":
-                    removed_uids = uids_before_removal ^ set(layer.properties['uid'])
-                    print(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
+                    removed_uids = _uids_snapshot.pop(id(layer), set()) ^ set(layer.features['uid'])
+                    logger.debug(f"Removed following UIDs: {removed_uids}") if viewer_config.verbose else None
                     viewer_config._removal_tracker += list(removed_uids)
                 else:
                     pass
 
+        def _on_features_changed(e, _l=None):
+            _l.refresh_text()
+            _apply_colors_from_features(_l, viewer_config)
+
+        def _on_colors_changed(e, v=viewer):
+            _update_colorlegend(v, viewer_config)
+
+        def _on_size_changed(event=None, _layer=None):
+            """Sync layer.size → features['size'] so the Features Table stays current."""
+            if _layer is None or 'size' not in _layer.features.columns:
+                return
+            updated = _layer.features.copy()
+            updated['size'] = np.array(_layer.size, dtype=float)
+            _layer.features = updated
+
+        def _connect_layer_events(layer):
+            layer.events.data.connect(_update_uid)
+            layer.events.features.connect(
+                lambda e, _l=layer: _on_features_changed(e, _l)
+            )
+            if isinstance(layer, Shapes):
+                layer.events.edge_color.connect(_on_colors_changed)
+            elif isinstance(layer, Points):
+                layer.events.face_color.connect(_on_colors_changed)
+                layer.events.size.connect(
+                    lambda e, _l=layer: _on_size_changed(e, _layer=_l)
+                )
+
         # Assign the function to data of all existing layers
         for layer in viewer.layers:
             if isinstance(layer, Shapes) or isinstance(layer, Points):
-                layer.events.data.connect(_update_uid)
+                _connect_layer_events(layer)
 
         # Connect the function to the data of existing shapes and points layers in the viewer
         def connect_to_all_shapes_layers(event):
             layer = event.source[event.index]
             if event is not None:
                 if isinstance(layer, Shapes) or isinstance(layer, Points):
-                    layer.events.data.connect(_update_uid)
+                    _connect_layer_events(layer)
 
         # Connect the function to any new layers added to the viewer
         viewer.layers.events.inserted.connect(connect_to_all_shapes_layers)
 
     def _add_color_legend_to_viewer(viewer: napari.Viewer):
-        # # add color legend widget
         config = config_manager[_get_viewer_uid(viewer)]
-        viewer.window.add_dock_widget(config.static_canvas, area='left', name='Color legend')
-
-        # add save widget for color legends
-        save_widget = SaveWidget()
-        viewer.window.add_dock_widget(save_widget, area='left', name="Save color legend")
+        color_legend_widget = ColorLegendWidget(static_canvas=config.static_canvas)
+        viewer.window.add_dock_widget(color_legend_widget, area='left', name='Color legend')
 
     def _add_buttons_to_viewer(viewer: napari.Viewer, widgets_max_width: int = 500):
-        # create sync button
-        sync_button = SyncButton()
+        # create combined utility buttons widget
+        utility_buttons = UtilityButtonsWidget(widgets_max_width=widgets_max_width)
 
-        # add the sync button to viewer
-        viewer.window.add_dock_widget(sync_button, area='right', name="Sync")
-
-        # create reset widgets button
-        reset_widgets_button = ResetWidgetsButton(widgets_max_width=widgets_max_width)
-
-        # add the reset widgets button to viewer
-        viewer.window.add_dock_widget(reset_widgets_button, area='right', name="Reset Widgets")
+        # add the combined widget to viewer
+        viewer.window.add_dock_widget(utility_buttons, area='right', name="Utilities")
 
     def _add_transcript_viewer_to_viewer(
         data: Union["InSituData", "StructuredSpatialData"],

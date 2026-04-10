@@ -1,63 +1,40 @@
-__author__ = "Johannes Wirth"
-__email__ = "j.wirth@tum.de"
-__version__ = "0.11.1"
-
-# check if napari is available
-try:
-    import napari
-    WITH_NAPARI = True
-except ImportError:
-    print((
-        "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
-        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`)."
-    ))
-    WITH_NAPARI = False
-
-from . import _core, dataclasses, datasets, experiment
+from . import _core, containers, datasets, experiment
 from . import images as im
 from . import io
 from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
 from . import utils
-from ._constants import CACHE
+from ._constants import CACHE, WITH_NAPARI
 from ._core.data import InSituData
+from ._version import __author__, __email__, __version__
 from .experiment.data import InSituExperiment
 
+try:
+    from . import spatialdata
+except ImportError:
+    pass
+
 __all__ = [
+    "__version__",
+    "__author__",
+    "__email__",
     "InSituData",
     "InSituExperiment",
-    "CustomPalettes",
-    "AnnotationsData",
-    "BoundariesData",
-    "CellData",
-    "ImageData",
-    "MultiCellData",
-    "RegionsData",
-    "read_xenium",
-    "differential_gene_expression",
-    "calc_distance_of_cells_from",
-    "register_images",
+    "_core",
+    "containers",
+    "datasets",
+    "experiment",
     "im",
     "io",
     "pl",
     "pp",
     "tl",
-    "utils"
+    "utils",
 ]
 
 # configure logging
-import logging
+from ._logging import setup_logging as _setup_logging
 
-from insitupy._logging import TqdmLoggingHandler
-
-logger = logging.getLogger('insitupy')
-logger.setLevel(logging.INFO)
-logger.propagate = False
-
-# Only add handler if one doesn't exist yet
-# Use TqdmLoggingHandler to prevent progress bar disruption from log messages
-if not logger.handlers:
-    handler = TqdmLoggingHandler()
-    handler.setFormatter(logging.Formatter('%(asctime)s | [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
-    logger.addHandler(handler)
+_setup_logging()
+del _setup_logging

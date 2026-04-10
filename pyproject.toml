@@ -1,6 +1,6 @@
 [project]
 name = "insitupy-spatial"
-version = "0.11.1"
+version = "0.12.0b3"
 description = "Package introducing the InSituPy framework to analyze single-cell spatial transcriptomics data."
 license = {text = "BSD-3-Clause"}
 authors = [
@@ -20,6 +20,7 @@ dependencies = [
     "parse>=1.19.1",
     "opencv-python>=4.8.0.76",
     "scikit-image (>=0.21.0,<1.0.0)",
+    "pandas (>=1.5.0,<3.0.0)",
     "geopandas>=1.0.1",
     # "fiona>=1.10.1",
     "openpyxl (>=3.1.2,<4.0.0)",
@@ -42,15 +43,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4.2"]
+dev = ["pytest>=7.4.2", "pytest-qt>=4.2.0"]
 spatialdata = [
     "spatialdata[extra]>=0.7.2",
     "spatialdata-io"
 ]
+mcp = ["mcp[cli]>=1.0.0"]
+
+[project.scripts]
+insitupy-mcp = "mcp_server:main"
 
 [tool.poetry]
 packages =[
-    { include = 'insitupy' }
+    { include = 'insitupy' },
+    { include = 'mcp_server', from = 'tools' }
 ]
 
 [build-system]

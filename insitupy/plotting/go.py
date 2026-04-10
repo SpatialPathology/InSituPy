@@ -1,3 +1,4 @@
+import logging
 import textwrap
 
 import matplotlib.pyplot as plt
@@ -5,6 +6,8 @@ import numpy as np
 
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils.utils import check_list, get_nrows_maxcols
+
+logger = logging.getLogger(__name__)
 
 
 def go_plot(
@@ -30,6 +33,100 @@ def go_plot(
     name_key='name', libraries=None, ascending=False,
     savepath=None, save_only=False, show=True, dpi_save=300
     ):
+    """
+    Plot GO / pathway enrichment results as dot, fixed-dot, or bar charts.
+
+    Creates one subplot per group found in the first index level of ``enrichment``.
+    Each subplot shows the top enriched terms ranked by ``value_to_plot``.
+
+    Args:
+        enrichment: Multi-index DataFrame of enrichment results. The first index
+            level contains group names; columns must include ``'source'``,
+            ``'native'``, and ``name_key``. Typically the output of
+            :meth:`~insitupy.utils.go.GOEnrichment.gprofiler`.
+        style (str, optional): Plot style. One of ``'dot'`` (scatter with colorbar),
+            ``'dot_fixed'`` (dot size encodes score, no x-axis), or ``'bar'``
+            (horizontal bar chart). Defaults to ``'dot'``.
+        color_key (str, optional): Column used to color dots in ``'dot'`` and
+            ``'dot_fixed'`` styles. Defaults to ``'Gene ratio'``.
+        size_key (str, optional): Column used to scale dot size. Defaults to None
+            (uniform size given by ``markersize``).
+        groups (list or str, optional): Subset of groups (first index level) to
+            plot. None plots all groups. Defaults to None.
+        fig (matplotlib.figure.Figure, optional): Existing figure to draw into.
+            Defaults to None (a new figure is created).
+        axis (matplotlib.axes.Axes, optional): Existing axis to draw into. If
+            provided, only a single group may be present. Defaults to None.
+        max_to_plot (int, optional): Maximum number of terms to show per group.
+            Defaults to 10.
+        max_cols (int, optional): Maximum number of subplot columns. Defaults to 4.
+        cmap (str, optional): Colormap for dot color encoding. Defaults to
+            ``'viridis'``.
+        cmin (float, optional): Minimum value for colorbar normalization. Defaults
+            to None (auto).
+        cmax (float, optional): Maximum value for colorbar normalization. Defaults
+            to None (auto).
+        ax_label_size (int, optional): Font size for axis labels. Defaults to 16.
+        markersize (int, optional): Dot size when ``size_key`` is None. Defaults
+            to 240.
+        figsize (tuple, optional): ``(width, height)`` of a single subplot panel.
+            Total figure size scales with the number of panels. Defaults to
+            ``(8, 6)``.
+        remove_yticklabels (bool, optional): If True, hide y-axis tick labels.
+            Defaults to False.
+        xtick_label_size (int, optional): Font size for x-axis tick labels.
+            Defaults to 16.
+        ytick_label_size (int, optional): Font size for y-axis tick labels.
+            Defaults to 16.
+        clb_label_size (int, optional): Font size for the colorbar label. Defaults
+            to 16.
+        clb_tick_label_size (int, optional): Font size for colorbar tick labels.
+            Defaults to 16.
+        clb_pos (int, optional): Index of the subplot that receives the colorbar
+            when using shared colorbars. None places the colorbar in each subplot.
+            Defaults to None.
+        clb_norm (bool, optional): If True, normalize the colorbar to the range
+            ``[cmin, cmax]``. Defaults to False.
+        title_size (int, optional): Font size for subplot titles. Defaults to 16.
+        max_line_length (int, optional): Maximum line length (characters) before a
+            line break is inserted in term names. Defaults to 30.
+        custom_headers (list or str, optional): Custom subplot titles replacing the
+            auto-generated ``'<group> <libraries>'`` header. Must match the number
+            of plotted groups. Defaults to None.
+        max_name_length (int, optional): Maximum characters of a term name before
+            it is truncated and appended with the GO native ID. Defaults to 60.
+        value_to_plot (str, optional): Column used as the x-axis (dot plot) or bar
+            width. Defaults to ``'Enrichment score'``.
+        colorcol (str, optional): Column whose values color the y-axis tick labels.
+            Defaults to None.
+        sortby (str, optional): Column used to sort terms within each group. Defaults
+            to None (sorts by ``value_to_plot``).
+        sort (bool, optional): If True, sort terms before plotting. Defaults to True.
+        additional_sortby (str, optional): Secondary sort column applied after
+            ``sortby``. Defaults to None.
+        x_margin (float, optional): Fractional x-axis margin passed to
+            ``ax.margins()``. Defaults to None.
+        y_margin (float, optional): Fractional y-axis margin passed to
+            ``ax.margins()``. Defaults to None.
+        name_key (str, optional): Column containing the display name of each term.
+            Defaults to ``'name'``.
+        libraries (list or str, optional): Subset of GO/pathway libraries (from the
+            ``'source'`` column) to include. None includes all. Defaults to None.
+        ascending (bool, optional): Sort order for ``sortby``. Defaults to False
+            (descending).
+        savepath (str, optional): Path to save the figure. Defaults to None.
+        save_only (bool, optional): If True, save without displaying. Defaults to
+            False.
+        show (bool, optional): If True, display the figure. If False, return the
+            figure and axes. Defaults to True.
+        dpi_save (int, optional): DPI for saved figure. Defaults to 300.
+
+    Returns:
+        None: Displays and/or saves the figure when ``show=True``.
+
+        Tuple[matplotlib.figure.Figure, np.ndarray]: ``(fig, axs)`` when
+            ``show=False``.
+    """
 
     # get groups from index of enrichment dataframe
     extracted_groups = enrichment.index.unique(level=0).tolist()
@@ -58,10 +155,11 @@ def go_plot(
         # check if all libraries are in dataframe
         libs_available = enrichment['source'].unique()
         notin = [elem for elem in libraries if elem not in libs_available]
-        assert len(notin) == 0, (
-            f"Following libraries could not be found in the `source` column: {notin}\n"
-            f"Following libraries are possible: {libs_available}"
-        )
+        if len(notin) != 0:
+            raise ValueError(
+                f"Following libraries could not be found in the `source` column: {notin}\n"
+                f"Following libraries are possible: {libs_available}"
+            )
         # filter for libraries
         enrichment = enrichment[enrichment['source'].isin(libraries)].copy()
 
@@ -97,7 +195,7 @@ def go_plot(
                 cmax = None
                 cmin = None
         except KeyError:
-            print(f"color_key '{color_key}' not found in columns.")
+            logger.warning(f"color_key '{color_key}' not found in columns.")
 
     # Plotting
     if axis is None:
@@ -105,7 +203,8 @@ def go_plot(
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(figsize[0]*n_cols, figsize[1]*n_rows))
 
     else:
-        assert len(groups) == 1, "Enrichment dataframe contains more than one group in first index level 0."
+        if len(groups) != 1:
+            raise ValueError("Enrichment dataframe contains more than one group in first index level 0.")
         axs = axis
         n_plots = 1
         show = False
@@ -123,7 +222,7 @@ def go_plot(
                 try:
                     color = df[color_key]
                 except KeyError:
-                    print(f"color_key '{color_key}' not found in columns.")
+                    logger.warning(f"color_key '{color_key}' not found in columns.")
                     color = 'k'
             else:
                 color = 'k'

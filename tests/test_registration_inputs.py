@@ -4,6 +4,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
+from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.tools import registration
 
 
@@ -121,42 +122,28 @@ def test_decon_scale_factor_non_positive_raises(dummy_data, image_file):
         )
 
 
+def _dummy_register_images_standalone(moving, fixed, **kwargs):
+    """Stub for register_images_standalone: return zeros + identity matrix."""
+    h, w = fixed.shape[:2] if hasattr(fixed, "shape") else (8, 8)
+    registered = np.zeros((h, w), dtype=np.uint8)
+    T = np.eye(2, 3, dtype=np.float64)
+    return registered, T
+
+
+def _dummy_apply_warp(image, T, dsize, axes):
+    """Stub for apply_warp: return zeros with the requested output size."""
+    w, h = dsize
+    return np.zeros((h, w), dtype=np.uint8)
+
+
 def test_if_positive_path_smoke(dummy_data, image_file, monkeypatch):
-    class _DummyImageRegistration:
-        def __init__(self, image, template, *args, **kwargs):
-            self.image = image
-            self.template = template
-            self.image_resized = None
-            self.image_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.registered = None
-
-        def load_and_scale_images(self, *args, **kwargs):
-            return None
-
-        def extract_features(self, *args, **kwargs):
-            return None
-
-        def calculate_transformation_matrix(self):
-            return None
-
-        def perform_registration(self):
-            if self.image is None:
-                self.registered = np.zeros((8, 8), dtype=np.uint8)
-            elif hasattr(self.image, "compute"):
-                self.registered = self.image.compute()
-            else:
-                self.registered = np.asarray(self.image)
-
-        def save(self, *args, **kwargs):
-            return None
-
     monkeypatch.setattr(
         registration,
         "read_image",
         lambda _p: (da.from_array(np.zeros((2, 8, 8), dtype=np.uint8)), {}, "CYX", 1.0),
     )
-    monkeypatch.setattr(registration, "ImageRegistration", _DummyImageRegistration)
+    monkeypatch.setattr(registration, "register_images_standalone", _dummy_register_images_standalone)
+    monkeypatch.setattr(registration, "apply_warp", _dummy_apply_warp)
 
     registration.register_images(
         data=dummy_data,
@@ -183,36 +170,13 @@ def test_if_positive_path_smoke(dummy_data, image_file, monkeypatch):
 
 
 def test_if_positive_path_with_pyramid_list_input(dummy_data, image_file, monkeypatch):
-    class _DummyImageRegistration:
-        def __init__(self, image, template, *args, **kwargs):
-            self.image = image
-            self.template = template
-            self.image_resized = None
-            self.image_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.registered = None
-
-        def load_and_scale_images(self, *args, **kwargs):
-            return None
-
-        def extract_features(self, *args, **kwargs):
-            return None
-
-        def calculate_transformation_matrix(self):
-            return None
-
-        def perform_registration(self):
-            self.registered = np.asarray(self.image)
-
-        def save(self, *args, **kwargs):
-            return None
-
     monkeypatch.setattr(
         registration,
         "read_image",
         lambda _p: ([np.zeros((2, 8, 8), dtype=np.uint8)], {}, "CYX", 1.0),
     )
-    monkeypatch.setattr(registration, "ImageRegistration", _DummyImageRegistration)
+    monkeypatch.setattr(registration, "register_images_standalone", _dummy_register_images_standalone)
+    monkeypatch.setattr(registration, "apply_warp", _dummy_apply_warp)
 
     registration.register_images(
         data=dummy_data,
@@ -230,39 +194,13 @@ def test_if_positive_path_with_pyramid_list_input(dummy_data, image_file, monkey
 
 
 def test_template_metadata_pixel_size_is_used(dummy_data, image_file, monkeypatch):
-    class _DummyImageRegistration:
-        def __init__(self, image, template, *args, **kwargs):
-            self.image = image
-            self.template = template
-            self.image_resized = None
-            self.image_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.registered = None
-
-        def load_and_scale_images(self, *args, **kwargs):
-            return None
-
-        def extract_features(self, *args, **kwargs):
-            return None
-
-        def calculate_transformation_matrix(self):
-            return None
-
-        def perform_registration(self):
-            if hasattr(self.image, "compute"):
-                self.registered = self.image.compute()
-            else:
-                self.registered = np.asarray(self.image)
-
-        def save(self, *args, **kwargs):
-            return None
-
     monkeypatch.setattr(
         registration,
         "read_image",
         lambda _p: (da.from_array(np.zeros((2, 8, 8), dtype=np.uint8)), {}, "CYX", 4.0),
     )
-    monkeypatch.setattr(registration, "ImageRegistration", _DummyImageRegistration)
+    monkeypatch.setattr(registration, "register_images_standalone", _dummy_register_images_standalone)
+    monkeypatch.setattr(registration, "apply_warp", _dummy_apply_warp)
 
     registration.register_images(
         data=dummy_data,
@@ -278,39 +216,13 @@ def test_template_metadata_pixel_size_is_used(dummy_data, image_file, monkeypatc
 
 
 def test_image_path_alias_is_accepted(dummy_data, image_file, monkeypatch):
-    class _DummyImageRegistration:
-        def __init__(self, image, template, *args, **kwargs):
-            self.image = image
-            self.template = template
-            self.image_resized = None
-            self.image_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.template_scaled = np.zeros((1, 1), dtype=np.uint8)
-            self.registered = None
-
-        def load_and_scale_images(self, *args, **kwargs):
-            return None
-
-        def extract_features(self, *args, **kwargs):
-            return None
-
-        def calculate_transformation_matrix(self):
-            return None
-
-        def perform_registration(self):
-            if hasattr(self.image, "compute"):
-                self.registered = self.image.compute()
-            else:
-                self.registered = np.asarray(self.image)
-
-        def save(self, *args, **kwargs):
-            return None
-
     monkeypatch.setattr(
         registration,
         "read_image",
         lambda _p: (da.from_array(np.zeros((2, 8, 8), dtype=np.uint8)), {}, "CYX", 1.0),
     )
-    monkeypatch.setattr(registration, "ImageRegistration", _DummyImageRegistration)
+    monkeypatch.setattr(registration, "register_images_standalone", _dummy_register_images_standalone)
+    monkeypatch.setattr(registration, "apply_warp", _dummy_apply_warp)
 
     registration.register_images(
         data=dummy_data,
@@ -332,4 +244,45 @@ def test_image_path_and_legacy_name_together_raises(dummy_data, image_file):
             image_to_be_registered=image_file,
             image_path=image_file,
             channel_names=["HE"],
+        )
+
+
+def _raise_not_enough_matches(*args, **kwargs):
+    raise NotEnoughFeatureMatchesError(number=1, threshold=5)
+
+
+def test_insufficient_matches_warns_and_returns_when_configured(dummy_data, image_file, monkeypatch):
+    monkeypatch.setattr(
+        registration,
+        "read_image",
+        lambda _p: (np.zeros((8, 8, 3), dtype=np.uint8), {}, "YXS", 1.0),
+    )
+    monkeypatch.setattr(registration, "register_images_standalone", _raise_not_enough_matches)
+
+    with pytest.warns(UserWarning, match="Registration skipped"):
+        registration.register_images(
+            data=dummy_data,
+            image_to_be_registered=image_file,
+            channel_names=["HE"],
+            save_registered_images=False,
+            raise_on_insufficient_matches=False,
+        )
+
+    assert len(dummy_data.images.added_images) == 0
+
+
+def test_insufficient_matches_raises_by_default(dummy_data, image_file, monkeypatch):
+    monkeypatch.setattr(
+        registration,
+        "read_image",
+        lambda _p: (np.zeros((8, 8, 3), dtype=np.uint8), {}, "YXS", 1.0),
+    )
+    monkeypatch.setattr(registration, "register_images_standalone", _raise_not_enough_matches)
+
+    with pytest.raises(NotEnoughFeatureMatchesError):
+        registration.register_images(
+            data=dummy_data,
+            image_to_be_registered=image_file,
+            channel_names=["HE"],
+            save_registered_images=False,
         )

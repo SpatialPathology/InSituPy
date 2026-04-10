@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import os
 import sys
 from datetime import datetime
@@ -9,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import issparse
 from shapely import MultiPolygon, Polygon
+
+logger = logging.getLogger(__name__)
 
 
 def _get_expression_values(adata, X, key_type, key):
@@ -39,7 +42,7 @@ def _get_expression_values(adata, X, key_type, key):
             warn("Data in `obsm` needs to be either pandas DataFrame or numpy array to be parsed.")
         pass
     else:
-        print("Unknown key selected.", flush=True)
+        logger.warning("Unknown key selected.")
 
     return color_value
 
@@ -94,6 +97,17 @@ def _generate_mask(values, xmax, ymax, seg_mask_value):
 
 
 def sort_paths_by_datetime(paths):
+    """Sort a list of paths by the datetime encoded in their names, newest first.
+
+    Assumes filenames follow the pattern ``YYMMDD-HHMMSSffffff-<hash>``
+    (e.g. ``250805-115555000343-2c58ca86``).
+
+    Args:
+        paths: Iterable of :class:`~pathlib.Path` objects to sort.
+
+    Returns:
+        A new list of paths sorted from most-recent to oldest.
+    """
     def extract_datetime(path):
         # Assumes ID format: "250805-115555000343-2c58ca86"
         parts = path.name.split("-")
@@ -113,6 +127,11 @@ def sort_paths_by_datetime(paths):
 
 @contextlib.contextmanager
 def suppress_output():
+    """Context manager that silences all stdout and stderr output.
+
+    Redirects both ``sys.stdout`` and ``sys.stderr`` to ``/dev/null`` for the
+    duration of the ``with`` block, then restores them unconditionally.
+    """
     with open(os.devnull, 'w') as devnull:
         old_stdout = sys.stdout
         old_stderr = sys.stderr

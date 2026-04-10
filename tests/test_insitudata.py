@@ -35,10 +35,34 @@ def test_read():
 def test_functions():
     xd = xenium_test_dataset()
     xd.load_all()
+
+    n_cells_before = xd.cells.table.n_obs
     sc.pp.filter_cells(xd.cells.table, min_counts=1, inplace=True)
+    assert xd.cells.table.n_obs <= n_cells_before
+
     normalize_and_transform(xd, transformation_method="sqrt")
     reduce_dimensions(xd, method="umap")
     cluster_cells(xd, method="leiden")
-    for key in ['spatial', 'X_pca', 'X_umap']:
-        assert key in xd.cells.table.obsm.keys()
-    assert "leiden" in xd.cells.table.obs.columns
+
+    table = xd.cells.table
+    n = table.n_obs
+
+    # obsm keys present
+    for key in ["spatial", "X_pca", "X_umap"]:
+        assert key in table.obsm
+
+    # cluster label present
+    assert "leiden" in table.obs.columns
+
+    # shape correctness
+    assert table.obsm["spatial"].shape == (n, 2)
+    assert table.obsm["X_pca"].ndim == 2
+    assert table.obsm["X_pca"].shape[0] == n
+    assert table.obsm["X_umap"].shape == (n, 2)
+
+    # content correctness: UMAP must produce non-trivial output
+    import numpy as np
+    assert not np.all(table.obsm["X_umap"] == 0)
+
+    # at least one cluster label assigned
+    assert table.obs["leiden"].nunique() >= 1

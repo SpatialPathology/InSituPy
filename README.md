@@ -1,4 +1,4 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18459472.svg)](https://doi.org/10.5281/zenodo.18459472)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18459472.svg)](https://doi.org/10.5281/zenodo.18459472) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/SpatialPathology/InSituPy)
 
 # InSituPy: A framework for histology-guided, multi-sample  analysis of single-cell spatial transcriptomics data
 
@@ -27,6 +27,27 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
    <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="800">
 </p>
 
+
+### AI Assistant Integration (MCP Server)
+
+InSituPy ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Supported clients include **Claude Desktop**, **Claude Code**, **Cursor**, **Windsurf**, **Continue.dev**, and **Cline**.
+
+The easiest way to activate the server in **Claude Desktop** is to add the following to your `claude_desktop_config.json` — no separate installation or repository clone required:
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+    }
+  }
+}
+```
+
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
+
+See **[MCP_TUTORIAL.md](MCP_TUTORIAL.md)** for step-by-step setup instructions for all supported clients.
 
 ### Documentation
 

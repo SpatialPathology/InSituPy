@@ -1,4 +1,6 @@
+import logging
 import os
+import warnings
 from contextlib import ExitStack
 from math import ceil
 from numbers import Number
@@ -14,19 +16,21 @@ import toml
 import zarr
 from zarr.errors import ArrayNotFoundError
 
-from insitupy import __version__
 from insitupy._io.files import read_json
-from insitupy.dataclasses._segmentations import _read_baysor_polygons
-from insitupy.dataclasses.dataclasses import (ZARR_V3, AnnotationsData,
-                                              BoundariesData, CellData,
-                                              ImageData, MultiCellData,
-                                              RegionsData, ShapesData,
-                                              _get_zarr_store)
+from insitupy._version import __version__
+
+logger = logging.getLogger(__name__)
+from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
+                                 ImageData, MultiCellData, RegionsData,
+                                 ShapesData)
+from insitupy.containers._segmentations import _read_baysor_polygons
+from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.utils.utils import (_generate_time_based_uid,
-                                  convert_int_to_xenium_hex, convert_to_list)
+                                  convert_int_to_xenium_hex, convert_to_list,
+                                  glob_visible)
 
 
-def read_baysor_cells(
+def _read_baysor_cells(
     baysor_output: Union[str, os.PathLike, Path],
     pixel_size: Number = 1 # the pixel size is usually 1 since baysor runs on the µm coordinates
     ) -> CellData:
@@ -44,7 +48,7 @@ def read_baysor_cells(
         baysor_config = toml.load(f)
 
     # read table
-    print("Parsing count table...", flush=True)
+    logger.info("Parsing count table...")
     loomfile = baysor_output / "segmentation_counts.loom"
     table = sc.read_loom(loomfile)
 
@@ -63,8 +67,8 @@ def read_baysor_cells(
     table.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
 
     # read polygons
-    print("Reading segmentation masks", flush=True)
-    print("\tRead polygons", flush=True)
+    logger.info("Reading segmentation masks")
+    logger.info("Read polygons")
     jsonfile = baysor_output / "segmentation_polygons.json"
     df = _read_baysor_polygons(jsonfile)
 
@@ -77,7 +81,7 @@ def read_baysor_cells(
     ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
 
     # generate a segmentation mask
-    print("\tConvert polygons to segmentation mask", flush=True)
+    logger.info("Convert polygons to segmentation mask")
     img = rasterize(list(zip(df["geometry"], df["cell"])), out_shape=(ymax,xmax))
 
     # convert to dask array
@@ -244,7 +248,7 @@ def _read_boundaries_from_celldata_zarr(
     return boundaries
 
 
-def read_celldata(
+def _read_celldata(
     path: Union[str, os.PathLike, Path],
 ) -> CellData:
     """
@@ -260,8 +264,10 @@ def read_celldata(
     CellData
         The loaded CellData object
     """
-    # read metadata
+    # validate path
     path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"CellData directory not found: {path}")
     celldata_metadata = read_json(path / ".celldata")
 
     # read table (AnnData)
@@ -280,12 +286,14 @@ def read_celldata(
     return celldata
 
 
-def read_shapesdata(
+def _read_shapesdata(
     path: Union[str, os.PathLike, Path],
     mode: Literal["annotations", "regions", "shapes"],
     scale_factor: Optional[Number] = None
 ):
     path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"ShapesData directory not found: {path}")
 
     # e.g. when reading from a shapesdata object, it is assumed that it was saved as µm
     if scale_factor is None:
@@ -295,7 +303,7 @@ def read_shapesdata(
     # metadata = read_json(path / "metadata.json")
     # keys = metadata.keys()
     # files = [path / f"{k}.geojson" for k in keys]
-    files_dict = {f.stem: f for f in path.glob("*.geojson") if f.stem != "metadata"}
+    files_dict = {f.stem: f for f in glob_visible(path, "*.geojson") if f.stem != "metadata"}
 
     # check which type of ShapesData is read here
     if mode == "annotations":
@@ -322,7 +330,7 @@ def read_shapesdata(
     # data.metadata = metadata
     return data
 
-def read_multicelldata(
+def _read_multicelldata(
         path: Union[str, os.PathLike, Path],
         path_upper: Optional[Union[str, os.PathLike, Path]] = None,
         alt_path_dict: Optional[dict] = None,
@@ -338,15 +346,15 @@ def read_multicelldata(
     if not old:
         celldata_metadata = read_json(path / ".multicelldata")
         for key in celldata_metadata["all_keys"]:
-            cd = read_celldata(path / key)
+            cd = _read_celldata(path / key)
             mcd.add_celldata(cd=cd, key=key, is_main=(key == celldata_metadata["key_main"]))
     else:
-        cd = read_celldata(path)
+        cd = _read_celldata(path)
         mcd.add_celldata(cd=cd, key="main", is_main=True)
         if path_upper is not None and alt_path_dict is not None:
             path_upper = Path(path_upper)
             for k, p in alt_path_dict.items():
-                cd = read_celldata(path=path_upper / p)
+                cd = _read_celldata(path=path_upper / p)
                 mcd.add_celldata(cd=cd, key=k)
     return mcd
 
@@ -357,16 +365,18 @@ def _save_images(imagedata: ImageData,
                  images_as_zarr: bool = True,
                  zipped: bool = False,
                  max_resolution: Optional[Number] = None, # in µm per pixel,
+                 debug: bool = False,
                  verbose: bool = False
                  ):
     img_path = (path / "images")
 
     savepaths = imagedata.save(
-        output_folder=img_path,
+        path=img_path,
         as_zarr=images_as_zarr,
         zipped=zipped,
         return_savepaths=True,
         max_resolution=max_resolution,
+        debug=debug,
         verbose=verbose
         )
 
@@ -381,7 +391,7 @@ def _save_images(imagedata: ImageData,
 def _save_cells(cells: MultiCellData,
                 path,
                 metadata,
-                boundaries_zipped=False,
+                zipped=False,
                 max_resolution_boundaries: Optional[Number] = None, # in µm per pixel
                 overwrite=False
                 ):
@@ -392,7 +402,7 @@ def _save_cells(cells: MultiCellData,
     # save cells to path and write info to metadata
     cells.save(
         path=cells_path,
-        boundaries_zipped=boundaries_zipped,
+        zipped=zipped,
         max_resolution_boundaries=max_resolution_boundaries,
         overwrite=overwrite
         )
@@ -488,3 +498,47 @@ def _save_regions(regions, path, metadata):
 
     # add new paths
     metadata["data"]["regions"] = Path(relpath(annot_path, path)).as_posix()
+
+
+# ---------------------------------------------------------------------------
+# Deprecation wrappers for renamed public functions
+# ---------------------------------------------------------------------------
+
+def read_celldata(path, **kwargs):
+    """Deprecated: Use CellData.read() instead."""
+    warnings.warn(
+        "read_celldata() is deprecated. Use CellData.read() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _read_celldata(path, **kwargs)
+
+
+def read_shapesdata(path, mode, scale_factor=None):
+    """Deprecated: Use ShapesData.read(), AnnotationsData.read(), or RegionsData.read() instead."""
+    warnings.warn(
+        "read_shapesdata() is deprecated. Use ShapesData.read() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _read_shapesdata(path, mode, scale_factor)
+
+
+def read_multicelldata(path, path_upper=None, alt_path_dict=None):
+    """Deprecated: Use MultiCellData.read() instead."""
+    warnings.warn(
+        "read_multicelldata() is deprecated. Use MultiCellData.read() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _read_multicelldata(path, path_upper, alt_path_dict)
+
+
+def read_baysor_cells(baysor_output, pixel_size=1):
+    """Deprecated: Use CellData.read_baysor() instead."""
+    warnings.warn(
+        "read_baysor_cells() is deprecated. Use the private _read_baysor_cells() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _read_baysor_cells(baysor_output, pixel_size)

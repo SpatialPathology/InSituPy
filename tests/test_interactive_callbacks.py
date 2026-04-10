@@ -142,6 +142,3 @@ def test_build_labels_properties_handles_unmapped_or_out_of_bounds_nuclei():
     assert len(properties["index"]) == 3
     assert properties["name"] == ["cell_a", "unmapped", "unmapped"]
     assert properties["cell_area"] == [4.0, None, None]
-    assert properties["cell_area"] == [4.0, None, None]
-    assert properties["cell_area"] == [4.0, None, None]
-    assert properties["cell_area"] == [4.0, None, None]
