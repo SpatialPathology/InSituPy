@@ -1442,7 +1442,11 @@ class InSituExperiment:
                 stacklevel=2,
             )
             return None
-        return anndata.experimental.read_lazy(table_path)
+        try:
+            return anndata.experimental.read_lazy(table_path)
+        except ImportError:
+            # xarray is not installed; fall back to eager loading
+            return anndata.read_zarr(table_path)
 
     def build_table(
         self,
@@ -3283,7 +3287,10 @@ class InSituExperimentView(InSituExperiment):
             )
             return None
 
-        full_table = anndata.experimental.read_lazy(table_path)
+        try:
+            full_table = anndata.experimental.read_lazy(table_path)
+        except ImportError:
+            full_table = anndata.read_zarr(table_path)
 
         # Retrieve the label column used during build_table
         label_col = full_table.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
