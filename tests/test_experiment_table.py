@@ -1,5 +1,7 @@
 """Tests for InSituExperiment build_table(), .table, import_from_table(), and view.table."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -303,3 +305,146 @@ class TestViewTable:
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
         view = exp._subset(slice(0, 1), as_view=True)
         assert view.path == exp.path
+
+
+# ── concat_on_disk ─────────────────────────────────────────────────────────────
+
+def _make_saved_experiment(tmp_path, n_samples=2, n_cells=10, n_genes=5):
+    """Build an experiment whose datasets are physically saved to disk.
+
+    Creates the minimal directory structure expected by
+    ``_resolve_per_sample_h5ad_paths``:
+
+        {sample_dir}/cells/{timestamp_uid}/
+            .multicelldata
+            main/
+                table.h5ad
+    """
+    # Fixed timestamp dir name that parses correctly by sort_paths_by_datetime
+    TIMESTAMP_DIR = "260101-000000000000-a1b2c3d4"
+
+    exp = InSituExperiment()
+    exp._path = tmp_path
+
+    for i in range(n_samples):
+        xd = _make_insitudata(
+            n_cells=n_cells, n_genes=n_genes,
+            seed=i, cell_prefix=f"s{i}cell",
+        )
+        sample_dir = tmp_path / f"sample_{i}"
+        sample_dir.mkdir()
+
+        # Write h5ad inside the expected cells subdirectory
+        cells_ts_dir = sample_dir / "cells" / TIMESTAMP_DIR
+        main_dir = cells_ts_dir / "main"
+        main_dir.mkdir(parents=True)
+
+        # Write the h5ad
+        xd.cells.table.write_h5ad(main_dir / "table.h5ad")
+
+        # Write .multicelldata JSON
+        multicelldata_meta = {
+            "key_main": "main",
+            "all_keys": ["main"],
+            "version": "test",
+        }
+        (cells_ts_dir / ".multicelldata").write_text(json.dumps(multicelldata_meta))
+
+        xd._path = sample_dir
+        exp._data.append(xd)
+
+    exp._metadata = pd.DataFrame({
+        "uid": [f"sample_{i}" for i in range(n_samples)],
+        "slide_id": ["slide1"] * n_samples,
+        "sample_id": [f"s{i}" for i in range(n_samples)],
+    })
+
+    return exp
+
+
+class TestConcatOnDisk:
+    def test_zarr_created(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        exp.build_table(method="concat_on_disk")
+        assert (tmp_path / "tables" / "concat.zarr").exists()
+
+    def test_shape(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path, n_samples=2, n_cells=10, n_genes=5)
+        exp.build_table(method="concat_on_disk")
+        tbl = exp.table
+        assert tbl.n_obs == 20
+        assert tbl.n_vars == 5
+
+    def test_label_col_in_obs(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        exp.build_table(method="concat_on_disk")
+        tbl = exp.table
+        assert "uid" in tbl.obs.columns
+
+    def test_build_params_sidecar_written(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        exp.build_table(method="concat_on_disk")
+        params_path = tmp_path / "tables" / "build_params.json"
+        assert params_path.exists()
+        params = json.loads(params_path.read_text())
+        assert params["label_col"] == "uid"
+        assert params["method"] == "concat_on_disk"
+
+    def test_in_memory_also_writes_sidecar(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        exp.build_table(method="in_memory")
+        params_path = tmp_path / "tables" / "build_params.json"
+        assert params_path.exists()
+        params = json.loads(params_path.read_text())
+        assert params["method"] == "in_memory"
+
+    def test_unsupported_filter_raises(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        with pytest.raises(ValueError, match="does not support"):
+            exp.build_table(method="concat_on_disk", obs_keys=["some_col"])
+
+    def test_unsupported_metadata_keys_raises(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        with pytest.raises(ValueError, match="does not support"):
+            exp.build_table(method="concat_on_disk", metadata_keys="all")
+
+    def test_no_saved_path_raises(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        # Unset xd paths so resolve fails
+        for xd in exp._data:
+            xd._path = None
+        with pytest.raises(ValueError, match="no save path"):
+            exp.build_table(method="concat_on_disk")
+
+    def test_invalid_method_raises(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        with pytest.raises(ValueError, match="Unknown method"):
+            exp.build_table(method="unknown_method")
+
+    def test_overwrite(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path)
+        exp.build_table(method="concat_on_disk")
+        exp.build_table(method="concat_on_disk", overwrite=True)  # Should not raise
+        assert (tmp_path / "tables" / "concat.zarr").exists()
+
+    def test_join_inner(self, tmp_path):
+        """Inner join retains only shared genes."""
+        exp = _make_saved_experiment(tmp_path, n_samples=2, n_genes=6, n_cells=5)
+        # Give sample 1 different genes by patching its h5ad with different var names
+        TIMESTAMP_DIR = "260101-000000000000-a1b2c3d4"
+        rng = np.random.default_rng(99)
+        import anndata as ad
+        shared = [f"gene_{j}" for j in range(3)]
+        unique = [f"other_gene_{j}" for j in range(3)]
+        h5ad_path = tmp_path / "sample_1" / "cells" / TIMESTAMP_DIR / "main" / "table.h5ad"
+        X = rng.integers(0, 20, size=(5, 6)).astype(float)
+        adata = ad.AnnData(
+            X=X,
+            obs=pd.DataFrame(index=pd.Index([f"s1cell_{i}" for i in range(5)])),
+            var=pd.DataFrame(index=pd.Index(shared + unique)),
+        )
+        adata.write_h5ad(h5ad_path)
+
+        exp.build_table(method="concat_on_disk", join="inner")
+        tbl = exp.table
+        assert tbl.n_vars == 3  # only 3 shared genes

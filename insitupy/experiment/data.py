@@ -25,7 +25,7 @@ from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
                                  with_insitupy_style)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy._io.files import check_overwrite_and_remove_if_true
+from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
@@ -1226,8 +1226,8 @@ class InSituExperiment:
         # Load the full table into memory for cell matching
         table_adata = anndata.read_zarr(table_path)
 
-        # Retrieve the label column used during build_table
-        label_col = table_adata.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
+        # Retrieve the label column used during build_table (sidecar JSON takes priority)
+        label_col = self._read_build_params().get("label_col", "uid")
 
         if label_col not in table_adata.obs.columns:
             raise ValueError(
@@ -1421,6 +1421,166 @@ class InSituExperiment:
             return None
         return Path(self.path) / "tables" / "concat.zarr"
 
+    def _get_build_params_path(self) -> Optional[Path]:
+        """Return the path to ``tables/build_params.json``, or None if no experiment path."""
+        if self.path is None:
+            return None
+        return Path(self.path) / "tables" / "build_params.json"
+
+    def _read_build_params(self) -> dict:
+        """Read build parameters from the sidecar JSON, with sensible defaults.
+
+        Returns:
+            dict with at least a ``label_col`` key.
+        """
+        params_path = self._get_build_params_path()
+        if params_path is not None and params_path.exists():
+            return read_json(params_path)
+        return {"label_col": "uid"}
+
+    def _resolve_per_sample_h5ad_paths(
+        self,
+        cells_layer: Optional[str] = None,
+        label_col: str = "uid",
+    ) -> List[tuple]:
+        """Resolve on-disk h5ad paths for each sample.
+
+        Args:
+            cells_layer: Cell layer key. ``None`` uses the main layer.
+            label_col: Metadata column whose value is used as the sample label.
+
+        Returns:
+            List of ``(label_value, h5ad_path)`` pairs, one per sample.
+
+        Raises:
+            ValueError: If any dataset has no save path, has no saved cells
+                directory, or if the h5ad file cannot be located.
+        """
+        from insitupy.utils._helpers import sort_paths_by_datetime
+
+        results = []
+        for meta, xd in self.iterdata():
+            uid = meta["uid"]
+            label_value = meta[label_col]
+
+            if xd._path is None:
+                raise ValueError(
+                    f"Dataset '{uid}' has no save path. "
+                    "Save all datasets before using method='concat_on_disk'."
+                )
+
+            cells_dir = xd._path / "cells"
+            if not cells_dir.exists():
+                raise ValueError(
+                    f"No cells directory found for dataset '{uid}' at '{cells_dir}'. "
+                    "Ensure the dataset has been saved with cell data."
+                )
+
+            timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
+            if not timestamp_dirs:
+                raise ValueError(
+                    f"No saved cells found for dataset '{uid}' in '{cells_dir}'."
+                )
+
+            most_recent = sort_paths_by_datetime(timestamp_dirs)[0]
+
+            # Determine the layer directory name
+            if cells_layer is None:
+                mc_meta = read_json(most_recent / ".multicelldata")
+                layer_key = mc_meta["key_main"]
+            else:
+                layer_key = cells_layer
+
+            h5ad_path = most_recent / layer_key / "table.h5ad"
+            if not h5ad_path.exists():
+                raise ValueError(
+                    f"h5ad file not found for dataset '{uid}': '{h5ad_path}'. "
+                    "Ensure the dataset has been saved."
+                )
+
+            results.append((label_value, h5ad_path))
+
+        return results
+
+    def _concat_samples_on_disk(
+        self,
+        output_path: Path,
+        cells_layer: Optional[str] = None,
+        label_col: str = "uid",
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: Optional[int] = None,
+        make_obs_names_unique: bool = True,
+    ) -> None:
+        """Concatenate per-sample h5ad files on disk without loading all into RAM.
+
+        Uses :func:`anndata.experimental.concat_on_disk` to stream each
+        sample's h5ad directly to the output zarr store.
+
+        .. note::
+            Requires all datasets to have been saved to disk (i.e. each
+            :class:`~insitupy._core.data.InSituData` must have a ``_path``).
+            Obs/var key filtering and experiment-metadata columns are not
+            supported in this mode.
+
+        Args:
+            output_path: Destination zarr path.
+            cells_layer: Cell layer to use. ``None`` selects the main layer.
+            label_col: Metadata column used as sample identifier label.
+            join: ``"inner"`` or ``"outer"`` variable join.
+            min_shared_genes: Warn if fewer shared genes after inner join.
+            make_obs_names_unique: If True, prepend label value to obs names
+                using a ``"-"`` separator.
+
+        Raises:
+            ValueError: If any dataset cannot be located on disk.
+        """
+        from anndata.experimental import concat_on_disk
+
+        sample_paths = self._resolve_per_sample_h5ad_paths(
+            cells_layer=cells_layer,
+            label_col=label_col,
+        )
+
+        # Build ordered mapping: {label_value → h5ad_path}
+        in_files: Dict[str, Path] = {label: path for label, path in sample_paths}
+
+        index_unique = "-" if make_obs_names_unique else None
+
+        # When in_files is a Mapping, the dict keys serve as the label values;
+        # passing keys= separately would be redundant and raises TypeError.
+        concat_on_disk(
+            in_files=in_files,
+            out_file=output_path,
+            join=join,
+            label=label_col,
+            index_unique=index_unique,
+            merge="unique",
+        )
+
+        if min_shared_genes is not None and join == "inner":
+            import zarr
+            try:
+                z = zarr.open_group(str(output_path), mode="r")
+                # var index is stored as a zarr array; shape gives gene count
+                var_group = z["var"]
+                # anndata stores the index under "_index"
+                n_genes = var_group["_index"].shape[0]
+            except Exception:
+                n_genes = None
+
+            if n_genes is not None and n_genes < min_shared_genes:
+                warnings.warn(
+                    f"Only {n_genes} shared genes after inner join "
+                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
+                    "to retain all genes.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+
+        logger.info(
+            "Built concatenated table (concat_on_disk) at '%s'.", output_path
+        )
+
     @property
     def table(self) -> Optional[AnnData]:
         """Lazily-loaded concatenated AnnData from ``tables/concat.zarr``.
@@ -1463,12 +1623,27 @@ class InSituExperiment:
         join: Literal["inner", "outer"] = "inner",
         min_shared_genes: Optional[int] = None,
         overwrite: bool = False,
+        method: Literal["in_memory", "concat_on_disk"] = "in_memory",
     ) -> None:
         """Build a zarr-backed concatenated AnnData across all samples.
 
         Concatenates all per-sample AnnData objects and writes the result to
         ``{experiment_path}/tables/concat.zarr``. After building, access the
         result via :attr:`table`.
+
+        Two concatenation strategies are available via ``method``:
+
+        - ``"in_memory"`` *(default)*: loads every sample's AnnData into RAM,
+          concatenates with :func:`anndata.concat`, then writes zarr.
+          Supports all filtering and metadata options.
+        - ``"concat_on_disk"``: streams each sample's saved ``table.h5ad``
+          file directly to the output zarr store using
+          :func:`anndata.experimental.concat_on_disk`.
+          Requires all datasets to be saved on disk. Does **not** support
+          ``obs_keys``, ``var_keys``, ``obsm_keys``, ``varm_keys``,
+          ``uns_keys``, ``layer_keys``, or ``metadata_keys``. Obs name
+          prefixes use the label value (e.g. ``"uid-cell_0"``) rather than
+          the numeric index (``"0-cell_0"``).
 
         .. note::
             This feature is experimental and may change in future versions.
@@ -1477,22 +1652,29 @@ class InSituExperiment:
             cells_layer: Cell layer to extract from each sample.
             label_col: Metadata column used as the sample identifier label.
                 Defaults to ``"uid"``.
-            obs_keys: Obs columns to retain in each sample's AnnData.
-            var_keys: Var columns to retain.
-            obsm_keys: Obsm keys to retain. Defaults to ``"spatial"``.
-            varm_keys: Varm keys to retain.
-            uns_keys: Uns keys to retain.
-            layer_keys: Layer keys to retain.
-            metadata_keys: Metadata columns to add to obs.
-            make_obs_names_unique: Prepend ``"{index}-"`` to obs names.
-            join: How to join variables. ``"inner"`` (default) keeps only shared
-                genes; ``"outer"`` keeps all genes with fill values.
+            obs_keys: Obs columns to retain (``in_memory`` only).
+            var_keys: Var columns to retain (``in_memory`` only).
+            obsm_keys: Obsm keys to retain (``in_memory`` only). Defaults to
+                ``"spatial"``.
+            varm_keys: Varm keys to retain (``in_memory`` only).
+            uns_keys: Uns keys to retain (``in_memory`` only).
+            layer_keys: Layer keys to retain (``in_memory`` only).
+            metadata_keys: Experiment metadata columns to add to obs
+                (``in_memory`` only).
+            make_obs_names_unique: Prepend a prefix to obs names to guarantee
+                uniqueness across samples.
+            join: How to join variables. ``"inner"`` (default) keeps only
+                shared genes; ``"outer"`` keeps all genes with fill values.
             min_shared_genes: Warn when fewer than this many genes remain after
                 an inner join.
             overwrite: If True, overwrite an existing table.
+            method: Concatenation strategy. ``"in_memory"`` (default) or
+                ``"concat_on_disk"`` for memory-efficient on-disk streaming.
 
         Raises:
-            ValueError: If the experiment has no save path set.
+            ValueError: If the experiment has no save path, or if
+                ``method="concat_on_disk"`` is used with unsupported filter
+                arguments.
             FileExistsError: If a table already exists and ``overwrite=False``.
         """
         self._check_mode_compatibility("build_table")
@@ -1503,38 +1685,72 @@ class InSituExperiment:
                 "Call `saveas()` first to give the experiment a path."
             )
 
+        # Validate concat_on_disk restrictions
+        if method == "concat_on_disk":
+            unsupported = {
+                "obs_keys": obs_keys,
+                "var_keys": var_keys,
+                "obsm_keys": obsm_keys if obsm_keys != "spatial" else None,
+                "varm_keys": varm_keys,
+                "uns_keys": uns_keys,
+                "layer_keys": layer_keys,
+                "metadata_keys": metadata_keys,
+            }
+            active = [k for k, v in unsupported.items() if v is not None]
+            if active:
+                raise ValueError(
+                    f"method='concat_on_disk' does not support these arguments: "
+                    f"{active}. Use method='in_memory' to apply filtering."
+                )
+
         output_path = self._get_table_path()
         check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # TODO: For very large experiments, switch to anndata.experimental.concat_on_disk()
-        #       to reduce peak memory usage.
-        adata = self._concatenate_samples(
-            cells_layer=cells_layer,
-            label_col=label_col,
-            obs_keys=obs_keys,
-            var_keys=var_keys,
-            obsm_keys=obsm_keys,
-            varm_keys=varm_keys,
-            uns_keys=uns_keys,
-            layer_keys=layer_keys,
-            metadata_keys=metadata_keys,
-            make_obs_names_unique=make_obs_names_unique,
-            join=join,
-            min_shared_genes=min_shared_genes,
-        )
+        build_params = {"label_col": label_col, "method": method}
 
-        # Store build parameters for round-trip (import_from_table)
-        adata.uns["_insitupy_build_params"] = {"label_col": label_col}
+        if method == "in_memory":
+            adata = self._concatenate_samples(
+                cells_layer=cells_layer,
+                label_col=label_col,
+                obs_keys=obs_keys,
+                var_keys=var_keys,
+                obsm_keys=obsm_keys,
+                varm_keys=varm_keys,
+                uns_keys=uns_keys,
+                layer_keys=layer_keys,
+                metadata_keys=metadata_keys,
+                make_obs_names_unique=make_obs_names_unique,
+                join=join,
+                min_shared_genes=min_shared_genes,
+            )
+            adata.uns["_insitupy_build_params"] = build_params
+            adata.write_zarr(output_path)
+            logger.info(
+                "Built concatenated table at '%s' (%d cells, %d genes).",
+                output_path,
+                adata.n_obs,
+                adata.n_vars,
+            )
 
-        adata.write_zarr(output_path)
-        logger.info(
-            "Built concatenated table at '%s' (%d cells, %d genes).",
-            output_path,
-            adata.n_obs,
-            adata.n_vars,
-        )
+        elif method == "concat_on_disk":
+            self._concat_samples_on_disk(
+                output_path=output_path,
+                cells_layer=cells_layer,
+                label_col=label_col,
+                join=join,
+                min_shared_genes=min_shared_genes,
+                make_obs_names_unique=make_obs_names_unique,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown method '{method}'. Choose 'in_memory' or 'concat_on_disk'."
+            )
+
+        # Write sidecar build params (readable by both methods without loading zarr)
+        import json as _json
+        self._get_build_params_path().write_text(_json.dumps(build_params))
 
     def load_all(self,
                  skip: Optional[str] = None,
@@ -3292,8 +3508,8 @@ class InSituExperimentView(InSituExperiment):
         except ImportError:
             full_table = anndata.read_zarr(table_path)
 
-        # Retrieve the label column used during build_table
-        label_col = full_table.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
+        # Retrieve the label column used during build_table (sidecar JSON takes priority)
+        label_col = self._read_build_params().get("label_col", "uid")
 
         # Get the sample identifiers present in this view
         if label_col not in self._metadata.columns:
