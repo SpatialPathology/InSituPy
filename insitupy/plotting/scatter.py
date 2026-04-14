@@ -452,6 +452,7 @@ def embedding(
     adata: ad.AnnData,
     basis: str = "X_umap",
     color: str | Sequence[str] | None = None,
+    nan_color: str | None = None,
     cmap: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -487,6 +488,11 @@ def embedding(
     color
         Key(s) for color encoding. Searches adata.obs first, then adata.var_names.
         Can be single key or list of keys for multiple panels.
+    nan_color
+        Color for cells with missing values (NaN) in categorical columns. If
+        None (default), NaN cells are excluded from the plot. If a color string
+        (e.g. "lightgray"), NaN cells are shown in that color with a "NaN"
+        legend entry. Has no effect on continuous color columns.
     cmap
         Colormap for continuous values. Default: "viridis".
     vmin
@@ -600,11 +606,24 @@ def embedding(
 
                 if c is not None:
                     values, color_type = _get_color_values(adata, c)
+                    _had_nan = False
+                    if color_type == "categorical" and values.isna().any():
+                        _had_nan = True
+                        if nan_color is None:
+                            keep = ~values.isna().values
+                            df = df[keep]
+                            values = values[keep]
+                        else:
+                            if "NaN" not in values.cat.categories:
+                                values = values.cat.add_categories(["NaN"])
+                            values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
                     colormap, _ = _get_colormap(values, color_type, cmap)
 
                     if color_type == "categorical":
                         color_dict = colormap
+                        if _had_nan and nan_color is not None:
+                            color_dict["NaN"] = nan_color
                         cmap_use = None
                         df[c] = df[c].astype(str)
                         vmin_use, vmax_use = None, None
@@ -643,11 +662,24 @@ def embedding(
 
                 if c is not None:
                     values, color_type = _get_color_values(adata, c)
+                    _had_nan = False
+                    if color_type == "categorical" and values.isna().any():
+                        _had_nan = True
+                        if nan_color is None:
+                            keep = ~values.isna().values
+                            df = df[keep]
+                            values = values[keep]
+                        else:
+                            if "NaN" not in values.cat.categories:
+                                values = values.cat.add_categories(["NaN"])
+                            values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
                     colormap, _ = _get_colormap(values, color_type, cmap)
 
                     if color_type == "categorical":
                         color_dict = colormap
+                        if _had_nan and nan_color is not None:
+                            color_dict["NaN"] = nan_color
                         cmap_use = None
                         df[c] = df[c].astype(str)
                     else:
@@ -692,11 +724,25 @@ def embedding(
 
             if c is not None:
                 values, color_type = _get_color_values(adata, c)
+                _had_nan = False
+                _nan_keep = None
+                if color_type == "categorical" and values.isna().any():
+                    _had_nan = True
+                    if nan_color is None:
+                        _nan_keep = ~values.isna().values
+                        df = df[_nan_keep]
+                        values = values[_nan_keep]
+                    else:
+                        if "NaN" not in values.cat.categories:
+                            values = values.cat.add_categories(["NaN"])
+                        values = values.fillna("NaN")
                 df[c] = values.values if hasattr(values, "values") else values
                 colormap, _ = _get_colormap(values, color_type, cmap)
 
                 if color_type == "categorical":
                     color_dict = colormap
+                    if _had_nan and nan_color is not None:
+                        color_dict["NaN"] = nan_color
                     cmap_use = None
                 else:
                     color_dict = None
@@ -705,7 +751,10 @@ def embedding(
                 if tooltip_keys:
                     for tk in tooltip_keys:
                         if tk not in df.columns and tk in adata.obs.columns:
-                            df[tk] = adata.obs[tk].values
+                            tk_vals = adata.obs[tk].values
+                            if _nan_keep is not None:
+                                tk_vals = tk_vals[_nan_keep]
+                            df[tk] = tk_vals
             else:
                 c = "_density"
                 df[c] = 1
@@ -755,10 +804,23 @@ def embedding(
 
         if c is not None:
             values, color_type = _get_color_values(adata, c)
+            _had_nan = False
+            if color_type == "categorical" and values.isna().any():
+                _had_nan = True
+                if nan_color is None:
+                    keep = ~values.isna().values
+                    df = df[keep]
+                    values = values[keep]
+                else:
+                    if "NaN" not in values.cat.categories:
+                        values = values.cat.add_categories(["NaN"])
+                    values = values.fillna("NaN")
             df[c] = values.values if hasattr(values, "values") else values
             colormap, _ = _get_colormap(values, color_type, cmap)
 
             if color_type == "categorical":
+                if _had_nan and nan_color is not None:
+                    colormap["NaN"] = nan_color
                 _plot_static_categorical(ax, df, c, colormap, point_size)
                 legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
                 if legend_fig:
