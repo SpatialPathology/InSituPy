@@ -63,6 +63,9 @@ class MultiCellData(DeepCopyMixin):
     def __getitem__(self, key):
         return self._layers.get(key)
 
+    def __contains__(self, key):
+        return key in self.keys()
+
     def __setitem__(self, key: str, item):
         from .cell_data import CellData
         if isinstance(item, CellData):

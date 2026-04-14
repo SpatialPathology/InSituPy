@@ -50,6 +50,112 @@ _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 _UNSET = object()
 
 
+class TableAccessor:
+    """Dict-like accessor for per-cells-layer concatenated tables.
+
+    Returned by :attr:`InSituExperiment.table`. Use bracket notation to load
+    the AnnData for a specific layer::
+
+        exp.table["main"]    # AnnData for the "main" segmentation
+        exp.table["proseg"]  # AnnData for the "proseg" segmentation
+        exp.table[None]      # auto-select when only one table exists
+        exp.table.keys()     # list available layer names
+
+    .. note::
+        This feature is experimental and may change in future versions.
+    """
+
+    def __init__(self, experiment: "InSituExperiment") -> None:
+        self._exp = experiment
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def keys(self) -> List[str]:
+        """Return the layer names for which a table has been built."""
+        if self._exp.path is None:
+            return []
+        tables_dir = Path(self._exp.path) / "tables"
+        if not tables_dir.exists():
+            return []
+        return sorted(
+            p.stem for p in tables_dir.iterdir()
+            if p.suffix == ".zarr" and p.is_dir() and p.name != "concat.zarr"
+        )
+
+    def __getitem__(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+        return self._load(cells_layer)
+
+    def __repr__(self) -> str:
+        keys = self.keys()
+        if not keys:
+            return "TableAccessor(no tables built yet)"
+        return f"TableAccessor(layers={keys})"
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _load(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+        try:
+            table_path = self._exp._get_table_path(cells_layer)
+        except ValueError as exc:
+            warnings.warn(str(exc), UserWarning, stacklevel=3)
+            return None
+        if table_path is None or not table_path.exists():
+            warnings.warn(
+                "No concatenated table found. Call `build_table()` to create one.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
+        try:
+            return anndata.experimental.read_lazy(table_path)
+        except ImportError:
+            return anndata.read_zarr(table_path)
+
+
+class ViewTableAccessor(TableAccessor):
+    """Table accessor for :class:`InSituExperimentView`.
+
+    Behaves identically to :class:`TableAccessor` but row-filters the loaded
+    AnnData to only the samples present in the view.
+    """
+
+    def _load(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+        full_table = super()._load(cells_layer)
+        if full_table is None:
+            return None
+
+        label_col = self._exp._read_build_params(cells_layer).get("label_col", "uid")
+
+        if label_col not in self._exp._metadata.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in view metadata. "
+                "Cannot filter table by view samples.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return full_table
+
+        view_sample_ids = set(self._exp._metadata[label_col].values)
+
+        if label_col not in full_table.obs.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in concatenated table obs. "
+                "Cannot filter by view samples.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return full_table
+
+        import numpy as np
+        obs_values = np.asarray(full_table.obs[label_col])
+        mask = np.isin(obs_values, list(view_sample_ids))
+        return full_table[mask]
+
+
 class InSituExperiment:
     """
     A class to manage and analyze multiple spatially resolved single-cell transcriptomics experiments.
@@ -1217,7 +1323,10 @@ class InSituExperiment:
                 "At least one must be provided."
             )
 
-        table_path = self._get_table_path()
+        try:
+            table_path = self._get_table_path(cells_layer)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
         if table_path is None or not table_path.exists():
             raise ValueError(
                 "No concatenated table found. Call `build_table()` first."
@@ -1227,7 +1336,7 @@ class InSituExperiment:
         table_adata = anndata.read_zarr(table_path)
 
         # Retrieve the label column used during build_table (sidecar JSON takes priority)
-        label_col = self._read_build_params().get("label_col", "uid")
+        label_col = self._read_build_params(cells_layer).get("label_col", "uid")
 
         if label_col not in table_adata.obs.columns:
             raise ValueError(
@@ -1247,15 +1356,46 @@ class InSituExperiment:
             fill_missing=True,
         )
 
-    def iterdata(self):
+    def iterdata(self, progress: bool = False, desc: str = "Samples"):
         """
         Iterate over the metadata rows and corresponding data.
+
+        Args:
+            progress: If True, display a tqdm progress bar. Logging messages and
+                Python warnings are routed through :func:`tqdm.write` so they do
+                not corrupt the bar.
+            desc: Label shown on the progress bar. Defaults to ``"Samples"``.
 
         Yields:
             tuple: A tuple containing the metadata row as a Series and the corresponding data.
         """
-        for idx, row in self._metadata.iterrows():
-            yield row, self._data[idx]
+        it = self._metadata.iterrows()
+        if not progress:
+            for idx, row in it:
+                yield row, self._data[idx]
+            return
+
+        import warnings
+        from tqdm.contrib.logging import logging_redirect_tqdm
+
+        bar = tqdm(it, total=len(self._metadata), desc=desc, dynamic_ncols=True)
+
+        # Patch warnings.showwarning so warning text goes via tqdm.write()
+        # instead of straight to stderr, which would corrupt the bar.
+        _orig_showwarning = warnings.showwarning
+
+        def _tqdm_showwarning(message, category, filename, lineno, file=None, line=None):
+            tqdm.write(
+                warnings.formatwarning(message, category, filename, lineno, line).rstrip()
+            )
+
+        warnings.showwarning = _tqdm_showwarning
+        try:
+            with logging_redirect_tqdm():
+                for idx, row in bar:
+                    yield row, self._data[idx]
+        finally:
+            warnings.showwarning = _orig_showwarning
 
 
     def _concatenate_samples(
@@ -1415,27 +1555,73 @@ class InSituExperiment:
 
     # ── Table (cross-sample concatenated AnnData) ─────────────────────────────
 
-    def _get_table_path(self) -> Optional[Path]:
-        """Return the path to ``tables/concat.zarr``, or None if no experiment path is set."""
-        if self.path is None:
-            return None
-        return Path(self.path) / "tables" / "concat.zarr"
+    def _get_table_path(self, cells_layer: Optional[str] = None) -> Optional[Path]:
+        """Return the path to the per-layer zarr table, or None if no experiment path is set.
 
-    def _get_build_params_path(self) -> Optional[Path]:
-        """Return the path to ``tables/build_params.json``, or None if no experiment path."""
+        When *cells_layer* is given, returns ``tables/{cells_layer}.zarr``.
+        When *cells_layer* is ``None``, scans ``tables/`` for ``*.zarr`` directories:
+
+        - Exactly one found → returns it (auto-resolve).
+        - Zero found → falls back to the legacy ``concat.zarr`` if present, otherwise
+          returns a ``tables/main.zarr`` placeholder so callers can check existence.
+        - More than one found → raises :exc:`ValueError` asking for an explicit layer.
+        """
         if self.path is None:
             return None
+        if cells_layer is not None:
+            return Path(self.path) / "tables" / f"{cells_layer}.zarr"
+        # Auto-resolve when cells_layer is None
+        tables_dir = Path(self.path) / "tables"
+        if not tables_dir.exists():
+            return tables_dir / "main.zarr"
+        candidates = [
+            p for p in tables_dir.iterdir()
+            if p.suffix == ".zarr" and p.is_dir() and p.name != "concat.zarr"
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) == 0:
+            legacy = tables_dir / "concat.zarr"
+            return legacy if legacy.exists() else tables_dir / "main.zarr"
+        raise ValueError(
+            f"Multiple tables found in '{tables_dir}': "
+            f"{sorted(p.name for p in candidates)}. "
+            "Pass cells_layer= explicitly to select one."
+        )
+
+    def _get_build_params_path(self, cells_layer: Optional[str] = None) -> Optional[Path]:
+        """Return the path to the per-layer sidecar JSON, or None if no experiment path.
+
+        Mirrors :meth:`_get_table_path`: when *cells_layer* is given returns
+        ``tables/{cells_layer}.json``; otherwise derives the stem from the resolved
+        table path.
+        """
+        if self.path is None:
+            return None
+        if cells_layer is not None:
+            return Path(self.path) / "tables" / f"{cells_layer}.json"
+        table_path = self._get_table_path()
+        if table_path is not None:
+            return table_path.with_suffix(".json")
         return Path(self.path) / "tables" / "build_params.json"
 
-    def _read_build_params(self) -> dict:
-        """Read build parameters from the sidecar JSON, with sensible defaults.
+    def _read_build_params(self, cells_layer: Optional[str] = None) -> dict:
+        """Read build parameters from the per-layer sidecar JSON, with sensible defaults.
+
+        Falls back to the legacy ``tables/build_params.json`` for datasets built
+        before the per-layer convention was introduced.
 
         Returns:
-            dict with at least a ``label_col`` key.
+            dict with at least ``label_col``, ``method``, and ``cells_layer`` keys.
         """
-        params_path = self._get_build_params_path()
+        params_path = self._get_build_params_path(cells_layer)
         if params_path is not None and params_path.exists():
             return read_json(params_path)
+        # Legacy fallback: shared build_params.json from earlier versions
+        if self.path is not None:
+            legacy = Path(self.path) / "tables" / "build_params.json"
+            if legacy.exists():
+                return read_json(legacy)
         return {"label_col": "uid"}
 
     def _resolve_per_sample_h5ad_paths(
@@ -1582,31 +1768,22 @@ class InSituExperiment:
         )
 
     @property
-    def table(self) -> Optional[AnnData]:
-        """Lazily-loaded concatenated AnnData from ``tables/concat.zarr``.
+    def table(self) -> "TableAccessor":
+        """Dict-like accessor for per-cells-layer concatenated tables.
 
-        Returns the concatenated AnnData spanning all samples. Call
-        :meth:`build_table` first to create it.
+        Use bracket notation to load the AnnData for a specific layer::
+
+            exp.table["main"]    # AnnData for the "main" segmentation
+            exp.table["proseg"]  # AnnData for the "proseg" segmentation
+            exp.table[None]      # auto-select when only one table exists
+            exp.table.keys()     # list available layer names
+
+        Call :meth:`build_table` first to create a table.
 
         .. note::
             This feature is experimental and may change in future versions.
-
-        Returns:
-            AnnData or None if no table has been built.
         """
-        table_path = self._get_table_path()
-        if table_path is None or not table_path.exists():
-            warnings.warn(
-                "No concatenated table found. Call `build_table()` to create one.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return None
-        try:
-            return anndata.experimental.read_lazy(table_path)
-        except ImportError:
-            # xarray is not installed; fall back to eager loading
-            return anndata.read_zarr(table_path)
+        return TableAccessor(self)
 
     def build_table(
         self,
@@ -1703,11 +1880,18 @@ class InSituExperiment:
                     f"{active}. Use method='in_memory' to apply filtering."
                 )
 
-        output_path = self._get_table_path()
+        # Resolve cells_layer=None to the actual layer key so the output filename
+        # is always explicit (e.g. "main" rather than the ambiguous None).
+        if cells_layer is None:
+            _, cells_layer = _get_cell_layer(
+                next(self.iterdata())[1].cells, cells_layer=None, return_layer_name=True
+            )
+
+        output_path = self._get_table_path(cells_layer)
         check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        build_params = {"label_col": label_col, "method": method}
+        build_params = {"label_col": label_col, "method": method, "cells_layer": cells_layer}
 
         if method == "in_memory":
             adata = self._concatenate_samples(
@@ -1748,9 +1932,9 @@ class InSituExperiment:
                 f"Unknown method '{method}'. Choose 'in_memory' or 'concat_on_disk'."
             )
 
-        # Write sidecar build params (readable by both methods without loading zarr)
+        # Write per-layer sidecar build params (readable by both methods without loading zarr)
         import json as _json
-        self._get_build_params_path().write_text(_json.dumps(build_params))
+        self._get_build_params_path(cells_layer).write_text(_json.dumps(build_params))
 
     def load_all(self,
                  skip: Optional[str] = None,
@@ -3481,56 +3665,18 @@ class InSituExperimentView(InSituExperiment):
         return True
 
     @property
-    def table(self) -> Optional[AnnData]:
-        """Row-sliced view of the parent experiment's concatenated table.
+    def table(self) -> "ViewTableAccessor":
+        """Dict-like accessor for per-cells-layer concatenated tables (view-filtered).
 
-        Returns an AnnData filtered to only the samples present in this view.
+        Returns an accessor that loads the AnnData for a specific layer and
+        row-filters it to only the samples present in this view::
+
+            view.table["main"]   # AnnData filtered to this view's samples
+            view.table.keys()    # available layer names (from parent path)
+
         Requires the parent experiment to have called :meth:`build_table` first.
 
         .. note::
             This feature is experimental and may change in future versions.
-
-        Returns:
-            AnnData filtered to this view's samples, or None if no table exists.
         """
-        table_path = self._get_table_path()
-        if table_path is None or not table_path.exists():
-            warnings.warn(
-                "No concatenated table found. Call `build_table()` on the parent "
-                "experiment first.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return None
-
-        try:
-            full_table = anndata.experimental.read_lazy(table_path)
-        except ImportError:
-            full_table = anndata.read_zarr(table_path)
-
-        # Retrieve the label column used during build_table (sidecar JSON takes priority)
-        label_col = self._read_build_params().get("label_col", "uid")
-
-        # Get the sample identifiers present in this view
-        if label_col not in self._metadata.columns:
-            warnings.warn(
-                f"Column '{label_col}' not found in view metadata. "
-                "Cannot filter table by view samples.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return full_table
-
-        view_sample_ids = set(self._metadata[label_col].values)
-
-        if label_col not in full_table.obs.columns:
-            warnings.warn(
-                f"Column '{label_col}' not found in concatenated table obs. "
-                "Cannot filter by view samples.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return full_table
-
-        mask = full_table.obs[label_col].isin(view_sample_ids)
-        return full_table[mask]
+        return ViewTableAccessor(self)
