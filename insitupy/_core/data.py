@@ -1288,6 +1288,74 @@ class InSituData:
 
         #self._remove_empty_modalities()
 
+    def annotations_to_regions(
+        self,
+        key: str,
+        region_key: Optional[str] = None,
+        name_filter: Optional[Union[str, List[str]]] = None,
+    ) -> None:
+        """Convert an annotation key to a region on this object.
+
+        Converts the annotation stored under ``key`` to a
+        :class:`~insitupy.containers.RegionsData` entry and registers it on
+        this object.  Only Polygon geometries are carried over; Points and
+        Lines are silently dropped.  Names within the key must be unique after
+        optional ``name_filter`` is applied, because
+        :class:`~insitupy.containers.RegionsData` enforces uniqueness.
+
+        Args:
+            key: Key of the annotation to convert.
+            region_key: Key under which the result is stored in
+                :attr:`regions`.  Defaults to ``key`` when ``None``.
+            name_filter: Keep only annotations whose name matches this value
+                or list of values.  ``None`` keeps all names.
+
+        Raises:
+            KeyError: If ``key`` is not found in :attr:`annotations`.
+            ValueError: If duplicate names remain after filtering.
+        """
+        if key not in self._annotations.keys():
+            raise KeyError(f"Annotation key '{key}' not found.")
+        target_key = region_key if region_key is not None else key
+        new_regions = self._annotations.to_regions(keys=[key], name_filter=name_filter)
+        if key in new_regions.keys():
+            self._regions.add_data(data=new_regions[key], key=target_key, scale_factor=1.0)
+
+    def regions_to_annotations(
+        self,
+        key: str,
+        annotation_key: Optional[str] = None,
+        on_forbidden: Literal["error", "rename", "skip"] = "error",
+    ) -> None:
+        """Convert a region key to an annotation on this object.
+
+        Converts the region stored under ``key`` to an
+        :class:`~insitupy.containers.AnnotationsData` entry and registers it
+        on this object.
+
+        Args:
+            key: Key of the region to convert.
+            annotation_key: Key under which the result is stored in
+                :attr:`annotations`.  Defaults to ``key`` when ``None``.
+            on_forbidden: How to handle names that appear in
+                ``FORBIDDEN_ANNOTATION_NAMES`` (currently ``["rest"]``).
+
+                - ``"error"`` — raise :exc:`ValueError` (default).
+                - ``"rename"`` — append ``"_region"`` suffix and warn.
+                - ``"skip"`` — drop the offending rows and warn.
+
+        Raises:
+            KeyError: If ``key`` is not found in :attr:`regions`.
+            ValueError: If ``on_forbidden="error"`` and a forbidden name is
+                encountered.
+        """
+        if key not in self._regions.keys():
+            raise KeyError(f"Region key '{key}' not found.")
+        target_key = annotation_key if annotation_key is not None else key
+        new_annotations = self._regions.to_annotations(keys=[key], on_forbidden=on_forbidden)
+        if key in new_annotations.keys():
+            self._annotations.add_data(data=new_annotations[key], key=target_key, scale_factor=1.0)
+
 
     def load_cells(self, verbose: bool = False):
         """Load cell data from the project directory into :attr:`cells`.
@@ -1793,6 +1861,143 @@ class InSituData:
 
             # save to the respective directory
             self.saveas(path=path)
+
+    def save_images(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        overwrite: bool = False,
+        verbose: bool = False,
+    ) -> None:
+        """Save only image data for this object.
+
+        Delegates to :meth:`save` with ``sync_images=True`` and
+        ``images_only=True``.  All other modalities are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            overwrite: If ``True``, overwrite existing image files on disk.
+                Defaults to ``False`` (skip images that already exist).
+            verbose: If ``True``, log progress messages.
+        """
+        self.save(
+            path=path,
+            sync_images=True,
+            images_only=True,
+            overwrite_images=overwrite,
+            verbose=verbose,
+        )
+
+    def save_geometries(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        verbose: bool = False,
+    ) -> None:
+        """Save only annotation and region geometries for this object.
+
+        Writes annotations and regions to the project directory and updates
+        the metadata JSON.  All other modalities (cells, images, transcripts)
+        are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            verbose: If ``True``, log progress messages.
+
+        Raises:
+            RuntimeError: If no project path is linked and ``path`` is ``None``.
+        """
+        if path is not None:
+            path = Path(path)
+        else:
+            if self.from_insitudata:
+                path = self.path
+            else:
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
+
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
+
+        if not self._annotations.is_empty:
+            if verbose:
+                logger.info("Updating annotations...")
+            _save_annotations(
+                annotations=self._annotations,
+                path=path,
+                metadata=self._metadata,
+            )
+
+        if not self._regions.is_empty:
+            if verbose:
+                logger.info("Updating regions...")
+            _save_regions(
+                regions=self._regions,
+                path=path,
+                metadata=self._metadata,
+            )
+
+        self._metadata["version"] = __version__
+        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+
+        if verbose:
+            logger.info("Geometries saved.")
+
+    def save_cells(
+        self,
+        path: Optional[Union[str, os.PathLike, Path]] = None,
+        zarr_zipped: bool = False,
+        verbose: bool = False,
+    ) -> None:
+        """Save only cell data (expression table and boundaries) for this object.
+
+        Writes the cell table and boundaries to the project directory and
+        updates the metadata JSON.  All other modalities (images, geometries,
+        transcripts) are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            zarr_zipped: If ``True``, write zarr stores as ``.zarr.zip``
+                archives.
+            verbose: If ``True``, log progress messages.
+
+        Raises:
+            RuntimeError: If no project path is linked and ``path`` is ``None``.
+        """
+        if path is not None:
+            path = Path(path)
+        else:
+            if self.from_insitudata:
+                path = self.path
+            else:
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
+
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
+
+        if not self._cells.is_empty:
+            if verbose:
+                logger.info("Updating cells...")
+            _save_cells(
+                cells=self._cells,
+                path=path,
+                metadata=self._metadata,
+                zipped=zarr_zipped,
+                overwrite=True,
+            )
+
+        self._metadata["version"] = __version__
+        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+
+        if verbose:
+            logger.info("Cells saved.")
 
     def quantify_signal(
         self,

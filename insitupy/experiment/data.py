@@ -2559,25 +2559,113 @@ class InSituExperiment:
         if collect_warnings_mode:
             with collect_warnings() as collector:
                 for xd in tqdm(self._data):
-                    xd.save(
-                        verbose=dataset_verbose,
-                        sync_images=True,
-                        images_only=True,
-                        overwrite_images=overwrite,
-                        **kwargs,
-                    )
+                    xd.save_images(overwrite=overwrite, verbose=dataset_verbose, **kwargs)
             collector.print_summary()
         else:
             for xd in tqdm(self._data):
-                xd.save(
-                    verbose=dataset_verbose,
-                    sync_images=True,
-                    images_only=True,
-                    overwrite_images=overwrite,
-                    **kwargs,
+                xd.save_images(overwrite=overwrite, verbose=dataset_verbose, **kwargs)
+
+    def save_geometries(
+        self,
+        collect_warnings_mode: bool = True,
+        verbose: bool = False,
+    ) -> None:
+        """Save only annotation and region geometries for all datasets.
+
+        Iterates all datasets and calls
+        :meth:`~insitupy.InSituData.save_geometries` on each.  All other
+        modalities are left untouched on disk.
+
+        Args:
+            collect_warnings_mode: If ``True``, collect warnings and print a
+                summary at the end instead of displaying them inline.
+            verbose: If ``True``, log per-dataset progress messages.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset
+                paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_geometries")
+
+        dataset_verbose = verbose
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
                 )
 
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving geometries failed: save path of some InSituData objects does not lie "
+                    f"inside the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
 
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save_geometries(verbose=dataset_verbose)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save_geometries(verbose=dataset_verbose)
+
+    def save_cells(
+        self,
+        collect_warnings_mode: bool = True,
+        verbose: bool = False,
+    ) -> None:
+        """Save only cell data (expression table and boundaries) for all datasets.
+
+        Iterates all datasets and calls
+        :meth:`~insitupy.InSituData.save_cells` on each.  All other
+        modalities are left untouched on disk.
+
+        Args:
+            collect_warnings_mode: If ``True``, collect warnings and print a
+                summary at the end instead of displaying them inline.
+            verbose: If ``True``, log per-dataset progress messages.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset
+                paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_cells")
+
+        dataset_verbose = verbose
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
+                )
+
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving cells failed: save path of some InSituData objects does not lie "
+                    f"inside the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save_cells(verbose=dataset_verbose)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save_cells(verbose=dataset_verbose)
 
     def saveas(
         self,
