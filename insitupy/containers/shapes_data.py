@@ -183,7 +183,7 @@ class ShapesData(DeepCopyMixin):
                  data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
                                 str, os.PathLike, Path],
                  key: str,
-                 scale_factor: Number,
+                 scale_factor: Optional[Number] = None,
                  verbose: bool = False,
                  in_napari: bool = False,
                  uid_col: Optional[str] = None,
@@ -210,7 +210,11 @@ class ShapesData(DeepCopyMixin):
                 file path to a GeoJSON / shapefile.
             key: String key under which the shapes are stored.
             scale_factor: Multiplicative factor applied to all geometry
-                coordinates (typically the pixel size in micrometers).
+                coordinates. Pass the pixel size in µm/pixel (e.g. ``0.2125``)
+                when importing raw pixel-coordinate data from files. Pass
+                ``1.0`` when the input is already in µm (e.g. data originating
+                from another :class:`ShapesData` object). This argument is
+                required — omitting it raises :exc:`ValueError`.
             verbose: If True, log a summary of added shapes.
             in_napari: If True, use napari notification functions for
                 reporting instead of the logger.
@@ -227,6 +231,13 @@ class ShapesData(DeepCopyMixin):
                 back to ``self._color_col`` (typically ``"color"``) when
                 ``None``.
         """
+        if scale_factor is None:
+            raise ValueError(
+                "scale_factor is required. Pass the pixel size in µm/pixel "
+                "(e.g. 0.2125) if your data is in pixel coordinates, or pass "
+                "1.0 if it is already in µm."
+            )
+
         _uid_col = uid_col if uid_col is not None else self._uid_col
         _name_col = name_col if name_col is not None else self._name_col
         _color_col = color_col if color_col is not None else self._color_col
