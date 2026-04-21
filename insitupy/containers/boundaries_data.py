@@ -477,18 +477,18 @@ class BoundariesData(DeepCopyMixin):
             self.cell_names.to_zarr(
                 dirstore,
                 component="cell_names",
-                overwrite=True
+                zarr_array_kwargs={"overwrite": True}
                 )
 
             if self._seg_mask_value is not None:
-                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", overwrite=True)
+                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", zarr_array_kwargs={"overwrite": True})
 
             # Save nucleus_to_cell_map if available (for multinucleated cell support)
             if self._nucleus_to_cell_map is not None:
                 # Store as 2D array with columns [nucleus_index, cell_index]
                 nucleus_map_arr = np.array([[k, v] for k, v in self._nucleus_to_cell_map.items()], dtype=np.int64)
-                da.from_array(nucleus_map_arr).to_zarr(dirstore, component="nucleus_to_cell_map", overwrite=True)
+                da.from_array(nucleus_map_arr).to_zarr(dirstore, component="nucleus_to_cell_map", zarr_array_kwargs={"overwrite": True})
 
             # Save nucleus_count if available
             if self._nucleus_count is not None:
-                da.from_array(self._nucleus_count).to_zarr(dirstore, component="nucleus_count", overwrite=True)
+                da.from_array(self._nucleus_count).to_zarr(dirstore, component="nucleus_count", zarr_array_kwargs={"overwrite": True})
