@@ -462,8 +462,19 @@ def _crop_transcripts(
         minx = xlim[0]
         miny = ylim[0]
 
-    # select
-    transcript_df = transcript_df.loc[mask, :].copy()
+    # select — use DataFrame.take(idx) to avoid pandas 2.x CoW / block-manager
+    # pitfalls. .loc[mask].copy() copies the full underlying block before filtering,
+    # and .to_numpy() on a consolidated object block allocates a full-length
+    # intermediate before any masking. take() routes through BlockManager.take →
+    # algos.take_nd, allocating output arrays at shape (n_cols_in_block, k) directly,
+    # with no full-length 1-D column intermediate. MultiIndex columns and dtypes are
+    # preserved unchanged.
+    if isinstance(transcript_df, pd.DataFrame):
+        idx = np.flatnonzero(np.asarray(mask))
+        transcript_df = transcript_df.take(idx)
+    else:
+        # Dask path (materialize=False): no pandas CoW issue.
+        transcript_df = transcript_df.loc[mask, :].copy()
 
     if grouped_df:
         # move origin again to 0 by subtracting the lower limits from the coordinates
