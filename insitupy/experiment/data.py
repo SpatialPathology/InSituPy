@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import os
@@ -2673,6 +2674,7 @@ class InSituExperiment:
         overwrite: bool = False,
         verbose: bool = False,
         collect_warnings_mode: bool = True,
+        free_after_save: bool = False,
         **kwargs):
         """Save experiment to a new location (initial full write).
 
@@ -2685,6 +2687,12 @@ class InSituExperiment:
             verbose: If True, print verbose output.
             collect_warnings_mode: If True, collect warnings and print summary at end
                 instead of displaying them inline (prevents progress bar disruption).
+            free_after_save: If True, each region's in-memory modality data is
+                released immediately after it has been written to disk.  This
+                reduces peak RAM when saving many large regions (e.g. after
+                ``from_regions(lazy=True)``).  After ``saveas`` completes the
+                ``InSituExperiment`` object will have empty data containers and
+                should be reloaded from disk for further use.  Defaults to False.
             **kwargs: Additional keyword arguments passed to dataset.saveas().
         """
         self._check_mode_compatibility("saveas")
@@ -2703,6 +2711,9 @@ class InSituExperiment:
                 for index, dataset in enumerate(tqdm(self._data)):
                     subfolder_path = path / f"data-{str(index).zfill(3)}"
                     dataset.saveas(subfolder_path, verbose=False, **kwargs)
+                    if free_after_save:
+                        dataset._release_data()
+                        gc.collect()
 
             # Print collected warnings at the end
             collector.print_summary()
@@ -2711,6 +2722,9 @@ class InSituExperiment:
             for index, dataset in enumerate(tqdm(self._data)):
                 subfolder_path = path / f"data-{str(index).zfill(3)}"
                 dataset.saveas(subfolder_path, verbose=False, **kwargs)
+                if free_after_save:
+                    dataset._release_data()
+                    gc.collect()
 
         self._path = path
         self.save_metadata(path=path, overwrite=True)

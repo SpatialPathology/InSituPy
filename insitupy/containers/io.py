@@ -10,6 +10,7 @@ from typing import Literal, Optional, Union
 from warnings import warn
 
 import dask.array as da
+import dask.dataframe as dd
 import numpy as np
 import scanpy as sc
 import toml
@@ -427,7 +428,15 @@ def _save_transcripts(transcripts, path, metadata):
     trans_file = trans_path / "transcripts.parquet"
 
     # save transcripts as parquet and modify metadata
-    transcripts.to_parquet(trans_file)
+    if isinstance(transcripts, dd.DataFrame):
+        # Use the synchronous scheduler so dask reads and writes one partition
+        # at a time. The default threaded scheduler reads N partitions
+        # concurrently (N ≈ CPU cores), multiplying peak RAM by N. For large
+        # transcript datasets this causes OOM even on systems with adequate
+        # total RAM due to concurrent allocation pressure.
+        transcripts.to_parquet(trans_file, compute_kwargs={"scheduler": "synchronous"})
+    else:
+        transcripts.to_parquet(trans_file)
 
     #if metadata is not None:
     metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()

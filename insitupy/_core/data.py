@@ -827,7 +827,10 @@ class InSituData:
         has_transcripts = (
             transcripts_were_loaded
             and _self.transcripts is not None
-            and len(_self.transcripts) > 0
+            and (
+                isinstance(_self._transcripts, dd.DataFrame)
+                or len(_self.transcripts) > 0
+            )
         )
         has_omic_data = has_cells or has_transcripts
 
@@ -1502,6 +1505,37 @@ class InSituData:
                     raise ValueError(f"Invalid value for `mode`: {mode}")
         else:
             NoProjectLoadWarning()
+
+    def _release_data(self) -> None:
+        """Free all heavy modality data from memory.
+
+        Resets every modality attribute to its empty default — the same state
+        as a freshly constructed ``InSituData()``.  Lightweight attributes
+        (``_path``, ``_metadata``, ``_slide_id``, ``_sample_id``) are
+        preserved so the object remains usable as a metadata container.
+
+        Intended for use inside ``InSituExperiment.saveas(free_after_save=True)``
+        to reduce peak RAM when saving many regions: once a region has been
+        written to disk its in-memory data is no longer needed.
+        """
+        try:
+            self._cells = MultiCellData()
+        except Exception:
+            self._cells = None
+        try:
+            self._images = ImageData()
+        except Exception:
+            self._images = None
+        try:
+            self._annotations = AnnotationsData()
+        except Exception:
+            self._annotations = None
+        try:
+            self._regions = RegionsData()
+        except Exception:
+            self._regions = None
+        self._transcripts = None
+        self._units = None
 
     def materialize(self, layers=None, verbose: bool = True):
         """Compute lazy Dask DataFrames and replace with well-partitioned equivalents.
