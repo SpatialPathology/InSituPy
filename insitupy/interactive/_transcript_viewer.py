@@ -747,7 +747,16 @@ if WITH_NAPARI:
 
             if not all_coords:
                 self.status_label.setText("Points: 0 (none in view)")
-                self.viewer.layers[self.LAYER_NAME].data = np.empty((0, 2))
+                layer = self.viewer.layers[self.LAYER_NAME]
+                # Clear stale indices before replacing data — napari's StatusChecker
+                # runs in a background thread and can read _indices_view between the
+                # data assignment and napari's internal slice recomputation, causing
+                # an IndexError. Empty indices take the safe code path in _view_data.
+                try:
+                    layer._indices_view = np.array([], dtype=int)
+                except AttributeError:
+                    pass
+                layer.data = np.empty((0, 2))
                 return
 
             combined = np.vstack(all_coords)
@@ -770,9 +779,15 @@ if WITH_NAPARI:
             # Swap x,y to y,x for napari (napari uses row, column order)
             points_yx = combined[:, ::-1]
 
-            # Update layer
+            # Update layer — clear stale indices before replacing data to prevent
+            # IndexError in napari's StatusChecker background thread (see empty
+            # path above for a full explanation).
             layer = self.viewer.layers[self.LAYER_NAME]
             properties = {"gene": gene_names}
+            try:
+                layer._indices_view = np.array([], dtype=int)
+            except AttributeError:
+                pass
             layer.data = points_yx
             layer.face_color = colors
             layer.properties = properties
