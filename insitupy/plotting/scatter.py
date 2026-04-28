@@ -146,7 +146,9 @@ def _get_default_palette(n_cats: int) -> list[str]:
 def _get_colormap(
     values: np.ndarray | pd.Categorical,
     color_type: Literal["categorical", "continuous"],
-    cmap: str | None = None
+    cmap: str | None = None,
+    adata: "ad.AnnData | None" = None,
+    key: str | None = None,
 ) -> tuple[dict | str, None]:
     """
     Generate colormap for values.
@@ -157,6 +159,16 @@ def _get_colormap(
     """
     if color_type == "categorical":
         categories = values.cat.categories
+        uns_key = f"{key}_colors" if key is not None else None
+        if (
+            adata is not None
+            and uns_key is not None
+            and uns_key in adata.uns
+            and len(adata.uns[uns_key]) >= len(categories)
+        ):
+            stored = adata.uns[uns_key]
+            color_dict = {cat: stored[i] for i, cat in enumerate(categories)}
+            return color_dict, None
         n_cats = len(categories)
         palette = _get_default_palette(n_cats)
         color_dict = {cat: palette[i % len(palette)] for i, cat in enumerate(categories)}
@@ -523,7 +535,7 @@ def embedding(
     interactive: bool = False,
     interactive_backend: Literal["bokeh", "matplotlib"] = "bokeh",
     interactive_resolution: int = 800,
-    render_mode: Literal["datashader", "jscatter", "plotly"] = "datashader",
+    render_mode: Literal["datashader", "jscatter", "plotly", "matplotlib"] = "datashader",
     plotly_renderer: str | None = "notebook",
     tooltip: str | Sequence[str] | None = None,
     legend_mode: Literal["full", "truncate", "separate", "none"] = "full",
@@ -571,10 +583,13 @@ def embedding(
             "matplotlib". Ignored when render_mode="jscatter" or "plotly".
             Default is "bokeh".
         interactive_resolution (int): Pixel resolution for interactive plots. Default is 800.
-        render_mode (str): Rendering mode for interactive plots: "datashader" (rasterized,
-            fastest for static/overview), "jscatter" (WebGL vector, best for
-            zooming/selection in Jupyter), or "plotly" (WebGL vector, works on
-            clusters/remote servers). Default is "datashader".
+        render_mode (str): Rendering backend. For static plots: "datashader" (default,
+            density-based raster) or "matplotlib" (standard scatter, better for small
+            datasets with continuous point size and alpha control). For interactive plots:
+            "datashader", "jscatter" (WebGL vector, best for zooming/selection in
+            Jupyter), or "plotly" (WebGL vector, works on clusters/remote servers).
+            "jscatter" and "plotly" raise a warning when interactive=False.
+            "matplotlib" raises a ValueError when interactive=True. Default is "datashader".
         plotly_renderer (str, optional): Plotly renderer to use. Options include "iframe",
             "notebook", "jupyterlab", "browser", "png", "svg". Only used when
             render_mode="plotly". Default is "notebook".
@@ -643,8 +658,20 @@ def embedding(
         else:
             tooltip_keys = list(tooltip)
 
+    if not interactive and render_mode in ("jscatter", "plotly"):
+        warnings.warn(
+            f"render_mode='{render_mode}' has no effect when interactive=False. "
+            "Set interactive=True to use this backend.",
+            UserWarning, stacklevel=2
+        )
+
     # Interactive mode
     if interactive:
+        if render_mode == "matplotlib":
+            raise ValueError(
+                "render_mode='matplotlib' is not supported with interactive=True. "
+                "Use render_mode='datashader', 'jscatter', or 'plotly' instead."
+            )
         # plotly mode
         if render_mode == "plotly":
             if not _check_plotly():
@@ -671,7 +698,7 @@ def embedding(
                                 values = values.cat.add_categories(["NaN"])
                             values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
-                    colormap, _ = _get_colormap(values, color_type, cmap)
+                    colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                     if color_type == "categorical":
                         color_dict = colormap
@@ -728,7 +755,7 @@ def embedding(
                                 values = values.cat.add_categories(["NaN"])
                             values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
-                    colormap, _ = _get_colormap(values, color_type, cmap)
+                    colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                     if color_type == "categorical":
                         color_dict = colormap
@@ -763,7 +790,7 @@ def embedding(
         if not _check_holoviews():
             raise ImportError(
                 "holoviews is required for interactive datashader plots. "
-                "Install with: pip install holoviews bokeh datashader"
+                "Install with: pip install holoviews bokeh jupyter_bokeh datashader"
             )
         if not _check_datashader():
             raise ImportError(
@@ -773,7 +800,7 @@ def embedding(
         import holoviews as hv
 
         plots = []
-        for c in color:
+        for c in keys:
             df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
             if c is not None:
@@ -791,7 +818,7 @@ def embedding(
                             values = values.cat.add_categories(["NaN"])
                         values = values.fillna("NaN")
                 df[c] = values.values if hasattr(values, "values") else values
-                colormap, _ = _get_colormap(values, color_type, cmap)
+                colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                 if color_type == "categorical":
                     color_dict = colormap
@@ -830,7 +857,7 @@ def embedding(
         return plots[0] if len(plots) == 1 else hv.Layout(plots).cols(ncols)
 
     # Static mode - use datashader when available, fall back to matplotlib scatter
-    use_datashader = _check_datashader()
+    use_datashader = _check_datashader() and render_mode != "matplotlib"
 
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
@@ -871,7 +898,7 @@ def embedding(
                         values = values.cat.add_categories(["NaN"])
                     values = values.fillna("NaN")
             df[c] = values.values if hasattr(values, "values") else values
-            colormap, _ = _get_colormap(values, color_type, cmap)
+            colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
             if color_type == "categorical":
                 if _had_nan and nan_color is not None:
