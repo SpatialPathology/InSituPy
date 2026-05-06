@@ -259,16 +259,22 @@ def _plot_static_categorical_mpl(
     df: pd.DataFrame,
     color_key: str,
     color_dict: dict,
-    point_size: float
+    point_size: float,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
 ) -> None:
     """Plot categorical data with matplotlib scatter (fallback when datashader unavailable)."""
     col = df[color_key].astype(str)
+    lw = point_edge_width if point_edge_color is not None else 0
+    ec = point_edge_color if point_edge_color is not None else "none"
     for cat, color in color_dict.items():
         mask = col == str(cat)
         if mask.any():
             ax.scatter(
                 df.loc[mask, "x"], df.loc[mask, "y"],
-                c=color, s=point_size, rasterized=True, linewidths=0, label=cat
+                c=color, s=point_size, rasterized=rasterized,
+                linewidths=lw, edgecolors=ec, label=cat
             )
 
 
@@ -279,14 +285,19 @@ def _plot_static_continuous_mpl(
     cmap: str,
     point_size: float,
     vmin: float,
-    vmax: float
+    vmax: float,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
 ) -> None:
     """Plot continuous data with matplotlib scatter (fallback when datashader unavailable)."""
+    lw = point_edge_width if point_edge_color is not None else 0
+    ec = point_edge_color if point_edge_color is not None else "none"
     ax.scatter(
         df["x"], df["y"],
         c=df[color_key], cmap=cmap,
         vmin=vmin, vmax=vmax,
-        s=point_size, rasterized=True, linewidths=0
+        s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec
     )
 
 
@@ -361,7 +372,9 @@ def _plot_plotly(
     show_tick_labels: bool,
     vmin: float | None = None,
     vmax: float | None = None,
-    plotly_renderer: str | None = None
+    plotly_renderer: str | None = None,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
 ) -> "go.Figure":
     """Create interactive plot with Plotly WebGL."""
     import plotly.express as px
@@ -389,7 +402,12 @@ def _plot_plotly(
             title=title
         )
 
-    fig.update_traces(marker=dict(size=point_size))
+    marker_opts: dict = dict(size=point_size)
+    if point_edge_color is not None:
+        import matplotlib.colors as mcolors
+        ec_hex = mcolors.to_hex(point_edge_color)
+        marker_opts["line"] = dict(color=ec_hex, width=point_edge_width)
+    fig.update_traces(marker=marker_opts)
     fig.update_layout(
         width=width,
         height=height,
@@ -532,6 +550,9 @@ def embedding(
     vmax: float | None = None,
     vmax_percentile: float | None = None,
     point_size: float = 1.0,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
     interactive: bool = False,
     interactive_backend: Literal["bokeh", "matplotlib"] = "bokeh",
     interactive_resolution: int = 800,
@@ -549,7 +570,7 @@ def embedding(
     show_tick_labels: bool = False,
     savepath: str | Path | None = None,
     save: str | Path | None = None,
-    save_dpi: int = 150,
+    save_dpi: int = 300,
     show: bool = True,
     return_fig: bool = False
 ) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
@@ -578,6 +599,17 @@ def embedding(
         point_size (float): Point size control. For plotly/jscatter it sets marker size
             directly. For datashader modes it controls pixel spreading (larger values make
             points appear thicker). Default is 1.0.
+        point_edge_color (str, optional): Color for point outlines (e.g. "black"). Supported
+            by render_mode="matplotlib" and render_mode="plotly" only. A UserWarning is
+            raised for datashader and jscatter backends, where edges are not supported.
+            Default is None (no outline).
+        point_edge_width (float): Width of point outlines. Only used when point_edge_color
+            is set. Default is 0.5.
+        rasterized (bool): If True, rasterize the scatter layer when saving to vector
+            formats (PDF, SVG). Keeps file sizes small for large datasets. Set to False
+            for true vector output (crisp at any zoom, but much larger files). Resolution
+            of the rasterized layer is controlled by save_dpi. Only applies to
+            render_mode="matplotlib". Default is True.
         interactive (bool): If True, return interactive plot. Default is False.
         interactive_backend (str): Backend for datashader interactive plots: "bokeh" or
             "matplotlib". Ignored when render_mode="jscatter" or "plotly".
@@ -665,6 +697,21 @@ def embedding(
             UserWarning, stacklevel=2
         )
 
+    if point_edge_color is not None:
+        # Edges are supported only by matplotlib scatter and plotly.
+        # Datashader rasterizes to pixels (no per-point primitives); jscatter has no stroke API.
+        _edge_unsupported = (
+            (interactive and render_mode in ("datashader", "jscatter"))
+            or (not interactive and render_mode != "matplotlib" and _check_datashader())
+        )
+        if _edge_unsupported:
+            warnings.warn(
+                "point_edge_color has no effect with the active rendering backend. "
+                "Edges are only supported for render_mode='matplotlib' (static) "
+                "and render_mode='plotly' (interactive).",
+                UserWarning, stacklevel=2
+            )
+
     # Interactive mode
     if interactive:
         if render_mode == "matplotlib":
@@ -722,7 +769,8 @@ def embedding(
                     df, c, color_type, color_dict, cmap_use,
                     plot_title, interactive_resolution, interactive_resolution, point_size,
                     show_tick_labels,
-                    vmin_use, vmax_use, plotly_renderer
+                    vmin_use, vmax_use, plotly_renderer,
+                    point_edge_color, point_edge_width
                 )
                 figs.append(fig)
 
@@ -906,7 +954,7 @@ def embedding(
                 if use_datashader:
                     _plot_static_categorical(ax, df, c, colormap, point_size)
                 else:
-                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size)
+                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size, point_edge_color, point_edge_width, rasterized)
                 legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
                 if legend_fig:
                     legend_figs.append(legend_fig)
@@ -915,7 +963,7 @@ def embedding(
                 if use_datashader:
                     _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
                 else:
-                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use, point_edge_color, point_edge_width, rasterized)
                 sm = plt.cm.ScalarMappable(
                     cmap=colormap,
                     norm=mcolors.Normalize(vmin=vmin_use, vmax=vmax_use)
@@ -931,7 +979,9 @@ def embedding(
                 shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
                 dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
             else:
-                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=True, linewidths=0)
+                lw = point_edge_width if point_edge_color is not None else 0
+                ec = point_edge_color if point_edge_color is not None else "none"
+                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec)
             c = "density"
 
         ax.set_title(title or c)
