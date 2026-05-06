@@ -67,3 +67,14 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry_bumpversion.file."insitupy/__init__.py"]
 search = '__version__ = "{current_version}"'
 replace = '__version__ = "{new_version}"'
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes (unused imports, undefined names)
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear (common bugs/design issues)
+    "NPY", # numpy-specific rules
+]
