@@ -1,18 +1,10 @@
-import os
 import warnings
 from numbers import Number
-from pathlib import Path
-from typing import List, Optional, Tuple, Union
-from warnings import warn
 
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
 import seaborn as sns
-from matplotlib.font_manager import FontProperties
 
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.plotting.save import save_and_show_figure
 
 
 def facs(data,

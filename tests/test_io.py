@@ -1,17 +1,16 @@
 """Tests for InSituData and InSituExperiment partial save methods:
 save_geometries(), save_cells(), save_images()."""
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-import geopandas as gpd
 from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.experiment.data import InSituExperiment
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -20,7 +20,6 @@ from shapely.geometry import LineString, Point, Polygon
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES
 from insitupy.containers import AnnotationsData, RegionsData
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 _FORBIDDEN = FORBIDDEN_ANNOTATION_NAMES[0]  # "rest"

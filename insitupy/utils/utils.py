@@ -1,16 +1,15 @@
 import logging
 import math
 import os
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
 logger = logging.getLogger(__name__)
 
 import dask.dataframe as dd
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely as _shapely
@@ -18,8 +17,7 @@ from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
 from shapely import LineString, Point, Polygon, affinity
 
-from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
-                                 XENIUM_INT_TO_HEX_CONV_DICT)
+from insitupy._constants import XENIUM_HEX_TO_INT_CONV_DICT, XENIUM_INT_TO_HEX_CONV_DICT
 
 
 def create_ansi_color_code_from_rgb(rgb_color):
@@ -370,10 +368,10 @@ def exclude_index(array, exclude_index):
 
 
 def _crop_transcripts(
-    transcript_df: Union[pd.DataFrame, dd.DataFrame],
-    shape: Optional[Polygon] = None,
-    xlim: Optional[Tuple[int, int]] = None,
-    ylim: Optional[Tuple[int, int]] = None,
+    transcript_df: pd.DataFrame | dd.DataFrame,
+    shape: Polygon | None = None,
+    xlim: tuple[int, int] | None = None,
+    ylim: tuple[int, int] | None = None,
     verbose: bool = True,
     materialize: bool = True
     ):

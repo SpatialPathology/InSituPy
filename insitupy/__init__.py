@@ -1,10 +1,8 @@
-from . import _core, containers, datasets, experiment
+from . import _core, containers, datasets, experiment, io, utils
 from . import images as im
-from . import io
 from . import plotting as pl
 from . import preprocessing as pp
 from . import tools as tl
-from . import utils
 from ._constants import CACHE, WITH_NAPARI
 from ._core.data import InSituData
 from ._version import __author__, __email__, __version__

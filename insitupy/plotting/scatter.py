@@ -22,13 +22,14 @@ Optional dependencies (install as needed):
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Literal, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import holoviews as hv
     import jscatter
-    import plotly.graph_objects as go
     import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
 
 from pathlib import Path
 
@@ -147,7 +148,7 @@ def _get_colormap(
     values: np.ndarray | pd.Categorical,
     color_type: Literal["categorical", "continuous"],
     cmap: str | None = None,
-    adata: "ad.AnnData | None" = None,
+    adata: ad.AnnData | None = None,
     key: str | None = None,
 ) -> tuple[dict | str, None]:
     """
@@ -200,7 +201,7 @@ def _get_vmin_vmax(
 
 
 def _plot_static_categorical(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     color_dict: dict,
@@ -225,7 +226,7 @@ def _plot_static_categorical(
 
 
 def _plot_static_continuous(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     cmap: str,
@@ -255,7 +256,7 @@ def _plot_static_continuous(
 
 
 def _plot_static_categorical_mpl(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     color_dict: dict,
@@ -279,7 +280,7 @@ def _plot_static_categorical_mpl(
 
 
 def _plot_static_continuous_mpl(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     cmap: str,
@@ -302,12 +303,12 @@ def _plot_static_continuous_mpl(
 
 
 def _add_legend(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     color_dict: dict,
     legend_mode: Literal["full", "truncate", "separate", "none"],
     max_categories: int = 20,
     legend_entries_per_col: int = 10
-) -> "plt.Figure | None":
+) -> plt.Figure | None:
     """Add legend to plot based on mode."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -375,7 +376,7 @@ def _plot_plotly(
     plotly_renderer: str | None = None,
     point_edge_color: str | None = None,
     point_edge_width: float = 0.5,
-) -> "go.Figure":
+) -> go.Figure:
     """Create interactive plot with Plotly WebGL."""
     import plotly.express as px
     import plotly.io as pio
@@ -446,7 +447,7 @@ def _plot_jscatter(
     height: int,
     point_size: float,
     tooltip_keys: list[str] | None = None
-) -> "jscatter.Scatter":
+) -> jscatter.Scatter:
     """Create interactive plot with jupyter-scatter."""
     import jscatter
 
@@ -486,7 +487,7 @@ def _plot_interactive_bokeh(
     width: int,
     height: int,
     point_size: float
-) -> "hv.Element":
+) -> hv.Element:
     """Create interactive plot with bokeh backend."""
     import datashader as ds
     import holoviews as hv
@@ -517,7 +518,7 @@ def _plot_interactive_matplotlib(
     width: int,
     height: int,
     point_size: float
-) -> "hv.Element":
+) -> hv.Element:
     """Create interactive plot with matplotlib backend."""
     import datashader as ds
     import holoviews as hv
@@ -573,7 +574,7 @@ def embedding(
     save_dpi: int = 300,
     show: bool = True,
     return_fig: bool = False
-) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
+) -> plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None:
     """
     Fast embedding plot using datashader for large datasets.
 
@@ -1033,7 +1034,7 @@ def umap(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
+) -> plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None:
     """
     Fast UMAP plot using datashader for large datasets.
 
@@ -1057,7 +1058,7 @@ def pca(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | None":
+) -> plt.Figure | hv.Layout | None:
     """
     Fast PCA plot using datashader.
 
@@ -1076,7 +1077,7 @@ def tsne(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | None":
+) -> plt.Figure | hv.Layout | None:
     """
     Fast t-SNE plot using datashader.
 

@@ -1,4 +1,4 @@
-from shapely import affinity, wkt
+from shapely import affinity
 
 
 def scale_polygon(polygon, constant):

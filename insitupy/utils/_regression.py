@@ -1,12 +1,10 @@
-from math import sqrt
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Literal
 from warnings import warn
 
 import numpy as np
 import pandas as pd
 import scipy
 from scipy import stats
-from scipy.spatial import distance as dist
 from statsmodels.nonparametric.smoothers_lowess import lowess as sm_lowess
 
 
@@ -275,8 +273,8 @@ class bootstrap_loess:
 
 
 def smooth_fit(xs: np.ndarray, ys: np.ndarray,
-               xmin: Optional[float] = None,
-               xmax: Optional[float] = None,
+               xmin: float | None = None,
+               xmax: float | None = None,
                nsteps: int = 100,
                method: Literal["lowess", "loess"] = "loess",
                stderr: bool = True,

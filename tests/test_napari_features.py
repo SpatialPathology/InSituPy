@@ -24,8 +24,10 @@ from insitupy._core._napari import _add_events_to_viewer  # noqa: E402
 from insitupy.containers.shapes_data import ShapesData  # noqa: E402
 from insitupy.interactive._configs import config_manager  # noqa: E402
 from insitupy.interactive._layers import _add_geometries_as_layer  # noqa: E402
-from insitupy.interactive.viewer import _remove_geometries, sync_geometries  # noqa: E402
-
+from insitupy.interactive.viewer import (  # noqa: E402
+    _remove_geometries,
+    sync_geometries,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers

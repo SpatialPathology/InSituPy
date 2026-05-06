@@ -1,25 +1,26 @@
-from numbers import Number
-from typing import Collection, Literal, Optional, Union
+from collections.abc import Collection
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
 from tqdm import tqdm
 
-from insitupy._version import __version__
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
-from insitupy.preprocessing.anndata import (cluster_anndata,
-                                            normalize_and_transform_anndata,
-                                            reduce_dimensions_anndata)
+from insitupy.preprocessing.anndata import (
+    cluster_anndata,
+    normalize_and_transform_anndata,
+    reduce_dimensions_anndata,
+)
 
 
 def calculate_qc_metrics(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
     percent_top: Collection[int] = None,
     log1p: bool = False,
     **kwargs
@@ -60,13 +61,13 @@ def calculate_qc_metrics(
             )
 
 def filter_cells(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
-    min_counts: Optional[int] = None,
-    min_genes: Optional[int] = None,
-    max_counts: Optional[int] = None,
-    max_genes: Optional[int] = None,
-    mask: Optional[Union[np.ndarray, list, pd.Series]] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
+    min_counts: int | None = None,
+    min_genes: int | None = None,
+    max_counts: int | None = None,
+    max_genes: int | None = None,
+    mask: np.ndarray | list | pd.Series | None = None,
     **kwargs
 ):
     """
@@ -122,12 +123,12 @@ def filter_cells(
         celldata.sync()
 
 def filter_genes(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
-    min_counts: Optional[int] = None,
-    min_cells: Optional[int] = None,
-    max_counts: Optional[int] = None,
-    max_cells: Optional[int] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
+    min_counts: int | None = None,
+    min_cells: int | None = None,
+    max_counts: int | None = None,
+    max_cells: int | None = None,
     **kwargs
 ):
     """
@@ -175,9 +176,9 @@ def filter_genes(
             )
 
 def normalize_and_transform(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
-    adata_layer: Optional[str] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
+    adata_layer: str | None = None,
     transformation_method: Literal["log1p", "sqrt"] = "log1p",
     target_sum: int = 250,
     scale: bool = False,
@@ -241,8 +242,8 @@ def normalize_and_transform(
             raise ModalityNotFoundError(modality="cells")
 
 def reduce_dimensions(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
     n_pcs: int = 0,
@@ -294,8 +295,8 @@ def reduce_dimensions(
             raise ModalityNotFoundError(modality="cells")
 
 def cluster_cells(
-    data: Union[InSituExperiment, InSituData], # type: ignore
-    cells_layer: Optional[str] = None,
+    data: InSituExperiment | InSituData, # type: ignore
+    cells_layer: str | None = None,
     method: Literal["leiden", "louvain"] = "leiden",
     verbose: bool = False
     ):

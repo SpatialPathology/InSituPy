@@ -20,13 +20,12 @@ Two loading modes:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
 
-from insitupy.palettes import TRANSCRIPTS_PALETTE
-
 from insitupy._constants import WITH_NAPARI
+from insitupy.palettes import TRANSCRIPTS_PALETTE
 
 if TYPE_CHECKING:
     import dask.dataframe as dd
@@ -99,8 +98,8 @@ class TranscriptViewerConfig:
 
 def prepare_gene_data(
     df: Union["pd.DataFrame", "dd.DataFrame"],
-    config: Optional[TranscriptViewerConfig] = None,
-) -> Tuple[Dict[str, np.ndarray], Dict[str, Tuple[float, float, float]]]:
+    config: TranscriptViewerConfig | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, tuple[float, float, float]]]:
     """Prepare gene data from a DataFrame (in-memory mode).
 
     Loads all gene coordinates into memory upfront for fast spatial queries.
@@ -138,7 +137,7 @@ def prepare_gene_data(
     gene_colors = _assign_gene_colors(genes)
 
     # Build per-gene coordinate arrays
-    gene_data: Dict[str, np.ndarray] = {}
+    gene_data: dict[str, np.ndarray] = {}
     grouped = df.groupby(config.gene_column)
     for gene, group in grouped:
         gene_data[gene] = group[[config.x_column, config.y_column]].values
@@ -148,8 +147,8 @@ def prepare_gene_data(
 
 def prepare_gene_colors(
     dask_df: "dd.DataFrame",
-    config: Optional[TranscriptViewerConfig] = None,
-) -> Tuple[List[str], Dict[str, Tuple[float, float, float]]]:
+    config: TranscriptViewerConfig | None = None,
+) -> tuple[list[str], dict[str, tuple[float, float, float]]]:
     """Prepare gene list and colors from a Dask DataFrame (lazy mode).
 
     Only loads unique gene names, not coordinates. Coordinates are loaded
@@ -181,8 +180,8 @@ def prepare_gene_colors(
 
 
 def _assign_gene_colors(
-    genes: List[str],
-) -> Dict[str, Tuple[float, float, float]]:
+    genes: list[str],
+) -> dict[str, tuple[float, float, float]]:
     """Assign distinct colors to genes using the static TRANSCRIPTS_PALETTE.
 
     Args:
@@ -200,7 +199,7 @@ def _assign_gene_colors(
     }
 
 
-def _hex_to_rgb(hex_color: str) -> Tuple[float, float, float]:
+def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
     """Convert a hex colour string to an (R, G, B) tuple with values in 0–1."""
     h = hex_color.lstrip('#')
     return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
@@ -211,9 +210,17 @@ if WITH_NAPARI:
     from matplotlib.lines import Line2D
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import Qt, QTimer
-    from qtpy.QtWidgets import (QCompleter, QHBoxLayout, QLabel, QLineEdit,
-                                QListWidget, QListWidgetItem, QPushButton,
-                                QVBoxLayout, QWidget)
+    from qtpy.QtWidgets import (
+        QCompleter,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QListWidget,
+        QListWidgetItem,
+        QPushButton,
+        QVBoxLayout,
+        QWidget,
+    )
 
     from insitupy.interactive._configs import ViewerConfig
 
@@ -254,12 +261,12 @@ if WITH_NAPARI:
         def __init__(
             self,
             viewer: napari.Viewer,
-            gene_data_or_list: Union[Dict[str, np.ndarray], List[str]],
-            gene_colors: Dict[str, Tuple[float, float, float]],
+            gene_data_or_list: dict[str, np.ndarray] | list[str],
+            gene_colors: dict[str, tuple[float, float, float]],
             lazy_loading: bool = False,
             dask_df: Optional["dd.DataFrame"] = None,
-            config: Optional[TranscriptViewerConfig] = None,
-            viewer_config: Optional[ViewerConfig] = None,
+            config: TranscriptViewerConfig | None = None,
+            viewer_config: ViewerConfig | None = None,
         ):
             """Initialize the transcript viewer widget.
 
@@ -284,7 +291,7 @@ if WITH_NAPARI:
             self.lazy_loading = lazy_loading
             self.config = config or TranscriptViewerConfig()
             self.viewer_config = viewer_config
-            self.active_genes: Dict[str, Optional[np.ndarray]] = {}
+            self.active_genes: dict[str, np.ndarray | None] = {}
             self._gene_query_mode: str = "str"
 
             if lazy_loading:
@@ -292,7 +299,7 @@ if WITH_NAPARI:
                     raise ValueError("dask_df is required when lazy_loading=True")
                 self.dask_df = dask_df
                 self.gene_list = gene_data_or_list  # list of gene names
-                self.gene_data: Dict[str, np.ndarray] = {}  # cache for loaded coords
+                self.gene_data: dict[str, np.ndarray] = {}  # cache for loaded coords
                 self._init_gene_query_mode()
             else:
                 self.dask_df = None
@@ -300,9 +307,9 @@ if WITH_NAPARI:
                 self.gene_list = sorted(gene_data_or_list.keys())
 
             # Cache for reference layer info (bbox optimization)
-            self._ref_layer: Optional[napari.layers.Image] = None
+            self._ref_layer: napari.layers.Image | None = None
             self._ref_layer_multiscale: bool = False
-            self._ref_layer_scale: Optional[Tuple[float, float]] = None
+            self._ref_layer_scale: tuple[float, float] | None = None
 
             self._setup_ui()
             self._setup_debounce()
@@ -423,7 +430,7 @@ if WITH_NAPARI:
                 self._ref_layer_multiscale = False
                 self._ref_layer_scale = None
 
-        def _get_bbox(self) -> Optional[Tuple[float, float, float, float]]:
+        def _get_bbox(self) -> tuple[float, float, float, float] | None:
             """Get current visible bounding box from the cached reference layer.
 
             The bounding box is returned in world coordinates (physical units),
@@ -808,7 +815,7 @@ if WITH_NAPARI:
         viewer: napari.Viewer,
         transcripts: Union["pd.DataFrame", "dd.DataFrame"],
         lazy_loading: bool = True,
-        config: Optional[TranscriptViewerConfig] = None,
+        config: TranscriptViewerConfig | None = None,
         viewer_config: Optional["ViewerConfig"] = None,
     ) -> TranscriptViewerWidget:
         """Create a TranscriptViewerWidget from transcript data.

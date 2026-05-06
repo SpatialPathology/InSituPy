@@ -15,7 +15,6 @@ from insitupy._core.data import InSituData  # noqa: E402
 from insitupy.containers.cell_data import CellData  # noqa: E402
 from insitupy.spatialdata.convert import convert_to_spatialdata  # noqa: E402
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_insitudata(n_cells=10, n_genes=5, seed=0):

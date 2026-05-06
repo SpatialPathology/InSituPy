@@ -1,6 +1,6 @@
 import logging
 from numbers import Number
-from typing import List, Literal, Optional, Union
+from typing import Literal
 
 import anndata as ad
 from sklearn.neighbors import radius_neighbors_graph
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def get_neighborhood(
     exp: InSituExperiment,
     sample_col: str,
-    cells_layer: Optional[str] = None,
+    cells_layer: str | None = None,
     radius: Number = 30
     ):
     """
@@ -147,13 +147,13 @@ def _check_transfer(metadata, columns):
 def pseudobulk(
     exp,
     celltype_col: str,
-    cells_layer: Optional[str] = None,
-    counts_layer: Optional[str] = None,
+    cells_layer: str | None = None,
+    counts_layer: str | None = None,
     uid_col: str = "uid",
     mode: Literal["sum", "mean", "median"] = "sum",
     calculate_neighbors: bool = False,
     neighbors_radius: int = 20,
-    metadata_to_transfer: Union[List[str], str] = None,
+    metadata_to_transfer: list[str] | str = None,
     **kwargs
     ):
     """

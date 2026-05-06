@@ -6,7 +6,7 @@ from math import ceil
 from numbers import Number
 from os.path import relpath
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal
 from warnings import warn
 
 import dask.array as da
@@ -18,21 +18,28 @@ import zarr
 from zarr.errors import ArrayNotFoundError
 
 from insitupy._io.files import read_json
-from insitupy._version import __version__
 
 logger = logging.getLogger(__name__)
-from insitupy.containers import (AnnotationsData, BoundariesData, CellData,
-                                 ImageData, MultiCellData, RegionsData,
-                                 ShapesData)
+from insitupy.containers import (
+    AnnotationsData,
+    BoundariesData,
+    CellData,
+    ImageData,
+    MultiCellData,
+    RegionsData,
+    ShapesData,
+)
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
-from insitupy.utils.utils import (_generate_time_based_uid,
-                                  convert_int_to_xenium_hex, convert_to_list,
-                                  glob_visible)
+from insitupy.utils.utils import (
+    _generate_time_based_uid,
+    convert_int_to_xenium_hex,
+    glob_visible,
+)
 
 
 def _read_baysor_cells(
-    baysor_output: Union[str, os.PathLike, Path],
+    baysor_output: str | os.PathLike | Path,
     pixel_size: Number = 1 # the pixel size is usually 1 since baysor runs on the µm coordinates
     ) -> CellData:
     try:
@@ -45,7 +52,7 @@ def _read_baysor_cells(
 
     # read baysor metadata
     tomlfile = baysor_output / "segmentation_params.dump.toml"
-    with open(tomlfile, 'r') as f:
+    with open(tomlfile) as f:
         baysor_config = toml.load(f)
 
     # read table
@@ -92,7 +99,7 @@ def _read_baysor_cells(
     cell_ids = da.from_array(table.obs["CellID"].values) # extract cell ids from adata
     seg_mask_value = da.from_array(sorted(df["cell"]))
     boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
-    boundaries.add_boundaries(data={f"cellular": img}, pixel_size=pixel_size)
+    boundaries.add_boundaries(data={"cellular": img}, pixel_size=pixel_size)
 
     celldata = CellData(table=table, boundaries=boundaries, config=baysor_config)
 
@@ -250,7 +257,7 @@ def _read_boundaries_from_celldata_zarr(
 
 
 def _read_celldata(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
 ) -> CellData:
     """
     Read CellData from a saved directory.
@@ -288,9 +295,9 @@ def _read_celldata(
 
 
 def _read_shapesdata(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     mode: Literal["annotations", "regions", "shapes"],
-    scale_factor: Optional[Number] = None
+    scale_factor: Number | None = None
 ):
     path = Path(path)
     if not path.exists():
@@ -332,9 +339,9 @@ def _read_shapesdata(
     return data
 
 def _read_multicelldata(
-        path: Union[str, os.PathLike, Path],
-        path_upper: Optional[Union[str, os.PathLike, Path]] = None,
-        alt_path_dict: Optional[dict] = None,
+        path: str | os.PathLike | Path,
+        path_upper: str | os.PathLike | Path | None = None,
+        alt_path_dict: dict | None = None,
     ) -> MultiCellData:
     if os.path.exists(path / ".multicelldata"):
         old = False
@@ -361,11 +368,11 @@ def _read_multicelldata(
 
 
 def _save_images(imagedata: ImageData,
-                 path: Union[str ,os.PathLike],
-                 metadata: Optional[dict] = None,
+                 path: str | os.PathLike,
+                 metadata: dict | None = None,
                  images_as_zarr: bool = True,
                  zipped: bool = False,
-                 max_resolution: Optional[Number] = None, # in µm per pixel,
+                 max_resolution: Number | None = None, # in µm per pixel,
                  debug: bool = False,
                  verbose: bool = False
                  ):
@@ -393,7 +400,7 @@ def _save_cells(cells: MultiCellData,
                 path,
                 metadata,
                 zipped=False,
-                max_resolution_boundaries: Optional[Number] = None, # in µm per pixel
+                max_resolution_boundaries: Number | None = None, # in µm per pixel
                 overwrite=False
                 ):
     # create path for cells

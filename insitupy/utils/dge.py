@@ -1,4 +1,3 @@
-from typing import List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -9,7 +8,7 @@ from insitupy.utils.utils import convert_to_list
 
 def create_deg_dataframe(
     adata: AnnData,
-    groups: Optional[str] = None,
+    groups: str | None = None,
     key: str = 'rank_genes_groups'
     ) -> dict:
     """

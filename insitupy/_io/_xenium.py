@@ -2,7 +2,6 @@ import os
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Union
 
 import dask.array as da
 import numpy as np
@@ -14,12 +13,10 @@ from pandas.api.types import is_numeric_dtype
 from scipy.sparse import csr_matrix
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._exceptions import InvalidFileTypeError
 from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.images.io import _get_zarr_store
 from insitupy.images.utils import _efficiently_resize_array
-from insitupy.utils.utils import (convert_int_to_xenium_hex,
-                                  decode_robust_series)
+from insitupy.utils.utils import convert_int_to_xenium_hex, decode_robust_series
 
 
 def _read_nucleus_to_cell_map_from_store(
@@ -59,7 +56,7 @@ def _read_nucleus_to_cell_map_from_store(
 
 def _read_nucleus_count_from_store(
     store
-) -> Union[np.ndarray, None]:
+) -> np.ndarray | None:
     """
     Read nucleus count per cell from Xenium zarr store.
 
@@ -118,7 +115,7 @@ def _read_table_from_xenium(path) -> AnnData:
 
 
 def _read_boundaries_from_xenium(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     pixel_size: Number,
     downscale: bool = False
     # mode: Literal["dataframe", "mask"] = "mask"
@@ -182,8 +179,8 @@ def _read_boundaries_from_xenium(
 
 
 def _read_binned_expression(
-    path: Union[str, os.PathLike, Path],
-    gene_names_to_select = List
+    path: str | os.PathLike | Path,
+    gene_names_to_select = list
 ):
     path = Path(path)
     # add binned expression data to .varm

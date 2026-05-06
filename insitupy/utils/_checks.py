@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 import anndata
 import dask.array as da
@@ -11,7 +10,7 @@ from insitupy._constants import WITH_NAPARI
 logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
-    from napari.layers import Points
+    pass
 
 
 # checker functions for data sanity
@@ -53,7 +52,7 @@ def check_hvg(hvg, hvg_key, adata_var):
     else:
         if not all(i in adata_var.index for i in hvg):
             raise ValueError('Not all HVGs are in the adata object')
-    if not hvg_key in adata_var:
+    if hvg_key not in adata_var:
         raise KeyError('`hvg_key` not found in `adata.var`')
 
 def check_sanity(adata, batch, hvg, hvg_key):

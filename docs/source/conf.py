@@ -2,7 +2,6 @@
 
 import os
 import sys
-from pathlib import PurePosixPath
 
 sys.path.insert(0, os.path.abspath('../..'))
 

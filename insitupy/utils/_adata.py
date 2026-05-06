@@ -1,6 +1,5 @@
 import logging
-import warnings
-from typing import List, Literal, Tuple, Union
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +69,7 @@ def _extract_groups(
             adata = adata.loc[mask, :].copy()
 
         if len(adata) == 0:
-            logger.warning("Subset variables '{}' not in groupby '{}'. Object not returned.".format(groups, groupby))
+            logger.warning(f"Subset variables '{groups}' not in groupby '{groupby}'. Object not returned.")
             return
         elif filtering:
             # check if all groups are in groupby category
@@ -78,7 +77,7 @@ def _extract_groups(
             groups_notfound = [group for group in groups if group not in groups_found]
 
             if len(groups_found) != len(groups):
-                logger.warning("Following groups were not found in column {}: {}".format(groupby, groups_notfound))
+                logger.warning(f"Following groups were not found in column {groupby}: {groups_notfound}")
 
             if extract_uns or uns_exclusion_pattern is not None:
                 new_uns = {key:value for (key,value) in adata.uns[uns_key].items() if np.any([group in key for group in groups])}
@@ -101,7 +100,7 @@ def _extract_groups(
             return adata
 
     else:
-        logger.warning("Subset category '{}' not found".format(groupby))
+        logger.warning(f"Subset category '{groupby}' not found")
         return
 
 
@@ -236,7 +235,7 @@ FilterMode = Literal[
 def filter_anndata(
     adata: anndata.AnnData,
     filter_mode: FilterMode,
-    filter_tuple: Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]
+    filter_tuple: tuple[str, str | int | float | list[str | int | float]]
 ) -> anndata.AnnData:
     """
     Filters an AnnData object based on a specified filter mode and condition.

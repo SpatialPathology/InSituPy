@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional
 from uuid import uuid4
 
 import dask
@@ -82,7 +81,7 @@ if WITH_NAPARI:
                 self.has_cells = False
 
             # Check if units are available
-            self.has_units = not data.units is None
+            self.has_units = data.units is not None
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -119,21 +118,21 @@ if WITH_NAPARI:
             return None
 
         @property
-        def genes(self) -> List[str]:
+        def genes(self) -> list[str]:
             """Return sorted list of gene names."""
             if self.adata is not None:
                 return sorted(self.adata.var_names.tolist())
             return []
 
         @property
-        def observations(self) -> List[str]:
+        def observations(self) -> list[str]:
             """Return sorted list of observation column names."""
             if self.adata is not None:
                 return sorted(self.adata.obs.columns.tolist())
             return []
 
         @property
-        def obsm(self) -> List[str]:
+        def obsm(self) -> list[str]:
             """Return list of obsm keys with subcategories in format 'key#column'."""
             if self.adata is None:
                 return []
@@ -150,14 +149,14 @@ if WITH_NAPARI:
             return obsm_cats
 
         @property
-        def points(self) -> Optional[np.ndarray]:
+        def points(self) -> np.ndarray | None:
             """Return spatial coordinates with flipped axes for napari display."""
             if self.adata is not None:
                 return np.flip(self.adata.obsm["spatial"].copy(), axis=1)
             return None
 
         @property
-        def X(self) -> Optional[np.ndarray]:
+        def X(self) -> np.ndarray | None:
             """Return the data matrix as a dense array."""
             if self.adata is None:
                 return None
@@ -269,7 +268,7 @@ if WITH_NAPARI:
         __slots__ = ['_configs']
 
         def __init__(self):
-            self._configs: Dict[str, ViewerConfig] = {}
+            self._configs: dict[str, ViewerConfig] = {}
 
         def add_config(self, data) -> str:
             """Create and store a new ViewerConfig instance with a unique ID."""
@@ -281,7 +280,7 @@ if WITH_NAPARI:
             """Allow dictionary-like access to ViewerConfig instances."""
             return self._configs[config_id]
 
-        def list_configs(self) -> Dict[str, ViewerConfig]:
+        def list_configs(self) -> dict[str, ViewerConfig]:
             """Return all stored ViewerConfig instances with their IDs."""
             return self._configs
 

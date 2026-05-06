@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
-import warnings
 from contextlib import ExitStack
 from numbers import Number
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
 
 import dask.array as da
 import geopandas as gpd
@@ -18,12 +16,13 @@ from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy._version import __version__
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
-from insitupy.images.utils import (_efficiently_resize_array,
-                                   _get_scale_factor_from_max_res,
-                                   create_img_pyramid,
-                                   crop_dask_array_or_pyramid)
+from insitupy.images.utils import (
+    _efficiently_resize_array,
+    _get_scale_factor_from_max_res,
+    create_img_pyramid,
+    crop_dask_array_or_pyramid,
+)
 from insitupy.utils._checks import _is_list_of_dask_arrays
 from insitupy.utils.utils import convert_to_list, decode_robust_series
 
@@ -38,10 +37,10 @@ class BoundariesData(DeepCopyMixin):
     Object to read and load boundaries of cells and nuclei.
     '''
     def __init__(self,
-                 cell_names: Union[np.ndarray, List],
-                 seg_mask_value: Optional[Union[np.ndarray, List]],
-                 nucleus_to_cell_map: Optional[Dict[int, int]] = None,
-                 nucleus_count: Optional[np.ndarray] = None,
+                 cell_names: np.ndarray | list,
+                 seg_mask_value: np.ndarray | list | None,
+                 nucleus_to_cell_map: dict[int, int] | None = None,
+                 nucleus_count: np.ndarray | None = None,
                  ):
         """
         Initialize the BoundariesData object.
@@ -85,7 +84,7 @@ class BoundariesData(DeepCopyMixin):
         if len(self._data) > 0:
             labels = list(self._metadata.keys())
             if len(labels) == 0:
-                repr = f"Empty BoundariesData object"
+                repr = "Empty BoundariesData object"
             else:
                 ll = len(labels)
                 repr = f"BoundariesData object with {ll} {'entry' if ll == 1 else 'entries'}:"
@@ -155,7 +154,7 @@ class BoundariesData(DeepCopyMixin):
 
     def update_nucleus_metadata_from_xenium(
         self,
-        xenium_path: Union[str, os.PathLike, Path],
+        xenium_path: str | os.PathLike | Path,
         overwrite: bool = False,
     ) -> None:
         """
@@ -192,7 +191,6 @@ class BoundariesData(DeepCopyMixin):
 
         import dask.array as da
         import zarr
-        from zarr.errors import ArrayNotFoundError
 
         xenium_path = Path(xenium_path)
         cells_zarr_file = xenium_path / "cells.zarr.zip"
@@ -218,8 +216,10 @@ class BoundariesData(DeepCopyMixin):
             nnuclei_current = len(da.unique(nuclei_data).compute()) - 1
 
         # Import helper functions from _io module
-        from insitupy._io._xenium import (_read_nucleus_count_from_store,
-                                          _read_nucleus_to_cell_map_from_store)
+        from insitupy._io._xenium import (
+            _read_nucleus_count_from_store,
+            _read_nucleus_to_cell_map_from_store,
+        )
 
         # Open the Xenium zarr store
         store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
@@ -261,9 +261,9 @@ class BoundariesData(DeepCopyMixin):
         store.close()
 
     def add_boundaries(self,
-                       cell_boundaries: Union[da.core.Array, np.ndarray],
+                       cell_boundaries: da.core.Array | np.ndarray,
                        pixel_size: Number, # required for boundaries that are saved as masks
-                       nuclei_boundaries: Optional[Union[da.core.Array, np.ndarray]] = None,
+                       nuclei_boundaries: da.core.Array | np.ndarray | None = None,
                        overwrite: bool = False
                        ):
         """Add cell and optionally nuclei boundary masks to the object.
@@ -322,9 +322,9 @@ class BoundariesData(DeepCopyMixin):
                 raise KeyError(f"Label '{l}' exists already in BoundariesData object. To overwrite, set 'overwrite' argument to True.")
 
     def crop(self,
-             cell_ids: List[str],
-             xlim: Tuple[int, int],
-             ylim: Tuple[int, int],
+             cell_ids: list[str],
+             xlim: tuple[int, int],
+             ylim: tuple[int, int],
              inplace: bool = False
              ):
         '''
@@ -391,9 +391,9 @@ class BoundariesData(DeepCopyMixin):
                 logger.warning(f"Boundaries element `{n}` was no Dataframe. Skipped.")
 
     def save(self,
-             path : Union[str, os.PathLike, Path] = "boundaries.zarr.zip",
+             path : str | os.PathLike | Path = "boundaries.zarr.zip",
              save_as_pyramid: bool = True,
-             max_resolution: Optional[Number] = None,
+             max_resolution: Number | None = None,
              verbose: bool = False
              ):
         """Save boundary masks, cell names, and metadata to a zarr store.
@@ -417,7 +417,6 @@ class BoundariesData(DeepCopyMixin):
             InvalidFileTypeError: If ``path`` does not end with
                 ``.zarr`` or ``.zarr.zip``.
         """
-        from shapely import Polygon
 
         path = Path(path)
         suffix = path.name.split(".", maxsplit=1)[-1]

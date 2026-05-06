@@ -1,6 +1,5 @@
 import logging
 import warnings
-from typing import Optional, Tuple
 
 import geopandas as gpd
 import numpy as np
@@ -14,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 def calc_distance_of_cells_from(
     data: InSituData,
-    annotation_tuple: Tuple[str, str] = None,
-    annotation_key: Optional[str] = None,
-    annotation_class: Optional[str] = None,
-    cells_layer: Optional[str] = None,
-    region_tuple: Optional[Tuple[str, str]] = None,
-    region_key: Optional[str] = None,
-    region_name: Optional[str] = None,
-    key_to_save: Optional[str] = None
+    annotation_tuple: tuple[str, str] = None,
+    annotation_key: str | None = None,
+    annotation_class: str | None = None,
+    cells_layer: str | None = None,
+    region_tuple: tuple[str, str] | None = None,
+    region_key: str | None = None,
+    region_name: str | None = None,
+    key_to_save: str | None = None
     ):
 
     """

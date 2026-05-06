@@ -1,6 +1,6 @@
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -15,10 +15,10 @@ if TYPE_CHECKING:
 class FilterSpec:
     """Structured filter specification."""
     key: str
-    mask: List[bool]
-    note: Optional[str] = None
+    mask: list[bool]
+    note: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise this filter spec to a JSON-compatible dict."""
         return {
             "mask": list(np.asarray(self.mask, dtype=bool)),
@@ -26,7 +26,7 @@ class FilterSpec:
         }
 
     @classmethod
-    def from_entry(cls, key: str, entry: Dict[str, Any]) -> "FilterSpec":
+    def from_entry(cls, key: str, entry: dict[str, Any]) -> "FilterSpec":
         """Deserialise a :class:`FilterSpec` from a stored dict entry.
 
         Args:
@@ -67,7 +67,7 @@ class FilterManager:
     def __init__(self, experiment: "InSituExperiment"):
         self._experiment = experiment
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         """Return the names of all stored filters."""
         return list(self._experiment._filters.keys())
 
@@ -108,7 +108,7 @@ class FilterManager:
 
         return pd.DataFrame(rows)
 
-    def masks(self) -> Dict[str, List[bool]]:
+    def masks(self) -> dict[str, list[bool]]:
         """Return a dict mapping each filter key to its boolean mask list."""
         out = {}
         for key, entry in self._experiment._filters.items():
@@ -119,13 +119,13 @@ class FilterManager:
     def create(
         self,
         by: str,
-        include: Optional[Union[List[str], str]] = None,
-        exclude: Optional[Union[List[str], str]] = None,
-        key: Optional[str] = None,
-        note: Optional[str] = None,
+        include: list[str] | str | None = None,
+        exclude: list[str] | str | None = None,
+        key: str | None = None,
+        note: str | None = None,
         overwrite: bool = False,
-        in_: Optional[Union[List[str], str]] = None,
-        out: Optional[Union[List[str], str]] = None,
+        in_: list[str] | str | None = None,
+        out: list[str] | str | None = None,
     ) -> str:
         """Create and store a new filter based on a metadata column.
 

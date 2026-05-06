@@ -11,7 +11,6 @@ from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.experiment.data import InSituExperiment, TableAccessor
 
-
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _make_insitudata(n_cells=10, n_genes=5, seed=0, gene_names=None, cell_prefix="cell"):

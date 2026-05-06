@@ -5,9 +5,14 @@ import pandas as pd
 import pytest
 
 from insitupy.interactive._transcript_viewer import (
-    DEFAULT_DEBOUNCE_MS, DEFAULT_MAX_VISIBLE_POINTS, DEFAULT_POINT_SIZE,
-    TranscriptViewerConfig, _assign_gene_colors, prepare_gene_colors,
-    prepare_gene_data)
+    DEFAULT_DEBOUNCE_MS,
+    DEFAULT_MAX_VISIBLE_POINTS,
+    DEFAULT_POINT_SIZE,
+    TranscriptViewerConfig,
+    _assign_gene_colors,
+    prepare_gene_colors,
+    prepare_gene_data,
+)
 
 
 class TestTranscriptViewerConfig:

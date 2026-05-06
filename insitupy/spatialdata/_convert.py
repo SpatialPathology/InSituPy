@@ -3,24 +3,33 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 else:
-    from spatialdata.transformations import get_transformation, Identity, Scale
     from spatialdata._core.validation import check_valid_name
-    from spatialdata.models import (Image2DModel, Labels2DModel, PointsModel,
-                                    ShapesModel, TableModel)
+    from spatialdata.models import (
+        Image2DModel,
+        Labels2DModel,
+        PointsModel,
+        ShapesModel,
+        TableModel,
+    )
+    from spatialdata.transformations import Identity, Scale, get_transformation
     from spatialdata.transformations.transformations import Scale
 
 import logging
 from numbers import Number
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Literal
 
 import numpy as np
 from anndata import AnnData
 from xarray import DataArray
 
-from insitupy._constants import (DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y,
-                                 MODALITIES, SAMPLE_STR)
+from insitupy._constants import (
+    DEFAULT_CHUNK_SIZE_X,
+    DEFAULT_CHUNK_SIZE_Y,
+    MODALITIES,
+    SAMPLE_STR,
+)
 from insitupy._core.data import InSituData
-from insitupy.containers import BoundariesData, CellData
+from insitupy.containers import BoundariesData
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
 
@@ -30,10 +39,10 @@ logger = logging.getLogger(__name__)
 def _generate_spatialdata_key(
     sample_id: str,
     modality: Literal[MODALITIES], # type: ignore
-    locator: Optional[Union[str, tuple, List]]
+    locator: str | tuple | list | None
     ):
     # from spatialdata._core.validation import check_valid_name
-    if not modality.lower() in MODALITIES:
+    if modality.lower() not in MODALITIES:
         raise ValueError(f"Modality '{modality}' not recognized. Choose from {MODALITIES}.")
 
     if modality == "transcripts":
@@ -77,7 +86,7 @@ def _transform_anndata_for_spatialdata(
     adata: AnnData,
     #cells_as_circles: bool = True
     cells_key: str,
-    cell_area_key: Optional[str] = "cell_area"
+    cell_area_key: str | None = "cell_area"
     ):
     """Convert an AnnData table to spatialdata-compatible format with circle shapes.
 
@@ -141,7 +150,7 @@ def _transform_anndata_for_spatialdata(
 def _transform_images_for_spatialdata(
     xd: InSituData,
     n_pyramids: int = 5,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Extract images from an :class:`InSituData` and parse them into SpatialData Image2DModel elements.
 
@@ -215,7 +224,7 @@ def _transform_images_for_spatialdata(
 
 def _transform_transcripts_for_spatialdata(
     xd: InSituData,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Parse transcript coordinates from an :class:`InSituData` into a SpatialData PointsModel element.
 
@@ -251,7 +260,7 @@ def _transform_transcripts_for_spatialdata(
 
 def _transform_table_for_spatialdata(
     xd: InSituData,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Convert cell AnnData tables and circle shapes from an :class:`InSituData` into SpatialData elements.
 
@@ -311,7 +320,7 @@ def _transform_table_for_spatialdata(
 def _transform_cell_boundaries_for_spatialdata(
     xd: InSituData,
     n_pyramids: int = 5,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Convert cell boundary label arrays from an :class:`InSituData` into SpatialData Labels2DModel elements.
 
@@ -368,7 +377,7 @@ def _transform_cell_boundaries_for_spatialdata(
 
 def _transform_annotations_for_spatialdata(
     xd: InSituData,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Parse annotation GeoDataFrames from an :class:`InSituData` into SpatialData ShapesModel elements.
 
@@ -400,7 +409,7 @@ def _transform_annotations_for_spatialdata(
 
 def _transform_regions_for_spatialdata(
     xd: InSituData,
-    sample_id: Optional[str] = None
+    sample_id: str | None = None
     ):
     """Parse region GeoDataFrames from an :class:`InSituData` into SpatialData ShapesModel elements.
 
@@ -445,9 +454,9 @@ def _extract_pixel_size_from_spatialdata(
     sdata: SpatialData,
     # pixel_size: Optional[float],
     element_to_extract_from: str,
-    coordinate_system: Optional[str] = None,
+    coordinate_system: str | None = None,
     verbose: bool = True
-) -> Optional[float]:
+) -> float | None:
     """Extract pixel size from SpatialData or use provided value."""
 
     # if pixel_size is not None:
@@ -501,12 +510,7 @@ def _extract_pixel_size_from_spatialdata(
 def _add_images_to_insitudata(
     data: InSituData,
     sdata: SpatialData,
-    image_data: Union[
-        Tuple[str, Number],
-        Tuple[str, Number, bool],
-        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
-        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
-    ],
+    image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]],
     # pixel_size: Optional[float],
     verbose: bool
 ):
@@ -577,8 +581,8 @@ def _add_images_to_insitudata(
 def _create_boundaries_from_spatialdata(
     sdata: SpatialData,
     cell_names: np.ndarray,
-    cell_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (cell_boundaries_key, pixel_size)
-    nucleus_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (nucleus_boundaries_key, pixel_size)
+    cell_boundaries_data: tuple[str, Number] | None = None, # tuple as (cell_boundaries_key, pixel_size)
+    nucleus_boundaries_data: tuple[str, Number] | None = None, # tuple as (nucleus_boundaries_key, pixel_size)
     ) -> BoundariesData:
     """Create BoundariesData from SpatialData labels."""
 
@@ -618,12 +622,7 @@ def _create_boundaries_from_spatialdata(
     return boundaries
 
 def _validate_image_data_format(
-    image_data: Optional[Union[
-        Tuple[str, Number],
-        Tuple[str, Number, bool],
-        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
-        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
-    ]]
+    image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None
 ) -> None:
     """
     Validate the format of image_data parameter.
@@ -675,7 +674,7 @@ def _validate_image_data_format(
         )
 
 def _validate_boundaries_data_format(
-    boundaries_data: Optional[Tuple[str, Number]],
+    boundaries_data: tuple[str, Number] | None,
     param_name: str = "boundaries_data"
 ) -> None:
     """

@@ -1,14 +1,14 @@
 """Tests for insitupy.utils._calc — numerical computation functions."""
 
-import numpy as np
 import dask.array as da
+import numpy as np
 import pytest
 
 from insitupy.utils._calc import (
     cohens_d,
     create_tiles,
-    summarize_tile_measurements,
     intensity_median,
+    summarize_tile_measurements,
 )
 
 

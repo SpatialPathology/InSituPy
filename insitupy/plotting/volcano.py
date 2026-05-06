@@ -2,18 +2,15 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
 from warnings import warn
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from adjustText import adjust_text
-from matplotlib.font_manager import FontProperties
 
 from insitupy._constants import with_insitupy_style
-from insitupy.containers.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
 
@@ -40,20 +37,20 @@ def single_volcano(
     pval_column: str = None,
     significance_threshold: Number = 0.05,
     foldchange_threshold: Number = 2,
-    title: Optional[str] = None,
+    title: str | None = None,
     adjust_labels: bool = True,
-    ax: Optional[plt.Axes] = None,
-    savepath: Union[str, os.PathLike, Path, None] = None,
+    ax: plt.Axes | None = None,
+    savepath: str | os.PathLike | Path | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
-    genes_to_label: Union[int, List[str]] = 20,
+    genes_to_label: int | list[str] = 20,
     label_sortby: str = "log2foldchange",
-    figsize: Tuple[int, int] = (8, 6),
-    config: Optional[DiffExprConfigCollector] = None,
-    up_label: Optional[str] = "Target",
-    down_label: Optional[str] = "Reference",
-    xlim: Optional[Tuple[Number, Number]] = None,
+    figsize: tuple[int, int] = (8, 6),
+    config: DiffExprConfigCollector | None = None,
+    up_label: str | None = "Target",
+    down_label: str | None = "Reference",
+    xlim: tuple[Number, Number] | None = None,
 ) -> None:
     """
     Create a volcano plot with labeled top differentially expressed genes.
@@ -355,14 +352,14 @@ def volcano(
     logfoldchanges_col='log2foldchange',
     label_top_n: int = 20,
     label_sortby: str = "log2foldchange",
-    figsize: Tuple[Number, Number] = (6, 6),
+    figsize: tuple[Number, Number] = (6, 6),
     show: bool = True,
     show_config: bool = False,
-    title: Optional[str] = None,
-    savepath: Union[str, os.PathLike, Path, None] = None,
+    title: str | None = None,
+    savepath: str | os.PathLike | Path | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
-    xlim: Optional[Tuple[Number, Number]] = None,
+    xlim: tuple[Number, Number] | None = None,
 ) -> None:
     """
     Generate multi-panel volcano plots for differential expression results.

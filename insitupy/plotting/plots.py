@@ -3,16 +3,18 @@ import math
 import os
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from matplotlib.colors import ListedColormap
 
-from insitupy._constants import WITH_NAPARI
-from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, with_insitupy_style
+from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
+    WITH_NAPARI,
+    with_insitupy_style,
+)
 from insitupy._core._checks import _check_assignment, _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.containers._utils import _get_cell_layer
@@ -20,8 +22,11 @@ from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils.utils import (
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +40,7 @@ def _resolve_colorlegend_layer(viewer, layer):
 
 if WITH_NAPARI:
     import napari
-    from napari.utils.notifications import show_info, show_warning
-    from napari.viewer import Viewer
+    from napari.utils.notifications import show_warning
 
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
 
@@ -45,7 +49,7 @@ def _generate_subplots(
     n_keys: int,
     max_cols: int = 4,
     dpi_display: int = 80,
-    header: Optional[str] = None,
+    header: str | None = None,
     subplot_height: Number = 8,
     subplot_width: Number = 8
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -125,7 +129,7 @@ def _generate_experiment_subplots(
     n_keys: int,
     max_cols: int = 4,
     dpi_display: int = 80,
-    header: Optional[str] = None
+    header: str | None = None
     ) -> tuple[plt.Figure, list[plt.Axes]]:
     try:
         n_data = len(data)
@@ -148,10 +152,10 @@ def _generate_experiment_subplots(
 def colorlegend(
     viewer: Optional["napari.Viewer"] = None,
     mapping: Optional[None] = None,
-    layer_name: Optional[str] = None,
+    layer_name: str | None = None,
     max_per_col: int = 10,
-    title: Optional[str] = None,
-    savepath: Union[str, os.PathLike, Path] = None,
+    title: str | None = None,
+    savepath: str | os.PathLike | Path = None,
     save_only: bool = False,
     dpi_save: int = 300,
     verbose: bool = True,
@@ -302,13 +306,13 @@ def _get_adata(d, cells_layer, mask_col):
     return adata
 
 def calc_cellular_composition(
-    data: Union[InSituData, InSituExperiment],
+    data: InSituData | InSituExperiment,
     cell_type_col: str,
-    cell_type_values: Optional[Union[str, List[str]]] = None,
-    cells_layer: Optional[str] = None,
-    mask_col: Optional[str] = None,
-    geom_key: Optional[str] = None,
-    geom_values: Optional[Union[str, List[str]]] = None,
+    cell_type_values: str | list[str] | None = None,
+    cells_layer: str | None = None,
+    mask_col: str | None = None,
+    geom_key: str | None = None,
+    geom_values: str | list[str] | None = None,
     modality: Literal["regions", "annotations"] = "regions",
     groupby: str = "uid",
     normalize: bool = True,
@@ -491,23 +495,23 @@ def calc_cellular_composition(
 
 @with_insitupy_style
 def cellular_composition(
-    data: Union[InSituData, InSituExperiment],
+    data: InSituData | InSituExperiment,
     cell_type_col: str,
-    cell_type_values: Optional[Union[str, List[str]]] = None,
-    cells_layer: Optional[str] = None,
-    mask_col: Optional[str] = None,
-    geom_key: Optional[str] = None,
-    geom_values: Optional[Union[str, List[str]]] = None,
-    modality: Optional[Literal["regions", "annotations"]] = None,
+    cell_type_values: str | list[str] | None = None,
+    cells_layer: str | None = None,
+    mask_col: str | None = None,
+    geom_key: str | None = None,
+    geom_values: str | list[str] | None = None,
+    modality: Literal["regions", "annotations"] | None = None,
     plot_type: Literal["bar", "barh"] = "barh",
     groupby: str = "uid",
     normalize: bool = True,
     force_assignment: bool = False,
     max_cols: int = 4,
     aspect_factor: Number = 1,
-    legend_max_per_col: Optional[Union[Literal["auto"], int]] = "auto",
-    savepath: Union[str, os.PathLike, Path] = None,
-    palette: Optional[Union[ListedColormap, List[str]]] = None,
+    legend_max_per_col: Literal["auto"] | int | None = "auto",
+    savepath: str | os.PathLike | Path = None,
+    palette: ListedColormap | list[str] | None = None,
     return_data: bool = False,
     save_only: bool = False,
     dpi_save: int = 300,
@@ -668,7 +672,7 @@ def cellular_composition(
         n_plots = len(geom_names) + 1
         separate_legend = True
     else:
-        raise ValueError(f"geom_names has length 0.")
+        raise ValueError("geom_names has length 0.")
 
     if plot_type == "bar":
         subplot_width = (0.5+len(data_names)*1) / aspect_factor

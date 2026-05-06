@@ -7,7 +7,6 @@ from copy import deepcopy
 from numbers import Number
 from os.path import relpath
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
 
 import dask.array as da
 import geopandas as gpd
@@ -16,12 +15,10 @@ import pandas as pd
 from anndata import AnnData
 from shapely import MultiPolygon, Polygon
 
-from insitupy._io.files import (check_overwrite_and_remove_if_true,
-                               write_dict_to_json)
+from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to_json
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
-from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +215,9 @@ class CellData(DeepCopyMixin):
                 close_method()
 
     def crop(self,
-            xlim: Optional[Tuple[int, int]] = None,
-            ylim: Optional[Tuple[int, int]] = None,
-            shape: Optional[Union[Polygon, MultiPolygon]] = None,
+            xlim: tuple[int, int] | None = None,
+            ylim: tuple[int, int] | None = None,
+            shape: Polygon | MultiPolygon | None = None,
             inplace: bool = False,
             verbose: bool = True
             ):
@@ -317,9 +314,9 @@ class CellData(DeepCopyMixin):
 
 
     def save(self,
-             path: Union[str, os.PathLike, Path],
+             path: str | os.PathLike | Path,
              zipped: bool = False,
-             max_resolution_boundaries: Optional[Number] = None,
+             max_resolution_boundaries: Number | None = None,
              overwrite: bool = False
              ):
         """Save the CellData object to disk.
@@ -503,8 +500,8 @@ class CellData(DeepCopyMixin):
             return None
 
     def shift(self,
-              x: Union[int, float],
-              y: Union[int, float]
+              x: int | float,
+              y: int | float
               ):
         '''
         Function to shift the coordinates of both table and boundaries data by certain values x/y.

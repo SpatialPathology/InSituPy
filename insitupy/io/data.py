@@ -3,21 +3,21 @@ import os
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import Dict, Literal, Optional, Union
+from typing import Literal
 
 import dask.dataframe as dd
 import pandas as pd
 from shapely import affinity
 
-from insitupy._version import __version__
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
-from insitupy._io._qupath import (_read_boundaries_qupath,
-                                  _read_measurements_qupath)
+from insitupy._io._qupath import _read_boundaries_qupath, _read_measurements_qupath
 from insitupy._io._read import _read_boundaries, _read_measurements
-from insitupy._io._xenium import (_read_boundaries_from_xenium,
-                                  _read_table_from_xenium,
-                                  _restructure_transcripts_dataframe)
+from insitupy._io._xenium import (
+    _read_boundaries_from_xenium,
+    _read_table_from_xenium,
+    _restructure_transcripts_dataframe,
+)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
 from insitupy.containers.cell_data import CellData
@@ -45,17 +45,17 @@ def _handle_xenium_image_names(im_path):
     return ch, ch_name
 
 def read_xenium(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     nuclei_type: Literal["focus", "mip", ""] = "focus",
     load_cell_segmentation_images: bool = False,
     load_background_images: bool = False,
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
     restructure_transcripts: bool = False,
-    dataset_name: Optional[str] = None,
-    sample_name: Optional[str] = None,
-    slide_id: Optional[str] = None,
-    sample_id: Optional[str] = None,
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    slide_id: str | None = None,
+    sample_id: str | None = None,
     backend: Literal["insitupy", "spatialdata"] = "insitupy",
     ) -> InSituData:
     """
@@ -259,13 +259,13 @@ def read_xenium(
 
 
 def read_visium(
-    path: Union[str, os.PathLike, Path],
-    dataset_name: Optional[str] = None,
-    sample_name: Optional[str] = None,
-    slide_id: Optional[str] = None,
-    sample_id: Optional[str] = None,
+    path: str | os.PathLike | Path,
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    slide_id: str | None = None,
+    sample_id: str | None = None,
     verbose: bool = True,
-    fullres_pixel_size: Optional[Number] = None, # microns per pixel
+    fullres_pixel_size: Number | None = None, # microns per pixel
     **kwargs,
 ) -> InSituData:
     """
@@ -330,9 +330,9 @@ def read_visium(
         logger.info("Reading Visium data with spatialdata-io...")
 
     if fullres_pixel_size is None:
-        logger.warning(f"No `fullres_pixel_size` provided. Setting to 1.0 by default. "
-                       f"For downstream analysis setting the correct pixel size might be important. "
-                       f"If possible, try to find out the resolution of the fullres image")
+        logger.warning("No `fullres_pixel_size` provided. Setting to 1.0 by default. "
+                       "For downstream analysis setting the correct pixel size might be important. "
+                       "If possible, try to find out the resolution of the fullres image")
         fullres_pixel_size = 1.0 # microns per pixel
 
     sf_file = path / "spatial" / "scalefactors_json.json"
@@ -383,15 +383,15 @@ def read_visium(
 
 
 def read_any(
-    cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
-    cellular_coordinates: Union[str, Path],
-    cellular_metadata: Optional[Union[str, Path]] = None,
-    cell_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
-    nucleus_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
-    images: Optional[Dict[str, Union[str, Path, os.PathLike]]] = None,
-    pixel_size: Optional[Number] = None,
-    dataset_name: Optional[str] = "Data 1",
-    sample_name: Optional[str] = "Sample 1",
+    cellular_measurements: dict[str, str | Path | os.PathLike],
+    cellular_coordinates: str | Path,
+    cellular_metadata: str | Path | None = None,
+    cell_boundaries: str | Path | os.PathLike | None = None,
+    nucleus_boundaries: str | Path | os.PathLike | None = None,
+    images: dict[str, str | Path | os.PathLike] | None = None,
+    pixel_size: Number | None = None,
+    dataset_name: str | None = "Data 1",
+    sample_name: str | None = "Sample 1",
     method_name: str = "Any",
     xshift: Number = 0,
     yshift: Number = 0,
@@ -473,10 +473,10 @@ def read_any(
     nucleus_boundaries = Path(nucleus_boundaries) if nucleus_boundaries is not None else nucleus_boundaries
 
     if nucleus_boundaries is not None and cell_boundaries is None:
-        raise ValueError((
-            f"If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
-            f"If you only have nucleus boundaries, add them as cell boundaries."
-            ))
+        raise ValueError(
+            "If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
+            "If you only have nucleus boundaries, add them as cell boundaries."
+            )
 
     if cell_boundaries is not None:
         if pixel_size is None:
@@ -519,7 +519,7 @@ def read_any(
 
 
 def read_qupath(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     pixel_size: Number,
     dataset_name: str,
     sample_name: str,

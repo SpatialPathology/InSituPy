@@ -1,7 +1,6 @@
 import logging
 import warnings
 from numbers import Number
-from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,19 +21,19 @@ logger = logging.getLogger(__name__)
 
 @with_insitupy_style
 def plot_qc_metrics(
-    data: Union[InSituData, AnnData],
-    cells_layer: Optional[str] = None,
+    data: InSituData | AnnData,
+    cells_layer: str | None = None,
     show_inset: bool = True,
     inset_fraction: Number = 0.2,
     plot_obs: bool = True,
     plot_var: bool = True,
-    additional_obs: Optional[Union[str, list]] = None,
-    additional_var: Optional[Union[str, list]] = None,
-    batch: Optional[str] = None,
-    counts_thresh: Optional[Number] = None,
-    genes_thresh: Optional[Number] = None,
+    additional_obs: str | list | None = None,
+    additional_var: str | list | None = None,
+    batch: str | None = None,
+    counts_thresh: Number | None = None,
+    genes_thresh: Number | None = None,
     log1p: bool = False,
-    mad_thresh: Optional[Number] = None,
+    mad_thresh: Number | None = None,
 ):
     """
     Plots the QC metrics calculated by sc.pp.calculate_qc_metrics.
@@ -417,9 +416,9 @@ def plot_qc_metrics(
 @with_insitupy_style
 def test_transformations(
     data: InSituData, # type: ignore #TODO: Expand this to InSituExperiment
-    cells_layer: Optional[str] = None,
+    cells_layer: str | None = None,
     target_sum: Number = 250,
-    layer: Optional[str] = None,
+    layer: str | None = None,
     scale: bool = False,
     assert_integer_counts: bool = True
         ):

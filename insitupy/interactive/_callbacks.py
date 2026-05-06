@@ -11,10 +11,12 @@ if WITH_NAPARI:
     from matplotlib.lines import Line2D
     from pandas.api.types import is_numeric_dtype
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL,
-                                     DEFAULT_CATEGORICAL_CMAP,
-                                     DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
-                                     REGIONS_SYMBOL)
+    from insitupy._constants import (
+        ANNOTATIONS_SYMBOL,
+        DEFAULT_CONTINUOUS_CMAP,
+        POINTS_SYMBOL,
+        REGIONS_SYMBOL,
+    )
     from insitupy.utils._colors import continuous_data_to_rgba
 
     def _resolve_legend_layer(viewer, layer):

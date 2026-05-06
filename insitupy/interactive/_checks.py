@@ -1,11 +1,14 @@
 from warnings import warn
 
-from insitupy._constants import WITH_NAPARI
-from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
-                                 REGIONS_SYMBOL)
+from insitupy._constants import (
+    ANNOTATIONS_SYMBOL,
+    POINTS_SYMBOL,
+    REGIONS_SYMBOL,
+    WITH_NAPARI,
+)
 
 if WITH_NAPARI:
-    from napari.layers import Layer, Points, Shapes
+    from napari.layers import Points
 
 
 def _check_geometry_symbol_and_layer(layer, type_symbol):

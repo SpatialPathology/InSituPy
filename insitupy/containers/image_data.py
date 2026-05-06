@@ -4,20 +4,29 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 
 import dask.array as da
 import numpy as np
-import pandas as pd
 
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy.images.axes import (ImageAxes, _transpose_to_standard_axes,
-                                  get_height_and_width)
-from insitupy.images.io import (get_zarr_source_path, is_from_zarr_disk,
-                                read_image, write_ome_tiff, write_zarr)
-from insitupy.images.utils import (create_img_pyramid,
-                                   crop_dask_array_or_pyramid, resize_image)
+from insitupy.images.axes import (
+    ImageAxes,
+    _transpose_to_standard_axes,
+)
+from insitupy.images.io import (
+    get_zarr_source_path,
+    is_from_zarr_disk,
+    read_image,
+    write_ome_tiff,
+    write_zarr,
+)
+from insitupy.images.utils import (
+    create_img_pyramid,
+    crop_dask_array_or_pyramid,
+    resize_image,
+)
 from insitupy.images.warp import apply_warp, load_transformation_matrix
 from insitupy.utils.utils import convert_to_list
 
@@ -29,8 +38,8 @@ class ImageData(DeepCopyMixin):
     Object to read and load images.
     '''
     def __init__(self,
-                 img_files: List[str] = None,
-                 img_names: List[str] = None,
+                 img_files: list[str] = None,
+                 img_names: list[str] = None,
                  pixel_size: float = None,
                  ):
 
@@ -116,14 +125,14 @@ class ImageData(DeepCopyMixin):
 
     def add_image(
         self,
-        image: Union[da.core.Array, np.ndarray, str, os.PathLike, Path],
-        channel_names: Optional[Union[str, List[str]]] = None,
-        axes: Optional[str] = None,
-        pixel_size: Optional[Number] = None,
-        ome_meta: Optional[dict] = {},
-        is_rgb: Optional[bool] = None,
-        transformation_matrix: Optional[Union[np.ndarray, str, os.PathLike, Path]] = None,
-        reference_image: Optional[str] = None,
+        image: da.core.Array | np.ndarray | str | os.PathLike | Path,
+        channel_names: str | list[str] | None = None,
+        axes: str | None = None,
+        pixel_size: Number | None = None,
+        ome_meta: dict | None = {},
+        is_rgb: bool | None = None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path | None = None,
+        reference_image: str | None = None,
         overwrite: bool = False,
         verbose: bool = True
         ):
@@ -194,7 +203,7 @@ class ImageData(DeepCopyMixin):
                         channels_info = ome_meta['Image']['Pixels']['Channel']
                         # Handle both single channel (dict) and multiple channels (list)
                         if isinstance(channels_info, dict):
-                            channel_names = [channels_info.get('Name', f'Channel_0')]
+                            channel_names = [channels_info.get('Name', 'Channel_0')]
                         else:
                             channel_names = [ch.get('Name', f'Channel_{i}') for i, ch in enumerate(channels_info)]
 
@@ -291,15 +300,15 @@ class ImageData(DeepCopyMixin):
 
     def _add_single_image(
         self,
-        img: Union[da.core.Array, np.ndarray, List],
+        img: da.core.Array | np.ndarray | list,
         name: str,
         axes: str,
         pixel_size: Number,
-        filename: Optional[str],
+        filename: str | None,
         ome_meta: dict,
-        is_rgb: Optional[bool],
-        transformation_matrix: Optional[Union[np.ndarray, str, os.PathLike, Path]],
-        reference_image: Optional[str],
+        is_rgb: bool | None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path | None,
+        reference_image: str | None,
         overwrite: bool,
         verbose: bool
     ):
@@ -409,7 +418,7 @@ class ImageData(DeepCopyMixin):
 
     def remove_image(
         self,
-        names: Union[str, List[str]],
+        names: str | list[str],
         verbose: bool = True
     ):
         """Remove one or more images from the ImageData object.
@@ -432,7 +441,7 @@ class ImageData(DeepCopyMixin):
             logger.info(f"Removed image '{name}'")
 
     def load(self,
-             which: Union[List[str], str] = "all"
+             which: list[str] | str = "all"
              ):
         '''
         Load images into memory.
@@ -447,8 +456,8 @@ class ImageData(DeepCopyMixin):
             self._data[n] = img_loaded
 
     def crop(self,
-             xlim: Optional[Tuple[int, int]],
-             ylim: Optional[Tuple[int, int]],
+             xlim: tuple[int, int] | None,
+             ylim: tuple[int, int] | None,
              inplace: bool = False
              ):
         """Crop all images to a spatial bounding box.
@@ -505,15 +514,15 @@ class ImageData(DeepCopyMixin):
             return _self
 
     def save(self,
-             path: Union[str, os.PathLike, Path],
-             keys_to_save: Optional[str] = None,
+             path: str | os.PathLike | Path,
+             keys_to_save: str | None = None,
              as_zarr: bool = True,
              zipped: bool = False,
              save_pyramid: bool = True,
              compression: Literal['jpeg', 'LZW', 'jpeg2000', 'ZLIB', None] = 'ZLIB',
              return_savepaths: bool = False,
              overwrite: bool = False,
-             max_resolution: Optional[Number] = None,
+             max_resolution: Number | None = None,
              debug: bool = False,
              verbose: bool = False
              ):
@@ -695,10 +704,10 @@ class ImageData(DeepCopyMixin):
 
     def transform(
         self,
-        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
-        source_pixel_size: Optional[Number] = None,
-        reference_pixel_size: Optional[Number] = None,
-        output_size: Optional[Tuple[Number, Number]] = None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path,
+        source_pixel_size: Number | None = None,
+        reference_pixel_size: Number | None = None,
+        output_size: tuple[Number, Number] | None = None,
         inplace: bool = False,
         verbose: bool = False
     ):

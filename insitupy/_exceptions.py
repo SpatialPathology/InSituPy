@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Optional, Type
 
 from .utils.utils import convert_to_list
 
@@ -146,7 +145,6 @@ class ModalityNotFoundError(Exception):
         self.message = f"No '{modality}' modality found."
         super().__init__(self.message)
 
-import warnings
 
 
 class ModalityNotFoundWarning(UserWarning):
@@ -163,9 +161,9 @@ class ModalityNotFoundWarning(UserWarning):
 class InvalidFileTypeError(Exception):
     """Raised when a file path has an extension that is not in the allowed set."""
     def __init__(self,
-                 allowed_types: List[Type],
-                 received_type: Type,
-                 message: Optional[str] = None
+                 allowed_types: list[type],
+                 received_type: type,
+                 message: str | None = None
                  ):
         # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
@@ -179,9 +177,9 @@ class InvalidFileTypeError(Exception):
 class InvalidDataTypeError(Exception):
     """Raised when a data object has a type that is not in the allowed set."""
     def __init__(self,
-                 allowed_types: List[Type],
-                 received_type: Type,
-                 message: Optional[str] = None
+                 allowed_types: list[type],
+                 received_type: type,
+                 message: str | None = None
                  ):
         # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
@@ -205,7 +203,7 @@ class InvalidXeniumDirectory(Exception):
 
 class MissingPackageError(ImportError):
     """Raised when an optional dependency is required but not installed."""
-    def __init__(self, package_name: str, installation_command: Optional[str]):
+    def __init__(self, package_name: str, installation_command: str | None):
         if installation_command is None:
             installation_command = f"pip install {package_name}"
 

@@ -4,7 +4,7 @@ import logging
 import math
 import warnings
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 
 import dask.array as da
 import matplotlib.pyplot as plt
@@ -15,22 +15,30 @@ from matplotlib import colors
 from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP,
-                                 with_insitupy_style)
+from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
+    DEFAULT_CONTINUOUS_CMAP,
+    with_insitupy_style,
+)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
-from insitupy.containers._utils import _get_cell_layer
 from insitupy.containers import AnnotationsData, ImageData, RegionsData
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
-from insitupy.utils._colors import (_add_colorlegend_to_axis,
-                                    _extract_color_values, _rgb2hex_robust,
-                                    create_cmap_mapping)
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils._colors import (
+    _add_colorlegend_to_axis,
+    _extract_color_values,
+    _rgb2hex_robust,
+    create_cmap_mapping,
+)
+from insitupy.utils.utils import (
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,19 +73,19 @@ class DataConfig(_UpdatablePlottingConfig):
     """
 
     # data extraction config
-    layer: Optional[str] = None
+    layer: str | None = None
     raw: bool = False
     obsm_key: str = 'spatial'
-    name_column: Optional[str] = None
+    name_column: str | None = None
 
     # data attribute keys
-    region_tuple: Optional[Tuple[str, str]] = None
-    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None
-    image_key: Optional[str] = None
+    region_tuple: tuple[str, str] | None = None
+    annotations_key: tuple[str, str | list[str] | None] | None = None
+    image_key: str | None = None
 
     # filters
-    filter_mode: Optional[FilterMode] = None,
-    filter_tuple: Optional[Tuple] = None
+    filter_mode: FilterMode | None = None,
+    filter_tuple: tuple | None = None
 
 @dataclass
 class PlotConfig(_UpdatablePlottingConfig):
@@ -111,21 +119,21 @@ class PlotConfig(_UpdatablePlottingConfig):
         show_all(): Display all current configuration values.
     """
 
-    xlim: Optional[Tuple[float, float]] = None
-    ylim: Optional[Tuple[float, float]] = None
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
     spot_size: float = 10
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
     palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
     spot_type: str = "o"
     background_color: str = "white"
-    cmap_center: Optional[float] = None
-    normalize: Optional[colors.Normalize] = None
+    cmap_center: float | None = None
+    normalize: colors.Normalize | None = None
     show_legend: bool = True
     legend_max_per_col: int = 10
-    clb_title: Optional[str] = None
+    clb_title: str | None = None
     annotations_mode: Literal["outlined", "filled"] = "outlined"
-    crange: Optional[List[int]] = None
+    crange: list[int] | None = None
     crange_type: Literal['minmax', 'max', 'upper_percentile', 'percentile'] = 'upper_percentile'
     origin_zero: bool = False
     label_size: int = 16
@@ -134,7 +142,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     show_scale: bool = True
     tick_label_size: int = 14
     pixelwidth_per_subplot: int = 200
-    histogram_setting: Union[Literal["auto"], Tuple[int, int], None] = "auto"
+    histogram_setting: Literal["auto"] | tuple[int, int] | None = "auto"
 
     def __post_init__(self):
         # check if cmap is supposed to be centered
@@ -166,8 +174,8 @@ class LayoutConfig(_UpdatablePlottingConfig):
             (rows, columns, number of plots) based on the given keys and datasets.
     """
 
-    max_cols: Optional[int] = 4
-    header: Optional[str] = None
+    max_cols: int | None = 4
+    header: str | None = None
     multikeys: bool = False
     multidata: bool = False
     n_rows: int = None
@@ -175,9 +183,9 @@ class LayoutConfig(_UpdatablePlottingConfig):
     n_plots: int = None
     subplot_width: int = 6
     subplot_height: int = 6
-    wspace: Optional[float] = 0.4
-    hspace: Optional[float] = 0.2
-    figsize: Optional[Tuple] = None
+    wspace: float | None = 0.4
+    hspace: float | None = 0.2
+    figsize: tuple | None = None
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
     def calc_subplot_params(self, keys, n_data, color_config):
@@ -250,32 +258,32 @@ class LayoutConfig(_UpdatablePlottingConfig):
 
 @with_insitupy_style
 def spatial(
-    data: Union[InSituData, InSituExperiment],
-    keys: Union[str, List[str]],
-    cells_layer: Optional[str] = None,
-    layer: Optional[str] = None,
+    data: InSituData | InSituExperiment,
+    keys: str | list[str],
+    cells_layer: str | None = None,
+    layer: str | None = None,
 
     # data attribute keys
-    region_tuple: Optional[Tuple[str, str]] = None,
-    annotation_tuple: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
-    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
-    image_key: Optional[str] = None,
+    region_tuple: tuple[str, str] | None = None,
+    annotation_tuple: tuple[str, str | list[str] | None] | None = None,
+    annotations_key: tuple[str, str | list[str] | None] | None = None,
+    image_key: str | None = None,
 
     # filters
-    filter_mode: Optional[FilterMode] = None,
-    filter_tuple: Optional[Tuple] = None,
+    filter_mode: FilterMode | None = None,
+    filter_tuple: tuple | None = None,
 
     # plotting configs
-    xlim: Optional[Tuple[float, float]] = None,
-    ylim: Optional[Tuple[float, float]] = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     spot_size: float = 10,
     alpha: float = 1.0,
 
     # layout configs
-    max_cols: Optional[int] = 4,
+    max_cols: int | None = 4,
 
     # save configs
-    savepath: Optional[str] = None,
+    savepath: str | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
@@ -527,7 +535,7 @@ def _plot_to_subplots(
 
 def _single_spatial(
     adata: AnnData,
-    key: List[str],
+    key: list[str],
     idx_key: int,
     name: str,
 
@@ -543,9 +551,9 @@ def _single_spatial(
     plot_config: PlotConfig,
 
     # data attributes
-    regions_data: Optional[RegionsData] = None,
-    annotations_data: Optional[AnnotationsData] = None,
-    image_data: Optional[ImageData] = None,
+    regions_data: RegionsData | None = None,
+    annotations_data: AnnotationsData | None = None,
+    image_data: ImageData | None = None,
     ):
 
     # get color values for expression data or categories
@@ -554,7 +562,7 @@ def _single_spatial(
     )
 
     if color_values is None:
-        logger.warning("Key '{}' not found.".format(key))
+        logger.warning(f"Key '{key}' not found.")
         ax.set_axis_off()
 
     else:
@@ -724,11 +732,11 @@ def _single_spatial(
 class _ColorConfigMultiPlot:
     def __init__(
         self,
-        data: Union[InSituData, InSituExperiment],
+        data: InSituData | InSituExperiment,
         data_config: DataConfig,
         plot_config: PlotConfig,
-        cells_layer: Optional[str] = None,
-        keys: Union[str, List[str]] = None,
+        cells_layer: str | None = None,
+        keys: str | list[str] = None,
         ):
         # add properties
         self._dict = {}
@@ -981,7 +989,7 @@ def _determine_axes(axs, idx, idx_key, layout_config):
             else:
                 add_legend = False
     else:
-        raise ValueError("`len(self.axs.shape)` has wrong shape {}. Requires 1 or 2.".format(len(axs.shape)))
+        raise ValueError(f"`len(self.axs.shape)` has wrong shape {len(axs.shape)}. Requires 1 or 2.")
 
     return ax, add_legend
 

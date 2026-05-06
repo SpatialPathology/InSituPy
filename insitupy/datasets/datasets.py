@@ -764,7 +764,6 @@ def visium_human_breast_cancer(
 
     # load data into InSituData object
     # Note: You'll need to implement read_visium if not already available
-    from insitupy.io.data import read_visium
     data = read_visium(data_dir, fullres_pixel_size=0.5476)
 
     return data

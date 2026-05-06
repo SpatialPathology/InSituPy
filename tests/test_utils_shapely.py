@@ -1,6 +1,5 @@
 """Tests for insitupy.utils._shapely — scale_polygon."""
 
-import pytest
 from shapely.geometry import Polygon
 
 from insitupy.utils._shapely import scale_polygon

@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from insitupy.containers.multi_cell_data import MultiCellData
 
@@ -8,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def _get_cell_layer(
     cells: MultiCellData,
-    cells_layer: Optional[str],
+    cells_layer: str | None,
     verbose: bool = False,
     return_layer_name: bool = False,
 ):

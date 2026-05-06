@@ -8,7 +8,7 @@ between main DGE results and neighborhood-based comparisons.
 import os
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 from warnings import warn
 
 import matplotlib.pyplot as plt
@@ -17,8 +17,7 @@ import pandas as pd
 from adjustText import adjust_text
 
 from insitupy._constants import with_insitupy_style
-from insitupy.containers.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
 
@@ -42,16 +41,16 @@ def dual_foldchange_plot(
     foldchange_threshold: Number = 1,
     logfoldchanges_col: str = "log2foldchange",
     pval_col: str = "padj",
-    patch_colors: List[str] = ["lightgreen", "lightcoral"],
+    patch_colors: list[str] = ["lightgreen", "lightcoral"],
     adjust_labels: bool = True,
-    label_top_n: Union[int, Literal["all"]] = "all",
+    label_top_n: int | Literal["all"] = "all",
     label_sortby: str = "padj",
     size_by_pvalue: bool = True,
-    size_range: Tuple[Number, Number] = (10, 40),
+    size_range: tuple[Number, Number] = (10, 40),
     show_nonsignificant: bool = True,
     show_config: bool = False,
-    figsize: Tuple[Number, Number] = (6, 6),
-    savepath: Union[str, os.PathLike, Path, None] = None,
+    figsize: tuple[Number, Number] = (6, 6),
+    savepath: str | os.PathLike | Path | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
@@ -251,21 +250,21 @@ def _plot_single_nb_plot(
     pval_col: str,
     fold_change_threshold: Number,
     significance_threshold: Number,
-    patch_colors: List[str],
-    label_top_n: Union[int, Literal["all"]],
+    patch_colors: list[str],
+    label_top_n: int | Literal["all"],
     label_sortby: str,
     adjust_labels: bool,
     size_by_pvalue: bool,
-    size_range: Tuple[Number, Number],
+    size_range: tuple[Number, Number],
     show_nonsignificant: bool,
-    config: Optional[DiffExprConfigCollector],
-    n_upreg: Optional[int],
-    n_downreg: Optional[int],
+    config: DiffExprConfigCollector | None,
+    n_upreg: int | None,
+    n_downreg: int | None,
     ax: plt.Axes,
     show_legend: bool,
-    xlabel: Optional[str] = "Log2FoldChange",
-    ylabel: Optional[str] = "Log2FoldChange (with neighborhood)",
-    title: Optional[str] = None
+    xlabel: str | None = "Log2FoldChange",
+    ylabel: str | None = "Log2FoldChange (with neighborhood)",
+    title: str | None = None
 ) -> None:
     """
     Helper function for plotting one dual fold change comparison subplot.
@@ -509,10 +508,10 @@ def _plot_single_nb_plot(
                 legend_elements.extend([
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=8,
-                       label=f'high'),
+                       label='high'),
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=5,
-                       label=f'low'),
+                       label='low'),
                     Line2D([0], [0], marker='o', color='w',
                            markerfacecolor=COLOR_NOT_SIGNIFICANT, markersize=5,
                            label='none')
@@ -521,10 +520,10 @@ def _plot_single_nb_plot(
                 legend_elements.extend([
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=8,
-                       label=f'high'),
+                       label='high'),
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=5,
-                       label=f'low')
+                       label='low')
                 ])
 
             # # Add size information
@@ -540,7 +539,7 @@ def _plot_single_nb_plot(
 
             ax.legend(
                 handles=legend_elements,
-                title=f"significance",
+                title="significance",
                 loc="center left",
                 bbox_to_anchor=(1, 0.5)
             )

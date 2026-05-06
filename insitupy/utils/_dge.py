@@ -1,5 +1,4 @@
 import logging
-from typing import List, Literal, Optional, Tuple, Union
 
 import numpy as np
 from anndata import AnnData
@@ -7,7 +6,6 @@ from anndata import AnnData
 from insitupy._core._checks import _check_assignment
 from insitupy._core.data import InSituData
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +22,9 @@ def _check_list_in_assignment(entry, list_to_check):
 def _select_data_for_dge(
     data: InSituData,
     cells_layer: str,
-    annotation_tuple: Optional[Union[Tuple[str, str], Tuple[str, List[str]]]] = None,
-    cell_type_tuple: Optional[Tuple[str, str]] = None,
-    region_tuple: Optional[Tuple[str, str]] = None,
+    annotation_tuple: tuple[str, str] | tuple[str, list[str]] | None = None,
+    cell_type_tuple: tuple[str, str] | None = None,
+    region_tuple: tuple[str, str] | None = None,
     force_assignment: bool = False,
     return_all_celltypes: bool = False,
     verbose: bool = False

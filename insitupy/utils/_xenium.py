@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from numbers import Number
 from pathlib import Path
-from typing import List, Union
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -20,11 +19,11 @@ from .._io.files import read_json
 
 
 def find_xenium_outputs(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     startswith: str = 'output-XET',
     max_depth: int = None,
     threads: int = 4,
-) -> List[Path]:
+) -> list[Path]:
     """
     Search for Xenium output directories more efficiently by:
     - Using iterdir() instead of os.walk to avoid unnecessary recursion
@@ -36,7 +35,7 @@ def find_xenium_outputs(
 
     results = []
 
-    def _scan(directory: Path, depth: int) -> List[Path]:
+    def _scan(directory: Path, depth: int) -> list[Path]:
         found = []
         try:
             entries = list(directory.iterdir())
@@ -66,7 +65,7 @@ def find_xenium_outputs(
     return results
 
 def collect_qc_data(
-    data_folders: List[Union[str, os.PathLike, Path]]
+    data_folders: list[str | os.PathLike | Path]
     ) -> pd.DataFrame:
     """Collect QC metadata from a list of Xenium output directories.
 
@@ -101,11 +100,11 @@ def collect_qc_data(
 def plot_qc(
     data: pd.DataFrame,
     x: str = "preservation_method",
-    cats: List[str] = ["num_cells", "transcripts_per_cell", "transcripts_per_100um"],
+    cats: list[str] = ["num_cells", "transcripts_per_cell", "transcripts_per_100um"],
     max_cols: int = 4,
     fontsize: int = 22,
     size: Number = 10,
-    savepath: Union[str, os.PathLike, Path] = None,
+    savepath: str | os.PathLike | Path = None,
     save_only: bool = False,
     dpi_save: int = 300
     ):

@@ -7,7 +7,7 @@ import warnings
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 from uuid import uuid4
 
 import anndata
@@ -21,9 +21,14 @@ from matplotlib.figure import Figure
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR,
-                                 with_insitupy_style)
+from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
+    LOAD_FUNCS,
+    MODALITIES,
+    MODALITIES_ABBR,
+    SAMPLE_STR,
+    with_insitupy_style,
+)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
@@ -34,8 +39,12 @@ from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils.utils import (_crop_transcripts, convert_to_list,
-                                  get_nrows_maxcols, remove_empty_subplots)
+from insitupy.utils.utils import (
+    _crop_transcripts,
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +82,7 @@ class TableAccessor:
     # Public interface
     # ------------------------------------------------------------------
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         """Return the layer names for which a table has been built."""
         if self._exp.path is None:
             return []
@@ -85,7 +94,7 @@ class TableAccessor:
             if p.suffix == ".zarr" and p.is_dir() and p.name != "concat.zarr"
         )
 
-    def __getitem__(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+    def __getitem__(self, cells_layer: str | None) -> AnnData | None:
         return self._load(cells_layer)
 
     def __repr__(self) -> str:
@@ -98,7 +107,7 @@ class TableAccessor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+    def _load(self, cells_layer: str | None) -> AnnData | None:
         try:
             table_path = self._exp._get_table_path(cells_layer)
         except ValueError as exc:
@@ -124,7 +133,7 @@ class ViewTableAccessor(TableAccessor):
     AnnData to only the samples present in the view.
     """
 
-    def _load(self, cells_layer: Optional[str]) -> Optional[AnnData]:
+    def _load(self, cells_layer: str | None) -> AnnData | None:
         full_table = super()._load(cells_layer)
         if full_table is None:
             return None
@@ -221,7 +230,7 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._filters = {}
-        self._applied_filters: List[str] = []
+        self._applied_filters: list[str] = []
         self._data_type = data_type
 
     def __repr__(self):
@@ -266,7 +275,7 @@ class InSituExperiment:
         return False
 
     @property
-    def applied_filters(self) -> List[str]:
+    def applied_filters(self) -> list[str]:
         """Return the list of filter labels that have been applied to this experiment."""
         return list(self._applied_filters)
 
@@ -274,7 +283,7 @@ class InSituExperiment:
         self,
         key,
         as_view: bool = False,
-        added_filter: Optional[str] = None,
+        added_filter: str | None = None,
     ):
         """
         Internal helper to subset experiment data and metadata.
@@ -555,7 +564,7 @@ class InSituExperiment:
         return self._path
 
     def add(self,
-            data: Union[str, os.PathLike, Path, InSituData],
+            data: str | os.PathLike | Path | InSituData,
             mode: Literal["insitupy", "xenium"] = "insitupy",
             metadata: dict = {}
             ):
@@ -618,7 +627,7 @@ class InSituExperiment:
     def add_metadata_column(
         self,
         column_name: str,
-        values: Union[List, str, pd.Series, np.ndarray],
+        values: list | str | pd.Series | np.ndarray,
         overwrite: bool = False
         ):
         """
@@ -645,8 +654,8 @@ class InSituExperiment:
         self._metadata[column_name] = values
 
     def append_metadata(self,
-                        new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],
-                        by: Optional[str] = _UNSET,
+                        new_metadata: pd.DataFrame | dict | str | os.PathLike | Path,
+                        by: str | None = _UNSET,
                         overwrite: bool = False
                         ):
         """
@@ -787,9 +796,9 @@ class InSituExperiment:
 
     def set_metadata_values(
         self,
-        index: Union[int, List[int], List[bool], slice, range, np.ndarray, pd.Series],
+        index: int | list[int] | list[bool] | slice | range | np.ndarray | pd.Series,
         column_name: str,
-        values: Union[Any, List, pd.Series, np.ndarray]
+        values: Any | list | pd.Series | np.ndarray
     ):
         """
         Set metadata values for one or more indices.
@@ -975,17 +984,17 @@ class InSituExperiment:
     def dge(
         self,
         target_id: int,
-        ref_id: Optional[Union[int, List[int], Literal["rest"]]] = None,
-        target_annotation_tuple: Optional[Tuple[str, str]] = None,
-        target_cell_type_tuple: Optional[Tuple[str, str]] = None,
-        target_region_tuple: Optional[Tuple[str, str]] = None,
-        ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        ref_region_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
+        ref_id: int | list[int] | Literal["rest"] | None = None,
+        target_annotation_tuple: tuple[str, str] | None = None,
+        target_cell_type_tuple: tuple[str, str] | None = None,
+        target_region_tuple: tuple[str, str] | None = None,
+        ref_annotation_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        ref_cell_type_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        ref_region_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        method: Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var'] | None = 't-test',
         exclude_ambiguous_assignments: bool = False,
         force_assignment: bool = False,
-        name_col: Optional[str] = "uid",
+        name_col: str | None = "uid",
         ):
         """
         Wrapper function for performing differential gene expression analysis within an `InSituExperiment` object.
@@ -1066,7 +1075,7 @@ class InSituExperiment:
 
     def get_n_cells(
         self,
-        cells_layer: Optional[str] = None
+        cells_layer: str | None = None
         ):
         """
         Get the total number of cells across all datasets.
@@ -1093,9 +1102,9 @@ class InSituExperiment:
         adata: AnnData,
         uid_column: str,
         uid_column_adata: str,
-        obs_columns_to_transfer: Optional[List[str]] = None,
-        obsm_keys_to_transfer: Optional[List[str]] = None,
-        cells_layer: Optional[str] = None,
+        obs_columns_to_transfer: list[str] | None = None,
+        obsm_keys_to_transfer: list[str] | None = None,
+        cells_layer: str | None = None,
         overwrite: bool = False,
         strip_uid_prefix: bool = True,
         fill_missing: bool = True,
@@ -1221,9 +1230,9 @@ class InSituExperiment:
         adata: AnnData,
         uid_column: str,
         uid_column_adata: str,
-        obs_columns_to_transfer: Optional[List[str]] = None,
-        obsm_keys_to_transfer: Optional[List[str]] = None,
-        cells_layer: Optional[str] = None,
+        obs_columns_to_transfer: list[str] | None = None,
+        obsm_keys_to_transfer: list[str] | None = None,
+        cells_layer: str | None = None,
         overwrite: bool = False,
         strip_uid_prefix: bool = True,
         fill_missing: bool = True
@@ -1289,9 +1298,9 @@ class InSituExperiment:
 
     def import_from_table(
         self,
-        obs_columns: Optional[List[str]] = None,
-        obsm_keys: Optional[List[str]] = None,
-        cells_layer: Optional[str] = None,
+        obs_columns: list[str] | None = None,
+        obsm_keys: list[str] | None = None,
+        cells_layer: str | None = None,
         overwrite: bool = False,
     ) -> "InSituExperiment":
         """Import data from the concatenated table back into per-sample AnnData objects.
@@ -1377,6 +1386,7 @@ class InSituExperiment:
             return
 
         import warnings
+
         from tqdm.contrib.logging import logging_redirect_tqdm
 
         bar = tqdm(it, total=len(self._metadata), desc=desc, dynamic_ncols=True)
@@ -1401,18 +1411,18 @@ class InSituExperiment:
 
     def _concatenate_samples(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
-        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
         join: Literal["inner", "outer"] = "inner",
-        min_shared_genes: Optional[int] = None,
+        min_shared_genes: int | None = None,
     ) -> anndata.AnnData:
         """Concatenate all sample AnnData objects into a single AnnData.
 
@@ -1442,7 +1452,7 @@ class InSituExperiment:
                 f"Available columns: {list(self._metadata.columns)}"
             )
 
-        adatas: Dict[Any, anndata.AnnData] = {}
+        adatas: dict[Any, anndata.AnnData] = {}
 
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
@@ -1510,15 +1520,15 @@ class InSituExperiment:
 
     def to_anndata(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
-        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
     ) -> anndata.AnnData:
         """
@@ -1556,7 +1566,7 @@ class InSituExperiment:
 
     # ── Table (cross-sample concatenated AnnData) ─────────────────────────────
 
-    def _get_table_path(self, cells_layer: Optional[str] = None) -> Optional[Path]:
+    def _get_table_path(self, cells_layer: str | None = None) -> Path | None:
         """Return the path to the per-layer zarr table, or None if no experiment path is set.
 
         When *cells_layer* is given, returns ``tables/{cells_layer}.zarr``.
@@ -1590,7 +1600,7 @@ class InSituExperiment:
             "Pass cells_layer= explicitly to select one."
         )
 
-    def _get_build_params_path(self, cells_layer: Optional[str] = None) -> Optional[Path]:
+    def _get_build_params_path(self, cells_layer: str | None = None) -> Path | None:
         """Return the path to the per-layer sidecar JSON, or None if no experiment path.
 
         Mirrors :meth:`_get_table_path`: when *cells_layer* is given returns
@@ -1606,7 +1616,7 @@ class InSituExperiment:
             return table_path.with_suffix(".json")
         return Path(self.path) / "tables" / "build_params.json"
 
-    def _read_build_params(self, cells_layer: Optional[str] = None) -> dict:
+    def _read_build_params(self, cells_layer: str | None = None) -> dict:
         """Read build parameters from the per-layer sidecar JSON, with sensible defaults.
 
         Falls back to the legacy ``tables/build_params.json`` for datasets built
@@ -1627,9 +1637,9 @@ class InSituExperiment:
 
     def _resolve_per_sample_h5ad_paths(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
-    ) -> List[tuple]:
+    ) -> list[tuple]:
         """Resolve on-disk h5ad paths for each sample.
 
         Args:
@@ -1692,10 +1702,10 @@ class InSituExperiment:
     def _concat_samples_on_disk(
         self,
         output_path: Path,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
         join: Literal["inner", "outer"] = "inner",
-        min_shared_genes: Optional[int] = None,
+        min_shared_genes: int | None = None,
         make_obs_names_unique: bool = True,
     ) -> None:
         """Concatenate per-sample h5ad files on disk without loading all into RAM.
@@ -1729,7 +1739,7 @@ class InSituExperiment:
         )
 
         # Build ordered mapping: {label_value → h5ad_path}
-        in_files: Dict[str, Path] = {label: path for label, path in sample_paths}
+        in_files: dict[str, Path] = {label: path for label, path in sample_paths}
 
         index_unique = "-" if make_obs_names_unique else None
 
@@ -1788,18 +1798,18 @@ class InSituExperiment:
 
     def build_table(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
-        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
         join: Literal["inner", "outer"] = "inner",
-        min_shared_genes: Optional[int] = None,
+        min_shared_genes: int | None = None,
         overwrite: bool = False,
         method: Literal["in_memory", "concat_on_disk"] = "in_memory",
     ) -> None:
@@ -1938,7 +1948,7 @@ class InSituExperiment:
         self._get_build_params_path(cells_layer).write_text(_json.dumps(build_params))
 
     def load_all(self,
-                 skip: Optional[str] = None,
+                 skip: str | None = None,
                  ):
         """
         Load all data modalities for all datasets.
@@ -1970,7 +1980,7 @@ class InSituExperiment:
             xd.load_cells()
 
     def load_images(self,
-                    names: Union[Literal["all", "nuclei"], str] = "all",
+                    names: Literal["all", "nuclei"] | str = "all",
                     overwrite: bool = False,
                     verbose: bool = False
                     ):
@@ -2002,16 +2012,16 @@ class InSituExperiment:
     def plot_embedding(
         self,
         basis: str,
-        cells_layer: Optional[str] = None,
-        color: Optional[str] = None,
-        title_column: Optional[str] = None,
+        cells_layer: str | None = None,
+        color: str | None = None,
+        title_column: str | None = None,
         title_size: int = 24,
         max_cols: int = 4,
-        figsize: Tuple[int, int] = (8,6),
-        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        figsize: tuple[int, int] = (8,6),
+        savepath: str | os.PathLike | Path | None = None,
         save_only: bool = False,
         show: bool = True,
-        fig: Optional[Figure] = None,
+        fig: Figure | None = None,
         dpi_save: int = 300,
         **kwargs
         ):
@@ -2064,16 +2074,16 @@ class InSituExperiment:
     @with_insitupy_style
     def plot_umaps(
         self,
-        cells_layer: Optional[str] = None,
-        color: Optional[str] = None,
-        title_column: Optional[str] = None,
+        cells_layer: str | None = None,
+        color: str | None = None,
+        title_column: str | None = None,
         title_size: int = 20,
         max_cols: int = 4,
-        figsize: Tuple[int, int] = (8, 6),
-        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        figsize: tuple[int, int] = (8, 6),
+        savepath: str | os.PathLike | Path | None = None,
         save_only: bool = False,
         show: bool = True,
-        fig: Optional[Figure] = None,
+        fig: Figure | None = None,
         dpi_save: int = 300,
         **kwargs
     ):
@@ -2135,7 +2145,7 @@ class InSituExperiment:
 
     def reload(
         self,
-        skip: Optional[List] = None,
+        skip: list | None = None,
         verbose: bool = True,
     ):
         """Reload all datasets and experiment-level files from disk.
@@ -2191,7 +2201,7 @@ class InSituExperiment:
         # Reload colors
         colors_path = path / "colors.json"
         if colors_path.exists():
-            with open(colors_path, 'r') as f:
+            with open(colors_path) as f:
                 self._colors = json.load(f)
         else:
             self._colors = {}
@@ -2202,7 +2212,7 @@ class InSituExperiment:
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
-                with open(filters_path, 'r') as f:
+                with open(filters_path) as f:
                     filters_payload = json.load(f)
                 version = filters_payload.get("version", None)
                 filters = filters_payload.get("filters", None)
@@ -2227,7 +2237,7 @@ class InSituExperiment:
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
-    def unload(self, modalities: Optional[List] = None):
+    def unload(self, modalities: list | None = None):
         """Unload modality data from memory for every dataset in this experiment.
 
         Calls :meth:`~insitupy._core.data.InSituData.unload` on every child
@@ -2333,7 +2343,7 @@ class InSituExperiment:
 
     def save_metadata(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
         """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
@@ -2375,7 +2385,7 @@ class InSituExperiment:
         return path / _METADATA_SCHEMA_FILENAME
 
     @staticmethod
-    def _metadata_dtype_map(metadata: pd.DataFrame) -> Dict[str, str]:
+    def _metadata_dtype_map(metadata: pd.DataFrame) -> dict[str, str]:
         """Serialize DataFrame dtypes to JSON-compatible strings."""
         return {str(column): str(dtype) for column, dtype in metadata.dtypes.items()}
 
@@ -2391,14 +2401,14 @@ class InSituExperiment:
             json.dump(schema_payload, f, indent=2, sort_keys=True)
 
     @classmethod
-    def _load_metadata_dtype_map(cls, path: Path) -> Optional[Dict[str, str]]:
+    def _load_metadata_dtype_map(cls, path: Path) -> dict[str, str] | None:
         """Load metadata dtype map if available and valid, else return None."""
         schema_path = cls._metadata_schema_path(path)
         if not schema_path.exists():
             return None
 
         try:
-            with open(schema_path, 'r') as f:
+            with open(schema_path) as f:
                 schema_payload = json.load(f)
         except Exception as err:
             logger.warning(
@@ -2448,7 +2458,7 @@ class InSituExperiment:
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: Dict[str, Any] = {}
+        read_csv_kwargs: dict[str, Any] = {}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -2481,7 +2491,7 @@ class InSituExperiment:
 
     def save_colors(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
         """Save only experiment colors to ``colors.json``.
@@ -2670,7 +2680,7 @@ class InSituExperiment:
 
     def saveas(
         self,
-        path: Union[str, os.PathLike, Path],
+        path: str | os.PathLike | Path,
         overwrite: bool = False,
         verbose: bool = False,
         collect_warnings_mode: bool = True,
@@ -2735,7 +2745,7 @@ class InSituExperiment:
 
     def save_filters(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
     ):
         """
         Save only experiment filters to ``filters.json``.
@@ -2801,8 +2811,8 @@ class InSituExperiment:
 
     def sync_colors(
         self,
-        keys: Union[str, List[str]],
-        cells_layer: Optional[str] = None,
+        keys: str | list[str],
+        cells_layer: str | None = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         overwrite: bool = False,
         verbose: bool = False
@@ -2878,7 +2888,7 @@ class InSituExperiment:
         cls,
         objs,
         new_col_name=None,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         mode: Literal["copy", "move"] = "copy",
     ):
         """Concatenate multiple InSituExperiment objects.
@@ -3083,7 +3093,7 @@ class InSituExperiment:
 
     @classmethod
     def from_config(cls,
-                    config_path: Union[str, os.PathLike, Path],
+                    config_path: str | os.PathLike | Path,
                     mode: Literal["insitupy", "xenium"],
                     collect_warnings_mode: bool = True,
                     **kwargs
@@ -3172,7 +3182,7 @@ class InSituExperiment:
     def from_regions(cls,
                     data: InSituData,
                     region_key: str,
-                    region_names: Optional[Union[List[str], str]] = None,
+                    region_names: list[str] | str | None = None,
                     lazy: bool = False,
                     detach_transcripts: bool = True
                     ):
@@ -3267,9 +3277,9 @@ class InSituExperiment:
 
     @classmethod
     def read(cls,
-             path: Union[str, os.PathLike, Path],
+             path: str | os.PathLike | Path,
                mode: Literal["insitupy", "spatialdata"] = "insitupy",
-               filter_key: Optional[str] = None) -> "InSituExperiment":
+               filter_key: str | None = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
@@ -3297,7 +3307,7 @@ class InSituExperiment:
     # ==================== SPATIALDATA MODE METHODS ====================
 
     @classmethod
-    def _read_spatialdata(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+    def _read_spatialdata(cls, path: str | os.PathLike | Path) -> "InSituExperiment":
         """
         Read an InSituExperiment from a SpatialData zarr store.
 
@@ -3325,8 +3335,7 @@ class InSituExperiment:
                 "Install it with: pip install insitupy[spatialdata]"
             )
         else:
-            from spatialdata_wrapper._io import \
-                silent_read_zarr as _silent_read_zarr
+            from spatialdata_wrapper._io import silent_read_zarr as _silent_read_zarr
 
         path = Path(path)
         if not path.exists():
@@ -3375,7 +3384,7 @@ class InSituExperiment:
         colors_path = path / "colors.json"
         if colors_path.exists():
             try:
-                with open(colors_path, 'r') as f:
+                with open(colors_path) as f:
                     experiment._colors = json.load(f)
             except Exception as e:
                 logger.warning(f"Could not load colors.json: {e}")
@@ -3383,7 +3392,7 @@ class InSituExperiment:
         return experiment
 
     @staticmethod
-    def _extract_samples_from_spatialdata(sdata) -> Dict[str, Dict]:
+    def _extract_samples_from_spatialdata(sdata) -> dict[str, dict]:
         """
         Group SpatialData elements by sample ID.
 
@@ -3422,7 +3431,7 @@ class InSituExperiment:
         return dict(samples)
 
     @staticmethod
-    def _populate_structured_data(struct_data, sample_elements: Dict, sample_id: str):
+    def _populate_structured_data(struct_data, sample_elements: dict, sample_id: str):
         """
         Populate a StructuredSpatialData object from a dictionary of elements.
 
@@ -3455,8 +3464,7 @@ class InSituExperiment:
                     image_name = parts[1]
                     # Get transformation for pixel size
                     try:
-                        from spatialdata.transformations import \
-                            get_transformation
+                        from spatialdata.transformations import get_transformation
                         scale_obj = get_transformation(elem)
                         struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
                     except Exception as e:
@@ -3498,7 +3506,7 @@ class InSituExperiment:
                 logger.warning(f"Unknown modality in key: {key}")
 
     @staticmethod
-    def _get_loaded_modalities_spatialdata(data) -> List[str]:
+    def _get_loaded_modalities_spatialdata(data) -> list[str]:
         """
         Get list of loaded modalities from a StructuredSpatialData object.
 
@@ -3524,8 +3532,8 @@ class InSituExperiment:
         return loaded
 
     @classmethod
-    def _read_insitupy(cls, path: Union[str, os.PathLike, Path],
-                       filter_key: Optional[str] = None) -> "InSituExperiment":
+    def _read_insitupy(cls, path: str | os.PathLike | Path,
+                       filter_key: str | None = None) -> "InSituExperiment":
         """
         Read an InSituExperiment in InSituPy format (original implementation).
 
@@ -3543,7 +3551,7 @@ class InSituExperiment:
 
         try:
             # load colors
-            with open(path / "colors.json", 'r') as f:
+            with open(path / "colors.json") as f:
                 colors = json.load(f)
         except FileNotFoundError:
             colors = {}
@@ -3553,7 +3561,7 @@ class InSituExperiment:
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
-                with open(filters_path, 'r') as f:
+                with open(filters_path) as f:
                     filters_payload = json.load(f)
             except Exception as err:
                 raise ValueError(
@@ -3623,9 +3631,9 @@ class InSituExperiment:
 
         return experiment
 
-    def _build_filters_payload(self) -> Dict[str, Any]:
+    def _build_filters_payload(self) -> dict[str, Any]:
         """Build versioned JSON payload for ``filters.json``."""
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "version": _FILTERS_SCHEMA_VERSION,
             "filters": {},
         }
@@ -3648,7 +3656,7 @@ class InSituExperiment:
             )
     def _check_obs_uniqueness(
         self,
-        cells_layer: Optional[str] = None
+        cells_layer: str | None = None
         ):
         """
         Check if the observation names are unique across all datasets.
@@ -3676,9 +3684,9 @@ class InSituExperiment:
     def _create_categorical_color_dict(
         self,
         obs_col: str,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
-        ) -> Dict:
+        ) -> dict:
         """Create a color dictionary for categorical data."""
         cols = []
         for _, xd in self.iterdata():
@@ -3699,12 +3707,12 @@ class InSituExperiment:
 
     def calculate_qc_metrics(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         layer: str = None,
         force_layer: bool = False,
         add_to_metadata: bool = True,
         return_metrics: bool = False,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Calculate quality control metrics for the InSituExperiment.
 

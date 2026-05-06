@@ -1,7 +1,6 @@
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 import matplotlib.pyplot as plt
 
@@ -14,7 +13,7 @@ def save_and_show_figure(
     save_only: bool = False,
     show: bool = True,
     dpi_save: int = 300,
-    background_color: Optional[str] = None,
+    background_color: str | None = None,
     tight: bool = True,
     verbose: bool = False
     ):

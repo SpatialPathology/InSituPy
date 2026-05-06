@@ -4,12 +4,11 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Union
 
 from insitupy.utils.utils import nested_dict_numpy_to_list
 
 
-def read_json(path: Union[str, os.PathLike, Path]) -> dict:
+def read_json(path: str | os.PathLike | Path) -> dict:
     '''
     Function to load json or json.gz files as dictionary.
     '''
@@ -18,7 +17,7 @@ def read_json(path: Union[str, os.PathLike, Path]) -> dict:
         with gzip.open(path, 'rt') as f:
             data = json.load(f)
     else:
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
 
     return data
@@ -26,7 +25,7 @@ def read_json(path: Union[str, os.PathLike, Path]) -> dict:
 
 def write_dict_to_json(
     dictionary: dict,
-    file: Union[str, os.PathLike, Path],
+    file: str | os.PathLike | Path,
     ):
     """Serialise a dictionary to a JSON file, converting NumPy arrays to lists if needed.
 
@@ -57,7 +56,7 @@ def write_dict_to_json(
 
 
 def check_overwrite_and_remove_if_true(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     overwrite: bool = False
     ):
     """Delete *path* if *overwrite* is True; raise :exc:`FileExistsError` otherwise.

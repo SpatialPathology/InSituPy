@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal, Union
 from uuid import uuid4
 from warnings import warn
 
@@ -7,9 +7,12 @@ import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
-from insitupy._version import __version__
-from insitupy._constants import WITH_NAPARI
-from insitupy._constants import ANNOTATIONS_SYMBOL, FLUO_CMAP, REGIONS_SYMBOL
+from insitupy._constants import (
+    ANNOTATIONS_SYMBOL,
+    FLUO_CMAP,
+    REGIONS_SYMBOL,
+    WITH_NAPARI,
+)
 from insitupy._exceptions import InSituDataMissingObject
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.images.axes import ImageAxes
@@ -41,17 +44,22 @@ if TYPE_CHECKING:
 if WITH_NAPARI:
     import napari
     from napari.layers import Layer, Points, Shapes
-    from napari.utils.notifications import show_info, show_warning
+    from napari.utils.notifications import show_warning
 
     from insitupy.interactive._callbacks import _update_colorlegend
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
-    from insitupy.interactive._layers import _apply_colors_from_features, _create_points_layer
+    from insitupy.interactive._layers import (
+        _apply_colors_from_features,
+        _create_points_layer,
+    )
     from insitupy.interactive._transcript_viewer import (
-        TranscriptViewerConfig, create_transcript_viewer_widget)
-    from insitupy.interactive._widgets import (ColorLegendWidget, UtilityButtonsWidget)
+        TranscriptViewerConfig,
+        create_transcript_viewer_widget,
+    )
+    from insitupy.interactive._widgets import ColorLegendWidget, UtilityButtonsWidget
 
     #from napari.layers.shapes.shapes import Shapes
-    from ..interactive._widgets import (_initialize_widgets, GeometriesWidget)
+    from ..interactive._widgets import _initialize_widgets
 
 ################################
 ### NAPARI-RELATED FUNCTIONS ###
@@ -60,7 +68,7 @@ if WITH_NAPARI:
     def _add_images_to_viewer(
         data: Union["InSituData"],
         viewer: napari.Viewer,
-        grayscale_colormap: List[str] = FLUO_CMAP,
+        grayscale_colormap: list[str] = FLUO_CMAP,
         ):
         images_attr = data._images
         n_images = len(images_attr.metadata)
@@ -84,10 +92,10 @@ if WITH_NAPARI:
 
             if data._images.metadata[img_name]["axes"] == "CYX":
                 if len(shape) == 2:
-                    warn((
+                    warn(
                         f"Axes information ({axes_str}) and shape ({shape}) do not fit together. Assumed grayscale image with axes 'YX'.\n"
                         f"Error is likely caused by inconsistencies in the metadata file occuring in insitupy versions < 0.9.0."
-                        )
+
                         )
                     axes_str = "YX"
 
@@ -217,7 +225,7 @@ if WITH_NAPARI:
         viewer: napari.viewer,
         keys: str,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         point_size: int = 8
         ):
         if data.cells.is_empty:
@@ -474,7 +482,7 @@ if WITH_NAPARI:
         data: Union["InSituData", "StructuredSpatialData"],
         viewer: napari.Viewer,
         lazy_loading: bool = True,
-        transcript_config: Optional[TranscriptViewerConfig] = None,
+        transcript_config: TranscriptViewerConfig | None = None,
         widgets_max_width: int = 500,
     ) -> None:
         """Add transcript viewer widget to the napari viewer.
@@ -525,9 +533,9 @@ if WITH_NAPARI:
 
     def _show(
         data: Union["InSituData", "StructuredSpatialData"],
-        keys: Optional[str] = None,
+        keys: str | None = None,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         point_size: int = 8,
         scalebar: bool = True,
         unit: str = "µm",
@@ -536,7 +544,7 @@ if WITH_NAPARI:
         verbose: bool = False,
         show_transcripts: bool = True,
         transcript_lazy_loading: bool = True,
-        transcript_config: Optional[TranscriptViewerConfig] = None,
+        transcript_config: TranscriptViewerConfig | None = None,
         ):
 
         _sync_cells_for_viewer_if_needed(data)

@@ -4,7 +4,6 @@ import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Union
 
 import geopandas
 import numpy as np
@@ -20,8 +19,7 @@ os.environ['USE_PYGEOS'] = '0'
 
 
 def parse_geopandas(
-    data: Union[GeoDataFrame, pd.DataFrame, dict,
-                str, os.PathLike, Path],
+    data: GeoDataFrame | pd.DataFrame | dict | str | os.PathLike | Path,
     uid_col: str = "id"
     ):
     """Parse geometry data from various input types into a GeoDataFrame.
@@ -93,7 +91,7 @@ def _read_file_helper(file, engine):
         dataframe['classification'] = dataframe['classification'].apply(safe_literal_eval)
     return dataframe
 
-def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
+def read_qupath_geojson(file: str | os.PathLike | Path) -> pd.DataFrame:
     """
     Reads a QuPath-compatible GeoJSON file and transforms it into a flat DataFrame.
 
@@ -137,7 +135,7 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     return dataframe
 
 def write_qupath_geojson(dataframe: GeoDataFrame,
-                         file: Union[str, os.PathLike, Path]
+                         file: str | os.PathLike | Path
                          ):
     """
     Converts a GeoDataFrame with "name" and "color" columns into a QuPath-compatible GeoJSON-like format,

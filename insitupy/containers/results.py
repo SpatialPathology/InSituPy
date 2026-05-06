@@ -1,11 +1,10 @@
-import json
 import logging
 import os
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 import pandas as pd
 import toml
@@ -25,24 +24,24 @@ class DiffExprConfigCollector:
     # General
     mode: Literal["single-cell", "pseudobulk"]
     method_params: dict
-    cells_layer: Optional[str] = None
-    exclude_ambiguous_assignments: Optional[bool] = None
+    cells_layer: str | None = None
+    exclude_ambiguous_assignments: bool | None = None
 
     # Target
-    target_annotation: Optional[str] = None
-    target_cell_type: Optional[str] = None
-    target_region: Optional[str] = None
-    target_cell_number: Optional[int] = None
-    target_name: Optional[str] = None
-    target_metadata: Dict[str, Any] = None
+    target_annotation: str | None = None
+    target_cell_type: str | None = None
+    target_region: str | None = None
+    target_cell_number: int | None = None
+    target_name: str | None = None
+    target_metadata: dict[str, Any] = None
 
     # Reference
-    ref_annotation: Optional[str] = None
-    ref_cell_type: Optional[str] = None
-    ref_region: Optional[str] = None
-    ref_cell_number: Optional[int] = None
-    ref_name: Optional[str] = None
-    ref_metadata: Dict[str, Any] = None
+    ref_annotation: str | None = None
+    ref_cell_type: str | None = None
+    ref_region: str | None = None
+    ref_cell_number: int | None = None
+    ref_name: str | None = None
+    ref_metadata: dict[str, Any] = None
 
     # class variables
     GENERAL_FIELDS = ["mode", "method_params", "cells_layer", "exclude_ambiguous_assignments"]
@@ -118,7 +117,7 @@ class DiffExprConfigCollector:
 
         return config_dict
 
-    def save_as_toml(self, filepath: Union[str, os.PathLike, Path]):
+    def save_as_toml(self, filepath: str | os.PathLike | Path):
         """Serialise this config to a TOML file.
 
         Args:
@@ -129,7 +128,7 @@ class DiffExprConfigCollector:
             toml.dump(config_dict, f)
 
     @classmethod
-    def read_from_toml(cls, filepath: Union[str, os.PathLike, Path]) -> "DiffExprConfigCollector":
+    def read_from_toml(cls, filepath: str | os.PathLike | Path) -> "DiffExprConfigCollector":
         """Load a :class:`DiffExprConfigCollector` from a TOML file.
 
         Args:
@@ -140,7 +139,7 @@ class DiffExprConfigCollector:
             A new :class:`DiffExprConfigCollector` instance populated with
             the values from the file.
         """
-        with open(filepath, 'r') as f:
+        with open(filepath) as f:
             config = toml.load(f)
 
         # Flatten the nested config dictionary
@@ -192,8 +191,8 @@ class DiffExprResults:
         self,
         main: pd.DataFrame,
         config: DiffExprConfigCollector,
-        target_neighborhood: Optional[pd.DataFrame] = None,
-        ref_neighborhood: Optional[pd.DataFrame] = None,
+        target_neighborhood: pd.DataFrame | None = None,
+        ref_neighborhood: pd.DataFrame | None = None,
     ):
         self.main = main
         self.target_neighborhood = target_neighborhood
@@ -211,7 +210,7 @@ class DiffExprResults:
     def __repr__(self):
         return f"<DiffExprResults main={len(self.main)} genes, neighbors={self.has_neighbors()}>"
 
-    def get_all_results(self) -> Dict[str, pd.DataFrame]:
+    def get_all_results(self) -> dict[str, pd.DataFrame]:
         """Return all results in a dictionary for easy iteration."""
         results = {"main": self.main}
         if self.target_neighborhood is not None:
@@ -226,7 +225,7 @@ class DiffExprResults:
 
 
     @classmethod
-    def read(cls, directory: Union[str, os.PathLike, Path]) -> "DiffExprResults":
+    def read(cls, directory: str | os.PathLike | Path) -> "DiffExprResults":
         """
         Read saved differential expression results and metadata from a directory.
 
@@ -271,7 +270,7 @@ class DiffExprResults:
 
     def save(
         self,
-        directory: Union[str, os.PathLike, Path],
+        directory: str | os.PathLike | Path,
         overwrite: bool = False):
         """
         Save all results and metadata to the specified directory.

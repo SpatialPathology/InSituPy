@@ -5,7 +5,6 @@ import time
 import tracemalloc
 import warnings
 from pathlib import Path
-from typing import List, Optional, Union
 
 try:
     import cv2
@@ -15,18 +14,16 @@ except ImportError:
     cv2 = None
 
 import dask.array as da
-import matplotlib.pyplot as plt
 import numpy as np
 
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import read_image
-from insitupy.images.registration import (_percentile_scale_for_saving,
-                                          register_images_standalone,
-                                          save_registered_image_tiff)
-from insitupy.images.utils import (deconvolve_he, resize_image,
-                                   scale_to_max_width)
+from insitupy.images.registration import (
+    register_images_standalone,
+    save_registered_image_tiff,
+)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list
 
@@ -60,8 +57,8 @@ class ImageRegistration:
     """
 
     def __init__(self,
-                 image: Union[np.ndarray, da.Array],
-                 template: Union[np.ndarray, da.Array],
+                 image: np.ndarray | da.Array,
+                 template: np.ndarray | da.Array,
                  **kwargs,
                  ):
 
@@ -125,12 +122,12 @@ class ImageRegistration:
 
 def register_images(
     data: InSituData,  # type: ignore
-    image_path: Optional[Union[str, os.PathLike, Path]] = None,
-    channel_names: Optional[Union[str, List[str]]] = None,
-    channel_name_for_registration: Optional[str] = None,
+    image_path: str | os.PathLike | Path | None = None,
+    channel_names: str | list[str] | None = None,
+    channel_name_for_registration: str | None = None,
     template_image_name: str = "nuclei",
     save_registered_images: bool = True,
-    output_dir: Union[str, os.PathLike, Path] = None,
+    output_dir: str | os.PathLike | Path = None,
     min_good_matches_per_area: int = 5,  # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
@@ -138,10 +135,10 @@ def register_images(
     physicalsize: str = 'µm',
     debug: bool = False,
     rank_matches_for_qc: bool = True,
-    identifier: Optional[str] = None,
+    identifier: str | None = None,
     force_failure_qc: bool = False,
     *,
-    image_to_be_registered: Optional[Union[str, os.PathLike, Path]] = None,
+    image_to_be_registered: str | os.PathLike | Path | None = None,
     raise_on_insufficient_matches: bool = False,
     ):
     """

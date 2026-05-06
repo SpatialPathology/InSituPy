@@ -6,8 +6,8 @@ importable regardless of the working directory. Use this script when running
 from Claude Desktop (which ignores the `cwd` config field).
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

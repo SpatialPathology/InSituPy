@@ -3,12 +3,12 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 else:
-    from spatialdata.transformations import get_transformation
+    pass
 
 import logging
 from collections import defaultdict
 from numbers import Number
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Union
 
 import numpy as np
 
@@ -16,13 +16,18 @@ from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.containers import CellData, SpatialUnitsData
 from insitupy.spatialdata._convert import (
-    _add_images_to_insitudata, _create_boundaries_from_spatialdata,
-    _extract_pixel_size_from_spatialdata, _merge_dicts_with_warning,
+    _add_images_to_insitudata,
+    _create_boundaries_from_spatialdata,
+    _merge_dicts_with_warning,
     _transform_annotations_for_spatialdata,
     _transform_cell_boundaries_for_spatialdata,
-    _transform_images_for_spatialdata, _transform_regions_for_spatialdata,
-    _transform_table_for_spatialdata, _transform_transcripts_for_spatialdata,
-    _validate_boundaries_data_format, _validate_image_data_format)
+    _transform_images_for_spatialdata,
+    _transform_regions_for_spatialdata,
+    _transform_table_for_spatialdata,
+    _transform_transcripts_for_spatialdata,
+    _validate_boundaries_data_format,
+    _validate_image_data_format,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,28 +230,23 @@ def convert_to_spatialdata(
 def convert_from_spatialdata(
     sdata: SpatialData,
     # Image parameters
-    image_data: Optional[Union[
-        Tuple[str, Number],
-        Tuple[str, Number, bool],
-        List[Union[Tuple[str, Number], Tuple[str, Number, bool]]],
-        Dict[str, Union[Tuple[str, Number], Tuple[str, Number, bool]]]
-    ]] = None,
+    image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None = None,
     # Table parameters
     table_key: str = 'table',
     # Cell parameters
-    cells_key: Optional[str] = None,
+    cells_key: str | None = None,
     # Spatial units parameters
-    units_key: Optional[str] = None,
-    unit_type: Optional[str] = None,
+    units_key: str | None = None,
+    unit_type: str | None = None,
     # Boundaries parameters
-    cell_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (cell_boundaries_key, pixel_size)
-    nucleus_boundaries_data: Optional[Tuple[str, Number]] = None, # tuple as (nucleus_boundaries_key, pixel_size)
+    cell_boundaries_data: tuple[str, Number] | None = None, # tuple as (cell_boundaries_key, pixel_size)
+    nucleus_boundaries_data: tuple[str, Number] | None = None, # tuple as (nucleus_boundaries_key, pixel_size)
     # Transcripts parameters
-    transcripts_key: Optional[str] = "transcripts",
+    transcripts_key: str | None = "transcripts",
     # Metadata
-    slide_id: Optional[str] = None,
-    sample_id: Optional[str] = None,
-    metadata: Optional[dict] = None,
+    slide_id: str | None = None,
+    sample_id: str | None = None,
+    metadata: dict | None = None,
     method_name: str = "",
 
     # Other parameters

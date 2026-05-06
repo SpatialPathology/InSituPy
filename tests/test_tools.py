@@ -1,11 +1,11 @@
 """Tests for tools: tl.dge, calc_distance_of_cells_from,
 calculate_gex_diff_to_neighbors, pseudobulk_dge."""
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-import geopandas as gpd
 from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
@@ -15,7 +15,6 @@ from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from
 from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors
 from insitupy.tools.pseudobulk import pseudobulk_dge
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -168,7 +167,6 @@ class TestCalculateGexDiffToNeighbors:
         assert len(result) == 4
 
     def test_first_element_is_dataframe(self):
-        from scipy.sparse import issparse
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
             adata, radius=200.0, strategy="mean", verbose=False
@@ -176,7 +174,6 @@ class TestCalculateGexDiffToNeighbors:
         assert isinstance(df, pd.DataFrame)
 
     def test_adjacency_matrix_shape(self):
-        from scipy.sparse import issparse
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
             adata, radius=200.0, strategy="mean", verbose=False

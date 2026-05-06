@@ -5,43 +5,64 @@ from insitupy._constants import WITH_NAPARI
 logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
-    from typing import List, Optional
 
     import matplotlib.pyplot as plt
     import napari
     import numpy as np
     import pandas as pd
-    from magicgui import magic_factory, magicgui
+    from magicgui import magicgui
     from magicgui.widgets import FunctionGui
     from matplotlib.colors import ListedColormap
     from napari.utils import DirectLabelColormap
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import QSize, Qt
-    from qtpy.QtGui import QFontMetrics, QIcon
-    from qtpy.QtWidgets import (QComboBox, QCompleter, QFileDialog,
-                                QHBoxLayout, QInputDialog, QLabel, QLineEdit,
-                                QPushButton, QVBoxLayout, QWidget)
-    from scipy.sparse import issparse
+    from qtpy.QtGui import QFontMetrics
+    from qtpy.QtWidgets import (
+        QComboBox,
+        QCompleter,
+        QFileDialog,
+        QHBoxLayout,
+        QInputDialog,
+        QLabel,
+        QLineEdit,
+        QPushButton,
+        QVBoxLayout,
+        QWidget,
+    )
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL,
-                                     DEFAULT_CATEGORICAL_CMAP, POINTS_SYMBOL,
-                                     REGION_CMAP, REGIONS_SYMBOL)
+    from insitupy._constants import (
+        ANNOTATIONS_SYMBOL,
+        DEFAULT_CATEGORICAL_CMAP,
+        POINTS_SYMBOL,
+        REGIONS_SYMBOL,
+    )
     from insitupy.images.utils import create_img_pyramid
     from insitupy.interactive._callbacks import (
-        _refresh_widgets_after_data_change, _update_colorlegend,
-        _update_key_on_type_change)
-    from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
-                                               config_manager)
-    from insitupy.interactive._layers import (_create_points_layer,
-                                              _create_units_layer,
-                                              _update_points_layer,
-                                              _update_units_layer)
+        _refresh_widgets_after_data_change,
+        _update_colorlegend,
+        _update_key_on_type_change,
+    )
+    from insitupy.interactive._configs import (
+        ViewerConfig,
+        _get_viewer_uid,
+        config_manager,
+    )
+    from insitupy.interactive._layers import (
+        _create_points_layer,
+        _create_units_layer,
+        _update_points_layer,
+        _update_units_layer,
+    )
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
+    from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
     from insitupy.utils._helpers import _get_expression_values
 
-    from ._layers import (_add_geometries_as_layer, _apply_colors_from_features,
-                          _connect_color_propagation, _get_or_assign_color)
-    from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
+    from ._layers import (
+        _add_geometries_as_layer,
+        _apply_colors_from_features,
+        _connect_color_propagation,
+        _get_or_assign_color,
+    )
 
     # Maximum number of unique colors for labels (napari limitation)
     MAX_LABEL_COLORS = 500
@@ -75,8 +96,8 @@ if WITH_NAPARI:
         label_ids: np.ndarray,
         cell_names_boundary: np.ndarray,
         mask_key: str,
-        key: Optional[str] = None,
-        color_values: Optional[np.ndarray] = None,
+        key: str | None = None,
+        color_values: np.ndarray | None = None,
     ) -> dict:
         """Build per-label properties used by napari status and tooltips."""
         boundaries = viewer_config.boundaries
@@ -124,7 +145,7 @@ if WITH_NAPARI:
 
     def _create_outline_colormap(
         label_ids: np.ndarray,
-        hidden_label_ids: Optional[set[int]] = None,
+        hidden_label_ids: set[int] | None = None,
     ) -> DirectLabelColormap:
         """Create a direct colormap that renders every non-background label in black."""
         if hidden_label_ids is None:
@@ -147,7 +168,7 @@ if WITH_NAPARI:
         layer_name: str,
         mask_key: str,
         key: str,
-        colormap: Optional[ListedColormap] = None,
+        colormap: ListedColormap | None = None,
         add_new_layer: bool = False,
     ) -> None:
         """Create or update a labels layer with colors based on expression values.
@@ -365,7 +386,7 @@ if WITH_NAPARI:
         viewer: napari.Viewer,
         viewer_config: ViewerConfig
         #xdata # InSituData object
-        ) -> List[FunctionGui]:
+        ) -> list[FunctionGui]:
 
         # access viewer from InSituData
         #viewer = xdata.viewer
@@ -664,7 +685,7 @@ if WITH_NAPARI:
                 cell="",
                 zoom=5,
                 highlight=True,
-                ) -> Optional[napari.types.LayerDataTuple]:
+                ) -> napari.types.LayerDataTuple | None:
                 if cell in viewer_config.adata.obs_names.astype(str):
                     # get location of selected cell
                     cell_loc = viewer_config.adata.obs_names.get_loc(cell)

@@ -1,7 +1,7 @@
 """Tests for the register_images_standalone() function and related dataclasses."""
+import dask.array as da
 import numpy as np
 import pytest
-import dask.array as da
 
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.registration import (
