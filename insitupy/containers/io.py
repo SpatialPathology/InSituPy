@@ -20,15 +20,11 @@ from zarr.errors import ArrayNotFoundError
 from insitupy._io.files import read_json
 
 logger = logging.getLogger(__name__)
-from insitupy.containers import (
-    AnnotationsData,
-    BoundariesData,
-    CellData,
-    ImageData,
-    MultiCellData,
-    RegionsData,
-    ShapesData,
-)
+from insitupy.containers.boundaries_data import BoundariesData
+from insitupy.containers.cell_data import CellData
+from insitupy.containers.image_data import ImageData
+from insitupy.containers.multi_cell_data import MultiCellData
+from insitupy.containers.shapes_data import AnnotationsData, RegionsData, ShapesData
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.utils.utils import (
