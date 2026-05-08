@@ -215,6 +215,11 @@ if WITH_NAPARI:
         # Get label IDs and cell names
         label_ids = boundaries.seg_mask_value.compute()
         cell_names_boundary = boundaries.cell_names.compute()
+        # Preserve categorical order before _as_positional_array drops the dtype.
+        # adata.obs[key] arrives as a Categorical Series whose .cat.categories
+        # matches the index order of adata.uns["{key}_colors"].  np.asarray()
+        # strips that ordering, so we save it here for the colormap lookup below.
+        categorical_order = list(color_values.cat.categories) if hasattr(color_values, 'cat') else None
         color_values = _as_positional_array(color_values)
 
         if not _has_non_missing_label_values(color_values):
@@ -247,9 +252,14 @@ if WITH_NAPARI:
         if is_categorical:
             # Categorical coloring
             if colormap is not None:
-                # Use provided colormap
-                unique_categories = _unique_non_missing_categories(color_values)
-                cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
+                # Build category→index mapping aligned to adata.uns["{key}_colors"].
+                # Use the preserved categorical order when available; fall back to
+                # first-occurrence order for non-categorical inputs.
+                if categorical_order is not None:
+                    cat_to_idx = {cat: i for i, cat in enumerate(categorical_order)}
+                else:
+                    unique_categories = _unique_non_missing_categories(color_values)
+                    cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
 
                 for label_id, cell_idx in zip(label_ids, cell_indices):
                     if cell_idx is not None and cell_idx < len(color_values):
