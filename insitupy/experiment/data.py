@@ -1,3 +1,4 @@
+import contextlib
 import gc
 import json
 import logging
@@ -23,6 +24,7 @@ from tqdm import tqdm
 
 from insitupy._constants import (
     DEFAULT_CATEGORICAL_CMAP,
+    ISPY_METADATA_FILE,
     LOAD_FUNCS,
     MODALITIES,
     MODALITIES_ABBR,
@@ -2824,7 +2826,8 @@ class InSituExperiment:
             keys (Union[str, List[str]]): The metadata keys to synchronize colors for.
             cells_layer (Optional[str], optional): The layer to access. Defaults to None.
             palette (ListedColormap, optional): The color palette to use.
-            overwrite (bool, optional): Whether to overwrite existing color dictionaries. Defaults to False.
+            overwrite (bool, optional): Whether to overwrite existing color
+                dictionaries. Defaults to False.
             verbose (bool, optional): Whether to print status messages. Defaults to True.
         """
         self._check_mode_compatibility("sync_colors")
@@ -2916,8 +2919,12 @@ class InSituExperiment:
 
                 .. warning::
                     ``mode="move"`` is **destructive and irreversible**.
-                    All source experiments must have a save path set and must
-                    reside on the same filesystem as ``path``.
+                    All source experiments must reside on the same filesystem
+                    as ``path``.  Subsetted experiments (created via ``[]``
+                    indexing) are supported: their datasets are moved normally,
+                    but the original experiment root directory is **not** removed
+                    automatically — a :class:`UserWarning` is emitted and the
+                    caller is responsible for cleaning up the remainder.
 
         Returns:
             InSituExperiment: A new InSituExperiment object.
@@ -2962,27 +2969,29 @@ class InSituExperiment:
             for i, obj in enumerate(objs):
                 if not isinstance(obj, InSituExperiment):
                     raise TypeError("All objects must be instances of InSituExperiment.")
-                if obj._path is None:
-                    raise ValueError(
-                        f"mode='move' requires all experiments to have a save path set, "
-                        f"but experiment at index {i} has no path. "
-                        f"Call saveas() first."
-                    )
+                for xd in obj._data:
+                    if xd._path is None:
+                        raise ValueError(
+                            f"mode='move' requires all datasets to have a save path set, "
+                            f"but dataset '{xd.slide_id}' in experiment at index {i} has no path. "
+                            f"Call saveas() on the experiment first."
+                        )
 
             path = Path(path)
 
-            # Verify same filesystem: compare the device of the destination
-            # parent (creating it if needed) against each source dataset.
+            # Verify same filesystem per dataset (covers subset experiments whose
+            # obj._path is None): compare device of destination against each source.
             path.mkdir(parents=True, exist_ok=True)
             dst_dev = os.stat(path).st_dev
             for obj in objs:
-                src_dev = os.stat(obj._path).st_dev
-                if src_dev != dst_dev:
-                    raise ValueError(
-                        f"mode='move' requires source and destination to be on the "
-                        f"same filesystem. Source '{obj._path}' and destination '{path}' "
-                        f"are on different devices. Use mode='copy' + saveas() instead."
-                    )
+                for xd in obj._data:
+                    src_dev = os.stat(xd._path).st_dev
+                    if src_dev != dst_dev:
+                        raise ValueError(
+                            f"mode='move' requires source and destination to be on the "
+                            f"same filesystem. Source '{xd._path}' and destination '{path}' "
+                            f"are on different devices. Use mode='copy' + saveas() instead."
+                        )
 
             return cls._concat_move(
                 objs=objs,
@@ -3039,17 +3048,33 @@ class InSituExperiment:
         Moves each source dataset directory to ``path/data-NNN``, updates
         ``InSituData._path``, detaches in-memory data, writes experiment-level
         files to ``path``, and removes the now-empty source experiment roots.
+        Subset experiments (``obj._path is None``) are supported: their datasets
+        are moved normally but the original experiment root is not removed.
         """
         new_experiment = cls(data_type=data_type)
         new_metadata: list = []
         merged_colors: dict = {}
         global_idx = 0
 
+        # Warn upfront about subset experiments whose roots will not be cleaned up.
+        for i, obj in enumerate(objs):
+            if obj._path is None and obj._data:
+                inferred_root = obj._data[0]._path.parent
+                warnings.warn(
+                    f"Experiment at index {i} is a subset (no experiment root path set). "
+                    f"{len(obj._data)} dataset(s) will be moved out of '{inferred_root}', "
+                    f"but that directory will NOT be removed automatically — any remaining "
+                    f"datasets and experiment-level files there must be cleaned up manually.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+
         for key, obj in zip(keys, objs):
             # Release in-memory data before moving so the move loop stays clean
             obj.unload()
 
-            for xd in tqdm(obj._data, desc=f"Moving datasets from {obj._path.name}"):
+            desc = f"Moving datasets from {obj._path.name}" if obj._path else "Moving datasets"
+            for xd in tqdm(obj._data, desc=desc):
                 dst = path / f"data-{str(global_idx).zfill(3)}"
                 shutil.move(str(xd._path), str(dst))
                 xd._path = dst
@@ -3075,13 +3100,26 @@ class InSituExperiment:
         new_experiment.save_colors(path=path, overwrite=True)
         new_experiment.save_filters(path=path)
 
-        # Remove source experiment roots (datasets have already been moved out)
+        # Remove source experiment roots (datasets have already been moved out).
+        # Subset experiments have no root path and are skipped.
+        _EXPECTED_ROOT_FILES = {
+            "metadata.csv",
+            _METADATA_SCHEMA_FILENAME,
+            "colors.json",
+            "filters.json",
+        }
         for obj in objs:
-            remaining = list(obj._path.iterdir())
-            if remaining:
-                logger.info(
-                    "Removing source experiment root '%s' (%d item(s) remaining).",
-                    obj._path, len(remaining),
+            if obj._path is None:
+                continue
+            remaining = {p.name for p in obj._path.iterdir()}
+            unexpected = remaining - _EXPECTED_ROOT_FILES
+            if unexpected:
+                warnings.warn(
+                    f"Removing source experiment root '{obj._path}' which still contains "
+                    f"{len(unexpected)} unexpected item(s): {sorted(unexpected)}. "
+                    f"These will be permanently deleted.",
+                    UserWarning,
+                    stacklevel=3,
                 )
             shutil.rmtree(str(obj._path))
             obj._path = None
@@ -3093,30 +3131,37 @@ class InSituExperiment:
 
     @classmethod
     def from_config(cls,
-                    config_path: str | os.PathLike | Path,
-                    mode: Literal["insitupy", "xenium"],
+                    config: str | os.PathLike | Path | pd.DataFrame,
+                    mode: Literal["insitupy", "xenium", "auto"] = "auto",
                     collect_warnings_mode: bool = True,
                     **kwargs
                     ):
-        """Create an InSituExperiment object from a configuration file.
+        """Create an InSituExperiment object from a configuration file or DataFrame.
 
         Args:
-            config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
-            mode (Literal["insitupy", "xenium"]): The mode to use for loading the datasets.
+            config (Union[str, os.PathLike, Path, pd.DataFrame]): Configuration specifying the
+                datasets to load. Either a path to a CSV or Excel file, or a :class:`pandas.DataFrame`
+                directly. Must contain a ``'directory'`` column with the path to each dataset.
+                When passing a DataFrame the index is ignored.
+            mode (Literal["insitupy", "xenium", "auto"]): The mode to use for loading the datasets.
+                - "auto": Automatically detect the format of each directory by looking for ``.ispy``
+                  (InSituPy project) or ``experiment.xenium`` (Xenium output bundle). Raises a
+                  ``ValueError`` if neither marker file is found. Defaults to ``"auto"``.
                 - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
                 - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
             collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
                 This keeps the progress bar clean while still showing important warnings. Defaults to True.
         """
-        config_path = Path(config_path)
-
-        # Determine file type and read the configuration file
-        if config_path.suffix in ['.csv']:
-            config = pd.read_csv(config_path, dtype=str)
-        elif config_path.suffix in ['.xlsx', '.xls']:
-            config = pd.read_excel(config_path, dtype=str)
+        if isinstance(config, pd.DataFrame):
+            config = config.reset_index(drop=True)
         else:
-            raise ValueError("Unsupported file type. Please provide a CSV or Excel file.")
+            config_path = Path(config)
+            if config_path.suffix == '.csv':
+                config = pd.read_csv(config_path, dtype=str)
+            elif config_path.suffix in ('.xlsx', '.xls'):
+                config = pd.read_excel(config_path, dtype=str)
+            else:
+                raise ValueError("Unsupported file type. Please provide a CSV or Excel file.")
 
         # Ensure the 'directory' column exists
         if 'directory' not in config.columns:
@@ -3131,6 +3176,17 @@ class InSituExperiment:
         # Create a warning collector if collect_warnings_mode is enabled
         warning_collector = WarningCollector() if collect_warnings_mode else None
 
+        def _resolve_mode(path: Path) -> str:
+            if (path / ISPY_METADATA_FILE).exists():
+                return "insitupy"
+            elif (path / "experiment.xenium").exists():
+                return "xenium"
+            else:
+                raise ValueError(
+                    f"Cannot auto-detect format for '{path}': neither '{ISPY_METADATA_FILE}' "
+                    f"nor 'experiment.xenium' was found. Set 'mode' explicitly."
+                )
+
         # Iterate over each row in the configuration file
         for i in tqdm(range(len(config))):
             row = config.iloc[i, :]
@@ -3144,22 +3200,16 @@ class InSituExperiment:
             if not dataset_path.exists():
                 raise FileNotFoundError(f"No such directory found: {str(dataset_path)}")
 
-            # Use collect_warnings context manager to capture warnings without disrupting progress bar
-            if collect_warnings_mode:
-                with collect_warnings(warning_collector):
-                    if mode == "insitupy":
-                        dataset = InSituData.read(dataset_path)
-                    elif mode == "xenium":
-                        dataset = read_xenium(dataset_path, verbose=False, **kwargs)
-                    else:
-                        raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
-            else:
-                if mode == "insitupy":
+            resolved_mode = _resolve_mode(dataset_path) if mode == "auto" else mode
+
+            ctx = collect_warnings(warning_collector) if collect_warnings_mode else contextlib.nullcontext()
+            with ctx:
+                if resolved_mode == "insitupy":
                     dataset = InSituData.read(dataset_path)
-                elif mode == "xenium":
+                elif resolved_mode == "xenium":
                     dataset = read_xenium(dataset_path, verbose=False, **kwargs)
                 else:
-                    raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
+                    raise ValueError(f"Invalid mode '{resolved_mode}'. Supported modes are 'insitupy', 'xenium', and 'auto'.")
 
             experiment._data.append(dataset)
 
