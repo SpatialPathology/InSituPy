@@ -58,7 +58,9 @@ class MultiCellData(DeepCopyMixin):
         return repr
 
     def __getitem__(self, key):
-        return self._layers.get(key)
+        if key not in self._layers:
+            raise KeyError(key)
+        return self._layers[key]
 
     def __contains__(self, key):
         return key in self.keys()
