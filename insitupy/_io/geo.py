@@ -177,6 +177,12 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
         # Remove the original "name" and "color" columns
         dataframe = dataframe.drop(existing_columns_to_move, axis=1)
 
-    # Write the GeoDataFrame to a GeoJSON file
-    dataframe.to_file(file, driver="GeoJSON")
+    # Write the GeoDataFrame to a GeoJSON file (pyogrio emits INFO noise for every layer)
+    _pyogrio_log = logging.getLogger("pyogrio")
+    _prev_level = _pyogrio_log.level
+    _pyogrio_log.setLevel(logging.WARNING)
+    try:
+        dataframe.to_file(file, driver="GeoJSON")
+    finally:
+        _pyogrio_log.setLevel(_prev_level)
 

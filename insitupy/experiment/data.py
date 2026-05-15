@@ -3799,6 +3799,23 @@ class InSituExperiment:
         experiment._colors = colors
         experiment._filters = {}
 
+        # Backfill _uid from experiment metadata for legacy datasets (saved before uid feature)
+        if "uid" in metadata.columns:
+            backfilled = []
+            for i, dataset in enumerate(data):
+                if dataset._uid is None and i < len(metadata):
+                    uid_val = metadata.iloc[i]["uid"]
+                    if pd.notna(uid_val):
+                        dataset._uid = uid_val
+                        backfilled.append(i)
+            if backfilled:
+                warnings.warn(
+                    f"{len(backfilled)} dataset(s) had no uid stored on disk and were "
+                    f"backfilled from the experiment metadata. Call .save_geometries() on each dataset to persist the uids.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         # Validate and store filters
         if filters:
             for name, entry in filters.items():

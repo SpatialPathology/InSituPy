@@ -1,5 +1,7 @@
 """Tests for InSituData.uid, InSituExperiment.replace(), and metadata reclassification."""
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -305,3 +307,46 @@ def test_remove_no_disk_deletion_by_default(tmp_path):
     exp.remove(0, confirm=False, delete_from_disk=False)
 
     assert dataset_dir.exists()
+
+
+# ── Phase 5: uid backfill for legacy datasets ─────────────────────────────────
+
+def _strip_uid_from_ispy(save_dir):
+    """Remove the 'uid' key from each dataset's .ispy file to simulate a legacy save."""
+    for ds_dir in sorted(save_dir.glob("data-*")):
+        ispy_path = ds_dir / ".ispy"
+        meta = json.loads(ispy_path.read_text())
+        meta.pop("uid", None)
+        ispy_path.write_text(json.dumps(meta))
+
+
+def test_uid_backfilled_from_metadata_on_load(tmp_path):
+    exp = InSituExperiment()
+    xd1 = _make_insitudata(slide_id="slide1", sample_id="s1")
+    xd2 = _make_insitudata(slide_id="slide2", sample_id="s2")
+    exp.add(xd1)
+    exp.add(xd2)
+    uid0 = exp.metadata.loc[0, "uid"]
+    uid1 = exp.metadata.loc[1, "uid"]
+
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    _strip_uid_from_ispy(save_dir)
+
+    with pytest.warns(UserWarning, match="backfilled"):
+        loaded = InSituExperiment._read_insitupy(save_dir)
+
+    assert loaded.data[0].uid == uid0
+    assert loaded.data[1].uid == uid1
+
+
+def test_no_warning_when_uids_present_on_disk(tmp_path):
+    import warnings as _warnings
+    exp, save_dir = _make_saved_experiment(tmp_path)
+
+    with _warnings.catch_warnings(record=True) as record:
+        _warnings.simplefilter("always")
+        InSituExperiment._read_insitupy(save_dir)
+
+    uid_warnings = [w for w in record if "backfilled" in str(w.message).lower()]
+    assert uid_warnings == []
