@@ -2349,6 +2349,76 @@ class InSituExperiment:
 
         new_data.saveas(bad_path, overwrite=True)
 
+    def remove(self, idx: int | str, *, confirm: bool = True, delete_from_disk: bool = False) -> None:
+        """Remove a dataset from this experiment.
+
+        Drops the dataset at the given position from the in-memory list and
+        experiment metadata.  Filter masks are truncated to match the new
+        dataset count.  The on-disk directory is left untouched unless
+        ``delete_from_disk=True``.
+
+        Args:
+            idx: Integer position or UID string of the dataset to remove.
+            confirm: If ``True`` (default), print a summary and prompt for
+                confirmation before proceeding.  Set to ``False`` for scripted use.
+            delete_from_disk: If ``True``, permanently delete the dataset
+                directory from disk using :func:`shutil.rmtree`.  Skipped
+                silently when the dataset has no path set.  Default ``False``.
+
+        Raises:
+            IndexError: If *idx* is an integer outside the valid range.
+            KeyError: If *idx* is a UID string not present in the experiment.
+
+        Note:
+            Filter masks are truncated to match the new dataset count after
+            removal.  ``delete_from_disk=False`` (default) leaves the dataset
+            directory untouched on disk.
+        """
+        # Resolve idx to an integer position
+        if isinstance(idx, str):
+            uid_series = self._metadata["uid"]
+            matches = uid_series[uid_series == idx].index.tolist()
+            if not matches:
+                raise KeyError(f"No dataset with UID '{idx}' found in this experiment.")
+            pos = matches[0]
+        else:
+            pos = idx
+            if pos < 0 or pos >= len(self._data):
+                raise IndexError(
+                    f"Index {pos} out of range. Valid range: 0 to {len(self._data) - 1}."
+                )
+
+        path = self._data[pos].path
+        uid = self._metadata.loc[pos, "uid"]
+
+        if confirm:
+            print(
+                f"Dataset at position {pos} (uid='{uid}', path={path}) will be removed "
+                "from this experiment."
+            )
+            if delete_from_disk and path is not None:
+                print(
+                    f"The dataset directory will also be permanently deleted from disk: {path}"
+                )
+            answer = input("Proceed? [Y/n]: ").strip()
+            if answer.lower() not in ("", "y"):
+                print("Removal cancelled.")
+                return
+
+        # Memory removal
+        del self._data[pos]
+        self._metadata = self._metadata.drop(index=pos).reset_index(drop=True)
+        for entry in self._filters.values():
+            entry["mask"].pop(pos)
+
+        # Disk deletion
+        if delete_from_disk and path is not None:
+            shutil.rmtree(path)
+
+        # Persist experiment metadata
+        if self._path is not None:
+            self.save()
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,

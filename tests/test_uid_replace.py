@@ -205,3 +205,103 @@ def test_replace_bad_uid_raises(tmp_path):
 
     with pytest.raises(KeyError):
         exp.replace("nonexistent-uid", _make_insitudata(), confirm=False)
+
+
+# ── Phase 4: remove() ────────────────────────────────────────────────────────
+
+def _make_experiment_n(n: int = 3) -> "InSituExperiment":
+    """Return an in-memory experiment with *n* datasets (no disk path)."""
+    exp = InSituExperiment()
+    for i in range(n):
+        exp.add(_make_insitudata(slide_id=f"slide{i}", sample_id=f"s{i}"))
+    return exp
+
+
+def test_remove_by_int_decrements_length():
+    exp = _make_experiment_n(3)
+    exp.remove(1, confirm=False)
+    assert len(exp) == 2
+
+
+def test_remove_by_int_updates_data_list():
+    exp = _make_experiment_n(3)
+    uid_0 = exp.metadata.loc[0, "uid"]
+    uid_2 = exp.metadata.loc[2, "uid"]
+    exp.remove(1, confirm=False)
+    assert exp.metadata.loc[0, "uid"] == uid_0
+    assert exp.metadata.loc[1, "uid"] == uid_2
+
+
+def test_remove_by_uid():
+    exp = _make_experiment_n(3)
+    uid_to_remove = exp.metadata.loc[1, "uid"]
+    exp.remove(uid_to_remove, confirm=False)
+    assert uid_to_remove not in exp.metadata["uid"].values
+    assert len(exp) == 2
+
+
+def test_remove_bad_uid_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(KeyError):
+        exp.remove("nonexistent-uid", confirm=False)
+
+
+def test_remove_out_of_range_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(IndexError):
+        exp.remove(99, confirm=False)
+
+
+def test_remove_negative_index_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(IndexError):
+        exp.remove(-1, confirm=False)
+
+
+def test_remove_truncates_filter_mask():
+    exp = _make_experiment_n(3)
+    exp._filters["test_filter"] = {"mask": [True, False, True], "note": ""}
+    exp.remove(1, confirm=False)
+    assert len(exp._filters["test_filter"]["mask"]) == 2
+    assert exp._filters["test_filter"]["mask"] == [True, True]
+
+
+def test_remove_no_filter_state_unchanged():
+    exp = _make_experiment_n(3)
+    exp.remove(0, confirm=False)
+    assert exp._filters == {}
+
+
+def test_remove_by_int_metadata_reindexed():
+    exp = _make_experiment_n(3)
+    exp.remove(0, confirm=False)
+    assert list(exp.metadata.index) == [0, 1]
+
+
+def test_remove_confirm_false_no_prompt(monkeypatch):
+    exp = _make_experiment_n(2)
+    called = []
+    monkeypatch.setattr("builtins.input", lambda _: called.append(1) or "y")
+    exp.remove(0, confirm=False)
+    assert called == []
+    assert len(exp) == 1
+
+
+def test_remove_disk_deletion(tmp_path):
+    exp, save_dir = _make_saved_experiment(tmp_path)
+    dataset_dir = exp.data[0].path
+    assert dataset_dir is not None and dataset_dir.exists()
+
+    exp.remove(0, confirm=False, delete_from_disk=True)
+
+    assert not dataset_dir.exists()
+
+
+def test_remove_no_disk_deletion_by_default(tmp_path):
+    exp, save_dir = _make_saved_experiment(tmp_path)
+    dataset_dir = exp.data[0].path
+    assert dataset_dir is not None and dataset_dir.exists()
+
+    exp.remove(0, confirm=False, delete_from_disk=False)
+
+    assert dataset_dir.exists()
