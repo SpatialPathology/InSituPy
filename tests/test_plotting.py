@@ -11,15 +11,13 @@ matplotlib.use("Agg")  # must be set before any other matplotlib import
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pytest
 import scanpy as sc
 import scipy.sparse as sp
 from anndata import AnnData
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
-from insitupy.containers.results import (DiffExprConfigCollector,
-                                         DiffExprResults)
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.facs import facs
 from insitupy.plotting.go import go_plot
 from insitupy.plotting.qc import plot_qc_metrics

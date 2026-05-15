@@ -3,8 +3,7 @@ import os
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
-from typing import List, Literal, Optional, Union
-from warnings import warn
+from typing import Literal
 
 import dask.array as da
 import numpy as np
@@ -13,7 +12,6 @@ import zarr
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy._version import __version__
 from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
 from insitupy.utils.utils import convert_to_list, make_json_serializable
@@ -29,7 +27,7 @@ else:
     logger.info("Using Zarr v2.")
 
 
-def get_zarr_source_path(arr) -> Optional[Path]:
+def get_zarr_source_path(arr) -> Path | None:
     """
     Extract the source Zarr store path from a dask array loaded via ``da.from_zarr()``.
 
@@ -89,7 +87,7 @@ def get_zarr_source_path(arr) -> Optional[Path]:
     return None
 
 
-def _extract_path_from_zarr_array(v) -> Optional[Path]:
+def _extract_path_from_zarr_array(v) -> Path | None:
     """Return the filesystem path of a ``zarr.Array``'s store, or ``None``."""
     if isinstance(v, zarr.Array):
         store = v.store
@@ -97,7 +95,7 @@ def _extract_path_from_zarr_array(v) -> Optional[Path]:
     return None
 
 
-def _extract_path_from_zarr_store(store) -> Optional[Path]:
+def _extract_path_from_zarr_store(store) -> Path | None:
     """Return the filesystem path backing a Zarr store, or ``None``."""
     if ZARR_V3:
         if isinstance(store, zarr.storage.LocalStore):
@@ -466,7 +464,7 @@ def write_zarr(
             else:
                 file.unlink()  # delete file for .zarr.zip
         else:
-            raise FileExistsError("Output file exists already ({}).\nFor overwriting it, select `overwrite=True`".format(file))
+            raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
     suffix = file.name.split(".", 1)[-1]
 
@@ -516,14 +514,14 @@ def write_zarr(
     #     store.attrs[k] = v
 
 def write_ome_tiff(
-    image: Union[np.ndarray, da.core.Array, List[da.core.Array]],
-    file: Union[str, os.PathLike, Path],
+    image: np.ndarray | da.core.Array | list[da.core.Array],
+    file: str | os.PathLike | Path,
     axes: str = "YXS", # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
     metadata: dict = {},
     subresolutions = 6,
     subres_steps: int = 2,
-    pixelsize: Optional[float] = 1, # defaults to Xenium settings.
-    pixelunit: Optional[str] = None, # usually µm
+    pixelsize: float | None = 1, # defaults to Xenium settings.
+    pixelunit: str | None = None, # usually µm
     photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', # before I had rgb here. Xenium doc says minisblack
     tile: tuple = (1024, 1024), # 1024 pixel is optimal for Xenium Explorer
     compression: Literal['jpeg', 'LZW', 'jpeg2000', "ZLIB", None] = 'ZLIB', # jpeg2000 or ZLIB are recommended in the Xenium documentation - ZLIB is faster
@@ -600,7 +598,7 @@ def write_ome_tiff(
         if overwrite:
             file.unlink() # delete file
         else:
-            raise FileExistsError("Output file exists already ({}).\nFor overwriting it, select `overwrite=True`".format(file))
+            raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
     # create metadata
     if pixelsize != 1:
@@ -700,7 +698,7 @@ def read_zarr_pyramid(dirstore, persist):
 
 def read_ome_tiff(
     path,
-    levels: Optional[Union[List[int], int]] = None,
+    levels: list[int] | int | None = None,
     new_method: bool = True
     ):
     '''

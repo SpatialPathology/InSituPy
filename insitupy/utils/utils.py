@@ -1,16 +1,15 @@
 import logging
 import math
 import os
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Optional, Tuple, Union
 from uuid import uuid4
 from warnings import warn
 
 logger = logging.getLogger(__name__)
 
 import dask.dataframe as dd
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely as _shapely
@@ -18,8 +17,7 @@ from numpy import ndarray
 from pandas.api.types import is_numeric_dtype, is_string_dtype
 from shapely import LineString, Point, Polygon, affinity
 
-from insitupy._constants import (XENIUM_HEX_TO_INT_CONV_DICT,
-                                 XENIUM_INT_TO_HEX_CONV_DICT)
+from insitupy._constants import XENIUM_HEX_TO_INT_CONV_DICT, XENIUM_INT_TO_HEX_CONV_DICT
 
 
 def create_ansi_color_code_from_rgb(rgb_color):
@@ -368,11 +366,12 @@ def exclude_index(array, exclude_index):
     """
     return np.concatenate((array[:exclude_index], array[exclude_index+1:]))
 
+
 def _crop_transcripts(
-    transcript_df: Union[pd.DataFrame, dd.DataFrame],
-    shape: Optional[Polygon] = None,
-    xlim: Optional[Tuple[int, int]] = None,
-    ylim: Optional[Tuple[int, int]] = None,
+    transcript_df: pd.DataFrame | dd.DataFrame,
+    shape: Polygon | None = None,
+    xlim: tuple[int, int] | None = None,
+    ylim: tuple[int, int] | None = None,
     verbose: bool = True,
     materialize: bool = True
     ):
@@ -462,8 +461,19 @@ def _crop_transcripts(
         minx = xlim[0]
         miny = ylim[0]
 
-    # select
-    transcript_df = transcript_df.loc[mask, :].copy()
+    # select — use DataFrame.take(idx) to avoid pandas 2.x CoW / block-manager
+    # pitfalls. .loc[mask].copy() copies the full underlying block before filtering,
+    # and .to_numpy() on a consolidated object block allocates a full-length
+    # intermediate before any masking. take() routes through BlockManager.take →
+    # algos.take_nd, allocating output arrays at shape (n_cols_in_block, k) directly,
+    # with no full-length 1-D column intermediate. MultiIndex columns and dtypes are
+    # preserved unchanged.
+    if isinstance(transcript_df, pd.DataFrame):
+        idx = np.flatnonzero(np.asarray(mask))
+        transcript_df = transcript_df.take(idx)
+    else:
+        # Dask path (materialize=False): no pandas CoW issue.
+        transcript_df = transcript_df.loc[mask, :].copy()
 
     if grouped_df:
         # move origin again to 0 by subtracting the lower limits from the coordinates

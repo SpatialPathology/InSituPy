@@ -1,3 +1,5 @@
+import contextlib
+import gc
 import json
 import logging
 import os
@@ -6,7 +8,7 @@ import warnings
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 from uuid import uuid4
 
 import anndata
@@ -20,12 +22,18 @@ from matplotlib.figure import Figure
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_ABBR, SAMPLE_STR,
-                                 with_insitupy_style)
+from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
+    ISPY_METADATA_FILE,
+    LOAD_FUNCS,
+    MODALITIES,
+    MODALITIES_ABBR,
+    SAMPLE_STR,
+    with_insitupy_style,
+)
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy._io.files import check_overwrite_and_remove_if_true
+from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
@@ -33,8 +41,12 @@ from insitupy.experiment.filters import FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils.utils import (_crop_transcripts, convert_to_list,
-                                  get_nrows_maxcols, remove_empty_subplots)
+from insitupy.utils.utils import (
+    _crop_transcripts,
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +60,112 @@ _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
+
+
+class TableAccessor:
+    """Dict-like accessor for per-cells-layer concatenated tables.
+
+    Returned by :attr:`InSituExperiment.table`. Use bracket notation to load
+    the AnnData for a specific layer::
+
+        exp.table["main"]    # AnnData for the "main" segmentation
+        exp.table["proseg"]  # AnnData for the "proseg" segmentation
+        exp.table[None]      # auto-select when only one table exists
+        exp.table.keys()     # list available layer names
+
+    .. note::
+        This feature is experimental and may change in future versions.
+    """
+
+    def __init__(self, experiment: "InSituExperiment") -> None:
+        self._exp = experiment
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def keys(self) -> list[str]:
+        """Return the layer names for which a table has been built."""
+        if self._exp.path is None:
+            return []
+        tables_dir = Path(self._exp.path) / "tables"
+        if not tables_dir.exists():
+            return []
+        return sorted(
+            p.stem for p in tables_dir.iterdir()
+            if p.suffix == ".zarr" and p.is_dir() and p.name != "concat.zarr"
+        )
+
+    def __getitem__(self, cells_layer: str | None) -> AnnData | None:
+        return self._load(cells_layer)
+
+    def __repr__(self) -> str:
+        keys = self.keys()
+        if not keys:
+            return "TableAccessor(no tables built yet)"
+        return f"TableAccessor(layers={keys})"
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _load(self, cells_layer: str | None) -> AnnData | None:
+        try:
+            table_path = self._exp._get_table_path(cells_layer)
+        except ValueError as exc:
+            warnings.warn(str(exc), UserWarning, stacklevel=3)
+            return None
+        if table_path is None or not table_path.exists():
+            warnings.warn(
+                "No concatenated table found. Call `build_table()` to create one.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
+        try:
+            return anndata.experimental.read_lazy(table_path)
+        except ImportError:
+            return anndata.read_zarr(table_path)
+
+
+class ViewTableAccessor(TableAccessor):
+    """Table accessor for :class:`InSituExperimentView`.
+
+    Behaves identically to :class:`TableAccessor` but row-filters the loaded
+    AnnData to only the samples present in the view.
+    """
+
+    def _load(self, cells_layer: str | None) -> AnnData | None:
+        full_table = super()._load(cells_layer)
+        if full_table is None:
+            return None
+
+        label_col = self._exp._read_build_params(cells_layer).get("label_col", "uid")
+
+        if label_col not in self._exp._metadata.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in view metadata. "
+                "Cannot filter table by view samples.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return full_table
+
+        view_sample_ids = set(self._exp._metadata[label_col].values)
+
+        if label_col not in full_table.obs.columns:
+            warnings.warn(
+                f"Column '{label_col}' not found in concatenated table obs. "
+                "Cannot filter by view samples.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return full_table
+
+        import numpy as np
+        obs_values = np.asarray(full_table.obs[label_col])
+        mask = np.isin(obs_values, list(view_sample_ids))
+        return full_table[mask]
 
 
 class InSituExperiment:
@@ -114,7 +232,7 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._filters = {}
-        self._applied_filters: List[str] = []
+        self._applied_filters: list[str] = []
         self._data_type = data_type
 
     def __repr__(self):
@@ -159,7 +277,7 @@ class InSituExperiment:
         return False
 
     @property
-    def applied_filters(self) -> List[str]:
+    def applied_filters(self) -> list[str]:
         """Return the list of filter labels that have been applied to this experiment."""
         return list(self._applied_filters)
 
@@ -167,7 +285,7 @@ class InSituExperiment:
         self,
         key,
         as_view: bool = False,
-        added_filter: Optional[str] = None,
+        added_filter: str | None = None,
     ):
         """
         Internal helper to subset experiment data and metadata.
@@ -448,7 +566,7 @@ class InSituExperiment:
         return self._path
 
     def add(self,
-            data: Union[str, os.PathLike, Path, InSituData],
+            data: str | os.PathLike | Path | InSituData,
             mode: Literal["insitupy", "xenium"] = "insitupy",
             metadata: dict = {}
             ):
@@ -511,7 +629,7 @@ class InSituExperiment:
     def add_metadata_column(
         self,
         column_name: str,
-        values: Union[List, str, pd.Series, np.ndarray],
+        values: list | str | pd.Series | np.ndarray,
         overwrite: bool = False
         ):
         """
@@ -538,8 +656,8 @@ class InSituExperiment:
         self._metadata[column_name] = values
 
     def append_metadata(self,
-                        new_metadata: Union[pd.DataFrame, dict, str, os.PathLike, Path],
-                        by: Optional[str] = _UNSET,
+                        new_metadata: pd.DataFrame | dict | str | os.PathLike | Path,
+                        by: str | None = _UNSET,
                         overwrite: bool = False
                         ):
         """
@@ -680,9 +798,9 @@ class InSituExperiment:
 
     def set_metadata_values(
         self,
-        index: Union[int, List[int], List[bool], slice, range, np.ndarray, pd.Series],
+        index: int | list[int] | list[bool] | slice | range | np.ndarray | pd.Series,
         column_name: str,
-        values: Union[Any, List, pd.Series, np.ndarray]
+        values: Any | list | pd.Series | np.ndarray
     ):
         """
         Set metadata values for one or more indices.
@@ -868,17 +986,17 @@ class InSituExperiment:
     def dge(
         self,
         target_id: int,
-        ref_id: Optional[Union[int, List[int], Literal["rest"]]] = None,
-        target_annotation_tuple: Optional[Tuple[str, str]] = None,
-        target_cell_type_tuple: Optional[Tuple[str, str]] = None,
-        target_region_tuple: Optional[Tuple[str, str]] = None,
-        ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        ref_region_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-        method: Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']] = 't-test',
+        ref_id: int | list[int] | Literal["rest"] | None = None,
+        target_annotation_tuple: tuple[str, str] | None = None,
+        target_cell_type_tuple: tuple[str, str] | None = None,
+        target_region_tuple: tuple[str, str] | None = None,
+        ref_annotation_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        ref_cell_type_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        ref_region_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+        method: Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var'] | None = 't-test',
         exclude_ambiguous_assignments: bool = False,
         force_assignment: bool = False,
-        name_col: Optional[str] = "uid",
+        name_col: str | None = "uid",
         ):
         """
         Wrapper function for performing differential gene expression analysis within an `InSituExperiment` object.
@@ -959,7 +1077,7 @@ class InSituExperiment:
 
     def get_n_cells(
         self,
-        cells_layer: Optional[str] = None
+        cells_layer: str | None = None
         ):
         """
         Get the total number of cells across all datasets.
@@ -981,14 +1099,142 @@ class InSituExperiment:
         return n_cells
 
 
+    def _transfer_to_samples(
+        self,
+        adata: AnnData,
+        uid_column: str,
+        uid_column_adata: str,
+        obs_columns_to_transfer: list[str] | None = None,
+        obsm_keys_to_transfer: list[str] | None = None,
+        cells_layer: str | None = None,
+        overwrite: bool = False,
+        strip_uid_prefix: bool = True,
+        fill_missing: bool = True,
+    ) -> "InSituExperiment":
+        """Transfer obs columns and obsm keys from an AnnData to per-sample AnnData objects.
+
+        Datasets are matched using unique identifiers in the metadata and
+        ``adata.obs``. Both ``.obs`` annotations and ``.obsm`` embeddings can
+        be transferred.
+
+        Args:
+            adata: Source AnnData object.
+            uid_column: Column in the InSituExperiment metadata that identifies
+                each sample.
+            uid_column_adata: Column in ``adata.obs`` that identifies each
+                sample.
+            obs_columns_to_transfer: ``adata.obs`` columns to copy into each
+                per-sample AnnData.
+            obsm_keys_to_transfer: ``adata.obsm`` keys to copy.
+            cells_layer: Cell layer to receive the transferred data.
+            overwrite: If True, overwrite existing columns/keys.
+            strip_uid_prefix: If True, strip the ``"{index}-"`` prefix from
+                obs_names before matching.
+            fill_missing: If True, allow partial matches (missing cells filled
+                with NaN).
+
+        Returns:
+            Self, for method chaining.
+        """
+        for meta, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            current_uid = meta[uid_column]
+            mask = adata.obs[uid_column_adata] == current_uid
+            subset = adata[mask].copy()
+
+            if len(subset) == 0:
+                warnings.warn(
+                    f"No matching data found in `adata` for ID '{current_uid}'. "
+                    f"Skipping this dataset.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                continue
+
+            # Handle cell name matching
+            if strip_uid_prefix:
+                if len(subset.obs_names) > 0:
+                    sample_name = str(subset.obs_names[0])
+                    if '-' in sample_name:
+                        subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
+                                                    for name in subset.obs_names])
+
+            # Check for cell name matches
+            matching_cells = celldata.table.obs_names.isin(subset.obs_names)
+            n_matching = matching_cells.sum()
+            n_total = len(celldata.table)
+
+            if n_matching == 0:
+                raise ValueError(
+                    f"No matching cell names found for dataset '{current_uid}'. "
+                    f"Ensure cell names match between adata and InSituData."
+                )
+
+            if n_matching < n_total:
+                if not fill_missing:
+                    raise ValueError(
+                        f"Cell name mismatch for dataset '{current_uid}': "
+                        f"Only {n_matching}/{n_total} cells found. "
+                        f"Set `fill_missing=True` to allow partial matches."
+                    )
+                else:
+                    warnings.warn(
+                        f"Partial match for dataset '{current_uid}': "
+                        f"Only {n_matching}/{n_total} cells found. "
+                        f"Missing cells will be filled with NaN.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+
+            # Transfer obs columns
+            if obs_columns_to_transfer:
+                for col in obs_columns_to_transfer:
+                    if col in celldata.table.obs.columns and not overwrite:
+                        raise ValueError(
+                            f"Column '{col}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
+                        )
+                    celldata.table.obs[col] = subset.obs[col]
+
+            # Transfer obsm keys
+            if obsm_keys_to_transfer:
+                for key in obsm_keys_to_transfer:
+                    if key in celldata.table.obsm.keys() and not overwrite:
+                        raise ValueError(
+                            f"Key '{key}' already exists for dataset '{current_uid}'. "
+                            f"Set `overwrite=True` to overwrite."
+                        )
+
+                    # Create empty array with NaN
+                    n_cells_target = len(celldata.table)
+                    n_features = subset.obsm[key].shape[1]
+                    target_array = np.full((n_cells_target, n_features), np.nan)
+
+                    # Fill with matching values
+                    subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
+                    for target_idx, cell_name in enumerate(celldata.table.obs_names):
+                        if cell_name in subset_index_map:
+                            subset_idx = subset_index_map[cell_name]
+                            target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
+
+                    if np.isnan(target_array).any() and not fill_missing:
+                        raise ValueError(
+                            f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
+                            f"Missing values. Set `fill_missing=True`."
+                        )
+
+                    celldata.table.obsm[key] = target_array
+
+        return self
+
     def import_from_anndata(
         self,
         adata: AnnData,
         uid_column: str,
         uid_column_adata: str,
-        obs_columns_to_transfer: Optional[List[str]] = None,
-        obsm_keys_to_transfer: Optional[List[str]] = None,
-        cells_layer: Optional[str] = None,
+        obs_columns_to_transfer: list[str] | None = None,
+        obsm_keys_to_transfer: list[str] | None = None,
+        cells_layer: str | None = None,
         overwrite: bool = False,
         strip_uid_prefix: bool = True,
         fill_missing: bool = True
@@ -1040,124 +1286,147 @@ class InSituExperiment:
                 f"Available columns: {list(adata.obs.columns)}"
             )
 
-        for meta, xd in self.iterdata():
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-            current_uid = meta[uid_column]
-            mask = adata.obs[uid_column_adata] == current_uid
-            subset = adata[mask].copy()
+        return self._transfer_to_samples(
+            adata=adata,
+            uid_column=uid_column,
+            uid_column_adata=uid_column_adata,
+            obs_columns_to_transfer=obs_columns_to_transfer,
+            obsm_keys_to_transfer=obsm_keys_to_transfer,
+            cells_layer=cells_layer,
+            overwrite=overwrite,
+            strip_uid_prefix=strip_uid_prefix,
+            fill_missing=fill_missing,
+        )
 
-            if len(subset) == 0:
-                warnings.warn(
-                    f"No matching data found in `adata` for ID '{current_uid}'. "
-                    f"Skipping this dataset.",
-                    UserWarning,
-                    stacklevel=2
-                )
-                continue
+    def import_from_table(
+        self,
+        obs_columns: list[str] | None = None,
+        obsm_keys: list[str] | None = None,
+        cells_layer: str | None = None,
+        overwrite: bool = False,
+    ) -> "InSituExperiment":
+        """Import data from the concatenated table back into per-sample AnnData objects.
 
-            # Handle cell name matching
-            if strip_uid_prefix:
-                if len(subset.obs_names) > 0:
-                    sample_name = str(subset.obs_names[0])
-                    if '-' in sample_name:
-                        subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
-                                                    for name in subset.obs_names])
+        Transfers selected obs columns and obsm keys from :attr:`table` back to
+        the individual per-sample AnnData objects. This is the reverse operation
+        of :meth:`build_table`.
 
-            # Check for cell name matches
-            matching_cells = celldata.table.obs_names.isin(subset.obs_names)
-            n_matching = matching_cells.sum()
-            n_total = len(celldata.table)
+        .. note::
+            This feature is experimental and may change in future versions.
 
-            if n_matching == 0:
-                raise ValueError(
-                    f"No matching cell names found for dataset '{current_uid}'. "
-                    f"Ensure cell names match between adata and InSituData."
-                )
+        Args:
+            obs_columns: Column names in ``table.obs`` to transfer.
+            obsm_keys: Keys in ``table.obsm`` to transfer.
+            cells_layer: Cell layer to transfer data into.
+            overwrite: If True, overwrite existing columns/keys.
 
-            if n_matching < n_total:
-                if not fill_missing:
-                    raise ValueError(
-                        f"Cell name mismatch for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells found. "
-                        f"Set `fill_missing=True` to allow partial matches."
-                    )
-                else:
-                    warnings.warn(
-                        f"Partial match for dataset '{current_uid}': "
-                        f"Only {n_matching}/{n_total} cells found. "
-                        f"Missing cells will be filled with NaN.",
-                        UserWarning,
-                        stacklevel=2
-                    )
+        Returns:
+            Self, for method chaining.
 
-            # Transfer obs columns
-            if obs_columns_to_transfer:
-                for col in obs_columns_to_transfer:
-                    if col in celldata.table.obs.columns and not overwrite:
-                        raise ValueError(
-                            f"Column '{col}' already exists for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite."
-                        )
-                    celldata.table.obs[col] = subset.obs[col]
+        Raises:
+            ValueError: If no table has been built yet, or if both ``obs_columns``
+                and ``obsm_keys`` are None.
+        """
+        self._check_mode_compatibility("import_from_table")
 
-            # Transfer obsm keys
-            if obsm_keys_to_transfer:
-                for key in obsm_keys_to_transfer:
-                    if key in celldata.table.obsm.keys() and not overwrite:
-                        raise ValueError(
-                            f"Key '{key}' already exists for dataset '{current_uid}'. "
-                            f"Set `overwrite=True` to overwrite."
-                        )
+        if obs_columns is None and obsm_keys is None:
+            raise ValueError(
+                "Both `obs_columns` and `obsm_keys` are None. "
+                "At least one must be provided."
+            )
 
-                    # Create empty array with NaN
-                    n_cells_target = len(celldata.table)
-                    n_features = subset.obsm[key].shape[1]
-                    target_array = np.full((n_cells_target, n_features), np.nan)
+        try:
+            table_path = self._get_table_path(cells_layer)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        if table_path is None or not table_path.exists():
+            raise ValueError(
+                "No concatenated table found. Call `build_table()` first."
+            )
 
-                    # Fill with matching values
-                    subset_index_map = {name: idx for idx, name in enumerate(subset.obs_names)}
-                    for target_idx, cell_name in enumerate(celldata.table.obs_names):
-                        if cell_name in subset_index_map:
-                            subset_idx = subset_index_map[cell_name]
-                            target_array[target_idx, :] = subset.obsm[key][subset_idx, :]
+        # Load the full table into memory for cell matching
+        table_adata = anndata.read_zarr(table_path)
 
-                    if np.isnan(target_array).any() and not fill_missing:
-                        raise ValueError(
-                            f"Cannot transfer obsm key '{key}' for dataset '{current_uid}': "
-                            f"Missing values. Set `fill_missing=True`."
-                        )
+        # Retrieve the label column used during build_table (sidecar JSON takes priority)
+        label_col = self._read_build_params(cells_layer).get("label_col", "uid")
 
-                    celldata.table.obsm[key] = target_array
+        if label_col not in table_adata.obs.columns:
+            raise ValueError(
+                f"Label column '{label_col}' not found in table.obs. "
+                "The table may have been built with a different label_col."
+            )
 
-        return self
+        return self._transfer_to_samples(
+            adata=table_adata,
+            uid_column=label_col,
+            uid_column_adata=label_col,
+            obs_columns_to_transfer=obs_columns,
+            obsm_keys_to_transfer=obsm_keys,
+            cells_layer=cells_layer,
+            overwrite=overwrite,
+            strip_uid_prefix=True,
+            fill_missing=True,
+        )
 
-
-    def iterdata(self):
+    def iterdata(self, progress: bool = False, desc: str = "Samples"):
         """
         Iterate over the metadata rows and corresponding data.
+
+        Args:
+            progress: If True, display a tqdm progress bar. Logging messages and
+                Python warnings are routed through :func:`tqdm.write` so they do
+                not corrupt the bar.
+            desc: Label shown on the progress bar. Defaults to ``"Samples"``.
 
         Yields:
             tuple: A tuple containing the metadata row as a Series and the corresponding data.
         """
-        for idx, row in self._metadata.iterrows():
-            yield row, self._data[idx]
+        it = self._metadata.iterrows()
+        if not progress:
+            for idx, row in it:
+                yield row, self._data[idx]
+            return
+
+        import warnings
+
+        from tqdm.contrib.logging import logging_redirect_tqdm
+
+        bar = tqdm(it, total=len(self._metadata), desc=desc, dynamic_ncols=True)
+
+        # Patch warnings.showwarning so warning text goes via tqdm.write()
+        # instead of straight to stderr, which would corrupt the bar.
+        _orig_showwarning = warnings.showwarning
+
+        def _tqdm_showwarning(message, category, filename, lineno, file=None, line=None):
+            tqdm.write(
+                warnings.formatwarning(message, category, filename, lineno, line).rstrip()
+            )
+
+        warnings.showwarning = _tqdm_showwarning
+        try:
+            with logging_redirect_tqdm():
+                for idx, row in bar:
+                    yield row, self._data[idx]
+        finally:
+            warnings.showwarning = _orig_showwarning
 
 
-    def to_anndata(
+    def _concatenate_samples(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        var_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        obsm_keys: Optional[Union[List[str], str, Literal["all"]]] = "spatial",
-        varm_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        uns_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        layer_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
-        metadata_keys: Optional[Union[List[str], str, Literal["all"]]] = None,
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: int | None = None,
     ) -> anndata.AnnData:
-        """
-        Concatenate all datasets into a single AnnData object.
+        """Concatenate all sample AnnData objects into a single AnnData.
 
         Args:
             cells_layer: The layer name to extract cell data from.
@@ -1168,14 +1437,16 @@ class InSituExperiment:
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
-            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
-            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
+            metadata_keys: Metadata columns to add to obs dataframe.
+            make_obs_names_unique: If True, prepends dataset index to obs names.
+            join: How to join variables. ``"inner"`` keeps only shared genes;
+                ``"outer"`` keeps all genes with fill values.
+            min_shared_genes: If set and ``join="inner"``, warn when the
+                number of shared genes falls below this threshold.
 
         Returns:
             AnnData: A concatenated AnnData object.
         """
-        self._check_mode_compatibility("to_anndata")
-
         # Validate label_col exists in metadata
         if label_col not in self._metadata.columns:
             raise ValueError(
@@ -1183,7 +1454,7 @@ class InSituExperiment:
                 f"Available columns: {list(self._metadata.columns)}"
             )
 
-        adatas: Dict[Any, anndata.AnnData] = {}
+        adatas: dict[Any, anndata.AnnData] = {}
 
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
@@ -1225,10 +1496,22 @@ class InSituExperiment:
         adata_concat = anndata.concat(
             adatas,
             axis='obs',
-            join='inner',
+            join=join,
             label=label_col,
             merge="unique"
         )
+
+        # Warn if inner join result has fewer shared genes than threshold
+        if join == "inner" and min_shared_genes is not None:
+            n_genes = adata_concat.n_vars
+            if n_genes < min_shared_genes:
+                warnings.warn(
+                    f"Only {n_genes} shared genes after inner join "
+                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
+                    "to retain all genes.",
+                    UserWarning,
+                    stacklevel=3,
+                )
 
         # Move label_col to first position in obs columns
         if label_col in adata_concat.obs.columns:
@@ -1237,9 +1520,437 @@ class InSituExperiment:
 
         return adata_concat
 
+    def to_anndata(
+        self,
+        cells_layer: str | None = None,
+        label_col: str = "uid",
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
+        make_obs_names_unique: bool = True,
+    ) -> anndata.AnnData:
+        """
+        Concatenate all datasets into a single AnnData object.
+
+        Args:
+            cells_layer: The layer name to extract cell data from.
+            label_col: Column name in metadata to use as labels. Defaults to "uid".
+            obs_keys: Keys to select from obs dataframe.
+            var_keys: Keys to select from var dataframe.
+            obsm_keys: Keys to select from obsm dictionary.
+            varm_keys: Keys to select from varm dictionary.
+            uns_keys: Keys to select from uns dictionary.
+            layer_keys: Keys to select from layers dictionary.
+            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
+            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
+
+        Returns:
+            AnnData: A concatenated AnnData object.
+        """
+        self._check_mode_compatibility("to_anndata")
+        return self._concatenate_samples(
+            cells_layer=cells_layer,
+            label_col=label_col,
+            obs_keys=obs_keys,
+            var_keys=var_keys,
+            obsm_keys=obsm_keys,
+            varm_keys=varm_keys,
+            uns_keys=uns_keys,
+            layer_keys=layer_keys,
+            metadata_keys=metadata_keys,
+            make_obs_names_unique=make_obs_names_unique,
+            join="inner",
+        )
+
+    # ── Table (cross-sample concatenated AnnData) ─────────────────────────────
+
+    def _get_table_path(self, cells_layer: str | None = None) -> Path | None:
+        """Return the path to the per-layer zarr table, or None if no experiment path is set.
+
+        When *cells_layer* is given, returns ``tables/{cells_layer}.zarr``.
+        When *cells_layer* is ``None``, scans ``tables/`` for ``*.zarr`` directories:
+
+        - Exactly one found → returns it (auto-resolve).
+        - Zero found → falls back to the legacy ``concat.zarr`` if present, otherwise
+          returns a ``tables/main.zarr`` placeholder so callers can check existence.
+        - More than one found → raises :exc:`ValueError` asking for an explicit layer.
+        """
+        if self.path is None:
+            return None
+        if cells_layer is not None:
+            return Path(self.path) / "tables" / f"{cells_layer}.zarr"
+        # Auto-resolve when cells_layer is None
+        tables_dir = Path(self.path) / "tables"
+        if not tables_dir.exists():
+            return tables_dir / "main.zarr"
+        candidates = [
+            p for p in tables_dir.iterdir()
+            if p.suffix == ".zarr" and p.is_dir() and p.name != "concat.zarr"
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) == 0:
+            legacy = tables_dir / "concat.zarr"
+            return legacy if legacy.exists() else tables_dir / "main.zarr"
+        raise ValueError(
+            f"Multiple tables found in '{tables_dir}': "
+            f"{sorted(p.name for p in candidates)}. "
+            "Pass cells_layer= explicitly to select one."
+        )
+
+    def _get_build_params_path(self, cells_layer: str | None = None) -> Path | None:
+        """Return the path to the per-layer sidecar JSON, or None if no experiment path.
+
+        Mirrors :meth:`_get_table_path`: when *cells_layer* is given returns
+        ``tables/{cells_layer}.json``; otherwise derives the stem from the resolved
+        table path.
+        """
+        if self.path is None:
+            return None
+        if cells_layer is not None:
+            return Path(self.path) / "tables" / f"{cells_layer}.json"
+        table_path = self._get_table_path()
+        if table_path is not None:
+            return table_path.with_suffix(".json")
+        return Path(self.path) / "tables" / "build_params.json"
+
+    def _read_build_params(self, cells_layer: str | None = None) -> dict:
+        """Read build parameters from the per-layer sidecar JSON, with sensible defaults.
+
+        Falls back to the legacy ``tables/build_params.json`` for datasets built
+        before the per-layer convention was introduced.
+
+        Returns:
+            dict with at least ``label_col``, ``method``, and ``cells_layer`` keys.
+        """
+        params_path = self._get_build_params_path(cells_layer)
+        if params_path is not None and params_path.exists():
+            return read_json(params_path)
+        # Legacy fallback: shared build_params.json from earlier versions
+        if self.path is not None:
+            legacy = Path(self.path) / "tables" / "build_params.json"
+            if legacy.exists():
+                return read_json(legacy)
+        return {"label_col": "uid"}
+
+    def _resolve_per_sample_h5ad_paths(
+        self,
+        cells_layer: str | None = None,
+        label_col: str = "uid",
+    ) -> list[tuple]:
+        """Resolve on-disk h5ad paths for each sample.
+
+        Args:
+            cells_layer: Cell layer key. ``None`` uses the main layer.
+            label_col: Metadata column whose value is used as the sample label.
+
+        Returns:
+            List of ``(label_value, h5ad_path)`` pairs, one per sample.
+
+        Raises:
+            ValueError: If any dataset has no save path, has no saved cells
+                directory, or if the h5ad file cannot be located.
+        """
+        from insitupy.utils._helpers import sort_paths_by_datetime
+
+        results = []
+        for meta, xd in self.iterdata():
+            uid = meta["uid"]
+            label_value = meta[label_col]
+
+            if xd._path is None:
+                raise ValueError(
+                    f"Dataset '{uid}' has no save path. "
+                    "Save all datasets before using method='concat_on_disk'."
+                )
+
+            cells_dir = xd._path / "cells"
+            if not cells_dir.exists():
+                raise ValueError(
+                    f"No cells directory found for dataset '{uid}' at '{cells_dir}'. "
+                    "Ensure the dataset has been saved with cell data."
+                )
+
+            timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
+            if not timestamp_dirs:
+                raise ValueError(
+                    f"No saved cells found for dataset '{uid}' in '{cells_dir}'."
+                )
+
+            most_recent = sort_paths_by_datetime(timestamp_dirs)[0]
+
+            # Determine the layer directory name
+            if cells_layer is None:
+                mc_meta = read_json(most_recent / ".multicelldata")
+                layer_key = mc_meta["key_main"]
+            else:
+                layer_key = cells_layer
+
+            h5ad_path = most_recent / layer_key / "table.h5ad"
+            if not h5ad_path.exists():
+                raise ValueError(
+                    f"h5ad file not found for dataset '{uid}': '{h5ad_path}'. "
+                    "Ensure the dataset has been saved."
+                )
+
+            results.append((label_value, h5ad_path))
+
+        return results
+
+    def _concat_samples_on_disk(
+        self,
+        output_path: Path,
+        cells_layer: str | None = None,
+        label_col: str = "uid",
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: int | None = None,
+        make_obs_names_unique: bool = True,
+    ) -> None:
+        """Concatenate per-sample h5ad files on disk without loading all into RAM.
+
+        Uses :func:`anndata.experimental.concat_on_disk` to stream each
+        sample's h5ad directly to the output zarr store.
+
+        .. note::
+            Requires all datasets to have been saved to disk (i.e. each
+            :class:`~insitupy._core.data.InSituData` must have a ``_path``).
+            Obs/var key filtering and experiment-metadata columns are not
+            supported in this mode.
+
+        Args:
+            output_path: Destination zarr path.
+            cells_layer: Cell layer to use. ``None`` selects the main layer.
+            label_col: Metadata column used as sample identifier label.
+            join: ``"inner"`` or ``"outer"`` variable join.
+            min_shared_genes: Warn if fewer shared genes after inner join.
+            make_obs_names_unique: If True, prepend label value to obs names
+                using a ``"-"`` separator.
+
+        Raises:
+            ValueError: If any dataset cannot be located on disk.
+        """
+        from anndata.experimental import concat_on_disk
+
+        sample_paths = self._resolve_per_sample_h5ad_paths(
+            cells_layer=cells_layer,
+            label_col=label_col,
+        )
+
+        # Build ordered mapping: {label_value → h5ad_path}
+        in_files: dict[str, Path] = {label: path for label, path in sample_paths}
+
+        index_unique = "-" if make_obs_names_unique else None
+
+        # When in_files is a Mapping, the dict keys serve as the label values;
+        # passing keys= separately would be redundant and raises TypeError.
+        concat_on_disk(
+            in_files=in_files,
+            out_file=output_path,
+            join=join,
+            label=label_col,
+            index_unique=index_unique,
+            merge="unique",
+        )
+
+        if min_shared_genes is not None and join == "inner":
+            import zarr
+            try:
+                z = zarr.open_group(str(output_path), mode="r")
+                # var index is stored as a zarr array; shape gives gene count
+                var_group = z["var"]
+                # anndata stores the index under "_index"
+                n_genes = var_group["_index"].shape[0]
+            except Exception:
+                n_genes = None
+
+            if n_genes is not None and n_genes < min_shared_genes:
+                warnings.warn(
+                    f"Only {n_genes} shared genes after inner join "
+                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
+                    "to retain all genes.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+
+        logger.info(
+            "Built concatenated table (concat_on_disk) at '%s'.", output_path
+        )
+
+    @property
+    def table(self) -> "TableAccessor":
+        """Dict-like accessor for per-cells-layer concatenated tables.
+
+        Use bracket notation to load the AnnData for a specific layer::
+
+            exp.table["main"]    # AnnData for the "main" segmentation
+            exp.table["proseg"]  # AnnData for the "proseg" segmentation
+            exp.table[None]      # auto-select when only one table exists
+            exp.table.keys()     # list available layer names
+
+        Call :meth:`build_table` first to create a table.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+        """
+        return TableAccessor(self)
+
+    def build_table(
+        self,
+        cells_layer: str | None = None,
+        label_col: str = "uid",
+        obs_keys: list[str] | str | Literal["all"] | None = None,
+        var_keys: list[str] | str | Literal["all"] | None = None,
+        obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
+        varm_keys: list[str] | str | Literal["all"] | None = None,
+        uns_keys: list[str] | str | Literal["all"] | None = None,
+        layer_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = None,
+        make_obs_names_unique: bool = True,
+        join: Literal["inner", "outer"] = "inner",
+        min_shared_genes: int | None = None,
+        overwrite: bool = False,
+        method: Literal["in_memory", "concat_on_disk"] = "in_memory",
+    ) -> None:
+        """Build a zarr-backed concatenated AnnData across all samples.
+
+        Concatenates all per-sample AnnData objects and writes the result to
+        ``{experiment_path}/tables/concat.zarr``. After building, access the
+        result via :attr:`table`.
+
+        Two concatenation strategies are available via ``method``:
+
+        - ``"in_memory"`` *(default)*: loads every sample's AnnData into RAM,
+          concatenates with :func:`anndata.concat`, then writes zarr.
+          Supports all filtering and metadata options.
+        - ``"concat_on_disk"``: streams each sample's saved ``table.h5ad``
+          file directly to the output zarr store using
+          :func:`anndata.experimental.concat_on_disk`.
+          Requires all datasets to be saved on disk. Does **not** support
+          ``obs_keys``, ``var_keys``, ``obsm_keys``, ``varm_keys``,
+          ``uns_keys``, ``layer_keys``, or ``metadata_keys``. Obs name
+          prefixes use the label value (e.g. ``"uid-cell_0"``) rather than
+          the numeric index (``"0-cell_0"``).
+
+        .. note::
+            This feature is experimental and may change in future versions.
+
+        Args:
+            cells_layer: Cell layer to extract from each sample.
+            label_col: Metadata column used as the sample identifier label.
+                Defaults to ``"uid"``.
+            obs_keys: Obs columns to retain (``in_memory`` only).
+            var_keys: Var columns to retain (``in_memory`` only).
+            obsm_keys: Obsm keys to retain (``in_memory`` only). Defaults to
+                ``"spatial"``.
+            varm_keys: Varm keys to retain (``in_memory`` only).
+            uns_keys: Uns keys to retain (``in_memory`` only).
+            layer_keys: Layer keys to retain (``in_memory`` only).
+            metadata_keys: Experiment metadata columns to add to obs
+                (``in_memory`` only).
+            make_obs_names_unique: Prepend a prefix to obs names to guarantee
+                uniqueness across samples.
+            join: How to join variables. ``"inner"`` (default) keeps only
+                shared genes; ``"outer"`` keeps all genes with fill values.
+            min_shared_genes: Warn when fewer than this many genes remain after
+                an inner join.
+            overwrite: If True, overwrite an existing table.
+            method: Concatenation strategy. ``"in_memory"`` (default) or
+                ``"concat_on_disk"`` for memory-efficient on-disk streaming.
+
+        Raises:
+            ValueError: If the experiment has no save path, or if
+                ``method="concat_on_disk"`` is used with unsupported filter
+                arguments.
+            FileExistsError: If a table already exists and ``overwrite=False``.
+        """
+        self._check_mode_compatibility("build_table")
+
+        if self.path is None:
+            raise ValueError(
+                "Cannot build table: experiment has no save path. "
+                "Call `saveas()` first to give the experiment a path."
+            )
+
+        # Validate concat_on_disk restrictions
+        if method == "concat_on_disk":
+            unsupported = {
+                "obs_keys": obs_keys,
+                "var_keys": var_keys,
+                "obsm_keys": obsm_keys if obsm_keys != "spatial" else None,
+                "varm_keys": varm_keys,
+                "uns_keys": uns_keys,
+                "layer_keys": layer_keys,
+                "metadata_keys": metadata_keys,
+            }
+            active = [k for k, v in unsupported.items() if v is not None]
+            if active:
+                raise ValueError(
+                    f"method='concat_on_disk' does not support these arguments: "
+                    f"{active}. Use method='in_memory' to apply filtering."
+                )
+
+        # Resolve cells_layer=None to the actual layer key so the output filename
+        # is always explicit (e.g. "main" rather than the ambiguous None).
+        if cells_layer is None:
+            _, cells_layer = _get_cell_layer(
+                next(self.iterdata())[1].cells, cells_layer=None, return_layer_name=True
+            )
+
+        output_path = self._get_table_path(cells_layer)
+        check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        build_params = {"label_col": label_col, "method": method, "cells_layer": cells_layer}
+
+        if method == "in_memory":
+            adata = self._concatenate_samples(
+                cells_layer=cells_layer,
+                label_col=label_col,
+                obs_keys=obs_keys,
+                var_keys=var_keys,
+                obsm_keys=obsm_keys,
+                varm_keys=varm_keys,
+                uns_keys=uns_keys,
+                layer_keys=layer_keys,
+                metadata_keys=metadata_keys,
+                make_obs_names_unique=make_obs_names_unique,
+                join=join,
+                min_shared_genes=min_shared_genes,
+            )
+            adata.uns["_insitupy_build_params"] = build_params
+            adata.write_zarr(output_path)
+            logger.info(
+                "Built concatenated table at '%s' (%d cells, %d genes).",
+                output_path,
+                adata.n_obs,
+                adata.n_vars,
+            )
+
+        elif method == "concat_on_disk":
+            self._concat_samples_on_disk(
+                output_path=output_path,
+                cells_layer=cells_layer,
+                label_col=label_col,
+                join=join,
+                min_shared_genes=min_shared_genes,
+                make_obs_names_unique=make_obs_names_unique,
+            )
+
+        else:
+            raise ValueError(
+                f"Unknown method '{method}'. Choose 'in_memory' or 'concat_on_disk'."
+            )
+
+        # Write per-layer sidecar build params (readable by both methods without loading zarr)
+        import json as _json
+        self._get_build_params_path(cells_layer).write_text(_json.dumps(build_params))
 
     def load_all(self,
-                 skip: Optional[str] = None,
+                 skip: str | None = None,
                  ):
         """
         Load all data modalities for all datasets.
@@ -1271,7 +1982,7 @@ class InSituExperiment:
             xd.load_cells()
 
     def load_images(self,
-                    names: Union[Literal["all", "nuclei"], str] = "all",
+                    names: Literal["all", "nuclei"] | str = "all",
                     overwrite: bool = False,
                     verbose: bool = False
                     ):
@@ -1303,16 +2014,16 @@ class InSituExperiment:
     def plot_embedding(
         self,
         basis: str,
-        cells_layer: Optional[str] = None,
-        color: Optional[str] = None,
-        title_column: Optional[str] = None,
+        cells_layer: str | None = None,
+        color: str | None = None,
+        title_column: str | None = None,
         title_size: int = 24,
         max_cols: int = 4,
-        figsize: Tuple[int, int] = (8,6),
-        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        figsize: tuple[int, int] = (8,6),
+        savepath: str | os.PathLike | Path | None = None,
         save_only: bool = False,
         show: bool = True,
-        fig: Optional[Figure] = None,
+        fig: Figure | None = None,
         dpi_save: int = 300,
         **kwargs
         ):
@@ -1365,16 +2076,16 @@ class InSituExperiment:
     @with_insitupy_style
     def plot_umaps(
         self,
-        cells_layer: Optional[str] = None,
-        color: Optional[str] = None,
-        title_column: Optional[str] = None,
+        cells_layer: str | None = None,
+        color: str | None = None,
+        title_column: str | None = None,
         title_size: int = 20,
         max_cols: int = 4,
-        figsize: Tuple[int, int] = (8, 6),
-        savepath: Optional[Union[str, os.PathLike, Path]] = None,
+        figsize: tuple[int, int] = (8, 6),
+        savepath: str | os.PathLike | Path | None = None,
         save_only: bool = False,
         show: bool = True,
-        fig: Optional[Figure] = None,
+        fig: Figure | None = None,
         dpi_save: int = 300,
         **kwargs
     ):
@@ -1436,7 +2147,7 @@ class InSituExperiment:
 
     def reload(
         self,
-        skip: Optional[List] = None,
+        skip: list | None = None,
         verbose: bool = True,
     ):
         """Reload all datasets and experiment-level files from disk.
@@ -1492,7 +2203,7 @@ class InSituExperiment:
         # Reload colors
         colors_path = path / "colors.json"
         if colors_path.exists():
-            with open(colors_path, 'r') as f:
+            with open(colors_path) as f:
                 self._colors = json.load(f)
         else:
             self._colors = {}
@@ -1503,7 +2214,7 @@ class InSituExperiment:
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
-                with open(filters_path, 'r') as f:
+                with open(filters_path) as f:
                     filters_payload = json.load(f)
                 version = filters_payload.get("version", None)
                 filters = filters_payload.get("filters", None)
@@ -1528,7 +2239,7 @@ class InSituExperiment:
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
-    def unload(self, modalities: Optional[List] = None):
+    def unload(self, modalities: list | None = None):
         """Unload modality data from memory for every dataset in this experiment.
 
         Calls :meth:`~insitupy._core.data.InSituData.unload` on every child
@@ -1634,7 +2345,7 @@ class InSituExperiment:
 
     def save_metadata(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
         """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
@@ -1676,7 +2387,7 @@ class InSituExperiment:
         return path / _METADATA_SCHEMA_FILENAME
 
     @staticmethod
-    def _metadata_dtype_map(metadata: pd.DataFrame) -> Dict[str, str]:
+    def _metadata_dtype_map(metadata: pd.DataFrame) -> dict[str, str]:
         """Serialize DataFrame dtypes to JSON-compatible strings."""
         return {str(column): str(dtype) for column, dtype in metadata.dtypes.items()}
 
@@ -1692,14 +2403,14 @@ class InSituExperiment:
             json.dump(schema_payload, f, indent=2, sort_keys=True)
 
     @classmethod
-    def _load_metadata_dtype_map(cls, path: Path) -> Optional[Dict[str, str]]:
+    def _load_metadata_dtype_map(cls, path: Path) -> dict[str, str] | None:
         """Load metadata dtype map if available and valid, else return None."""
         schema_path = cls._metadata_schema_path(path)
         if not schema_path.exists():
             return None
 
         try:
-            with open(schema_path, 'r') as f:
+            with open(schema_path) as f:
                 schema_payload = json.load(f)
         except Exception as err:
             logger.warning(
@@ -1749,7 +2460,7 @@ class InSituExperiment:
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: Dict[str, Any] = {}
+        read_csv_kwargs: dict[str, Any] = {}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -1782,7 +2493,7 @@ class InSituExperiment:
 
     def save_colors(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
         """Save only experiment colors to ``colors.json``.
@@ -1861,32 +2572,121 @@ class InSituExperiment:
         if collect_warnings_mode:
             with collect_warnings() as collector:
                 for xd in tqdm(self._data):
-                    xd.save(
-                        verbose=dataset_verbose,
-                        sync_images=True,
-                        images_only=True,
-                        overwrite_images=overwrite,
-                        **kwargs,
-                    )
+                    xd.save_images(overwrite=overwrite, verbose=dataset_verbose, **kwargs)
             collector.print_summary()
         else:
             for xd in tqdm(self._data):
-                xd.save(
-                    verbose=dataset_verbose,
-                    sync_images=True,
-                    images_only=True,
-                    overwrite_images=overwrite,
-                    **kwargs,
+                xd.save_images(overwrite=overwrite, verbose=dataset_verbose, **kwargs)
+
+    def save_geometries(
+        self,
+        collect_warnings_mode: bool = True,
+        verbose: bool = False,
+    ) -> None:
+        """Save only annotation and region geometries for all datasets.
+
+        Iterates all datasets and calls
+        :meth:`~insitupy.InSituData.save_geometries` on each.  All other
+        modalities are left untouched on disk.
+
+        Args:
+            collect_warnings_mode: If ``True``, collect warnings and print a
+                summary at the end instead of displaying them inline.
+            verbose: If ``True``, log per-dataset progress messages.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset
+                paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_geometries")
+
+        dataset_verbose = verbose
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
                 )
 
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving geometries failed: save path of some InSituData objects does not lie "
+                    f"inside the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
 
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save_geometries(verbose=dataset_verbose)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save_geometries(verbose=dataset_verbose)
+
+    def save_cells(
+        self,
+        collect_warnings_mode: bool = True,
+        verbose: bool = False,
+    ) -> None:
+        """Save only cell data (expression table and boundaries) for all datasets.
+
+        Iterates all datasets and calls
+        :meth:`~insitupy.InSituData.save_cells` on each.  All other
+        modalities are left untouched on disk.
+
+        Args:
+            collect_warnings_mode: If ``True``, collect warnings and print a
+                summary at the end instead of displaying them inline.
+            verbose: If ``True``, log per-dataset progress messages.
+
+        Raises:
+            ValueError: If no experiment save path is available or dataset
+                paths are inconsistent.
+        """
+        self._check_mode_compatibility("save_cells")
+
+        dataset_verbose = verbose
+
+        if not self.is_view:
+            if self.path is None:
+                raise ValueError(
+                    "No save path available. First save the InSituExperiment using `saveas()` "
+                    "or set `self.path` by reading an existing experiment."
+                )
+
+            parent_path_identical = [
+                (d.path is not None) and (Path(d.path).parent == self.path)
+                for d in self.data
+            ]
+            if not np.all(parent_path_identical):
+                invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
+                raise ValueError(
+                    "Saving cells failed: save path of some InSituData objects does not lie "
+                    f"inside the InSituExperiment save path. Affected uids: {invalid_uids}"
+                )
+
+        if collect_warnings_mode:
+            with collect_warnings() as collector:
+                for xd in tqdm(self._data):
+                    xd.save_cells(verbose=dataset_verbose)
+            collector.print_summary()
+        else:
+            for xd in tqdm(self._data):
+                xd.save_cells(verbose=dataset_verbose)
 
     def saveas(
         self,
-        path: Union[str, os.PathLike, Path],
+        path: str | os.PathLike | Path,
         overwrite: bool = False,
         verbose: bool = False,
         collect_warnings_mode: bool = True,
+        free_after_save: bool = False,
         **kwargs):
         """Save experiment to a new location (initial full write).
 
@@ -1899,6 +2699,12 @@ class InSituExperiment:
             verbose: If True, print verbose output.
             collect_warnings_mode: If True, collect warnings and print summary at end
                 instead of displaying them inline (prevents progress bar disruption).
+            free_after_save: If True, each region's in-memory modality data is
+                released immediately after it has been written to disk.  This
+                reduces peak RAM when saving many large regions (e.g. after
+                ``from_regions(lazy=True)``).  After ``saveas`` completes the
+                ``InSituExperiment`` object will have empty data containers and
+                should be reloaded from disk for further use.  Defaults to False.
             **kwargs: Additional keyword arguments passed to dataset.saveas().
         """
         self._check_mode_compatibility("saveas")
@@ -1917,6 +2723,9 @@ class InSituExperiment:
                 for index, dataset in enumerate(tqdm(self._data)):
                     subfolder_path = path / f"data-{str(index).zfill(3)}"
                     dataset.saveas(subfolder_path, verbose=False, **kwargs)
+                    if free_after_save:
+                        dataset._release_data()
+                        gc.collect()
 
             # Print collected warnings at the end
             collector.print_summary()
@@ -1925,6 +2734,9 @@ class InSituExperiment:
             for index, dataset in enumerate(tqdm(self._data)):
                 subfolder_path = path / f"data-{str(index).zfill(3)}"
                 dataset.saveas(subfolder_path, verbose=False, **kwargs)
+                if free_after_save:
+                    dataset._release_data()
+                    gc.collect()
 
         self._path = path
         self.save_metadata(path=path, overwrite=True)
@@ -1935,7 +2747,7 @@ class InSituExperiment:
 
     def save_filters(
         self,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
     ):
         """
         Save only experiment filters to ``filters.json``.
@@ -2001,8 +2813,8 @@ class InSituExperiment:
 
     def sync_colors(
         self,
-        keys: Union[str, List[str]],
-        cells_layer: Optional[str] = None,
+        keys: str | list[str],
+        cells_layer: str | None = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         overwrite: bool = False,
         verbose: bool = False
@@ -2014,7 +2826,8 @@ class InSituExperiment:
             keys (Union[str, List[str]]): The metadata keys to synchronize colors for.
             cells_layer (Optional[str], optional): The layer to access. Defaults to None.
             palette (ListedColormap, optional): The color palette to use.
-            overwrite (bool, optional): Whether to overwrite existing color dictionaries. Defaults to False.
+            overwrite (bool, optional): Whether to overwrite existing color
+                dictionaries. Defaults to False.
             verbose (bool, optional): Whether to print status messages. Defaults to True.
         """
         self._check_mode_compatibility("sync_colors")
@@ -2078,7 +2891,7 @@ class InSituExperiment:
         cls,
         objs,
         new_col_name=None,
-        path: Optional[Union[str, os.PathLike, Path]] = None,
+        path: str | os.PathLike | Path | None = None,
         mode: Literal["copy", "move"] = "copy",
     ):
         """Concatenate multiple InSituExperiment objects.
@@ -2106,8 +2919,12 @@ class InSituExperiment:
 
                 .. warning::
                     ``mode="move"`` is **destructive and irreversible**.
-                    All source experiments must have a save path set and must
-                    reside on the same filesystem as ``path``.
+                    All source experiments must reside on the same filesystem
+                    as ``path``.  Subsetted experiments (created via ``[]``
+                    indexing) are supported: their datasets are moved normally,
+                    but the original experiment root directory is **not** removed
+                    automatically — a :class:`UserWarning` is emitted and the
+                    caller is responsible for cleaning up the remainder.
 
         Returns:
             InSituExperiment: A new InSituExperiment object.
@@ -2152,27 +2969,29 @@ class InSituExperiment:
             for i, obj in enumerate(objs):
                 if not isinstance(obj, InSituExperiment):
                     raise TypeError("All objects must be instances of InSituExperiment.")
-                if obj._path is None:
-                    raise ValueError(
-                        f"mode='move' requires all experiments to have a save path set, "
-                        f"but experiment at index {i} has no path. "
-                        f"Call saveas() first."
-                    )
+                for xd in obj._data:
+                    if xd._path is None:
+                        raise ValueError(
+                            f"mode='move' requires all datasets to have a save path set, "
+                            f"but dataset '{xd.slide_id}' in experiment at index {i} has no path. "
+                            f"Call saveas() on the experiment first."
+                        )
 
             path = Path(path)
 
-            # Verify same filesystem: compare the device of the destination
-            # parent (creating it if needed) against each source dataset.
+            # Verify same filesystem per dataset (covers subset experiments whose
+            # obj._path is None): compare device of destination against each source.
             path.mkdir(parents=True, exist_ok=True)
             dst_dev = os.stat(path).st_dev
             for obj in objs:
-                src_dev = os.stat(obj._path).st_dev
-                if src_dev != dst_dev:
-                    raise ValueError(
-                        f"mode='move' requires source and destination to be on the "
-                        f"same filesystem. Source '{obj._path}' and destination '{path}' "
-                        f"are on different devices. Use mode='copy' + saveas() instead."
-                    )
+                for xd in obj._data:
+                    src_dev = os.stat(xd._path).st_dev
+                    if src_dev != dst_dev:
+                        raise ValueError(
+                            f"mode='move' requires source and destination to be on the "
+                            f"same filesystem. Source '{xd._path}' and destination '{path}' "
+                            f"are on different devices. Use mode='copy' + saveas() instead."
+                        )
 
             return cls._concat_move(
                 objs=objs,
@@ -2229,17 +3048,33 @@ class InSituExperiment:
         Moves each source dataset directory to ``path/data-NNN``, updates
         ``InSituData._path``, detaches in-memory data, writes experiment-level
         files to ``path``, and removes the now-empty source experiment roots.
+        Subset experiments (``obj._path is None``) are supported: their datasets
+        are moved normally but the original experiment root is not removed.
         """
         new_experiment = cls(data_type=data_type)
         new_metadata: list = []
         merged_colors: dict = {}
         global_idx = 0
 
+        # Warn upfront about subset experiments whose roots will not be cleaned up.
+        for i, obj in enumerate(objs):
+            if obj._path is None and obj._data:
+                inferred_root = obj._data[0]._path.parent
+                warnings.warn(
+                    f"Experiment at index {i} is a subset (no experiment root path set). "
+                    f"{len(obj._data)} dataset(s) will be moved out of '{inferred_root}', "
+                    f"but that directory will NOT be removed automatically — any remaining "
+                    f"datasets and experiment-level files there must be cleaned up manually.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+
         for key, obj in zip(keys, objs):
             # Release in-memory data before moving so the move loop stays clean
             obj.unload()
 
-            for xd in tqdm(obj._data, desc=f"Moving datasets from {obj._path.name}"):
+            desc = f"Moving datasets from {obj._path.name}" if obj._path else "Moving datasets"
+            for xd in tqdm(obj._data, desc=desc):
                 dst = path / f"data-{str(global_idx).zfill(3)}"
                 shutil.move(str(xd._path), str(dst))
                 xd._path = dst
@@ -2265,13 +3100,26 @@ class InSituExperiment:
         new_experiment.save_colors(path=path, overwrite=True)
         new_experiment.save_filters(path=path)
 
-        # Remove source experiment roots (datasets have already been moved out)
+        # Remove source experiment roots (datasets have already been moved out).
+        # Subset experiments have no root path and are skipped.
+        _EXPECTED_ROOT_FILES = {
+            "metadata.csv",
+            _METADATA_SCHEMA_FILENAME,
+            "colors.json",
+            "filters.json",
+        }
         for obj in objs:
-            remaining = list(obj._path.iterdir())
-            if remaining:
-                logger.info(
-                    "Removing source experiment root '%s' (%d item(s) remaining).",
-                    obj._path, len(remaining),
+            if obj._path is None:
+                continue
+            remaining = {p.name for p in obj._path.iterdir()}
+            unexpected = remaining - _EXPECTED_ROOT_FILES
+            if unexpected:
+                warnings.warn(
+                    f"Removing source experiment root '{obj._path}' which still contains "
+                    f"{len(unexpected)} unexpected item(s): {sorted(unexpected)}. "
+                    f"These will be permanently deleted.",
+                    UserWarning,
+                    stacklevel=3,
                 )
             shutil.rmtree(str(obj._path))
             obj._path = None
@@ -2283,30 +3131,37 @@ class InSituExperiment:
 
     @classmethod
     def from_config(cls,
-                    config_path: Union[str, os.PathLike, Path],
-                    mode: Literal["insitupy", "xenium"],
+                    config: str | os.PathLike | Path | pd.DataFrame,
+                    mode: Literal["insitupy", "xenium", "auto"] = "auto",
                     collect_warnings_mode: bool = True,
                     **kwargs
                     ):
-        """Create an InSituExperiment object from a configuration file.
+        """Create an InSituExperiment object from a configuration file or DataFrame.
 
         Args:
-            config_path (Union[str, os.PathLike, Path]): The path to the configuration CSV or Excel file.
-            mode (Literal["insitupy", "xenium"]): The mode to use for loading the datasets.
+            config (Union[str, os.PathLike, Path, pd.DataFrame]): Configuration specifying the
+                datasets to load. Either a path to a CSV or Excel file, or a :class:`pandas.DataFrame`
+                directly. Must contain a ``'directory'`` column with the path to each dataset.
+                When passing a DataFrame the index is ignored.
+            mode (Literal["insitupy", "xenium", "auto"]): The mode to use for loading the datasets.
+                - "auto": Automatically detect the format of each directory by looking for ``.ispy``
+                  (InSituPy project) or ``experiment.xenium`` (Xenium output bundle). Raises a
+                  ``ValueError`` if neither marker file is found. Defaults to ``"auto"``.
                 - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
                 - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
             collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
                 This keeps the progress bar clean while still showing important warnings. Defaults to True.
         """
-        config_path = Path(config_path)
-
-        # Determine file type and read the configuration file
-        if config_path.suffix in ['.csv']:
-            config = pd.read_csv(config_path, dtype=str)
-        elif config_path.suffix in ['.xlsx', '.xls']:
-            config = pd.read_excel(config_path, dtype=str)
+        if isinstance(config, pd.DataFrame):
+            config = config.reset_index(drop=True)
         else:
-            raise ValueError("Unsupported file type. Please provide a CSV or Excel file.")
+            config_path = Path(config)
+            if config_path.suffix == '.csv':
+                config = pd.read_csv(config_path, dtype=str)
+            elif config_path.suffix in ('.xlsx', '.xls'):
+                config = pd.read_excel(config_path, dtype=str)
+            else:
+                raise ValueError("Unsupported file type. Please provide a CSV or Excel file.")
 
         # Ensure the 'directory' column exists
         if 'directory' not in config.columns:
@@ -2321,6 +3176,17 @@ class InSituExperiment:
         # Create a warning collector if collect_warnings_mode is enabled
         warning_collector = WarningCollector() if collect_warnings_mode else None
 
+        def _resolve_mode(path: Path) -> str:
+            if (path / ISPY_METADATA_FILE).exists():
+                return "insitupy"
+            elif (path / "experiment.xenium").exists():
+                return "xenium"
+            else:
+                raise ValueError(
+                    f"Cannot auto-detect format for '{path}': neither '{ISPY_METADATA_FILE}' "
+                    f"nor 'experiment.xenium' was found. Set 'mode' explicitly."
+                )
+
         # Iterate over each row in the configuration file
         for i in tqdm(range(len(config))):
             row = config.iloc[i, :]
@@ -2334,22 +3200,16 @@ class InSituExperiment:
             if not dataset_path.exists():
                 raise FileNotFoundError(f"No such directory found: {str(dataset_path)}")
 
-            # Use collect_warnings context manager to capture warnings without disrupting progress bar
-            if collect_warnings_mode:
-                with collect_warnings(warning_collector):
-                    if mode == "insitupy":
-                        dataset = InSituData.read(dataset_path)
-                    elif mode == "xenium":
-                        dataset = read_xenium(dataset_path, verbose=False, **kwargs)
-                    else:
-                        raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
-            else:
-                if mode == "insitupy":
+            resolved_mode = _resolve_mode(dataset_path) if mode == "auto" else mode
+
+            ctx = collect_warnings(warning_collector) if collect_warnings_mode else contextlib.nullcontext()
+            with ctx:
+                if resolved_mode == "insitupy":
                     dataset = InSituData.read(dataset_path)
-                elif mode == "xenium":
+                elif resolved_mode == "xenium":
                     dataset = read_xenium(dataset_path, verbose=False, **kwargs)
                 else:
-                    raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
+                    raise ValueError(f"Invalid mode '{resolved_mode}'. Supported modes are 'insitupy', 'xenium', and 'auto'.")
 
             experiment._data.append(dataset)
 
@@ -2372,7 +3232,7 @@ class InSituExperiment:
     def from_regions(cls,
                     data: InSituData,
                     region_key: str,
-                    region_names: Optional[Union[List[str], str]] = None,
+                    region_names: list[str] | str | None = None,
                     lazy: bool = False,
                     detach_transcripts: bool = True
                     ):
@@ -2467,9 +3327,9 @@ class InSituExperiment:
 
     @classmethod
     def read(cls,
-             path: Union[str, os.PathLike, Path],
+             path: str | os.PathLike | Path,
                mode: Literal["insitupy", "spatialdata"] = "insitupy",
-               filter_key: Optional[str] = None) -> "InSituExperiment":
+               filter_key: str | None = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
@@ -2497,7 +3357,7 @@ class InSituExperiment:
     # ==================== SPATIALDATA MODE METHODS ====================
 
     @classmethod
-    def _read_spatialdata(cls, path: Union[str, os.PathLike, Path]) -> "InSituExperiment":
+    def _read_spatialdata(cls, path: str | os.PathLike | Path) -> "InSituExperiment":
         """
         Read an InSituExperiment from a SpatialData zarr store.
 
@@ -2525,8 +3385,7 @@ class InSituExperiment:
                 "Install it with: pip install insitupy[spatialdata]"
             )
         else:
-            from spatialdata_wrapper._io import \
-                silent_read_zarr as _silent_read_zarr
+            from spatialdata_wrapper._io import silent_read_zarr as _silent_read_zarr
 
         path = Path(path)
         if not path.exists():
@@ -2575,7 +3434,7 @@ class InSituExperiment:
         colors_path = path / "colors.json"
         if colors_path.exists():
             try:
-                with open(colors_path, 'r') as f:
+                with open(colors_path) as f:
                     experiment._colors = json.load(f)
             except Exception as e:
                 logger.warning(f"Could not load colors.json: {e}")
@@ -2583,7 +3442,7 @@ class InSituExperiment:
         return experiment
 
     @staticmethod
-    def _extract_samples_from_spatialdata(sdata) -> Dict[str, Dict]:
+    def _extract_samples_from_spatialdata(sdata) -> dict[str, dict]:
         """
         Group SpatialData elements by sample ID.
 
@@ -2622,7 +3481,7 @@ class InSituExperiment:
         return dict(samples)
 
     @staticmethod
-    def _populate_structured_data(struct_data, sample_elements: Dict, sample_id: str):
+    def _populate_structured_data(struct_data, sample_elements: dict, sample_id: str):
         """
         Populate a StructuredSpatialData object from a dictionary of elements.
 
@@ -2655,8 +3514,7 @@ class InSituExperiment:
                     image_name = parts[1]
                     # Get transformation for pixel size
                     try:
-                        from spatialdata.transformations import \
-                            get_transformation
+                        from spatialdata.transformations import get_transformation
                         scale_obj = get_transformation(elem)
                         struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
                     except Exception as e:
@@ -2698,7 +3556,7 @@ class InSituExperiment:
                 logger.warning(f"Unknown modality in key: {key}")
 
     @staticmethod
-    def _get_loaded_modalities_spatialdata(data) -> List[str]:
+    def _get_loaded_modalities_spatialdata(data) -> list[str]:
         """
         Get list of loaded modalities from a StructuredSpatialData object.
 
@@ -2724,8 +3582,8 @@ class InSituExperiment:
         return loaded
 
     @classmethod
-    def _read_insitupy(cls, path: Union[str, os.PathLike, Path],
-                       filter_key: Optional[str] = None) -> "InSituExperiment":
+    def _read_insitupy(cls, path: str | os.PathLike | Path,
+                       filter_key: str | None = None) -> "InSituExperiment":
         """
         Read an InSituExperiment in InSituPy format (original implementation).
 
@@ -2743,7 +3601,7 @@ class InSituExperiment:
 
         try:
             # load colors
-            with open(path / "colors.json", 'r') as f:
+            with open(path / "colors.json") as f:
                 colors = json.load(f)
         except FileNotFoundError:
             colors = {}
@@ -2753,7 +3611,7 @@ class InSituExperiment:
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
-                with open(filters_path, 'r') as f:
+                with open(filters_path) as f:
                     filters_payload = json.load(f)
             except Exception as err:
                 raise ValueError(
@@ -2823,9 +3681,9 @@ class InSituExperiment:
 
         return experiment
 
-    def _build_filters_payload(self) -> Dict[str, Any]:
+    def _build_filters_payload(self) -> dict[str, Any]:
         """Build versioned JSON payload for ``filters.json``."""
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "version": _FILTERS_SCHEMA_VERSION,
             "filters": {},
         }
@@ -2848,7 +3706,7 @@ class InSituExperiment:
             )
     def _check_obs_uniqueness(
         self,
-        cells_layer: Optional[str] = None
+        cells_layer: str | None = None
         ):
         """
         Check if the observation names are unique across all datasets.
@@ -2876,9 +3734,9 @@ class InSituExperiment:
     def _create_categorical_color_dict(
         self,
         obs_col: str,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP
-        ) -> Dict:
+        ) -> dict:
         """Create a color dictionary for categorical data."""
         cols = []
         for _, xd in self.iterdata():
@@ -2899,12 +3757,12 @@ class InSituExperiment:
 
     def calculate_qc_metrics(
         self,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         layer: str = None,
         force_layer: bool = False,
         add_to_metadata: bool = True,
         return_metrics: bool = False,
-    ) -> Optional[Dict]:
+    ) -> dict | None:
         """
         Calculate quality control metrics for the InSituExperiment.
 
@@ -2965,3 +3823,20 @@ class InSituExperimentView(InSituExperiment):
     def is_view(self) -> bool:
         """Return True; this object is a linked view of a parent experiment."""
         return True
+
+    @property
+    def table(self) -> "ViewTableAccessor":
+        """Dict-like accessor for per-cells-layer concatenated tables (view-filtered).
+
+        Returns an accessor that loads the AnnData for a specific layer and
+        row-filters it to only the samples present in this view::
+
+            view.table["main"]   # AnnData filtered to this view's samples
+            view.table.keys()    # available layer names (from parent path)
+
+        Requires the parent experiment to have called :meth:`build_table` first.
+
+        .. note::
+            This feature is experimental and may change in future versions.
+        """
+        return ViewTableAccessor(self)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 
@@ -15,9 +14,9 @@ from insitupy.images.utils import fit_image_to_size_limit
 logger = logging.getLogger(__name__)
 
 def load_transformation_matrix(
-    source: Union[np.ndarray, str, Path],
-    reference_pixel_size: Optional[float] = None,
-    source_pixel_size: Optional[float] = None,
+    source: np.ndarray | str | Path,
+    reference_pixel_size: float | None = None,
+    source_pixel_size: float | None = None,
 ) -> np.ndarray:
     """Load and validate a transformation matrix, optionally converting from pixel to physical space.
 

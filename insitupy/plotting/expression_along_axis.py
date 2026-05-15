@@ -4,26 +4,21 @@ import textwrap
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
-from warnings import warn
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import pyplot as plt
-from matplotlib.axes._axes import Axes
-from matplotlib.figure import Figure
-from scipy.stats import pearsonr, spearmanr, zscore
 from sklearn.preprocessing import MinMaxScaler
-from tqdm import tqdm
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, _init_mpl_fontsize
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.utils._checks import check_raw, has_valid_labels
 from insitupy.utils._regression import smooth_fit
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils.utils import (
+    convert_to_list,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +26,16 @@ logger = logging.getLogger(__name__)
 def cell_expression_along_axis(
     adata,
     axis,
-    genes: List[str],
+    genes: list[str],
     cell_type_column: str,
-    cell_type: Union[str, List[str]],
-    xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
-    min_expression: Union[int, float] = 0,
-    xlabel: Optional[str] = None,
+    cell_type: str | list[str],
+    xlim: tuple[int | float, int | float] = (0, np.inf),
+    min_expression: int | float = 0,
+    xlabel: str | None = None,
     fit_reg: bool = False,
     kde: bool = False,
     max_cols: int = 4,
-    savepath: Union[str, os.PathLike, Path] = None,
+    savepath: str | os.PathLike | Path = None,
     save_only: bool = False,
     dpi_save: int = 300,
     fig_height: Number = 4,
@@ -261,10 +256,10 @@ def cell_expression_along_axis(
 def _select_data(
     adata,
     axis,
-    genes: List[str],
+    genes: list[str],
     cell_type_column: str,
-    cell_type: Union[str, List[str]],
-    xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
+    cell_type: str | list[str],
+    xlim: tuple[int | float, int | float] = (0, np.inf),
     min_expression: Number = None,
     sort: bool = True,
     minmax_scale: bool = True,
@@ -459,11 +454,11 @@ def _bin_qc_plot(
 
 def cell_abundance_along_axis(
     adata: AnnData,
-    axis: Union[str, Tuple[str, str]],
-    groupby: Optional[str] = None,
-    xlim: Tuple = (0, np.inf),
-    savepath: Optional[os.PathLike] = None,
-    figsize: Tuple = (8,6),
+    axis: str | tuple[str, str],
+    groupby: str | None = None,
+    xlim: tuple = (0, np.inf),
+    savepath: os.PathLike | None = None,
+    figsize: tuple = (8,6),
     save_only: bool = False,
     dpi_save: int = 300,
     multiple: Literal["layer", "dodge", "stack", "fill"] = "stack",

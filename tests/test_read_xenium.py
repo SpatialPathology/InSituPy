@@ -1,13 +1,15 @@
 import pytest
 
 from insitupy import InSituData
-from insitupy.datasets import (xenium_test_dataset_v2_mm,
-                               xenium_test_dataset_v2_nucex,
-                               xenium_test_dataset_v3_mm,
-                               xenium_test_dataset_v3_nucex,
-                               xenium_test_dataset_v4_mm,
-                               xenium_test_dataset_v4_nucex,
-                               xenium_test_dataset_v4_protein)
+from insitupy.datasets import (
+    xenium_test_dataset_v2_mm,
+    xenium_test_dataset_v2_nucex,
+    xenium_test_dataset_v3_mm,
+    xenium_test_dataset_v3_nucex,
+    xenium_test_dataset_v4_mm,
+    xenium_test_dataset_v4_nucex,
+    xenium_test_dataset_v4_protein,
+)
 from insitupy.io.data import read_xenium
 
 
@@ -294,8 +296,10 @@ class TestReadXeniumSpatialDataBackend:
         """Test roundtrip conversion InSituData -> SpatialData -> InSituData."""
         pytest.importorskip("spatialdata", minversion="0.7.2")
 
-        from insitupy.spatialdata import (convert_from_spatialdata,
-                                          convert_to_spatialdata)
+        from insitupy.spatialdata import (
+            convert_from_spatialdata,
+            convert_to_spatialdata,
+        )
 
         xd_original = v2_mm_data
         sdata = convert_to_spatialdata(xd_original)

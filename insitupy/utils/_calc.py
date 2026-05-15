@@ -1,6 +1,6 @@
 import logging
-import warnings
-from typing import Callable, List, Literal, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ from tqdm.auto import tqdm
 
 
 def _calc_kernel_density(
-    data: Union[np.ndarray, List],
+    data: np.ndarray | list,
     mode: Literal["gauss", "mellon"] = "gauss",
     verbose: bool = False
     ):
@@ -185,10 +185,10 @@ def intensity_median(region_mask, intensity_image):
 def quantify_fluorescence(
     image_dask: da.Array,
     mask_dask: da.Array,
-    method: Union[Literal["mean", "median"], str, Callable] = "median",
-    downsample_factor: Optional[int] = None,
+    method: Literal["mean", "median"] | str | Callable = "median",
+    downsample_factor: int | None = None,
     return_area: bool = False
-) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Memory-efficient quantification for greyscale images.
 
@@ -357,7 +357,7 @@ def create_tiles(
     dask_array: da.Array,
     tile_size: int = 2000,
     overlap: int = 100
-) -> List[Tuple[da.Array, Tuple[slice, slice], Tuple[slice, slice]]]:
+) -> list[tuple[da.Array, tuple[slice, slice], tuple[slice, slice]]]:
     """
     Split a 2D dask array into overlapping tiles.
 
@@ -428,14 +428,13 @@ def create_tiles(
 
     return tiles
 
-from typing import List, Tuple
 
 import numpy as np
 
 
 def summarize_tile_measurements(
-    quant_results: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]
-) -> Tuple[np.ndarray, np.ndarray]:
+    quant_results: list[tuple[np.ndarray, np.ndarray, np.ndarray]]
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Consolidate measurements from overlapping tiles.
 

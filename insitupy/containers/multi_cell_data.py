@@ -4,13 +4,10 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Union
 
-import numpy as np
 from shapely import MultiPolygon, Polygon
 
-from insitupy._io.files import (check_overwrite_and_remove_if_true,
-                               write_dict_to_json)
+from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to_json
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
@@ -23,8 +20,8 @@ class MultiCellData(DeepCopyMixin):
     Data object containing multiple CellData objects.
     '''
     def __init__(self):
-        self._layers: Dict[str, "CellData"] = dict()
-        self._main_key: Optional[str] = None
+        self._layers: dict[str, CellData] = dict()
+        self._main_key: str | None = None
 
     @classmethod
     def read(cls, path, path_upper=None, alt_path_dict=None):
@@ -61,7 +58,12 @@ class MultiCellData(DeepCopyMixin):
         return repr
 
     def __getitem__(self, key):
-        return self._layers.get(key)
+        if key not in self._layers:
+            raise KeyError(key)
+        return self._layers[key]
+
+    def __contains__(self, key):
+        return key in self.keys()
 
     def __setitem__(self, key: str, item):
         from .cell_data import CellData
@@ -166,7 +168,7 @@ class MultiCellData(DeepCopyMixin):
             ValueError: If *value* is not an existing layer key.
         """
         if value not in self._layers.keys():
-            raise ValueError(f"Such layer does not exist.")
+            raise ValueError("Such layer does not exist.")
         self._main_key = value
 
     @property
@@ -209,10 +211,10 @@ class MultiCellData(DeepCopyMixin):
             self._main_key = key
 
     def add_proseg(self,
-                   path: Union[str, os.PathLike, Path],
-                   counts_file: Optional[str] = None,
-                   cell_metadata_file: Optional[str] = None,
-                   polygons_file: Optional[str] = None,
+                   path: str | os.PathLike | Path,
+                   counts_file: str | None = None,
+                   cell_metadata_file: str | None = None,
+                   polygons_file: str | None = None,
                    pixel_size: Number = 1,
                    key: str = "proseg",
                    is_main: bool = False,
@@ -299,11 +301,11 @@ class MultiCellData(DeepCopyMixin):
 
     def add_baysor(
                     self,
-                    xd: Union[str, os.PathLike, Path], # XeniumRanger output
-                    path: Union[str, os.PathLike, Path], # baysor output
-                    counts_file: Optional[str] = None,
-                    cell_metadata_file: Optional[str] = None,
-                    polygons_file: Optional[str] = None,
+                    xd: str | os.PathLike | Path, # XeniumRanger output
+                    path: str | os.PathLike | Path, # baysor output
+                    counts_file: str | None = None,
+                    cell_metadata_file: str | None = None,
+                    polygons_file: str | None = None,
                     pixel_size: Number = 1,
                     key: str = "baysor",
                     is_main: bool = False,
@@ -376,9 +378,9 @@ class MultiCellData(DeepCopyMixin):
 
 
     def crop(self,
-            xlim: Optional[Tuple[int, int]] = None,
-            ylim: Optional[Tuple[int, int]] = None,
-            shape: Optional[Union[Polygon, MultiPolygon]] = None,
+            xlim: tuple[int, int] | None = None,
+            ylim: tuple[int, int] | None = None,
+            shape: Polygon | MultiPolygon | None = None,
             inplace: bool = False,
             verbose: bool = True):
         """Crop all cell data layers to a spatial bounding box or polygon.
@@ -422,10 +424,10 @@ class MultiCellData(DeepCopyMixin):
         return self._layers.keys()
 
     def save(self,
-             path: Union[str, os.PathLike, Path],
+             path: str | os.PathLike | Path,
              zipped: bool = False,
              overwrite: bool = False,
-             max_resolution_boundaries: Optional[Number] = None
+             max_resolution_boundaries: Number | None = None
              ):
         """Save all cell data layers to a directory on disk.
 

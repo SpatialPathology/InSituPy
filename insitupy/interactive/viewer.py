@@ -1,14 +1,12 @@
-from insitupy._version import __version__
 from insitupy._constants import WITH_NAPARI
 
 if WITH_NAPARI:
     import os
     from pathlib import Path
-    from typing import Union
 
     import napari
     from geopandas import GeoDataFrame
-    from napari.layers import Layer, Points, Shapes
+    from napari.layers import Points, Shapes
     from napari.utils.notifications import show_info, show_warning
     from parse import parse
     from shapely import Point
@@ -160,7 +158,7 @@ if WITH_NAPARI:
                             )
 
     def save_colorlegends(
-        output_folder: Union[str, os.PathLike, Path] = "figures",
+        output_folder: str | os.PathLike | Path = "figures",
         #savepath: Optional[Union[str, os.PathLike, Path]] = None,
         #from_canvas: bool = False,
         max_per_col: int = 10,

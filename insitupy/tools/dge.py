@@ -1,18 +1,14 @@
 import logging
-from numbers import Number
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 from warnings import catch_warnings, filterwarnings, warn
 
 import anndata
 import numpy as np
-import pandas as pd
 import scanpy as sc
 
 from insitupy._core.data import InSituData
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.containers.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
-from insitupy.plotting.volcano import single_volcano
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
@@ -23,20 +19,20 @@ DGE_COMPARISON_COLUMN = "DGE_COMPARISON_COLUMN"
 
 def dge(
     target: InSituData,
-    target_annotation_tuple: Optional[Tuple[str, str]] = None,
-    target_cell_type_tuple: Optional[Tuple[str, str]] = None,
-    target_region_tuple: Optional[Tuple[str, str]] = None,
-    target_name: Optional[str] = None,
-    target_metadata: Optional[dict] = None,
-    ref: Optional[Union[InSituData, List[InSituData]]] = None,
-    ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-    ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-    ref_region_tuple: Optional[Tuple[str, str]] = "same",
-    ref_name: Optional[str] = None,
-    ref_metadata: Optional[dict] = None,
-    cells_layer: Optional[str] = None,
+    target_annotation_tuple: tuple[str, str] | None = None,
+    target_cell_type_tuple: tuple[str, str] | None = None,
+    target_region_tuple: tuple[str, str] | None = None,
+    target_name: str | None = None,
+    target_metadata: dict | None = None,
+    ref: InSituData | list[InSituData] | None = None,
+    ref_annotation_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+    ref_cell_type_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+    ref_region_tuple: tuple[str, str] | None = "same",
+    ref_name: str | None = None,
+    ref_metadata: dict | None = None,
+    cells_layer: str | None = None,
     consider_neighbors: bool = False,
-    method: Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']] = 't-test',
+    method: Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var'] | None = 't-test',
     exclude_ambiguous_assignments: bool = False,
     force_assignment: bool = False,
     verbose: bool = False,

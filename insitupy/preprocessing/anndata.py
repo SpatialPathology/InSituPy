@@ -1,13 +1,10 @@
 import logging
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 import scanpy as sc
-from scipy.sparse import csr_matrix, issparse
-from tqdm import tqdm
+from scipy.sparse import csr_matrix
 
-from insitupy._textformat import textformat as tf
-from insitupy._version import __version__
 from insitupy.utils._checks import check_integer_counts
 
 logger = logging.getLogger(__name__)
@@ -15,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def normalize_and_transform_anndata(
     adata,
-    layer: Optional[str] = None,
+    layer: str | None = None,
     transformation_method: Literal["log1p", "sqrt"] = "log1p",
     target_sum: int = None, # defaults to median of total counts of cells
     scale: bool = False,
@@ -95,7 +92,7 @@ def normalize_and_transform_anndata(
             X = norm_counts
         adata.X = csr_matrix(np.sqrt(X) + np.sqrt(X + 1))
     else:
-        raise ValueError(f'`transformation_method` is not one of ["log1p", "sqrt"]')
+        raise ValueError('`transformation_method` is not one of ["log1p", "sqrt"]')
 
 
     if scale:
@@ -186,4 +183,4 @@ def cluster_anndata(
         logger.info("Louvain clustering...") if verbose else None
         sc.tl.louvain(adata)
     else:
-        raise ValueError(f'`type` is not one of ["leiden", "louvain"]')
+        raise ValueError('`type` is not one of ["leiden", "louvain"]')

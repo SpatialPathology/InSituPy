@@ -1,7 +1,6 @@
 import math
 
 import geopandas as gpd
-import shapely
 from shapely import MultiPolygon, Polygon
 from shapely.geometry import Polygon, box
 from shapely.strtree import STRtree

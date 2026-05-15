@@ -1,5 +1,4 @@
 import logging
-from typing import Optional, Tuple
 
 import anndata as ad
 import decoupler as dc
@@ -7,8 +6,7 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
-from insitupy.containers.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.utils._helpers import suppress_output
 
 logger = logging.getLogger(__name__)
@@ -188,10 +186,10 @@ def _verbose_filter_features(
 
 def pseudobulk_dge(
     pdata,
-    dge_setup: Tuple[str, str, str],
+    dge_setup: tuple[str, str, str],
     celltype_col: str,
     celltype: str,
-    pdata_nb: Optional[AnnData] = None,
+    pdata_nb: AnnData | None = None,
     plot_qc: bool = True,
     min_cells: int = 10,
     min_counts: int = 1000,

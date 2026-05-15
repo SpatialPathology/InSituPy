@@ -19,7 +19,6 @@ import pkgutil
 import re
 import textwrap
 from pathlib import Path
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -48,7 +47,7 @@ def _truncate(text: str, limit: int = _MAX_OUTPUT) -> str:
     """Truncate text and append a notice if it exceeds *limit* characters."""
     if len(text) <= limit:
         return text
-    return text[:limit] + "\n\n... [truncated — full text is {} chars]".format(len(text))
+    return text[:limit] + f"\n\n... [truncated — full text is {len(text)} chars]"
 
 
 def _resolve_object(dotted_path: str):
@@ -147,7 +146,7 @@ _ALL_SUBMODULE_SEARCH_PATHS = [
 ]
 
 
-def _resolve_all_path(name: str) -> Optional[str]:
+def _resolve_all_path(name: str) -> str | None:
     """Try to find the dotted path of *name* in known insitupy submodules.
 
     Returns a fully qualified path string, or None if not found.
@@ -183,7 +182,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def list_modules(subpackage: Optional[str] = None) -> str:
+def list_modules(subpackage: str | None = None) -> str:
     """List all submodules and subpackages of insitupy.
 
     Args:
@@ -531,7 +530,7 @@ def list_test_files() -> str:
 def read_source_file(
     file_path: str,
     start_line: int = 1,
-    end_line: Optional[int] = None,
+    end_line: int | None = None,
 ) -> str:
     """Read a source file from the InSituPy repository.
 
@@ -1405,8 +1404,7 @@ def get_interactive_guide() -> str:
     # TranscriptViewerWidget
     lines.append("## TranscriptViewerWidget — Napari dock widget for transcripts")
     try:
-        from insitupy.interactive._transcript_viewer import \
-            TranscriptViewerWidget
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
 
         sig = _format_signature(TranscriptViewerWidget.__init__)
         doc = inspect.getdoc(TranscriptViewerWidget)
@@ -1557,8 +1555,10 @@ def get_spatialdata_api() -> str:
     lines.append("Requires the `spatialdata` package: `pip install spatialdata`\n")
 
     try:
-        from insitupy.spatialdata.convert import (convert_from_spatialdata,
-                                                  convert_to_spatialdata)
+        from insitupy.spatialdata.convert import (
+            convert_from_spatialdata,
+            convert_to_spatialdata,
+        )
 
         for fn_name, fn_obj in [
             ("convert_to_spatialdata", convert_to_spatialdata),

@@ -5,12 +5,12 @@ import os
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely import MultiPoint, MultiPolygon, Point, Polygon, affinity
+from shapely import MultiPoint, Point, Polygon, affinity
 
 from insitupy._constants import FORBIDDEN_ANNOTATION_NAMES, RED, WITH_NAPARI
 from insitupy._io.files import check_overwrite_and_remove_if_true
@@ -47,13 +47,13 @@ class ShapesData(DeepCopyMixin):
             Defaults to ``"id"``.
     """
     def __init__(self,
-                 files: Optional[List[Union[str, os.PathLike, Path]]] = None,
-                 keys: Optional[List[str]] = None,
-                 pixel_size: Optional[float] = None,
+                 files: list[str | os.PathLike | Path] | None = None,
+                 keys: list[str] | None = None,
+                 pixel_size: float | None = None,
                  assert_uniqueness: bool = False,
                  polygons_only: bool = False,
-                 forbidden_names: Optional[List[str]] = None,
-                 shape_name: Optional[str] = None,
+                 forbidden_names: list[str] | None = None,
+                 shape_name: str | None = None,
                  name_col: str = "name",
                  color_col: str = "color",
                  uid_col: str = "id",
@@ -139,10 +139,10 @@ class ShapesData(DeepCopyMixin):
         return len(self._data) == 0
 
     def _check_uniqueness(self,
-                          dataframe: Optional[gpd.GeoDataFrame] = None,
-                          key: Optional[str] = None,
+                          dataframe: gpd.GeoDataFrame | None = None,
+                          key: str | None = None,
                           verbose: bool = True,
-                          name_col: Optional[str] = None,
+                          name_col: str | None = None,
                           ) -> bool:
         """Check that every index entry maps to a unique name-column value.
 
@@ -180,15 +180,14 @@ class ShapesData(DeepCopyMixin):
             return True
 
     def add_data(self,
-                 data: Union[gpd.GeoDataFrame, pd.DataFrame, dict,
-                                str, os.PathLike, Path],
+                 data: gpd.GeoDataFrame | pd.DataFrame | dict | str | os.PathLike | Path,
                  key: str,
-                 scale_factor: Number,
+                 scale_factor: Number | None = None,
                  verbose: bool = False,
                  in_napari: bool = False,
-                 uid_col: Optional[str] = None,
-                 name_col: Optional[str] = None,
-                 color_col: Optional[str] = None,
+                 uid_col: str | None = None,
+                 name_col: str | None = None,
+                 color_col: str | None = None,
                    ):
         """Add shape data from a file or dataframe to the ShapesData object.
 
@@ -210,7 +209,11 @@ class ShapesData(DeepCopyMixin):
                 file path to a GeoJSON / shapefile.
             key: String key under which the shapes are stored.
             scale_factor: Multiplicative factor applied to all geometry
-                coordinates (typically the pixel size in micrometers).
+                coordinates. Pass the pixel size in µm/pixel (e.g. ``0.2125``)
+                when importing raw pixel-coordinate data from files. Pass
+                ``1.0`` when the input is already in µm (e.g. data originating
+                from another :class:`ShapesData` object). This argument is
+                required — omitting it raises :exc:`ValueError`.
             verbose: If True, log a summary of added shapes.
             in_napari: If True, use napari notification functions for
                 reporting instead of the logger.
@@ -227,6 +230,13 @@ class ShapesData(DeepCopyMixin):
                 back to ``self._color_col`` (typically ``"color"``) when
                 ``None``.
         """
+        if scale_factor is None:
+            raise ValueError(
+                "scale_factor is required. Pass the pixel size in µm/pixel "
+                "(e.g. 0.2125) if your data is in pixel coordinates, or pass "
+                "1.0 if it is already in µm."
+            )
+
         _uid_col = uid_col if uid_col is not None else self._uid_col
         _name_col = name_col if name_col is not None else self._name_col
         _color_col = color_col if color_col is not None else self._color_col
@@ -419,7 +429,7 @@ class ShapesData(DeepCopyMixin):
     def remove_key(
         self,
         key_to_remove: str,
-        classes_to_remove: Union[Literal["all"], List[str], str] = "all"
+        classes_to_remove: Literal["all"] | list[str] | str = "all"
         ):
         """Remove a shape layer or specific classes within it.
 
@@ -455,7 +465,7 @@ class ShapesData(DeepCopyMixin):
         return _read_shapesdata(path, mode="shapes", scale_factor=scale_factor)
 
     def save(self,
-             path: Union[str, os.PathLike, Path],
+             path: str | os.PathLike | Path,
              overwrite: bool = False
              ):
         """Save all shape layers to disk as GeoJSON files.
@@ -504,9 +514,9 @@ class AnnotationsData(ShapesData):
             Defaults to ``"id"``.
     """
     def __init__(self,
-                 files: Optional[List[Union[str, os.PathLike, Path]]] = None,
-                 keys: Optional[List[str]] = None,
-                 pixel_size: Optional[float] = None,
+                 files: list[str | os.PathLike | Path] | None = None,
+                 keys: list[str] | None = None,
+                 pixel_size: float | None = None,
                  name_col: str = "name",
                  color_col: str = "color",
                  uid_col: str = "id",
@@ -542,9 +552,9 @@ class AnnotationsData(ShapesData):
 
     def to_regions(
         self,
-        keys: Optional[Union[str, List[str]]] = None,
-        name_filter: Optional[Union[str, List[str]]] = None,
-    ) -> "RegionsData":
+        keys: str | list[str] | None = None,
+        name_filter: str | list[str] | None = None,
+    ) -> RegionsData:
         """Convert annotations to a new :class:`RegionsData` object.
 
         Only Polygon geometries are carried over.  Each key must have unique
@@ -608,10 +618,10 @@ class AnnotationsData(ShapesData):
     @classmethod
     def from_regions(
         cls,
-        regions: "RegionsData",
-        keys: Optional[Union[str, List[str]]] = None,
+        regions: RegionsData,
+        keys: str | list[str] | None = None,
         on_forbidden: Literal["error", "rename", "skip"] = "error",
-    ) -> "AnnotationsData":
+    ) -> AnnotationsData:
         """Construct an :class:`AnnotationsData` from a :class:`RegionsData`.
 
         Delegates to :meth:`RegionsData.to_annotations`.
@@ -649,9 +659,9 @@ class RegionsData(ShapesData):
             Defaults to ``"id"``.
     """
     def __init__(self,
-                 files: Optional[List[Union[str, os.PathLike, Path]]] = None,
-                 keys: Optional[List[str]] = None,
-                 pixel_size: Optional[float] = None,
+                 files: list[str | os.PathLike | Path] | None = None,
+                 keys: list[str] | None = None,
+                 pixel_size: float | None = None,
                  name_col: str = "name",
                  color_col: str = "color",
                  uid_col: str = "id",
@@ -687,9 +697,9 @@ class RegionsData(ShapesData):
 
     def to_annotations(
         self,
-        keys: Optional[Union[str, List[str]]] = None,
+        keys: str | list[str] | None = None,
         on_forbidden: Literal["error", "rename", "skip"] = "error",
-    ) -> "AnnotationsData":
+    ) -> AnnotationsData:
         """Convert regions to a new :class:`AnnotationsData` object.
 
         Since ``RegionsData`` is already filtered to unique-named Polygons,
@@ -755,10 +765,10 @@ class RegionsData(ShapesData):
     @classmethod
     def from_annotations(
         cls,
-        annotations: "AnnotationsData",
-        keys: Optional[Union[str, List[str]]] = None,
-        name_filter: Optional[Union[str, List[str]]] = None,
-    ) -> "RegionsData":
+        annotations: AnnotationsData,
+        keys: str | list[str] | None = None,
+        name_filter: str | list[str] | None = None,
+    ) -> RegionsData:
         """Construct a :class:`RegionsData` from an :class:`AnnotationsData`.
 
         Delegates to :meth:`AnnotationsData.to_regions`.

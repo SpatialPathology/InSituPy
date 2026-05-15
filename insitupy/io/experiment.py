@@ -3,10 +3,11 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Optional, Union
 
-from insitupy._io._qupath import (_get_pixel_size_from_qupath_metadata,
-                                  _list_insitupy_data_folders)
+from insitupy._io._qupath import (
+    _get_pixel_size_from_qupath_metadata,
+    _list_insitupy_data_folders,
+)
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.data import read_qupath
 
@@ -14,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def read_qupath_project(
-    path: Union[str, os.PathLike, Path],
-    pixel_size: Optional[Number] = None,
+    path: str | os.PathLike | Path,
+    pixel_size: Number | None = None,
     export_folder: str = "insitupy",
     method_name: str = "mIF"
 ):
@@ -66,7 +67,7 @@ def read_qupath_project(
             logger.info("Will try to automatically infer pixel sizes.")
 
             # Replace 'your_file.json' with the path to your JSON file
-            with open(qp_project_file, 'r') as file:
+            with open(qp_project_file) as file:
                 metadata = json.load(file)
     else:
         if pixel_size is None:

@@ -7,7 +7,6 @@ returns None when inplace=True.
 
 import numpy as np
 import pandas as pd
-import pytest
 from anndata import AnnData
 
 from insitupy.containers.boundaries_data import BoundariesData

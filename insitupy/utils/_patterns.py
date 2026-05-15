@@ -1,13 +1,11 @@
 import logging
 from numbers import Number
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from scipy.stats import pearsonr, spearmanr, zscore
-from sklearn.preprocessing import MinMaxScaler
+from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import fdrcorrection
 from tqdm.autonotebook import tqdm
 
@@ -16,8 +14,11 @@ from insitupy.plotting.expression_along_axis import _bin_data, _select_data
 from insitupy.utils._regression import smooth_fit
 
 logger = logging.getLogger(__name__)
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils.utils import (
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 
 # Functions
@@ -59,19 +60,14 @@ def filter_outliers(data, threshold=1.5):
 
     return filtered_data
 
-from typing import List, Optional, Union
 
-import numpy as np
-import pandas as pd
-from joblib import Parallel, delayed
-from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
 
 class EvaluateExpressionObject:
     """Container for spatial expression evaluation results, including raw data, binned data, and regression output."""
 
-    def __init__(self, raw_data: Optional[pd.DataFrame] = None, binned_data: Optional[pd.DataFrame] = None, result: Optional[pd.DataFrame] = None):
+    def __init__(self, raw_data: pd.DataFrame | None = None, binned_data: pd.DataFrame | None = None, result: pd.DataFrame | None = None):
         """
         EvaluateExpressionObject holds the results of the expression evaluation.
 
@@ -106,15 +102,15 @@ class EvaluateExpressionObject:
 def evaluate_expression_along_axis(
     adata: pd.DataFrame,
     obs_val: str,
-    genes: Union[str, List[str]],
+    genes: str | list[str],
     cell_type_column: str,
     cell_type: str,
-    xlim: List[float],
+    xlim: list[float],
     parallel: bool,
     bin_data: bool = False,
-    resolution: Union[int, float] = 5,
+    resolution: int | float = 5,
     n_sim: int = 10000,
-    min_expression: Optional[Union[int, float]] = None,
+    min_expression: int | float | None = None,
     n_jobs: int = 8,
     # plot_qc: bool = False
 ) -> EvaluateExpressionObject:
@@ -244,12 +240,12 @@ def evaluate_expression_along_axis(
 
 def plot_evaluation(
     eval_object: EvaluateExpressionObject,
-    genes: Optional[List[str]] = None,
+    genes: list[str] | None = None,
     # raw_data: pd.DataFrame,
     # binned_data: Optional[pd.DataFrame],
     xlabel='x',
     maxcols=4,
-    font_scale_factor: Optional[Number] = None
+    font_scale_factor: Number | None = None
 ):
     """Plot gene expression along a spatial axis with optional LOESS regression overlays.
 
@@ -359,7 +355,7 @@ def plot_evaluation(
 
         # Add labels and legend
         axs[i].set_xlabel(xlabel)
-        axs[i].set_ylabel(f"Gene expression'")
+        axs[i].set_ylabel("Gene expression'")
         axs[i].set_title(f"{gene}")
 
 
@@ -383,7 +379,7 @@ def plot_evaluation(
 
 def loess_regress(
     eval_object: EvaluateExpressionObject,
-    genes: Optional[List[str]] = None,
+    genes: list[str] | None = None,
 ):
     """Run LOESS regression for each gene in an :class:`EvaluateExpressionObject`.
 

@@ -52,7 +52,7 @@ def test_embedding_plotly_smoke_with_monkeypatched_backend(monkeypatch):
 def test_embedding_raises_when_basis_missing():
     adata = ad.AnnData(X=np.random.rand(5, 2), obs=pd.DataFrame(index=[f"c{i}" for i in range(5)]))
 
-    with pytest.raises(KeyError, match="not found in adata\.obsm"):
+    with pytest.raises(KeyError, match=r"not found in adata\.obsm"):
         scatter_module.embedding(adata=adata, basis="X_umap", color=None)
 
 

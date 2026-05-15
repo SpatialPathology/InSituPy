@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 
@@ -30,14 +30,19 @@ import dask.array as da
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
 
-from insitupy._constants import CACHE, SHRT_MAX
+from insitupy._constants import SHRT_MAX
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import write_ome_tiff
-from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
-                                   deconvolve_he, fit_image_to_size_limit,
-                                   otsu_thresholding, resize_image,
-                                   scale_to_max_width)
+from insitupy.images.utils import (
+    clip_image_histogram,
+    convert_to_8bit_func,
+    deconvolve_he,
+    fit_image_to_size_limit,
+    otsu_thresholding,
+    resize_image,
+    scale_to_max_width,
+)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import remove_last_line_from_csv
 
@@ -91,7 +96,7 @@ class RegistrationConfig:
     """Immutable configuration for image registration."""
     axes_moving: str = "YXS"
     axes_fixed: str = "YX"
-    max_width: Optional[int] = 4000
+    max_width: int | None = 4000
     convert_to_grayscale: bool = False
     deconvolve_moving: bool = False
     deconvolve_fixed: bool = False
@@ -105,11 +110,11 @@ class RegistrationConfig:
     max_features: int = 500
     min_good_matches: int = 20
     test_flipping: bool = True
-    adjust_contrast_method: Optional[Literal["otsu", "clip"]] = "clip"
+    adjust_contrast_method: Literal["otsu", "clip"] | None = "clip"
     verbose: bool = True
     # QC metadata (not algorithm parameters, but needed for detail figure scaling)
-    pixel_size_moving: Optional[float] = None
-    pixel_size_fixed: Optional[float] = None
+    pixel_size_moving: float | None = None
+    pixel_size_fixed: float | None = None
     physical_size_unit: str = "µm"
 
 
@@ -148,8 +153,8 @@ class ScaledImages:
     axes_fixed_effective: str
 
     # Full-resolution deconvolved images for QC output (only set when deconvolve_moving/fixed=True).
-    moving_deconvolved: Optional[np.ndarray] = None
-    fixed_deconvolved: Optional[np.ndarray] = None
+    moving_deconvolved: np.ndarray | None = None
+    fixed_deconvolved: np.ndarray | None = None
 
 
 @dataclass
@@ -160,8 +165,8 @@ class FeatureMatchResult:
     good_matches: list          # Filtered feature matches (cv2.DMatch list)
     ptsA: np.ndarray            # Matched point coordinates in moving image (N×2, original scale)
     ptsB: np.ndarray            # Matched point coordinates in fixed image (N×2, original scale)
-    flip_axis: Optional[int]    # Axis used for flipping (0=vertical, None=no flip)
-    matchedVis: Optional[np.ndarray]  # cv2.drawMatches visualization (or None)
+    flip_axis: int | None    # Axis used for flipping (0=vertical, None=no flip)
+    matchedVis: np.ndarray | None  # cv2.drawMatches visualization (or None)
 
 
 @dataclass
@@ -169,7 +174,7 @@ class TransformResult:
     """Result of the transformation matrix estimation stage."""
     T: np.ndarray                           # Transformation matrix in original coordinate space (2×3 or 3×3)
     T_for_warp: np.ndarray                  # Matrix for actual warping (may differ if image was resized)
-    inlier_mask: Optional[np.ndarray]       # Boolean RANSAC inlier mask (aligned with good_matches)
+    inlier_mask: np.ndarray | None       # Boolean RANSAC inlier mask (aligned with good_matches)
     ptsA_for_warp: np.ndarray               # Points scaled for warp-space (used internally)
 
 
@@ -196,8 +201,8 @@ def _deconvolve_he_image(
 
 def _enforce_unique_match_pairs(
     good_matches: list,
-    ordered_match_indices: List[int],
-) -> List[int]:
+    ordered_match_indices: list[int],
+) -> list[int]:
     """Keep one-to-one unique queryIdx/trainIdx pairs while preserving input order."""
     selected = []
     used_query = set()
@@ -215,10 +220,10 @@ def _enforce_unique_match_pairs(
 def _rank_match_indices_for_qc(
     features: FeatureMatchResult,
     scaled: ScaledImages,
-    transform: Optional[TransformResult],
+    transform: TransformResult | None,
     config: RegistrationConfig,
     patch_half_size: int = 16,
-) -> List[int]:
+) -> list[int]:
     """Rank good match indices by robust QC quality score."""
     good_matches = features.good_matches
     n_total = len(good_matches)
@@ -233,7 +238,7 @@ def _rank_match_indices_for_qc(
             return cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32)
         return img.mean(axis=-1).astype(np.float32)
 
-    def _extract_patch(img: np.ndarray, x: float, y: float, half: int) -> Optional[np.ndarray]:
+    def _extract_patch(img: np.ndarray, x: float, y: float, half: int) -> np.ndarray | None:
         cx = int(round(x))
         cy = int(round(y))
         x0, x1 = cx - half, cx + half + 1
@@ -243,7 +248,7 @@ def _rank_match_indices_for_qc(
             return None
         return img[y0:y1, x0:x1]
 
-    def _zncc(a: Optional[np.ndarray], b: Optional[np.ndarray]) -> float:
+    def _zncc(a: np.ndarray | None, b: np.ndarray | None) -> float:
         if a is None or b is None:
             return -2.0
         aa = a.astype(np.float32)
@@ -304,15 +309,15 @@ def _rank_match_indices_for_qc(
 def _create_match_figure(
     scaled: ScaledImages,
     features: FeatureMatchResult,
-    transform: Optional[TransformResult],
+    transform: TransformResult | None,
     config: RegistrationConfig,
     topn: int,
     rank_matches_for_qc: bool = True,
-    ranked_idx: Optional[List[int]] = None,
+    ranked_idx: list[int] | None = None,
     figsize: tuple = (16, 8),
     create_detail_figure: bool = True,
     detail_window_um: float = 200.0,
-) -> tuple[plt.Figure, Optional[plt.Figure]]:
+) -> tuple[plt.Figure, plt.Figure | None]:
     """Create a figure showing top-N matched keypoints between moving and fixed images."""
     kpsA = features.kpsA
     kpsB = features.kpsB
@@ -342,7 +347,7 @@ def _create_match_figure(
         if px_um_tmpl is None:
             px_um_tmpl = px_um_img
 
-        def _half_window_scaled(sf: float, pixel_size_um: Optional[float]) -> int:
+        def _half_window_scaled(sf: float, pixel_size_um: float | None) -> int:
             fallback_half_original = detail_window_um / 2.0
             if is_um_unit and pixel_size_um is not None and float(pixel_size_um) > 0:
                 half_window_original = (detail_window_um / float(pixel_size_um)) / 2.0
@@ -489,8 +494,8 @@ def _create_match_figure(
 # ---------------------------------------------------------------------------
 
 def load_and_scale_images(
-    moving: Union[np.ndarray, da.Array],
-    fixed: Union[np.ndarray, da.Array],
+    moving: np.ndarray | da.Array,
+    fixed: np.ndarray | da.Array,
     config: RegistrationConfig,
 ) -> ScaledImages:
     """Load images into memory, apply preprocessing, and scale to max_width.
@@ -983,11 +988,11 @@ def perform_registration_warp(
 # ---------------------------------------------------------------------------
 
 def save_registration_qc(
-    qc_dir: Union[str, Path],
+    qc_dir: str | Path,
     identifier: str,
-    T: Optional[np.ndarray],
+    T: np.ndarray | None,
     scaled_images: ScaledImages,
-    features: Optional[FeatureMatchResult],
+    features: FeatureMatchResult | None,
     config: RegistrationConfig,
     *,
     rank_matches_for_qc: bool = True,
@@ -1078,12 +1083,12 @@ def save_registration_qc(
 
 
 def save_registered_image_tiff(
-    output_dir: Union[str, Path],
+    output_dir: str | Path,
     identifier: str,
     registered: np.ndarray,
     axes: str,
     photometric: Literal["rgb", "minisblack", "maxisblack"] = "rgb",
-    ome_metadata: Optional[dict] = None,
+    ome_metadata: dict | None = None,
 ) -> Path:
     """Save a registered image as OME-TIFF.
 
@@ -1117,12 +1122,12 @@ def save_registered_image_tiff(
 # ---------------------------------------------------------------------------
 
 def register_images_standalone(
-    moving: Union[np.ndarray, da.Array],
-    fixed: Union[np.ndarray, da.Array],
+    moving: np.ndarray | da.Array,
+    fixed: np.ndarray | da.Array,
     *,
     axes_moving: str = "YXS",
     axes_fixed: str = "YX",
-    max_width: Optional[int] = 4000,
+    max_width: int | None = 4000,
     convert_to_grayscale: bool = False,
     deconvolve_moving: bool = False,
     deconvolve_fixed: bool = False,
@@ -1135,13 +1140,13 @@ def register_images_standalone(
     keep_fraction: float = 0.2,
     min_good_matches: int = 20,
     test_flipping: bool = True,
-    adjust_contrast_method: Optional[Literal["otsu", "clip"]] = "clip",
+    adjust_contrast_method: Literal["otsu", "clip"] | None = "clip",
     debug: bool = False,
-    qc_dir: Union[str, Path, None] = None,
+    qc_dir: str | Path | None = None,
     qc_identifier: str = "registration",
     rank_matches_for_qc: bool = True,
-    pixel_size_moving: Optional[float] = None,
-    pixel_size_fixed: Optional[float] = None,
+    pixel_size_moving: float | None = None,
+    pixel_size_fixed: float | None = None,
     physical_size_unit: str = "µm",
     verbose: bool = True,
     force_failure: bool = False,

@@ -2,32 +2,22 @@
 
 import os
 import sys
-from pathlib import PurePosixPath
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_version
 
 sys.path.insert(0, os.path.abspath('../..'))
 
-
-def read(rel_path: str) -> str:
-    here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, rel_path)) as fp:
-        return fp.read()
-
-
-def get_version(rel_path: str) -> str:
-    for line in read(rel_path).splitlines():
-        if line.startswith("__version__"):
-            delim = '"' if '"' in line else "'"
-            return line.split(delim)[1]
-    raise RuntimeError("Unable to find version string.")
-
+try:
+    release = _get_version("insitupy-spatial")
+except PackageNotFoundError:
+    release = "dev"
+version = ".".join(release.split(".")[:2])
 
 # -- Project information
 
 project = 'InSituPy'
 copyright = '2025, Johannes Wirth'
 author = 'Johannes Wirth'
-release = get_version("../../insitupy/__init__.py")
-version = get_version("../../insitupy/__init__.py")
 
 # -- General configuration
 

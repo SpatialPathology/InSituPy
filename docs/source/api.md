@@ -11,7 +11,7 @@ Individual submodules can then be imported like this:
 ```{eval-rst}
 .. code-block:: python
 
-    isp.dataclasses
+    isp.containers
     isp.io
     isp.plotting
 ```
@@ -171,55 +171,55 @@ Data classes are used to store the different modalities.
 ### Cellular data
 
 ```{eval-rst}
-.. module:: insitupy.dataclasses
+.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/core_data_classes
 
-    dataclasses.CellData
-    dataclasses.MultiCellData
-    dataclasses.BoundariesData
+    containers.CellData
+    containers.MultiCellData
+    containers.BoundariesData
 ```
 
 ### Image data
 
 ```{eval-rst}
-.. module:: insitupy.dataclasses
+.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/core_data_classes
 
-    dataclasses.ImageData
+    containers.ImageData
 ```
 
 ### Geometric data
 
 ```{eval-rst}
-.. module:: insitupy.dataclasses
+.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/core_data_classes
 
-    dataclasses.ShapesData
-    dataclasses.AnnotationsData
-    dataclasses.RegionsData
+    containers.ShapesData
+    containers.AnnotationsData
+    containers.RegionsData
 ```
 
 The different data classes can be read using following functions:
 
 ```{eval-rst}
-.. module:: insitupy.dataclasses
+.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
     :toctree: generated/core_data_classes
 
-    dataclasses.read_celldata
-    dataclasses.read_multicelldata
-    dataclasses.read_shapesdata
+    containers.read_celldata
+    containers.read_multicelldata
+    containers.read_shapesdata
 ```
 
 ---

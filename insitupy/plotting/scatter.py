@@ -22,13 +22,14 @@ Optional dependencies (install as needed):
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Literal, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import holoviews as hv
     import jscatter
-    import plotly.graph_objects as go
     import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
 
 from pathlib import Path
 
@@ -146,7 +147,9 @@ def _get_default_palette(n_cats: int) -> list[str]:
 def _get_colormap(
     values: np.ndarray | pd.Categorical,
     color_type: Literal["categorical", "continuous"],
-    cmap: str | None = None
+    cmap: str | None = None,
+    adata: ad.AnnData | None = None,
+    key: str | None = None,
 ) -> tuple[dict | str, None]:
     """
     Generate colormap for values.
@@ -157,6 +160,16 @@ def _get_colormap(
     """
     if color_type == "categorical":
         categories = values.cat.categories
+        uns_key = f"{key}_colors" if key is not None else None
+        if (
+            adata is not None
+            and uns_key is not None
+            and uns_key in adata.uns
+            and len(adata.uns[uns_key]) >= len(categories)
+        ):
+            stored = adata.uns[uns_key]
+            color_dict = {cat: stored[i] for i, cat in enumerate(categories)}
+            return color_dict, None
         n_cats = len(categories)
         palette = _get_default_palette(n_cats)
         color_dict = {cat: palette[i % len(palette)] for i, cat in enumerate(categories)}
@@ -188,7 +201,7 @@ def _get_vmin_vmax(
 
 
 def _plot_static_categorical(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     color_dict: dict,
@@ -213,7 +226,7 @@ def _plot_static_categorical(
 
 
 def _plot_static_continuous(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     cmap: str,
@@ -243,48 +256,59 @@ def _plot_static_continuous(
 
 
 def _plot_static_categorical_mpl(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     color_dict: dict,
-    point_size: float
+    point_size: float,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
 ) -> None:
     """Plot categorical data with matplotlib scatter (fallback when datashader unavailable)."""
     col = df[color_key].astype(str)
+    lw = point_edge_width if point_edge_color is not None else 0
+    ec = point_edge_color if point_edge_color is not None else "none"
     for cat, color in color_dict.items():
         mask = col == str(cat)
         if mask.any():
             ax.scatter(
                 df.loc[mask, "x"], df.loc[mask, "y"],
-                c=color, s=point_size, rasterized=True, linewidths=0, label=cat
+                c=color, s=point_size, rasterized=rasterized,
+                linewidths=lw, edgecolors=ec, label=cat
             )
 
 
 def _plot_static_continuous_mpl(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     df: pd.DataFrame,
     color_key: str,
     cmap: str,
     point_size: float,
     vmin: float,
-    vmax: float
+    vmax: float,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
 ) -> None:
     """Plot continuous data with matplotlib scatter (fallback when datashader unavailable)."""
+    lw = point_edge_width if point_edge_color is not None else 0
+    ec = point_edge_color if point_edge_color is not None else "none"
     ax.scatter(
         df["x"], df["y"],
         c=df[color_key], cmap=cmap,
         vmin=vmin, vmax=vmax,
-        s=point_size, rasterized=True, linewidths=0
+        s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec
     )
 
 
 def _add_legend(
-    ax: "plt.Axes",
+    ax: plt.Axes,
     color_dict: dict,
     legend_mode: Literal["full", "truncate", "separate", "none"],
     max_categories: int = 20,
     legend_entries_per_col: int = 10
-) -> "plt.Figure | None":
+) -> plt.Figure | None:
     """Add legend to plot based on mode."""
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
@@ -349,8 +373,10 @@ def _plot_plotly(
     show_tick_labels: bool,
     vmin: float | None = None,
     vmax: float | None = None,
-    plotly_renderer: str | None = None
-) -> "go.Figure":
+    plotly_renderer: str | None = None,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+) -> go.Figure:
     """Create interactive plot with Plotly WebGL."""
     import plotly.express as px
     import plotly.io as pio
@@ -377,7 +403,12 @@ def _plot_plotly(
             title=title
         )
 
-    fig.update_traces(marker=dict(size=point_size))
+    marker_opts: dict = dict(size=point_size)
+    if point_edge_color is not None:
+        import matplotlib.colors as mcolors
+        ec_hex = mcolors.to_hex(point_edge_color)
+        marker_opts["line"] = dict(color=ec_hex, width=point_edge_width)
+    fig.update_traces(marker=marker_opts)
     fig.update_layout(
         width=width,
         height=height,
@@ -416,7 +447,7 @@ def _plot_jscatter(
     height: int,
     point_size: float,
     tooltip_keys: list[str] | None = None
-) -> "jscatter.Scatter":
+) -> jscatter.Scatter:
     """Create interactive plot with jupyter-scatter."""
     import jscatter
 
@@ -456,7 +487,7 @@ def _plot_interactive_bokeh(
     width: int,
     height: int,
     point_size: float
-) -> "hv.Element":
+) -> hv.Element:
     """Create interactive plot with bokeh backend."""
     import datashader as ds
     import holoviews as hv
@@ -487,7 +518,7 @@ def _plot_interactive_matplotlib(
     width: int,
     height: int,
     point_size: float
-) -> "hv.Element":
+) -> hv.Element:
     """Create interactive plot with matplotlib backend."""
     import datashader as ds
     import holoviews as hv
@@ -514,15 +545,19 @@ def embedding(
     basis: str = "X_umap",
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
+    nan_color: str | None = None,
     cmap: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
     vmax_percentile: float | None = None,
     point_size: float = 1.0,
+    point_edge_color: str | None = None,
+    point_edge_width: float = 0.5,
+    rasterized: bool = True,
     interactive: bool = False,
     interactive_backend: Literal["bokeh", "matplotlib"] = "bokeh",
     interactive_resolution: int = 800,
-    render_mode: Literal["datashader", "jscatter", "plotly"] = "datashader",
+    render_mode: Literal["datashader", "jscatter", "plotly", "matplotlib"] = "datashader",
     plotly_renderer: str | None = "notebook",
     tooltip: str | Sequence[str] | None = None,
     legend_mode: Literal["full", "truncate", "separate", "none"] = "full",
@@ -536,10 +571,10 @@ def embedding(
     show_tick_labels: bool = False,
     savepath: str | Path | None = None,
     save: str | Path | None = None,
-    save_dpi: int = 150,
+    save_dpi: int = 300,
     show: bool = True,
     return_fig: bool = False
-) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
+) -> plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None:
     """
     Fast embedding plot using datashader for large datasets.
 
@@ -550,6 +585,10 @@ def embedding(
             adata.obs first, then adata.var_names. Can be single key or list of keys
             for multiple panels.
         color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
+        nan_color (str, optional): Color for cells with missing values (NaN) in
+            categorical columns. If None (default), NaN cells are excluded from the
+            plot. If a color string (e.g. "lightgray"), NaN cells are shown in that
+            color with a "NaN" legend entry. Has no effect on continuous columns.
         cmap (str, optional): Colormap for continuous values. Default is "viridis".
         vmin (float, optional): Minimum value for continuous color scale. Default is
             data minimum.
@@ -561,15 +600,29 @@ def embedding(
         point_size (float): Point size control. For plotly/jscatter it sets marker size
             directly. For datashader modes it controls pixel spreading (larger values make
             points appear thicker). Default is 1.0.
+        point_edge_color (str, optional): Color for point outlines (e.g. "black"). Supported
+            by render_mode="matplotlib" and render_mode="plotly" only. A UserWarning is
+            raised for datashader and jscatter backends, where edges are not supported.
+            Default is None (no outline).
+        point_edge_width (float): Width of point outlines. Only used when point_edge_color
+            is set. Default is 0.5.
+        rasterized (bool): If True, rasterize the scatter layer when saving to vector
+            formats (PDF, SVG). Keeps file sizes small for large datasets. Set to False
+            for true vector output (crisp at any zoom, but much larger files). Resolution
+            of the rasterized layer is controlled by save_dpi. Only applies to
+            render_mode="matplotlib". Default is True.
         interactive (bool): If True, return interactive plot. Default is False.
         interactive_backend (str): Backend for datashader interactive plots: "bokeh" or
             "matplotlib". Ignored when render_mode="jscatter" or "plotly".
             Default is "bokeh".
         interactive_resolution (int): Pixel resolution for interactive plots. Default is 800.
-        render_mode (str): Rendering mode for interactive plots: "datashader" (rasterized,
-            fastest for static/overview), "jscatter" (WebGL vector, best for
-            zooming/selection in Jupyter), or "plotly" (WebGL vector, works on
-            clusters/remote servers). Default is "datashader".
+        render_mode (str): Rendering backend. For static plots: "datashader" (default,
+            density-based raster) or "matplotlib" (standard scatter, better for small
+            datasets with continuous point size and alpha control). For interactive plots:
+            "datashader", "jscatter" (WebGL vector, best for zooming/selection in
+            Jupyter), or "plotly" (WebGL vector, works on clusters/remote servers).
+            "jscatter" and "plotly" raise a warning when interactive=False.
+            "matplotlib" raises a ValueError when interactive=True. Default is "datashader".
         plotly_renderer (str, optional): Plotly renderer to use. Options include "iframe",
             "notebook", "jupyterlab", "browser", "png", "svg". Only used when
             render_mode="plotly". Default is "notebook".
@@ -638,8 +691,35 @@ def embedding(
         else:
             tooltip_keys = list(tooltip)
 
+    if not interactive and render_mode in ("jscatter", "plotly"):
+        warnings.warn(
+            f"render_mode='{render_mode}' has no effect when interactive=False. "
+            "Set interactive=True to use this backend.",
+            UserWarning, stacklevel=2
+        )
+
+    if point_edge_color is not None:
+        # Edges are supported only by matplotlib scatter and plotly.
+        # Datashader rasterizes to pixels (no per-point primitives); jscatter has no stroke API.
+        _edge_unsupported = (
+            (interactive and render_mode in ("datashader", "jscatter"))
+            or (not interactive and render_mode != "matplotlib" and _check_datashader())
+        )
+        if _edge_unsupported:
+            warnings.warn(
+                "point_edge_color has no effect with the active rendering backend. "
+                "Edges are only supported for render_mode='matplotlib' (static) "
+                "and render_mode='plotly' (interactive).",
+                UserWarning, stacklevel=2
+            )
+
     # Interactive mode
     if interactive:
+        if render_mode == "matplotlib":
+            raise ValueError(
+                "render_mode='matplotlib' is not supported with interactive=True. "
+                "Use render_mode='datashader', 'jscatter', or 'plotly' instead."
+            )
         # plotly mode
         if render_mode == "plotly":
             if not _check_plotly():
@@ -654,11 +734,24 @@ def embedding(
 
                 if c is not None:
                     values, color_type = _get_color_values(adata, c)
+                    _had_nan = False
+                    if color_type == "categorical" and values.isna().any():
+                        _had_nan = True
+                        if nan_color is None:
+                            keep = ~values.isna().values
+                            df = df[keep]
+                            values = values[keep]
+                        else:
+                            if "NaN" not in values.cat.categories:
+                                values = values.cat.add_categories(["NaN"])
+                            values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
-                    colormap, _ = _get_colormap(values, color_type, cmap)
+                    colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                     if color_type == "categorical":
                         color_dict = colormap
+                        if _had_nan and nan_color is not None:
+                            color_dict["NaN"] = nan_color
                         cmap_use = None
                         df[c] = df[c].astype(str)
                         vmin_use, vmax_use = None, None
@@ -677,7 +770,8 @@ def embedding(
                     df, c, color_type, color_dict, cmap_use,
                     plot_title, interactive_resolution, interactive_resolution, point_size,
                     show_tick_labels,
-                    vmin_use, vmax_use, plotly_renderer
+                    vmin_use, vmax_use, plotly_renderer,
+                    point_edge_color, point_edge_width
                 )
                 figs.append(fig)
 
@@ -698,11 +792,24 @@ def embedding(
 
                 if c is not None:
                     values, color_type = _get_color_values(adata, c)
+                    _had_nan = False
+                    if color_type == "categorical" and values.isna().any():
+                        _had_nan = True
+                        if nan_color is None:
+                            keep = ~values.isna().values
+                            df = df[keep]
+                            values = values[keep]
+                        else:
+                            if "NaN" not in values.cat.categories:
+                                values = values.cat.add_categories(["NaN"])
+                            values = values.fillna("NaN")
                     df[c] = values.values if hasattr(values, "values") else values
-                    colormap, _ = _get_colormap(values, color_type, cmap)
+                    colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                     if color_type == "categorical":
                         color_dict = colormap
+                        if _had_nan and nan_color is not None:
+                            color_dict["NaN"] = nan_color
                         cmap_use = None
                         df[c] = df[c].astype(str)
                     else:
@@ -732,7 +839,7 @@ def embedding(
         if not _check_holoviews():
             raise ImportError(
                 "holoviews is required for interactive datashader plots. "
-                "Install with: pip install holoviews bokeh datashader"
+                "Install with: pip install holoviews bokeh jupyter_bokeh datashader"
             )
         if not _check_datashader():
             raise ImportError(
@@ -742,16 +849,30 @@ def embedding(
         import holoviews as hv
 
         plots = []
-        for c in color:
+        for c in keys:
             df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
             if c is not None:
                 values, color_type = _get_color_values(adata, c)
+                _had_nan = False
+                _nan_keep = None
+                if color_type == "categorical" and values.isna().any():
+                    _had_nan = True
+                    if nan_color is None:
+                        _nan_keep = ~values.isna().values
+                        df = df[_nan_keep]
+                        values = values[_nan_keep]
+                    else:
+                        if "NaN" not in values.cat.categories:
+                            values = values.cat.add_categories(["NaN"])
+                        values = values.fillna("NaN")
                 df[c] = values.values if hasattr(values, "values") else values
-                colormap, _ = _get_colormap(values, color_type, cmap)
+                colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
                 if color_type == "categorical":
                     color_dict = colormap
+                    if _had_nan and nan_color is not None:
+                        color_dict["NaN"] = nan_color
                     cmap_use = None
                 else:
                     color_dict = None
@@ -760,7 +881,10 @@ def embedding(
                 if tooltip_keys:
                     for tk in tooltip_keys:
                         if tk not in df.columns and tk in adata.obs.columns:
-                            df[tk] = adata.obs[tk].values
+                            tk_vals = adata.obs[tk].values
+                            if _nan_keep is not None:
+                                tk_vals = tk_vals[_nan_keep]
+                            df[tk] = tk_vals
             else:
                 c = "_density"
                 df[c] = 1
@@ -782,7 +906,7 @@ def embedding(
         return plots[0] if len(plots) == 1 else hv.Layout(plots).cols(ncols)
 
     # Static mode - use datashader when available, fall back to matplotlib scatter
-    use_datashader = _check_datashader()
+    use_datashader = _check_datashader() and render_mode != "matplotlib"
 
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
@@ -811,14 +935,27 @@ def embedding(
 
         if c is not None:
             values, color_type = _get_color_values(adata, c)
+            _had_nan = False
+            if color_type == "categorical" and values.isna().any():
+                _had_nan = True
+                if nan_color is None:
+                    keep = ~values.isna().values
+                    df = df[keep]
+                    values = values[keep]
+                else:
+                    if "NaN" not in values.cat.categories:
+                        values = values.cat.add_categories(["NaN"])
+                    values = values.fillna("NaN")
             df[c] = values.values if hasattr(values, "values") else values
-            colormap, _ = _get_colormap(values, color_type, cmap)
+            colormap, _ = _get_colormap(values, color_type, cmap, adata, c)
 
             if color_type == "categorical":
+                if _had_nan and nan_color is not None:
+                    colormap["NaN"] = nan_color
                 if use_datashader:
                     _plot_static_categorical(ax, df, c, colormap, point_size)
                 else:
-                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size)
+                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size, point_edge_color, point_edge_width, rasterized)
                 legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
                 if legend_fig:
                     legend_figs.append(legend_fig)
@@ -827,7 +964,7 @@ def embedding(
                 if use_datashader:
                     _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
                 else:
-                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use)
+                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use, point_edge_color, point_edge_width, rasterized)
                 sm = plt.cm.ScalarMappable(
                     cmap=colormap,
                     norm=mcolors.Normalize(vmin=vmin_use, vmax=vmax_use)
@@ -843,7 +980,9 @@ def embedding(
                 shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
                 dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
             else:
-                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=True, linewidths=0)
+                lw = point_edge_width if point_edge_color is not None else 0
+                ec = point_edge_color if point_edge_color is not None else "none"
+                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec)
             c = "density"
 
         ax.set_title(title or c)
@@ -895,7 +1034,7 @@ def umap(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None":
+) -> plt.Figure | hv.Layout | jscatter.Scatter | list[jscatter.Scatter] | go.Figure | list[go.Figure] | None:
     """
     Fast UMAP plot using datashader for large datasets.
 
@@ -919,7 +1058,7 @@ def pca(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | None":
+) -> plt.Figure | hv.Layout | None:
     """
     Fast PCA plot using datashader.
 
@@ -938,7 +1077,7 @@ def tsne(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     **kwargs
-) -> "plt.Figure | hv.Layout | None":
+) -> plt.Figure | hv.Layout | None:
     """
     Fast t-SNE plot using datashader.
 

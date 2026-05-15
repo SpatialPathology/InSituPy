@@ -3,7 +3,6 @@ import os
 from math import ceil
 from numbers import Number
 from pathlib import Path
-from typing import List, Optional, Union
 
 import dask
 import dask.array as da
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def _read_baysor_polygons(
-    file: Union[str, os.PathLike, Path]
+    file: str | os.PathLike | Path
     ) -> gpd.GeoDataFrame:
     from insitupy._io.files import read_json
 
@@ -69,7 +68,7 @@ def _read_baysor_polygons(
 
 
 def read_baysor_transcripts(
-    baysor_output: Union[str, os.PathLike, Path]
+    baysor_output: str | os.PathLike | Path
     ) -> pd.DataFrame:
     """Read the transcript-level assignment CSV produced by Baysor.
 
@@ -102,7 +101,7 @@ def read_baysor_transcripts(
 
 
 def _read_proseg_polygons(
-    file: Union[str, os.PathLike, Path]
+    file: str | os.PathLike | Path
     ) -> gpd.GeoDataFrame:
     from insitupy._io.files import read_json
 
@@ -153,7 +152,7 @@ def _read_proseg_polygons(
 def _read_proseg_counts(
     path_counts,
     path_cell_metadata,
-    exclude_patterns_genes: List[str] = ["NegControl", "Unassigned", "BLANK_", "antisense_"]
+    exclude_patterns_genes: list[str] = ["NegControl", "Unassigned", "BLANK_", "antisense_"]
     ):
     path_counts = Path(path_counts)
     path_cell_metadata = Path(path_cell_metadata)
@@ -291,9 +290,9 @@ def _read_proseg_from_spatialdata(
 
 def _read_proseg(
     path,
-    counts_file: Optional[str] = None,
-    cell_metadata_file: Optional[str] = None,
-    polygons_file: Optional[str] = None,
+    counts_file: str | None = None,
+    cell_metadata_file: str | None = None,
+    polygons_file: str | None = None,
     pixel_size: Number = 1
     ):
     try:
@@ -352,9 +351,9 @@ def _read_proseg(
 def _read_baysor(
     path,
     xd,
-    counts_file: Optional[str] = None,
-    cell_metadata_file: Optional[str] = None,
-    polygons_file: Optional[str] = None,
+    counts_file: str | None = None,
+    cell_metadata_file: str | None = None,
+    polygons_file: str | None = None,
     pixel_size: Number = 1
     ):
     try:

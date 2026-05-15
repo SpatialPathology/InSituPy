@@ -5,7 +5,6 @@ import time
 import tracemalloc
 import warnings
 from pathlib import Path
-from typing import List, Optional, Union
 
 try:
     import cv2
@@ -15,18 +14,16 @@ except ImportError:
     cv2 = None
 
 import dask.array as da
-import matplotlib.pyplot as plt
 import numpy as np
 
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.axes import ImageAxes, get_height_and_width
 from insitupy.images.io import read_image
-from insitupy.images.registration import (_percentile_scale_for_saving,
-                                          register_images_standalone,
-                                          save_registered_image_tiff)
-from insitupy.images.utils import (deconvolve_he, resize_image,
-                                   scale_to_max_width)
+from insitupy.images.registration import (
+    register_images_standalone,
+    save_registered_image_tiff,
+)
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list
 
@@ -60,8 +57,8 @@ class ImageRegistration:
     """
 
     def __init__(self,
-                 image: Union[np.ndarray, da.Array],
-                 template: Union[np.ndarray, da.Array],
+                 image: np.ndarray | da.Array,
+                 template: np.ndarray | da.Array,
                  **kwargs,
                  ):
 
@@ -125,12 +122,12 @@ class ImageRegistration:
 
 def register_images(
     data: InSituData,  # type: ignore
-    image_path: Optional[Union[str, os.PathLike, Path]] = None,
-    channel_names: Optional[Union[str, List[str]]] = None,
-    channel_name_for_registration: Optional[str] = None,
+    image_path: str | os.PathLike | Path | None = None,
+    channel_names: str | list[str] | None = None,
+    channel_name_for_registration: str | None = None,
     template_image_name: str = "nuclei",
     save_registered_images: bool = True,
-    output_dir: Union[str, os.PathLike, Path] = None,
+    output_dir: str | os.PathLike | Path = None,
     min_good_matches_per_area: int = 5,  # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
@@ -138,10 +135,10 @@ def register_images(
     physicalsize: str = 'µm',
     debug: bool = False,
     rank_matches_for_qc: bool = True,
-    identifier: Optional[str] = None,
+    identifier: str | None = None,
     force_failure_qc: bool = False,
     *,
-    image_to_be_registered: Optional[Union[str, os.PathLike, Path]] = None,
+    image_to_be_registered: str | os.PathLike | Path | None = None,
     raise_on_insufficient_matches: bool = False,
     ):
     """
@@ -212,7 +209,6 @@ def register_images(
     _SEP   = "\u2501"   # ━
 
     _t_start = time.time()
-    tracemalloc.start()
 
     def _unwrap_first_level_image(img_obj, image_name: str):
         """Return the highest-resolution level when image-like input is nested as list/tuple."""
@@ -382,197 +378,201 @@ def register_images(
     if debug:
         logger.info("%s%s%s QC directory: %s", _TSIGN, _HLINE, _HLINE, qc_dir_resolved)
 
-    if image_type == "histo":
-        save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
+    tracemalloc.start()
+    try:
+        if image_type == "histo":
+            save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
 
-        try:
-            registered, T = register_images_standalone(
-                moving=image,
-                fixed=template,
-                axes_moving=axes_image,
-                axes_fixed=axes_template,
-                deconvolve_moving=True,
-                deconvolve_fixed=deconvolve_template,
-                decon_scale_factor=decon_scale_factor,
-                min_good_matches=min_good_matches,
-                test_flipping=test_flipping,
-                debug=debug,
-                qc_dir=qc_dir_resolved,
-                qc_identifier=save_identifier,
-                rank_matches_for_qc=rank_matches_for_qc,
-                pixel_size_moving=pixel_size_image,
-                pixel_size_fixed=pixel_size_template,
-                physical_size_unit=physicalsize,
-                force_failure=force_failure_qc,
-            )
-        except NotEnoughFeatureMatchesError as exc:
-            # Preserve failure QC even when debug=False (debug=True already handled by standalone)
-            if not debug and output_dir is not None:
-                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
-                partial = exc.partial_result
-                if partial is not None and partial.matchedVis is not None:
-                    logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
-                    qc_dir_resolved.mkdir(parents=True, exist_ok=True)
-                    import matplotlib.pyplot as plt
-                    plt.imshow(partial.matchedVis)
-                    plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
-                    plt.close()
-            if raise_on_insufficient_matches:
-                raise
+            try:
+                registered, T = register_images_standalone(
+                    moving=image,
+                    fixed=template,
+                    axes_moving=axes_image,
+                    axes_fixed=axes_template,
+                    deconvolve_moving=True,
+                    deconvolve_fixed=deconvolve_template,
+                    decon_scale_factor=decon_scale_factor,
+                    min_good_matches=min_good_matches,
+                    test_flipping=test_flipping,
+                    debug=debug,
+                    qc_dir=qc_dir_resolved,
+                    qc_identifier=save_identifier,
+                    rank_matches_for_qc=rank_matches_for_qc,
+                    pixel_size_moving=pixel_size_image,
+                    pixel_size_fixed=pixel_size_template,
+                    physical_size_unit=physicalsize,
+                    force_failure=force_failure_qc,
+                )
+            except NotEnoughFeatureMatchesError as exc:
+                # Preserve failure QC even when debug=False (debug=True already handled by standalone)
+                if not debug and output_dir is not None:
+                    _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
+                    partial = exc.partial_result
+                    if partial is not None and partial.matchedVis is not None:
+                        logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
+                        qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                        import matplotlib.pyplot as plt
+                        plt.imshow(partial.matchedVis)
+                        plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                        plt.close()
+                if raise_on_insufficient_matches:
+                    raise
 
-            warnings.warn(
-                (
-                    f"Registration skipped for {data.slide_id}/{data.sample_id} ({channel_names[0]}): "
-                    f"{exc}"
-                ),
-                UserWarning,
-                stacklevel=2,
-            )
-            logger.warning(
-                "%s%s%s Registration skipped for %s/%s (%s): %s",
-                _LSIGN,
-                _HLINE,
-                _HLINE,
-                data.slide_id,
-                data.sample_id,
-                channel_names[0],
-                exc,
-            )
-            return
-
-        if save_registered_images:
-            _outfile = save_registered_image_tiff(
-                output_dir=output_dir,
-                identifier=save_identifier,
-                registered=registered,
-                axes=axes_image,
-                photometric='rgb',
-                ome_metadata=ome_metadata,
-            )
-            logger.info("%s     Saved: %s", _VLINE, _outfile)
-
-        data.images.add_image(
-            image=registered,
-            channel_names=channel_names[0],
-            axes=axes_image,
-            pixel_size=pixel_size_template,
-            ome_meta=ome_metadata,
-            overwrite=True,
-        )
-
-    else:
-        # image_type is IF
-        channel_id_for_registration = channel_names.index(channel_name_for_registration)
-        logger.info("%s%s%s Selecting registration channel (index: %s)", _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
-
-        nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
-        if hasattr(nuclei_img, "compute"):
-            nuclei_img = nuclei_img.compute()
-
-        _qc_ref_name = channel_name_for_registration
-        qc_identifier_if = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}"
-
-        try:
-            _, T = register_images_standalone(
-                moving=nuclei_img,
-                fixed=template,
-                axes_moving="YX",
-                axes_fixed=axes_template,
-                deconvolve_fixed=deconvolve_template,
-                decon_scale_factor=decon_scale_factor,
-                min_good_matches=min_good_matches,
-                test_flipping=test_flipping,
-                debug=debug,
-                qc_dir=qc_dir_resolved,
-                qc_identifier=qc_identifier_if,
-                rank_matches_for_qc=rank_matches_for_qc,
-                pixel_size_moving=pixel_size_image,
-                pixel_size_fixed=pixel_size_template,
-                physical_size_unit=physicalsize,
-                force_failure=force_failure_qc,
-            )
-        except NotEnoughFeatureMatchesError as exc:
-            # Preserve failure QC even when debug=False
-            if not debug and output_dir is not None:
-                _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
-                partial = exc.partial_result
-                if partial is not None and partial.matchedVis is not None:
-                    logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
-                    qc_dir_resolved.mkdir(parents=True, exist_ok=True)
-                    import matplotlib.pyplot as plt
-                    plt.imshow(partial.matchedVis)
-                    plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
-                    plt.close()
-            if raise_on_insufficient_matches:
-                raise
-
-            warnings.warn(
-                (
-                    f"Registration skipped for {data.slide_id}/{data.sample_id} ({_qc_ref_name}): "
-                    f"{exc}"
-                ),
-                UserWarning,
-                stacklevel=2,
-            )
-            logger.warning(
-                "%s%s%s Registration skipped for %s/%s (%s): %s",
-                _LSIGN,
-                _HLINE,
-                _HLINE,
-                data.slide_id,
-                data.sample_id,
-                _qc_ref_name,
-                exc,
-            )
-            return
-
-        del nuclei_img
-
-        # Compute output dimensions from template
-        ref_h, ref_w = get_height_and_width(
-            template if not hasattr(template, "compute") else template.compute(),
-            ImageAxes(axes_template),
-        )
-
-        # Warp each non-registration channel using the shared transformation matrix
-        for i, n in enumerate(channel_names):
-            if n == channel_name_for_registration:
-                continue
-
-            logger.info("%s%s%s Registering channel: %s", _TSIGN, _HLINE, _HLINE, n)
-            channel = np.take(image, i, channel_axis)
-            if hasattr(channel, "compute"):
-                channel = channel.compute()
-            channel = np.asarray(channel)
-
-            registered_channel = apply_warp(channel, T, (ref_w, ref_h), "YX")
+                warnings.warn(
+                    (
+                        f"Registration skipped for {data.slide_id}/{data.sample_id} ({channel_names[0]}): "
+                        f"{exc}"
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
+                logger.warning(
+                    "%s%s%s Registration skipped for %s/%s (%s): %s",
+                    _LSIGN,
+                    _HLINE,
+                    _HLINE,
+                    data.slide_id,
+                    data.sample_id,
+                    channel_names[0],
+                    exc,
+                )
+                return
 
             if save_registered_images:
-                save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
                 _outfile = save_registered_image_tiff(
                     output_dir=output_dir,
                     identifier=save_identifier,
-                    registered=registered_channel,
-                    axes='YX',
-                    photometric='minisblack',
+                    registered=registered,
+                    axes=axes_image,
+                    photometric='rgb',
                     ome_metadata=ome_metadata,
                 )
                 logger.info("%s     Saved: %s", _VLINE, _outfile)
 
             data.images.add_image(
-                image=registered_channel,
-                channel_names=n,
-                axes="YX",
+                image=registered,
+                channel_names=channel_names[0],
+                axes=axes_image,
                 pixel_size=pixel_size_template,
                 ome_meta=ome_metadata,
                 overwrite=True,
             )
 
-    _elapsed = time.time() - _t_start
-    _, _peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
-    logger.info("%s%s%s Done (%.1f s, peak memory: %s)", _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
-    gc.collect()
+        else:
+            # image_type is IF
+            channel_id_for_registration = channel_names.index(channel_name_for_registration)
+            logger.info("%s%s%s Selecting registration channel (index: %s)", _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
+
+            nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
+            if hasattr(nuclei_img, "compute"):
+                nuclei_img = nuclei_img.compute()
+
+            _qc_ref_name = channel_name_for_registration
+            qc_identifier_if = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}"
+
+            try:
+                _, T = register_images_standalone(
+                    moving=nuclei_img,
+                    fixed=template,
+                    axes_moving="YX",
+                    axes_fixed=axes_template,
+                    deconvolve_fixed=deconvolve_template,
+                    decon_scale_factor=decon_scale_factor,
+                    min_good_matches=min_good_matches,
+                    test_flipping=test_flipping,
+                    debug=debug,
+                    qc_dir=qc_dir_resolved,
+                    qc_identifier=qc_identifier_if,
+                    rank_matches_for_qc=rank_matches_for_qc,
+                    pixel_size_moving=pixel_size_image,
+                    pixel_size_fixed=pixel_size_template,
+                    physical_size_unit=physicalsize,
+                    force_failure=force_failure_qc,
+                )
+            except NotEnoughFeatureMatchesError as exc:
+                # Preserve failure QC even when debug=False
+                if not debug and output_dir is not None:
+                    _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
+                    partial = exc.partial_result
+                    if partial is not None and partial.matchedVis is not None:
+                        logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
+                        qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                        import matplotlib.pyplot as plt
+                        plt.imshow(partial.matchedVis)
+                        plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                        plt.close()
+                if raise_on_insufficient_matches:
+                    raise
+
+                warnings.warn(
+                    (
+                        f"Registration skipped for {data.slide_id}/{data.sample_id} ({_qc_ref_name}): "
+                        f"{exc}"
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
+                logger.warning(
+                    "%s%s%s Registration skipped for %s/%s (%s): %s",
+                    _LSIGN,
+                    _HLINE,
+                    _HLINE,
+                    data.slide_id,
+                    data.sample_id,
+                    _qc_ref_name,
+                    exc,
+                )
+                return
+
+            del nuclei_img
+
+            # Compute output dimensions from template
+            ref_h, ref_w = get_height_and_width(
+                template if not hasattr(template, "compute") else template.compute(),
+                ImageAxes(axes_template),
+            )
+
+            # Warp each non-registration channel using the shared transformation matrix
+            for i, n in enumerate(channel_names):
+                if n == channel_name_for_registration:
+                    continue
+
+                logger.info("%s%s%s Registering channel: %s", _TSIGN, _HLINE, _HLINE, n)
+                channel = np.take(image, i, channel_axis)
+                if hasattr(channel, "compute"):
+                    channel = channel.compute()
+                channel = np.asarray(channel)
+
+                registered_channel = apply_warp(channel, T, (ref_w, ref_h), "YX")
+
+                if save_registered_images:
+                    save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
+                    _outfile = save_registered_image_tiff(
+                        output_dir=output_dir,
+                        identifier=save_identifier,
+                        registered=registered_channel,
+                        axes='YX',
+                        photometric='minisblack',
+                        ome_metadata=ome_metadata,
+                    )
+                    logger.info("%s     Saved: %s", _VLINE, _outfile)
+
+                data.images.add_image(
+                    image=registered_channel,
+                    channel_names=n,
+                    axes="YX",
+                    pixel_size=pixel_size_template,
+                    ome_meta=ome_metadata,
+                    overwrite=True,
+                )
+
+        _elapsed = time.time() - _t_start
+        _, _peak_mem = tracemalloc.get_traced_memory()
+        _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
+        logger.info("%s%s%s Done (%.1f s, peak memory: %s)", _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
+        gc.collect()
+    finally:
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
 
 

@@ -1,4 +1,3 @@
-from typing import Optional, Union
 
 import matplotlib as mpl
 import matplotlib.cm as cm

@@ -1,7 +1,6 @@
 import logging
 import math
-from typing import Literal, Optional, Union
-from warnings import warn
+from typing import Literal
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -11,8 +10,7 @@ from matplotlib import cm
 from matplotlib.colors import ListedColormap, rgb2hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP)
+from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, DEFAULT_CONTINUOUS_CMAP
 from insitupy.palettes import CustomPalettes
 from insitupy.utils._checks import check_raw
 
@@ -76,7 +74,7 @@ def _add_colorlegend_to_axis(
     max_per_col: int = 10,
     loc: str = 'center',
     bbox_to_anchor: tuple = (0.5, 0.5),
-    title: Optional[str] = None,
+    title: str | None = None,
     #marker: Optional[str] = 'o',
     mode: Literal["circle", "rectangle"] = "circle",
     remove_axis: bool = True
@@ -137,8 +135,8 @@ def _parse_unique_categories(data):
 
 def create_cmap_mapping(
     data,
-    cmap: Optional[Union[str, ListedColormap]] = None,
-    rgba_values: Optional[np.ndarray] = None
+    cmap: str | ListedColormap | None = None,
+    rgba_values: np.ndarray | None = None
     ):
     """Build a mapping from unique category labels to RGBA colour tuples.
 
@@ -179,10 +177,10 @@ def create_cmap_mapping(
 
 
 def categorical_data_to_rgba(data,
-                             cmap: Union[str, ListedColormap],
+                             cmap: str | ListedColormap,
                              return_mapping: bool = False,
                              nan_val: tuple = (1,1,1,0),
-                             rgba_values: Optional[np.ndarray] = None
+                             rgba_values: np.ndarray | None = None
                              ):
     """Convert a categorical array to a NumPy array of RGBA colours.
 
@@ -251,9 +249,9 @@ def _determine_climits(
 
 def continuous_data_to_rgba(
     data,
-    cmap: Union[str, ListedColormap],
+    cmap: str | ListedColormap,
     upper_climit_pct: int = 99,
-    lower_climit: Optional[int] = None,
+    lower_climit: int | None = None,
     clip = False,
     nan_val: tuple = (1,1,1,0),
     return_mapping: bool = False
@@ -328,12 +326,12 @@ def continuous_data_to_rgba(
 
 def _data_to_rgba(
     data: np.ndarray,
-    continuous_cmap: Union[str, ListedColormap] = DEFAULT_CONTINUOUS_CMAP,
-    categorical_cmap: Union[str, ListedColormap] = None,
+    continuous_cmap: str | ListedColormap = DEFAULT_CONTINUOUS_CMAP,
+    categorical_cmap: str | ListedColormap = None,
     upper_climit_pct: int = 99,
     #return_all: bool = False,
     nan_val: tuple = (1,1,1,0),
-    rgba_values: Optional[np.ndarray] = None
+    rgba_values: np.ndarray | None = None
     ):
     if isinstance(data, list):
         data = np.array(data) # make sure the data is not a list but a numpy array

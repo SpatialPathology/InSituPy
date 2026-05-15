@@ -6,7 +6,6 @@ from pathlib import Path
 import anndata
 import pandas as pd
 
-from insitupy._version import __version__
 from insitupy._io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils.utils import convert_int_to_xenium_hex
@@ -43,7 +42,7 @@ def _list_insitupy_data_folders(
                 dataset_paths[item.name] = subdirs
 
     # Print summary of folders and datasets found
-    logger.info(f"Data folders found:")
+    logger.info("Data folders found:")
     for name, paths in dataset_paths.items():
         logger.info(f"\t- '{name}': {len(paths)} dataset(s)")
     return dataset_paths
@@ -132,7 +131,7 @@ def _read_boundaries_qupath(
 
     # --- Read the nuclear geometries ---
     # Load the GeoJSON file
-    with open(bound_path, 'r') as f:
+    with open(bound_path) as f:
         data = json.load(f)
 
     nucleus_geom = []

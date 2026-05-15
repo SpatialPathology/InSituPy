@@ -1,6 +1,5 @@
 import logging
-from numbers import Number
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -22,7 +21,7 @@ def _compute_gex_diff_mean(
     target_mask: np.ndarray,
     gene_indices: np.ndarray,
     verbose: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute gene expression differences using mean neighbor expression.
 
@@ -71,7 +70,7 @@ def _compute_gex_diff_max(
     gene_indices: np.ndarray,
     exclude_zeros: bool = True,
     verbose: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute gene expression differences using maximum neighbor expression per gene.
 
@@ -134,7 +133,7 @@ def _filter_and_normalize_graph(
     shuffled_labels: np.ndarray,
     celltype: str,
     use_distance_weighting: bool
-) -> Tuple[sparse.csr_matrix, np.ndarray]:
+) -> tuple[sparse.csr_matrix, np.ndarray]:
     """
     Filter pre-computed spatial graph based on shuffled cell type labels.
 
@@ -198,14 +197,14 @@ def _single_permutation(
     A_base: sparse.csr_matrix,
     cell_labels: np.ndarray,
     X: np.ndarray,
-    genes: List[str],
+    genes: list[str],
     gene_indices: np.ndarray,
     celltype: str,
     strategy: Literal["mean", "max"],
     use_distance_weighting: bool,
     exclude_zeros_from_max: bool,
-    genes_to_test_mask: Optional[np.ndarray] = None,
-    random_seed: Optional[int] = None
+    genes_to_test_mask: np.ndarray | None = None,
+    random_seed: int | None = None
 ) -> np.ndarray:
     """
     Run a single permutation: shuffle cell types and compute mean differences.
@@ -290,16 +289,16 @@ def permutation_test_gex_diff(
     observed_results: pd.DataFrame,
     radius: float = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Tuple[str, str] = None,
+    celltype_tuple: tuple[str, str] = None,
     exclude_self: bool = True,
     strategy: Literal["mean", "max"] = "mean",
     use_distance_weighting: bool = False,
     exclude_zeros_from_max: bool = True,
-    genes_subset: Optional[List[str]] = None,
-    genes_to_test: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
+    genes_to_test: list[str] | None = None,
     n_permutations: int = 1000,
     n_jobs: int = -1,
-    random_seed: Optional[int] = 42,
+    random_seed: int | None = 42,
     show_progress: bool = True,
     verbose: bool = True
 ) -> pd.DataFrame:

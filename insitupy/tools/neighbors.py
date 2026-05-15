@@ -1,7 +1,7 @@
 import logging
 import warnings
 from numbers import Number
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -20,8 +20,8 @@ def _validate_inputs(
     adata,
     radius: Number,
     obs_key: str,
-    celltype_col: Optional[str],
-    celltype: Optional[str],
+    celltype_col: str | None,
+    celltype: str | None,
     method: str,
     min_cells: Number,
     strategy: str,
@@ -52,9 +52,9 @@ def _validate_inputs(
 
 def _prepare_data(
     adata,
-    genes_subset: Optional[List[str]],
+    genes_subset: list[str] | None,
     verbose: bool
-) -> Tuple[List[str], np.ndarray, int]:
+) -> tuple[list[str], np.ndarray, int]:
     """Prepare gene data and indices."""
     all_genes = adata.var_names.tolist()
 
@@ -77,14 +77,14 @@ def _prepare_data(
 def _build_spatial_graph(
     coords: np.ndarray,
     radius: float,
-    celltype_col: Optional[str],
-    celltype: Optional[str],
+    celltype_col: str | None,
+    celltype: str | None,
     adata,
     exclude_self: bool,
     use_distance_weighting: bool,
     strategy: str,
     verbose: bool
-) -> Tuple[sparse.csr_matrix, np.ndarray, np.ndarray, int]:
+) -> tuple[sparse.csr_matrix, np.ndarray, np.ndarray, int]:
     """Build spatial adjacency graph with optional cell type filtering."""
     n_cells = coords.shape[0]
 
@@ -240,12 +240,12 @@ def _run_statistical_tests(
     target_expr: np.ndarray,
     neighbor_expr: np.ndarray,
     target_mask: np.ndarray,
-    genes: List[str],
+    genes: list[str],
     method: str,
     min_cells: int,
-    batch_size: Optional[int],
+    batch_size: int | None,
     verbose: bool
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Run per-gene statistical tests and compute fold changes."""
     n_genes = len(genes)
 
@@ -370,8 +370,8 @@ def _apply_multiple_testing_correction(
 def _create_qc_stats(
     n_cells: int,
     n_target_cells: int,
-    celltype: Optional[str],
-    celltype_col: Optional[str],
+    celltype: str | None,
+    celltype_col: str | None,
     n_genes: int,
     n_genes_total: int,
     deg: np.ndarray,
@@ -383,8 +383,8 @@ def _create_qc_stats(
     min_cells: int,
     use_distance_weighting: bool,
     strategy: str,
-    exclude_zeros_from_max: Optional[bool] = None
-) -> Dict:
+    exclude_zeros_from_max: bool | None = None
+) -> dict:
     """Create QC statistics dictionary."""
     target_deg = deg[target_mask]
 
@@ -410,7 +410,7 @@ def _create_qc_stats(
     }
 
 
-def _print_summary(qc_stats: Dict, verbose: bool) -> None:
+def _print_summary(qc_stats: dict, verbose: bool) -> None:
     """Print analysis summary."""
     if not verbose:
         return
@@ -442,19 +442,19 @@ def calculate_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str] | None = None,
     exclude_self: bool = True,
     strategy: Literal["mean", "max"] = "mean",
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
     test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     use_distance_weighting: bool = False,
     exclude_zeros_from_max: bool = True,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Cell-type-specific spatial gene expression contamination analysis.
 
@@ -613,16 +613,16 @@ def mean_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str] | None = None,
     exclude_self: bool = True,
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     use_distance_weighting: bool = False,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Wrapper for calculate_gex_diff_to_neighbors with strategy="mean".
 
@@ -649,16 +649,16 @@ def max_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str] | None = None,
     exclude_self: bool = True,
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     exclude_zeros_from_max: bool = True,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Wrapper for calculate_gex_diff_to_neighbors with strategy="max".
 

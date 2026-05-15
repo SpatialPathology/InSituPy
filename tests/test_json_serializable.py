@@ -3,7 +3,6 @@ Regression tests for the JSON-serialization fix in images/io.write_zarr and
 the make_json_serializable helper in utils/utils.
 """
 import json
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -13,7 +12,6 @@ import zarr
 
 from insitupy.images.io import write_zarr
 from insitupy.utils.utils import make_json_serializable
-
 
 # ---------------------------------------------------------------------------
 # Tests for make_json_serializable

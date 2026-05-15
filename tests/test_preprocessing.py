@@ -18,7 +18,6 @@ from insitupy.preprocessing import (
     reduce_dimensions,
 )
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 def _make_insitudata(n_cells=30, n_genes=15, seed=42):

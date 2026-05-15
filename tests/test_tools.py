@@ -1,11 +1,11 @@
 """Tests for tools: tl.dge, calc_distance_of_cells_from,
 calculate_gex_diff_to_neighbors, pseudobulk_dge."""
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-import geopandas as gpd
 from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
@@ -15,7 +15,6 @@ from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from
 from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors
 from insitupy.tools.pseudobulk import pseudobulk_dge
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -168,7 +167,6 @@ class TestCalculateGexDiffToNeighbors:
         assert len(result) == 4
 
     def test_first_element_is_dataframe(self):
-        from scipy.sparse import issparse
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
             adata, radius=200.0, strategy="mean", verbose=False
@@ -176,7 +174,6 @@ class TestCalculateGexDiffToNeighbors:
         assert isinstance(df, pd.DataFrame)
 
     def test_adjacency_matrix_shape(self):
-        from scipy.sparse import issparse
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
             adata, radius=200.0, strategy="mean", verbose=False
@@ -238,3 +235,98 @@ class TestPseudobulkDge:
 
     def test_full_analysis(self):
         pytest.skip("requires real pseudobulk dataset with PyDESeq2")
+
+
+# ── ShapesData.add_data / InSituData convenience conversions ──────────────────
+
+def _make_polygon_gdf(name: str, coords=None) -> gpd.GeoDataFrame:
+    if coords is None:
+        coords = [(0, 0), (10, 0), (10, 10), (0, 10)]
+    poly = Polygon(coords)
+    return gpd.GeoDataFrame(
+        {"id": [f"{name}_0"], "name": [name], "geometry": [poly], "color": ["#ff0000"]}
+    )
+
+
+class TestAddDataScaleFactor:
+    def test_raises_when_scale_factor_omitted(self):
+        from insitupy.containers import AnnotationsData
+        ann = AnnotationsData()
+        gdf = _make_polygon_gdf("roi")
+        with pytest.raises(ValueError, match="scale_factor is required"):
+            ann.add_data(data=gdf, key="test")
+
+
+class TestAnnotationsToRegions:
+    def test_round_trip_geometry_preserved(self):
+        xd = _make_insitudata_with_celltypes()
+        gdf = _make_polygon_gdf("Tumor")
+        xd._annotations.add_data(data=gdf, key="pathology", scale_factor=1.0)
+
+        xd.annotations_to_regions(key="pathology")
+
+        assert "pathology" in xd.regions.keys()
+        region_geom = xd.regions["pathology"].geometry.iloc[0]
+        annot_geom = xd.annotations["pathology"].geometry.iloc[0]
+        assert region_geom.equals(annot_geom)
+
+    def test_custom_region_key(self):
+        xd = _make_insitudata_with_celltypes()
+        gdf = _make_polygon_gdf("Tumor")
+        xd._annotations.add_data(data=gdf, key="pathology", scale_factor=1.0)
+
+        xd.annotations_to_regions(key="pathology", region_key="tumor_region")
+
+        assert "tumor_region" in xd.regions.keys()
+        assert "pathology" not in xd.regions.keys()
+
+    def test_missing_key_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        with pytest.raises(KeyError, match="not found"):
+            xd.annotations_to_regions(key="nonexistent")
+
+    def test_name_filter_applied(self):
+        xd = _make_insitudata_with_celltypes()
+        poly_a = Polygon([(0, 0), (5, 0), (5, 5), (0, 5)])
+        poly_b = Polygon([(10, 10), (20, 10), (20, 20), (10, 20)])
+        gdf = gpd.GeoDataFrame({
+            "id": ["a_0", "b_0"],
+            "name": ["Tumor", "Stroma"],
+            "geometry": [poly_a, poly_b],
+            "color": ["#ff0000", "#0000ff"],
+        })
+        xd._annotations.add_data(data=gdf, key="pathology", scale_factor=1.0)
+
+        xd.annotations_to_regions(key="pathology", name_filter="Tumor")
+
+        region_df = xd.regions["pathology"]
+        assert list(region_df["name"]) == ["Tumor"]
+
+
+class TestRegionsToAnnotations:
+    def test_round_trip_geometry_preserved(self):
+        xd = _make_insitudata_with_celltypes()
+        gdf = _make_polygon_gdf("Tumor")
+        xd._regions.add_data(data=gdf, key="pathology", scale_factor=1.0)
+
+        xd.regions_to_annotations(key="pathology")
+
+        assert "pathology" in xd.annotations.keys()
+        annot_geom = xd.annotations["pathology"].geometry.iloc[0]
+        region_geom = xd.regions["pathology"].geometry.iloc[0]
+        assert annot_geom.equals(region_geom)
+
+    def test_custom_annotation_key(self):
+        xd = _make_insitudata_with_celltypes()
+        gdf = _make_polygon_gdf("Tumor")
+        xd._regions.add_data(data=gdf, key="pathology", scale_factor=1.0)
+
+        xd.regions_to_annotations(key="pathology", annotation_key="pathology_annot")
+
+        assert "pathology_annot" in xd.annotations.keys()
+        assert "pathology" not in xd.annotations.keys()
+
+    def test_missing_key_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        with pytest.raises(KeyError, match="not found"):
+            xd.regions_to_annotations(key="nonexistent")

@@ -11,9 +11,10 @@ pytestmark = pytest.mark.skipif(not WITH_NAPARI, reason="napari is required for 
 
 
 from insitupy.interactive._callbacks import (  # noqa: E402
-    _refresh_widgets_after_data_change, _update_key_on_type_change)
-from insitupy.interactive._widgets import \
-    _build_labels_properties  # noqa: E402
+    _refresh_widgets_after_data_change,
+    _update_key_on_type_change,
+)
+from insitupy.interactive._widgets import _build_labels_properties  # noqa: E402
 
 
 def _make_field(value=None, choices=None):

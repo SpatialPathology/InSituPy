@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
     from numbers import Number
-    from typing import List, Literal, Optional, Tuple
+    from typing import Literal
     from warnings import warn
 
     import matplotlib
@@ -17,18 +17,19 @@ if WITH_NAPARI:
     from matplotlib.colors import rgb2hex, to_rgba
     from napari.types import LayerDataTuple
     from napari.utils.notifications import show_info, show_warning
-    from pandas.api.types import is_numeric_dtype
-    from shapely import (LinearRing, LineString, MultiPoint, MultiPolygon,
-                         Point, Polygon)
+    from shapely import LinearRing, LineString, MultiPoint, MultiPolygon, Point, Polygon
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL,
-                                     DEFAULT_CATEGORICAL_CMAP,
-                                     DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
-                                     REGIONS_SYMBOL)
+    from insitupy._constants import (
+        ANNOTATIONS_SYMBOL,
+        DEFAULT_CATEGORICAL_CMAP,
+        DEFAULT_CONTINUOUS_CMAP,
+        POINTS_SYMBOL,
+        REGIONS_SYMBOL,
+    )
     from insitupy.interactive._configs import _get_viewer_uid, config_manager
     from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
     from insitupy.utils._checks import check_rgb_column
-    from insitupy.utils._colors import _data_to_rgba, _determine_climits
+    from insitupy.utils._colors import _data_to_rgba
 
     def _get_or_assign_color(registry: dict, palette: list, idx_attr: str,
                               config, key: str, name: str) -> str:
@@ -433,9 +434,9 @@ if WITH_NAPARI:
                 )
 
     def _create_points_layer(points,
-                            color_values: List[Number],
+                            color_values: list[Number],
                             name: str,
-                            point_names: List[str],
+                            point_names: list[str],
                             point_size: int = 6, # is in scale unit (so mostly µm)
                             opacity: float = 1,
                             visible: bool = True,
@@ -477,8 +478,8 @@ if WITH_NAPARI:
 
     def _update_points_layer(
         layer: napari.layers.Layer,
-        new_color_values: List[Number],
-        new_name: Optional[str] = None,
+        new_color_values: list[Number],
+        new_name: str | None = None,
         upper_climit_pct: int = 99,
         categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
@@ -505,8 +506,8 @@ if WITH_NAPARI:
 
     def _update_units_layer(
         layer: napari.layers.Layer,
-        new_color_values: List[Number],
-        new_name: Optional[str] = None,
+        new_color_values: list[Number],
+        new_name: str | None = None,
         upper_climit_pct: int = 99,
         categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
         continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
@@ -546,9 +547,9 @@ if WITH_NAPARI:
 
     def _create_units_layer(
             gdf: GeoDataFrame,
-            color_values: Optional[List[Number]] = None,
+            color_values: list[Number] | None = None,
             name: str = "units",
-            unit_names: Optional[List[str]] = None,
+            unit_names: list[str] | None = None,
             edge_width: Number = 2,
             opacity: float = 0.5,
             upper_climit_pct: int = 99,

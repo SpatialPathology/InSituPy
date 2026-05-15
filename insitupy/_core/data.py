@@ -8,7 +8,7 @@ from datetime import datetime
 from numbers import Number
 from os.path import abspath, relpath
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 from uuid import uuid4
 from warnings import warn
 
@@ -24,24 +24,45 @@ from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
-from insitupy._constants import (CACHE, ISPY_METADATA_FILE, LOAD_FUNCS,
-                                 MODALITIES, MODALITIES_COLOR_DICT,
-                                 with_insitupy_style)
-from insitupy._exceptions import (InSituDataRepeatedCropError,
-                                  ModalityNotFoundError,
-                                  ModalityNotFoundWarning, NoImageOverlapError)
-from insitupy._io.files import (check_overwrite_and_remove_if_true, read_json,
-                                write_dict_to_json)
+from insitupy._constants import (
+    CACHE,
+    ISPY_METADATA_FILE,
+    LOAD_FUNCS,
+    MODALITIES,
+    MODALITIES_COLOR_DICT,
+    with_insitupy_style,
+)
+from insitupy._exceptions import (
+    InSituDataRepeatedCropError,
+    ModalityNotFoundError,
+    ModalityNotFoundWarning,
+)
+from insitupy._io.files import (
+    check_overwrite_and_remove_if_true,
+    read_json,
+    write_dict_to_json,
+)
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
 from insitupy._warnings import NoProjectLoadWarning
-from insitupy.containers import (AnnotationsData, ImageData, MultiCellData,
-                                 RegionsData, SpatialUnitsData)
+from insitupy.containers import (
+    AnnotationsData,
+    ImageData,
+    MultiCellData,
+    RegionsData,
+    SpatialUnitsData,
+)
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.containers.io import (_read_multicelldata, _read_shapesdata,
-                                    _save_annotations, _save_cells,
-                                    _save_images, _save_regions,
-                                    _save_transcripts, _save_units)
+from insitupy.containers.io import (
+    _read_multicelldata,
+    _read_shapesdata,
+    _save_annotations,
+    _save_cells,
+    _save_images,
+    _save_regions,
+    _save_transcripts,
+    _save_units,
+)
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
@@ -167,18 +188,27 @@ class InSituData:
     """
 
     # import deprecated functions
-    from ._deprecated import (add_alt, normalize_and_transform, read_all,
-                              read_annotations, read_cells, read_images,
-                              read_regions, read_transcripts,
-                              reduce_dimensions, save_colorlegends,
-                              save_current_colorlegend, store_geometries,
-                              sync_geometries)
+    from ._deprecated import (
+        add_alt,
+        normalize_and_transform,
+        read_all,
+        read_annotations,
+        read_cells,
+        read_images,
+        read_regions,
+        read_transcripts,
+        reduce_dimensions,
+        save_colorlegends,
+        save_current_colorlegend,
+        store_geometries,
+        sync_geometries,
+    )
 
     def __init__(self,
-                 path: Optional[Union[str, os.PathLike, Path]] = None,
-                 metadata: Optional[dict] = None,
-                 slide_id: Optional[str] = None,
-                 sample_id: Optional[str] = None,
+                 path: str | os.PathLike | Path | None = None,
+                 metadata: dict | None = None,
+                 slide_id: str | None = None,
+                 sample_id: str | None = None,
                  method_name: str = "not specified",
                  method_params: dict = dict(),
                  pixel_size: Number = 1
@@ -526,7 +556,7 @@ class InSituData:
 
     def assign_geometries(self,
                           geometry_type: Literal["annotations", "regions"],
-                          keys: Union[str, Literal["all"]] = "all",
+                          keys: str | Literal["all"] = "all",
                           add_masks: bool = False,
                           add_to_obs: bool = False,
                           overwrite: bool = True,
@@ -644,8 +674,8 @@ class InSituData:
 
     def assign_annotations(
         self,
-        keys: Union[str, Literal["all"]] = "all",
-        cells_layers: Optional[Union[List[str], str]] = None,
+        keys: str | Literal["all"] = "all",
+        cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
@@ -681,8 +711,8 @@ class InSituData:
 
     def assign_regions(
         self,
-        keys: Union[str, Literal["all"]] = "all",
-        cells_layers: Optional[Union[List[str], str]] = None,
+        keys: str | Literal["all"] = "all",
+        cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
         overwrite: bool = True
     ):
@@ -728,9 +758,9 @@ class InSituData:
         return self_copy
 
     def crop(self,
-             region_tuple: Optional[Tuple[str, str]] = None,
-             xlim: Optional[Tuple[int, int]] = None,
-             ylim: Optional[Tuple[int, int]] = None,
+             region_tuple: tuple[str, str] | None = None,
+             xlim: tuple[int, int] | None = None,
+             ylim: tuple[int, int] | None = None,
              inplace: bool = False,
              verbose: bool = False,
              materialize_transcripts: bool = True
@@ -827,7 +857,10 @@ class InSituData:
         has_transcripts = (
             transcripts_were_loaded
             and _self.transcripts is not None
-            and len(_self.transcripts) > 0
+            and (
+                isinstance(_self._transcripts, dd.DataFrame)
+                or len(_self.transcripts) > 0
+            )
         )
         has_omic_data = has_cells or has_transcripts
 
@@ -899,10 +932,10 @@ class InSituData:
 
     def transform(
         self,
-        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
-        source_pixel_size: Optional[Number] = None,
-        reference_pixel_size: Optional[Number] = None,
-        output_size: Optional[Tuple[Number, Number]] = None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path,
+        source_pixel_size: Number | None = None,
+        reference_pixel_size: Number | None = None,
+        output_size: tuple[Number, Number] | None = None,
         inplace: bool = False,
         verbose: bool = False
     ):
@@ -962,11 +995,11 @@ class InSituData:
     def align_units(
         self,
         other: "InSituData",
-        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
-        source_image_name: Optional[str] = None,
-        reference_image_name: Optional[str] = None,
-        source_pixel_size: Optional[Number] = None,
-        reference_pixel_size: Optional[Number] = None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path,
+        source_image_name: str | None = None,
+        reference_image_name: str | None = None,
+        source_pixel_size: Number | None = None,
+        reference_pixel_size: Number | None = None,
         transfer_images: bool = False,
         verbose: bool = False
     ):
@@ -1079,7 +1112,7 @@ class InSituData:
                 logger.info("Images aligned and added to InSituData object.")
 
     @with_insitupy_style
-    def plot_dimred(self, save: Optional[str] = None):
+    def plot_dimred(self, save: str | None = None):
         '''
         Read dimensionality reduction plots.
         '''
@@ -1110,7 +1143,7 @@ class InSituData:
         plt.show()
 
     def load_all(self,
-                 skip: Optional[str] = None,
+                 skip: str | None = None,
                  verbose: bool = False
                  ):
         """Load all available modalities from the project directory.
@@ -1170,8 +1203,8 @@ class InSituData:
 
 
     def import_annotations(self,
-                           files: Optional[Union[str, os.PathLike, Path]],
-                           keys: Optional[str],
+                           files: str | os.PathLike | Path | None,
+                           keys: str | None,
                            scale_factor: Number,
                            verbose: bool = False
                            ):
@@ -1244,8 +1277,8 @@ class InSituData:
             self._regions = _read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
-                    files: Optional[Union[str, os.PathLike, Path]],
-                    keys: Optional[str],
+                    files: str | os.PathLike | Path | None,
+                    keys: str | None,
                     scale_factor: Number,
                     verbose: bool = False
                     ):
@@ -1288,6 +1321,74 @@ class InSituData:
 
         #self._remove_empty_modalities()
 
+    def annotations_to_regions(
+        self,
+        key: str,
+        region_key: str | None = None,
+        name_filter: str | list[str] | None = None,
+    ) -> None:
+        """Convert an annotation key to a region on this object.
+
+        Converts the annotation stored under ``key`` to a
+        :class:`~insitupy.containers.RegionsData` entry and registers it on
+        this object.  Only Polygon geometries are carried over; Points and
+        Lines are silently dropped.  Names within the key must be unique after
+        optional ``name_filter`` is applied, because
+        :class:`~insitupy.containers.RegionsData` enforces uniqueness.
+
+        Args:
+            key: Key of the annotation to convert.
+            region_key: Key under which the result is stored in
+                :attr:`regions`.  Defaults to ``key`` when ``None``.
+            name_filter: Keep only annotations whose name matches this value
+                or list of values.  ``None`` keeps all names.
+
+        Raises:
+            KeyError: If ``key`` is not found in :attr:`annotations`.
+            ValueError: If duplicate names remain after filtering.
+        """
+        if key not in self._annotations.keys():
+            raise KeyError(f"Annotation key '{key}' not found.")
+        target_key = region_key if region_key is not None else key
+        new_regions = self._annotations.to_regions(keys=[key], name_filter=name_filter)
+        if key in new_regions.keys():
+            self._regions.add_data(data=new_regions[key], key=target_key, scale_factor=1.0)
+
+    def regions_to_annotations(
+        self,
+        key: str,
+        annotation_key: str | None = None,
+        on_forbidden: Literal["error", "rename", "skip"] = "error",
+    ) -> None:
+        """Convert a region key to an annotation on this object.
+
+        Converts the region stored under ``key`` to an
+        :class:`~insitupy.containers.AnnotationsData` entry and registers it
+        on this object.
+
+        Args:
+            key: Key of the region to convert.
+            annotation_key: Key under which the result is stored in
+                :attr:`annotations`.  Defaults to ``key`` when ``None``.
+            on_forbidden: How to handle names that appear in
+                ``FORBIDDEN_ANNOTATION_NAMES`` (currently ``["rest"]``).
+
+                - ``"error"`` — raise :exc:`ValueError` (default).
+                - ``"rename"`` — append ``"_region"`` suffix and warn.
+                - ``"skip"`` — drop the offending rows and warn.
+
+        Raises:
+            KeyError: If ``key`` is not found in :attr:`regions`.
+            ValueError: If ``on_forbidden="error"`` and a forbidden name is
+                encountered.
+        """
+        if key not in self._regions.keys():
+            raise KeyError(f"Region key '{key}' not found.")
+        target_key = annotation_key if annotation_key is not None else key
+        new_annotations = self._regions.to_annotations(keys=[key], on_forbidden=on_forbidden)
+        if key in new_annotations.keys():
+            self._annotations.add_data(data=new_annotations[key], key=target_key, scale_factor=1.0)
+
 
     def load_cells(self, verbose: bool = False):
         """Load cell data from the project directory into :attr:`cells`.
@@ -1325,7 +1426,7 @@ class InSituData:
 
     def load_images(
         self,
-        names: Union[Literal["all", "nuclei"], str] = "all",
+        names: Literal["all", "nuclei"] | str = "all",
         overwrite: bool = True,
         verbose: bool = False,
     ):
@@ -1435,6 +1536,37 @@ class InSituData:
         else:
             NoProjectLoadWarning()
 
+    def _release_data(self) -> None:
+        """Free all heavy modality data from memory.
+
+        Resets every modality attribute to its empty default — the same state
+        as a freshly constructed ``InSituData()``.  Lightweight attributes
+        (``_path``, ``_metadata``, ``_slide_id``, ``_sample_id``) are
+        preserved so the object remains usable as a metadata container.
+
+        Intended for use inside ``InSituExperiment.saveas(free_after_save=True)``
+        to reduce peak RAM when saving many regions: once a region has been
+        written to disk its in-memory data is no longer needed.
+        """
+        try:
+            self._cells = MultiCellData()
+        except Exception:
+            self._cells = None
+        try:
+            self._images = ImageData()
+        except Exception:
+            self._images = None
+        try:
+            self._annotations = AnnotationsData()
+        except Exception:
+            self._annotations = None
+        try:
+            self._regions = RegionsData()
+        except Exception:
+            self._regions = None
+        self._transcripts = None
+        self._units = None
+
     def materialize(self, layers=None, verbose: bool = True):
         """Compute lazy Dask DataFrames and replace with well-partitioned equivalents.
 
@@ -1499,7 +1631,7 @@ class InSituData:
                 # Load metadata
                 meta_file = units_path / "metadata.json"
                 if meta_file.exists():
-                    with open(meta_file, 'r') as f:
+                    with open(meta_file) as f:
                         meta_dict = json.load(f)
                     unit_type = meta_dict.get("unit_type", "unit")
                 else:
@@ -1515,7 +1647,7 @@ class InSituData:
             NoProjectLoadWarning()
 
     @classmethod
-    def read(cls, path: Union[str, os.PathLike, Path]):
+    def read(cls, path: str | os.PathLike | Path):
         """Read an InSituData object from a specified folder.
 
         Args:
@@ -1553,12 +1685,12 @@ class InSituData:
 
 
     def saveas(self,
-            path: Union[str, os.PathLike, Path],
+            path: str | os.PathLike | Path,
             overwrite: bool = False,
             zip_output: bool = False,
             images_as_zarr: bool = True,
             zarr_zipped: bool = False,
-            images_max_resolution: Optional[Number] = None, # in µm per pixel
+            images_max_resolution: Number | None = None, # in µm per pixel
             debug: bool = False,
             verbose: bool = True
             ):
@@ -1694,7 +1826,7 @@ class InSituData:
             logger.info("Saved.")
 
     def save(self,
-             path: Optional[Union[str, os.PathLike, Path]] = None,
+             path: str | os.PathLike | Path | None = None,
              zarr_zipped: bool = False,
              verbose: bool = True,
              keep_history: bool = False,
@@ -1794,14 +1926,151 @@ class InSituData:
             # save to the respective directory
             self.saveas(path=path)
 
+    def save_images(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = False,
+        verbose: bool = False,
+    ) -> None:
+        """Save only image data for this object.
+
+        Delegates to :meth:`save` with ``sync_images=True`` and
+        ``images_only=True``.  All other modalities are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            overwrite: If ``True``, overwrite existing image files on disk.
+                Defaults to ``False`` (skip images that already exist).
+            verbose: If ``True``, log progress messages.
+        """
+        self.save(
+            path=path,
+            sync_images=True,
+            images_only=True,
+            overwrite_images=overwrite,
+            verbose=verbose,
+        )
+
+    def save_geometries(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        verbose: bool = False,
+    ) -> None:
+        """Save only annotation and region geometries for this object.
+
+        Writes annotations and regions to the project directory and updates
+        the metadata JSON.  All other modalities (cells, images, transcripts)
+        are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            verbose: If ``True``, log progress messages.
+
+        Raises:
+            RuntimeError: If no project path is linked and ``path`` is ``None``.
+        """
+        if path is not None:
+            path = Path(path)
+        else:
+            if self.from_insitudata:
+                path = self.path
+            else:
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
+
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
+
+        if not self._annotations.is_empty:
+            if verbose:
+                logger.info("Updating annotations...")
+            _save_annotations(
+                annotations=self._annotations,
+                path=path,
+                metadata=self._metadata,
+            )
+
+        if not self._regions.is_empty:
+            if verbose:
+                logger.info("Updating regions...")
+            _save_regions(
+                regions=self._regions,
+                path=path,
+                metadata=self._metadata,
+            )
+
+        self._metadata["version"] = __version__
+        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+
+        if verbose:
+            logger.info("Geometries saved.")
+
+    def save_cells(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        zarr_zipped: bool = False,
+        verbose: bool = False,
+    ) -> None:
+        """Save only cell data (expression table and boundaries) for this object.
+
+        Writes the cell table and boundaries to the project directory and
+        updates the metadata JSON.  All other modalities (images, geometries,
+        transcripts) are left untouched on disk.
+
+        Args:
+            path: Destination directory.  If ``None``, saves to the original
+                project path.  Raises :exc:`RuntimeError` when no project is
+                linked and ``path`` is ``None``.
+            zarr_zipped: If ``True``, write zarr stores as ``.zarr.zip``
+                archives.
+            verbose: If ``True``, log progress messages.
+
+        Raises:
+            RuntimeError: If no project path is linked and ``path`` is ``None``.
+        """
+        if path is not None:
+            path = Path(path)
+        else:
+            if self.from_insitudata:
+                path = self.path
+            else:
+                raise RuntimeError(
+                    "Cannot save: no project is linked. Use .saveas() to save to a new location."
+                )
+
+        self._metadata["slide_id"] = self._slide_id
+        self._metadata["sample_id"] = self._sample_id
+
+        if not self._cells.is_empty:
+            if verbose:
+                logger.info("Updating cells...")
+            _save_cells(
+                cells=self._cells,
+                path=path,
+                metadata=self._metadata,
+                zipped=zarr_zipped,
+                overwrite=True,
+            )
+
+        self._metadata["version"] = __version__
+        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+
+        if verbose:
+            logger.info("Cells saved.")
+
     def quantify_signal(
         self,
         image_name: str,
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         cells_compartment: Literal["cells", "nuclei"] = "cells",
         method: Literal["mean", "median"] = "median",
-        downsample_factor: Optional[int] = None,
-        tile_size: Optional[int] = None,
+        downsample_factor: int | None = None,
+        tile_size: int | None = None,
         add_to_obs: bool = True
     ):
         """Quantify image fluorescence signal per cell using segmentation masks.
@@ -1837,8 +2106,11 @@ class InSituData:
         import dask.array as da
         from scipy.ndimage import zoom as ndimage_zoom
 
-        from insitupy.utils._calc import (create_tiles, quantify_fluorescence,
-                                          summarize_tile_measurements)
+        from insitupy.utils._calc import (
+            create_tiles,
+            quantify_fluorescence,
+            summarize_tile_measurements,
+        )
 
         # --- image: keep full pyramid to allow level selection ---
         img_pyramid = self.images[image_name]
@@ -1923,7 +2195,7 @@ class InSituData:
 
 
     def quicksave(self,
-                  note: Optional[str] = None
+                  note: str | None = None
                   ):
         """Save the current annotations to a time-stamped cache directory.
 
@@ -1995,7 +2267,7 @@ class InSituData:
 
             notepath = d / "note.txt"
             if notepath.exists():
-                with open(notepath, "r") as notefile:
+                with open(notepath) as notefile:
                     res["note"].append(notefile.read())
             else:
                 res["note"].append("")
@@ -2033,9 +2305,9 @@ class InSituData:
             self._annotations.add_data(ad[k], k, verbose=True)
 
     def show(self,
-        keys: Optional[str] = None,
+        keys: str | None = None,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
-        cells_layer: Optional[str] = None,
+        cells_layer: str | None = None,
         point_size: int = 8,
         scalebar: bool = True,
         unit: str = "µm",
@@ -2090,7 +2362,7 @@ class InSituData:
 
     def reload(
         self,
-        skip: Optional[List] = None,
+        skip: list | None = None,
         verbose: bool = True
         ):
         """Reload all currently loaded modalities from disk.
@@ -2172,7 +2444,7 @@ class InSituData:
             logger.info("Cleared modality '%s'.", modality)
         return True
 
-    def unload(self, modalities: Optional[Union[str, List]] = None, verbose: bool = True):
+    def unload(self, modalities: str | list | None = None, verbose: bool = True):
         """Unload modality data from memory, keeping only the path reference.
 
         Resets the specified modalities to their empty state without touching
@@ -2311,7 +2583,7 @@ class InSituData:
 
     def _update_to_existing_project(
         self,
-        path: Optional[Union[str, os.PathLike, Path]],
+        path: str | os.PathLike | Path | None,
         zarr_zipped: bool = False,
         verbose: bool = True,
         sync_images: bool = False,

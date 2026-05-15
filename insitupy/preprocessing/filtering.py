@@ -1,5 +1,4 @@
 from numbers import Number
-from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -40,9 +39,9 @@ def _compute_mad_threshold(values, n_mads, log1p_transform=True):
 
 
 def calculate_mad_thresholds(
-    data: Union[InSituData, AnnData],
-    cells_layer: Optional[str] = None,
-    batch: Optional[str] = None,
+    data: InSituData | AnnData,
+    cells_layer: str | None = None,
+    batch: str | None = None,
     n_mads: Number = 5,
 ) -> pd.DataFrame:
     """

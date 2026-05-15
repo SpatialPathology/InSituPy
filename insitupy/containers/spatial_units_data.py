@@ -4,7 +4,6 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Optional, Tuple, Union
 
 import geopandas as gpd
 import numpy as np
@@ -12,8 +11,7 @@ import pandas as pd
 from anndata import AnnData
 from shapely import MultiPolygon, Polygon, affinity
 
-from insitupy._io.files import (check_overwrite_and_remove_if_true,
-                               write_dict_to_json)
+from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to_json
 from insitupy._io.geo import write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
@@ -37,8 +35,8 @@ class SpatialUnitsData(DeepCopyMixin):
 
     def __init__(
         self,
-        shapes: Optional[gpd.GeoDataFrame],
-        data: Optional[AnnData],
+        shapes: gpd.GeoDataFrame | None,
+        data: AnnData | None,
         unit_type: str = "unit"
     ):
         """
@@ -90,12 +88,13 @@ class SpatialUnitsData(DeepCopyMixin):
             SpatialUnitsData: The loaded object.
         """
         import json
+
         from anndata import read_h5ad
         path = Path(path)
 
         # Read metadata
         meta_file = path / "metadata.json"
-        with open(meta_file, 'r') as f:
+        with open(meta_file) as f:
             meta = json.load(f)
 
         # Read shapes
@@ -168,12 +167,12 @@ class SpatialUnitsData(DeepCopyMixin):
         self._shapes = value
 
     @property
-    def table(self) -> Optional[AnnData]:
+    def table(self) -> AnnData | None:
         """AnnData object with omics readouts. This is the preferred name going forward."""
         return self._data
 
     @table.setter
-    def table(self, value: Optional[AnnData]):
+    def table(self, value: AnnData | None):
         """Set the AnnData table. This is the preferred name going forward."""
         if value is not None and not isinstance(value, AnnData):
             raise TypeError(f"table must be AnnData object, not {type(value)}")
@@ -205,15 +204,15 @@ class SpatialUnitsData(DeepCopyMixin):
 
         if not np.all(unit_names == data_names):
             logger.warning(
-                f"Indices in `.shapes` do not match `.data.obs_names`. Shapes will be renamed according to the `obs_names`. "
-                f"For this to be valid, please make sure that the order of elements in `.shapes` and `.data` matches."
+                "Indices in `.shapes` do not match `.data.obs_names`. Shapes will be renamed according to the `obs_names`. "
+                "For this to be valid, please make sure that the order of elements in `.shapes` and `.data` matches."
             )
 
     def crop(
         self,
-        xlim: Optional[Tuple[Number, Number]] = None,
-        ylim: Optional[Tuple[Number, Number]] = None,
-        shape: Optional[Union[Polygon, MultiPolygon]] = None,
+        xlim: tuple[Number, Number] | None = None,
+        ylim: tuple[Number, Number] | None = None,
+        shape: Polygon | MultiPolygon | None = None,
         inplace: bool = False,
         verbose: bool = True
     ):
@@ -288,9 +287,9 @@ class SpatialUnitsData(DeepCopyMixin):
 
     def transform(
         self,
-        transformation_matrix: Union[np.ndarray, str, os.PathLike, Path],
-        source_pixel_size: Optional[Number] = None,
-        reference_pixel_size: Optional[Number] = None,
+        transformation_matrix: np.ndarray | str | os.PathLike | Path,
+        source_pixel_size: Number | None = None,
+        reference_pixel_size: Number | None = None,
         inplace: bool = False,
         verbose: bool = False
     ):
@@ -371,7 +370,7 @@ class SpatialUnitsData(DeepCopyMixin):
 
     def save(
         self,
-        path: Union[str, os.PathLike, Path],
+        path: str | os.PathLike | Path,
         overwrite: bool = False
     ):
         """

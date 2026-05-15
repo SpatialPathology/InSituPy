@@ -1,6 +1,5 @@
 """Tests for insitupy.utils._checks — validation helper functions."""
 
-import warnings
 from pathlib import Path
 
 import anndata as ad

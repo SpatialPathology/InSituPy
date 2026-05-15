@@ -1,7 +1,7 @@
 import logging
 import math
 from numbers import Number
-from typing import List, Literal, Tuple, Union
+from typing import Literal
 from warnings import warn
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def _get_scale_factor_from_max_res(pixel_size, max_resolution):
 
 
 def resize_image(img: NDArray,
-                 dim: Tuple[int, int] = None,
+                 dim: tuple[int, int] = None,
                  scale_factor: float = None,
                  axes = "YXS",
                  interpolation = None
@@ -260,7 +260,7 @@ def deconvolve_he(
     return ihc_h, ihc_e, ihc_d
 
 def create_img_pyramid(
-    img: Union[np.ndarray, da.core.Array],
+    img: np.ndarray | da.core.Array,
     axes: str, # e.g. 'YXS'. - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
     nsubres: int = 6,
     scale_steps: int = 2,
@@ -328,9 +328,9 @@ def create_img_pyramid(
 
 
 def crop_dask_array_or_pyramid(
-    data: Union[da.core.Array, List[da.core.Array]],
-    xlim: Tuple[int, int],
-    ylim: Tuple[int, int],
+    data: da.core.Array | list[da.core.Array],
+    xlim: tuple[int, int],
+    ylim: tuple[int, int],
     pixel_size: Number
     ):
     """Crop a dask array or image pyramid to physical-unit bounding box.
@@ -407,7 +407,7 @@ def crop_dask_array_or_pyramid(
             cropped_data = cropped_data.rechunk()
         else:
             raise InvalidDataTypeError(
-                allowed_types=[da.core.Array, List[da.core.Array]],
+                allowed_types=[da.core.Array, list[da.core.Array]],
                 received_type=type(data)
         )
 

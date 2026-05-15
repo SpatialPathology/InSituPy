@@ -1,17 +1,14 @@
 """Tests for IO reader functions: read_any, read_visium, read_qupath, read_qupath_project."""
 
-import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from insitupy._core.data import InSituData
 from insitupy.io import read_any, read_qupath, read_visium
 from insitupy.io.experiment import read_qupath_project
-from insitupy._core.data import InSituData
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

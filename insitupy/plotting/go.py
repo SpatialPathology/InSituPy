@@ -181,7 +181,7 @@ def go_plot(
     # Prepare names for plotting
     # Shorten name and add GO term name if too short
     if max_name_length is not None:
-        enrichment[name_key] = ["{}...({})".format(n[:max_name_length], go) if len(n)>max_name_length else n for go, n in zip(enrichment['native'], enrichment[name_key])]
+        enrichment[name_key] = [f"{n[:max_name_length]}...({go})" if len(n)>max_name_length else n for go, n in zip(enrichment['native'], enrichment[name_key])]
     # Insert line breaks if sentence too long
     #enrichment[name_key] = [nth_repl_all(elem, ' ', '\n', 1) for elem in enrichment[name_key]]
 
@@ -263,10 +263,10 @@ def go_plot(
                 )
                 axs[i].set_yticks(ys_pos, labels=ys)
             else:
-                raise ValueError('Invalid `style` parameter ("{}"). Possible options'.format(style))
+                raise ValueError(f'Invalid `style` parameter ("{style}"). Possible options')
 
             if custom_headers is None:
-                axs[i].set_title("{}\n{}".format(group, libraries), fontsize=title_size)
+                axs[i].set_title(f"{group}\n{libraries}", fontsize=title_size)
             else:
                 axs[i].set_title(custom_headers[i], fontsize=title_size)
 
@@ -333,8 +333,8 @@ def go_plot(
 
         else:
             #print('No significant results for selected libraries {} in group {}'.format(libraries, group))
-            axs[i].set_title("{}\n{}".format(group, libraries), fontsize=12, fontweight='bold')
-            axs[i].text(0.5,0.5, 'No significant results for selected\nlibraries {}\nin group {}'.format(libraries, group),
+            axs[i].set_title(f"{group}\n{libraries}", fontsize=12, fontweight='bold')
+            axs[i].text(0.5,0.5, f'No significant results for selected\nlibraries {libraries}\nin group {group}',
                         va='center', ha='center', fontsize=20)
             axs[i].set_axis_off()
 
