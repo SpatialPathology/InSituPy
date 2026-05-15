@@ -227,7 +227,7 @@ class InSituExperiment:
                 "Please use data_type='insitupy' for now."
             )
 
-        self._metadata = pd.DataFrame(columns=['uid', 'slide_id', 'sample_id'])
+        self._metadata = pd.DataFrame(columns=['uid'])
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
@@ -606,14 +606,26 @@ class InSituExperiment:
         if dataset.__class__ is not InSituData:
             raise TypeError(f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'")
 
+        # Resolve the UID for this slot
+        existing_uids = list(self._metadata["uid"]) if "uid" in self._metadata.columns else []
+        if dataset.uid is not None and dataset.uid in existing_uids:
+            # idempotent re-add: dataset already belongs to this experiment slot
+            slot_uid = dataset.uid
+            idx = existing_uids.index(slot_uid)
+            self._data[idx] = dataset
+            return
+        else:
+            # assign a fresh UID for this experiment context
+            slot_uid = str(uuid4()).split("-")[0]
+
+        dataset._uid = slot_uid
+
         # Add the dataset to the data collection
         self._data.append(dataset)
 
         # Create a new DataFrame for the new metadata
         new_metadata = {
-            'uid': str(uuid4()).split("-")[0],
-            'slide_id': dataset.slide_id,
-            'sample_id': dataset.sample_id
+            'uid': slot_uid,
         }
 
         # add information from metadata argument
@@ -644,6 +656,14 @@ class InSituExperiment:
         Warns:
             UserWarning: If the column already exists and overwrite is False.
         """
+        if column_name in ("slide_id", "sample_id"):
+            warnings.warn(
+                f'"{column_name}" is also an intrinsic attribute of InSituData objects. '
+                f"This column is independent — changes to InSituData.{column_name} will not be reflected here automatically.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         if column_name in self._metadata.columns and not overwrite:
             warnings.warn(
                 f"Column '{column_name}' already exists in metadata. "
@@ -918,32 +938,18 @@ class InSituExperiment:
     def update_metadata(self):
         """Sync ``slide_id`` and ``sample_id`` from child datasets into the experiment metadata.
 
-        Reads :attr:`~insitupy._core.data.InSituData.slide_id` and
-        :attr:`~insitupy._core.data.InSituData.sample_id` from every dataset in
-        :attr:`data` and overwrites the corresponding values in :attr:`metadata`.
-        All other metadata columns are left untouched.
-
-        Call this method after changing ``slide_id`` or ``sample_id`` on one or more
-        :class:`~insitupy._core.data.InSituData` objects that belong to this experiment.
-
-        Examples:
-            >>> exp.data[0].slide_id = '0005405'
-            >>> exp.update_metadata()
+        .. deprecated::
+            ``slide_id`` and ``sample_id`` are no longer stored in the experiment metadata.
+            This method is a no-op and will be removed in a future release.
+            Access these values directly via ``exp.data[i].slide_id`` and ``exp.data[i].sample_id``.
         """
-        changed = 0
-        for i, dataset in enumerate(self._data):
-            old_slide = self._metadata.at[i, 'slide_id']
-            old_sample = self._metadata.at[i, 'sample_id']
-            new_slide = dataset.slide_id
-            new_sample = dataset.sample_id
-            if old_slide != new_slide or old_sample != new_sample:
-                self._metadata.at[i, 'slide_id'] = new_slide
-                self._metadata.at[i, 'sample_id'] = new_sample
-                changed += 1
-        if changed:
-            logger.info("update_metadata: synced slide_id/sample_id for %d dataset(s).", changed)
-        else:
-            logger.info("update_metadata: all slide_id/sample_id values already in sync.")
+        warnings.warn(
+            "update_metadata() is deprecated and has no effect. "
+            "slide_id and sample_id are no longer stored in InSituExperiment metadata. "
+            "Access them directly via exp.data[i].slide_id and exp.data[i].sample_id.",
+            FutureWarning,
+            stacklevel=2,
+        )
 
     def rename_metadata_column(self, old_name: str, new_name: str):
         """Rename a column in the experiment metadata.
@@ -2278,6 +2284,71 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.unload(modalities=modalities, verbose=False)
 
+    def replace(self, idx: int | str, new_data: "InSituData", *, confirm: bool = True) -> None:
+        """Replace a dataset in this experiment with *new_data*.
+
+        The slot's UID and on-disk path are inherited by *new_data* so the experiment
+        metadata row remains consistent.  The in-memory swap happens unconditionally;
+        the disk write only occurs after optional confirmation.
+
+        Args:
+            idx: Integer position or UID string of the slot to replace.
+            new_data: The replacement :class:`~insitupy._core.data.InSituData` object.
+            confirm: If ``True`` (default), prompt before overwriting the directory on disk.
+                Set to ``False`` for scripted use.
+
+        Raises:
+            IndexError: If *idx* is an integer outside the valid range.
+            KeyError: If *idx* is a UID string not present in the experiment.
+            ValueError: If this experiment has no path set (cannot write to disk).
+        """
+        # Resolve idx to an integer position
+        if isinstance(idx, str):
+            uid_series = self._metadata["uid"]
+            matches = uid_series[uid_series == idx].index.tolist()
+            if not matches:
+                raise KeyError(f"No dataset with UID '{idx}' found in this experiment.")
+            pos = matches[0]
+        else:
+            pos = idx
+            if pos < 0 or pos >= len(self._data):
+                raise IndexError(
+                    f"Index {pos} out of range. Valid range: 0 to {len(self._data) - 1}."
+                )
+
+        bad_path = self._data[pos].path
+        slot_uid = self._metadata.loc[pos, "uid"]
+
+        if new_data.uid is not None:
+            warnings.warn(
+                f"new_data already has uid='{new_data.uid}'. "
+                f"It will be overwritten with the slot uid='{slot_uid}'.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Memory swap (non-destructive, unconditional)
+        new_data._uid = slot_uid
+        new_data._path = bad_path
+        self._data[pos] = new_data
+
+        if confirm:
+            print(f"The following directory will be permanently overwritten: {bad_path}")
+            answer = input("Proceed? [Y/n]: ").strip()
+            if answer.lower() not in ("", "y"):
+                print(
+                    "Disk write cancelled. The in-memory swap is active but the directory on disk is unchanged."
+                )
+                return
+
+        if bad_path is None:
+            raise ValueError(
+                "Cannot write to disk: the replaced slot has no path. "
+                "Use confirm=False only after verifying the path is set."
+            )
+
+        new_data.saveas(bad_path, overwrite=True)
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
@@ -2474,7 +2545,7 @@ class InSituExperiment:
         metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
 
         if not dtype_map:
-            return metadata
+            return cls._migrate_legacy_metadata(metadata)
 
         for column, dtype in dtype_map.items():
             if column not in metadata.columns:
@@ -2489,7 +2560,15 @@ class InSituExperiment:
                     err,
                 )
 
-        return metadata
+        return cls._migrate_legacy_metadata(metadata)
+
+    @staticmethod
+    def _migrate_legacy_metadata(df: pd.DataFrame) -> pd.DataFrame:
+        """Discard legacy slide_id/sample_id columns from loaded metadata CSVs."""
+        legacy_cols = [c for c in ("slide_id", "sample_id") if c in df.columns]
+        if legacy_cols:
+            df = df.drop(columns=legacy_cols)
+        return df
 
     def save_colors(
         self,
@@ -2788,7 +2867,7 @@ class InSituExperiment:
         dataset = self.data[index]
         dataset.show(verbose=verbose)
 
-    def show_modality(self, modality, uid_column: str = "sample_id"):
+    def show_modality(self, modality, uid_column: str = "uid"):
         """Show a modality for all datasets."""
         repr_string = ""
         for meta, data in self.iterdata():
@@ -3215,9 +3294,9 @@ class InSituExperiment:
 
             # Extract metadata from the row, excluding the 'directory' column
             metadata = row.drop(labels=['directory']).to_dict()
-            metadata['uid'] = str(uuid4()).split("-")[0]
-            metadata['slide_id'] = dataset.slide_id
-            metadata['sample_id'] = dataset.sample_id
+            slot_uid = str(uuid4()).split("-")[0]
+            metadata['uid'] = slot_uid
+            dataset._uid = slot_uid
 
             # Append the metadata to the experiment's metadata DataFrame
             experiment._metadata = pd.concat([experiment._metadata, pd.DataFrame([metadata])], ignore_index=True)
@@ -3422,8 +3501,6 @@ class InSituExperiment:
             # Create metadata entry
             metadata_entry = {
                 'uid': sample_id if sample_id != 'single' else str(uuid4()).split("-")[0],
-                'slide_id': sample_id if sample_id != 'single' else 'unknown',
-                'sample_id': sample_id if sample_id != 'single' else 'unknown',
             }
             experiment._metadata = pd.concat([
                 experiment._metadata,
