@@ -596,7 +596,7 @@ class InSituExperiment:
             dataset = data
         else:
             if mode == "insitupy":
-                dataset = InSituData.read(data)
+                dataset = InSituData.read(data, load_all=False)
             elif mode == "xenium":
                 dataset = read_xenium(data)
             else:
@@ -3354,7 +3354,7 @@ class InSituExperiment:
             ctx = collect_warnings(warning_collector) if collect_warnings_mode else contextlib.nullcontext()
             with ctx:
                 if resolved_mode == "insitupy":
-                    dataset = InSituData.read(dataset_path)
+                    dataset = InSituData.read(dataset_path, load_all=False)
                 elif resolved_mode == "xenium":
                     dataset = read_xenium(dataset_path, verbose=False, **kwargs)
                 else:
@@ -3788,7 +3788,7 @@ class InSituExperiment:
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
         for dataset_path in tqdm(dataset_paths):
-            dataset = InSituData.read(dataset_path)
+            dataset = InSituData.read(dataset_path, load_all=False)
             data.append(dataset)
 
         # Create a new InSituExperiment object

@@ -1643,11 +1643,14 @@ class InSituData:
             NoProjectLoadWarning()
 
     @classmethod
-    def read(cls, path: str | os.PathLike | Path):
+    def read(cls, path: str | os.PathLike | Path, load_all: bool = True):
         """Read an InSituData object from a specified folder.
 
         Args:
             path (Union[str, os.PathLike, Path]): The path to the folder where data is saved.
+            load_all (bool): If ``True`` (default), automatically load all available
+                modalities after reading.  Set to ``False`` to defer loading, e.g. when
+                loading is controlled at the :class:`InSituExperiment` level.
 
         Returns:
             InSituData: A new InSituData object with the loaded data.
@@ -1681,6 +1684,8 @@ class InSituData:
                    sample_id=sample_id
                    )
         data._uid = dataset_uid
+        if load_all:
+            data.load_all()
         return data
 
 

@@ -277,9 +277,12 @@ def _read_celldata(
     # read table (AnnData)
     table = _read_table_from_celldata(path, celldata_metadata)
 
-    # read boundaries
-    bound_path = path / celldata_metadata["boundaries"]
-    boundaries = _read_boundaries_from_celldata_zarr(bound_path)
+    # read boundaries (absent when CellData was saved without boundaries)
+    if "boundaries" in celldata_metadata:
+        bound_path = path / celldata_metadata["boundaries"]
+        boundaries = _read_boundaries_from_celldata_zarr(bound_path)
+    else:
+        boundaries = None
 
     # extract configuration
     config = celldata_metadata.get("config", {})
