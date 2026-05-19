@@ -58,6 +58,7 @@ _FILTERS_SCHEMA_VERSION = 2
 _SUPPORTED_FILTER_VERSIONS = {1, 2}
 _METADATA_SCHEMA_VERSION = 1
 _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
+_METADATA_PARQUET_FILENAME = "metadata.parquet"
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -2263,9 +2264,8 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.reload(skip=skip, verbose=False)
 
-        # Reload experiment metadata
-        metadata_path = path / "metadata.csv"
-        if metadata_path.exists():
+        # Reload experiment metadata (Parquet canonical or legacy CSV).
+        if (path / _METADATA_PARQUET_FILENAME).exists() or (path / "metadata.csv").exists():
             self._metadata = self._read_metadata_with_schema(path)
             if verbose:
                 logger.info("Reloaded metadata, colors, and filters from disk.")
@@ -2567,7 +2567,10 @@ class InSituExperiment:
         path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
-        """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
+        """Save experiment metadata to ``metadata.parquet`` (canonical) and ``metadata.csv`` (export).
+
+        The Parquet file is the authoritative store; ``metadata.csv`` is regenerated on every save
+        as a human-readable reference and should not be edited directly.
 
         Args:
             path: Directory where metadata files should be written.
@@ -2587,18 +2590,31 @@ class InSituExperiment:
 
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        metadata_path = path / "metadata.csv"
-        metadata_schema_path = self._metadata_schema_path(path)
+        parquet_path = path / _METADATA_PARQUET_FILENAME
+        csv_path = path / "metadata.csv"
 
-        if (metadata_path.exists() or metadata_schema_path.exists()) and not overwrite:
+        if (parquet_path.exists() or csv_path.exists()) and not overwrite:
             raise FileExistsError(
                 "Metadata file(s) already exist. "
-                f"Found: {metadata_path} and/or {metadata_schema_path}. "
+                f"Found: {parquet_path} and/or {csv_path}. "
                 "Set `overwrite=True` to replace them."
             )
 
-        self._metadata.to_csv(metadata_path, index=True)
-        self._save_metadata_schema(path, self._metadata)
+        # Atomic Parquet write: write to a temp file first, then replace.
+        # Path.replace() uses os.replace(), which overwrites the target atomically on all platforms.
+        tmp_path = path / "metadata.parquet.tmp"
+        self._metadata.to_parquet(tmp_path, index=False)
+        tmp_path.replace(parquet_path)
+
+        # Regenerate CSV as a human-readable export (not the canonical source).
+        with open(csv_path, "w") as f:
+            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+            self._metadata.to_csv(f, index=True)
+
+        # Remove stale schema sidecar written by older versions.
+        stale_schema = self._metadata_schema_path(path)
+        if stale_schema.exists():
+            stale_schema.unlink()
 
     @staticmethod
     def _metadata_schema_path(path: Path) -> Path:
@@ -2673,13 +2689,23 @@ class InSituExperiment:
 
     @classmethod
     def _read_metadata_with_schema(cls, path: Path) -> pd.DataFrame:
-        """Read metadata.csv and restore dtypes from optional schema sidecar."""
+        """Read experiment metadata, preferring the Parquet canonical store.
+
+        Falls back to ``metadata.csv`` + optional schema sidecar for legacy directories
+        that predate the Parquet format.
+        """
+        parquet_path = path / _METADATA_PARQUET_FILENAME
+        if parquet_path.exists():
+            metadata = pd.read_parquet(parquet_path)
+            return cls._migrate_legacy_metadata(metadata)
+
+        # Legacy path: CSV + optional dtype schema sidecar.
         metadata_path = path / "metadata.csv"
         dtype_map = cls._load_metadata_dtype_map(path)
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: dict[str, Any] = {}
+        read_csv_kwargs: dict[str, Any] = {"comment": "#"}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -3139,8 +3165,9 @@ class InSituExperiment:
                 is set unless you call :meth:`saveas` afterwards).
 
                 ``"move"`` — each dataset directory is moved (not copied) to
-                ``path``, the experiment-level files (``metadata.csv``,
-                ``colors.json``, ``filters.json``) are written there, and the
+                ``path``, the experiment-level files (``metadata.parquet``,
+                ``metadata.csv``, ``colors.json``, ``filters.json``) are written
+                there, and the
                 original experiment root directories are removed.  This is
                 disk-efficient because no data is duplicated.
 
@@ -3331,6 +3358,7 @@ class InSituExperiment:
         # Subset experiments have no root path and are skipped.
         _EXPECTED_ROOT_FILES = {
             "metadata.csv",
+            _METADATA_PARQUET_FILENAME,
             _METADATA_SCHEMA_FILENAME,
             "colors.json",
             "filters.json",
@@ -3821,7 +3849,6 @@ class InSituExperiment:
         path = Path(path)
 
         # Load metadata
-        metadata_path = path / "metadata.csv"
         metadata = cls._read_metadata_with_schema(path)
 
         try:
@@ -4087,6 +4114,91 @@ class InSituExperimentView(InSituExperiment):
     def is_view(self) -> bool:
         """Return True; this object is a linked view of a parent experiment."""
         return True
+
+    def save_metadata(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view metadata by merging changes back into the full on-disk metadata.
+
+        Rather than writing only the view's subset rows (which would silently drop all
+        non-selected datasets from the file), this method:
+
+        1. Loads the full metadata from the parent experiment path (``self.path``).
+        2. Updates matching rows using the ``uid`` column.
+        3. Adds any new columns that exist in the view but not on disk, filling
+           non-view rows with ``pd.NA``.
+        4. Writes the complete merged metadata to ``path`` (or ``self.path`` if
+           ``path`` is None).
+
+        Args:
+            path: Directory where metadata files should be written.
+                If None, uses ``self.path`` (the parent experiment path).
+            overwrite: If True, overwrite existing metadata files.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set, or if the
+                on-disk metadata has no ``uid`` column (legacy format).
+            FileExistsError: If metadata files exist and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view metadata: the parent experiment path is not set. "
+                "Load the experiment from disk before calling save_metadata() on a view."
+            )
+
+        # Load the authoritative full metadata from the parent path.
+        on_disk = self._read_metadata_with_schema(self.path)
+
+        if "uid" not in on_disk.columns:
+            raise ValueError(
+                "The on-disk metadata has no 'uid' column. "
+                "This experiment was saved with an older version of InSituPy that did not "
+                "assign UIDs. Re-add all datasets and save the full experiment first."
+            )
+        if "uid" not in self._metadata.columns:
+            raise ValueError(
+                "The view metadata has no 'uid' column and cannot be safely merged."
+            )
+
+        # Merge: update only the rows present in this view, keyed by uid.
+        on_disk_idx = on_disk.set_index("uid")
+        view_idx = self._metadata.set_index("uid")
+
+        # Add columns that are new in the view (e.g., from add_metadata_column).
+        for col in view_idx.columns:
+            if col not in on_disk_idx.columns:
+                on_disk_idx[col] = pd.NA
+
+        on_disk_idx.update(view_idx)
+        merged = on_disk_idx.reset_index()
+
+        # Resolve write path.
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+
+        parquet_path = write_path / _METADATA_PARQUET_FILENAME
+        csv_path = write_path / "metadata.csv"
+
+        if (parquet_path.exists() or csv_path.exists()) and not overwrite:
+            raise FileExistsError(
+                "Metadata file(s) already exist. "
+                f"Found: {parquet_path} and/or {csv_path}. "
+                "Set `overwrite=True` to replace them."
+            )
+
+        tmp_path = write_path / "metadata.parquet.tmp"
+        merged.to_parquet(tmp_path, index=False)
+        tmp_path.replace(parquet_path)
+
+        with open(csv_path, "w") as f:
+            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+            merged.to_csv(f, index=True)
+
+        stale_schema = self._metadata_schema_path(write_path)
+        if stale_schema.exists():
+            stale_schema.unlink()
 
     @property
     def table(self) -> "ViewTableAccessor":
