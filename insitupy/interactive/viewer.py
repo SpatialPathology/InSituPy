@@ -36,7 +36,7 @@ if WITH_NAPARI:
 
         return viewer, config
 
-    def sync_geometries():
+    def sync_geometries(viewer: "napari.Viewer | None" = None):
         """Synchronise annotation and region shapes from the active napari viewer back into the :class:`InSituData` object.
 
         Iterates all napari Shapes and Points layers whose names match the
@@ -44,14 +44,31 @@ if WITH_NAPARI:
         writes the geometries into the corresponding :class:`~insitupy.containers.shapes_data.ShapesData`
         object.  Geometries present in the data but absent from the viewer are
         also removed.
+
+        Args:
+            viewer: The napari viewer to sync.  When ``None`` (default), falls
+                back to ``napari.current_viewer()`` — preserving the original
+                behaviour.  Pass an explicit viewer to sync a non-focused
+                window without changing window focus.
         """
         new_pattern = "{type_symbol} {annot_key}"
         old_pattern = "{type_symbol} {class_name} ({annot_key})"
 
-        # get current viewer config
-        viewer, config = _get_current_viewer_config("synchronize geometries")
-        if viewer is None:
-            return
+        # get viewer and config — use provided viewer if given, else current_viewer()
+        if viewer is not None:
+            viewer_id = _get_viewer_uid(viewer)
+            try:
+                config = config_manager[viewer_id]
+            except KeyError:
+                show_warning(
+                    "Could not find viewer configuration for the supplied napari viewer. "
+                    "Please reopen the viewer via `.show()` and try again."
+                )
+                return
+        else:
+            viewer, config = _get_current_viewer_config("synchronize geometries")
+            if viewer is None:
+                return
 
         data = config.data
 
