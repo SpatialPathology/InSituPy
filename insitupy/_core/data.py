@@ -277,6 +277,7 @@ class InSituData:
             f"{tf.Bold}Method:{tf.ResetAll}\t\t{method}\n"
             f"{tf.Bold}Slide ID:{tf.ResetAll}\t{self._slide_id}\n"
             f"{tf.Bold}Sample ID:{tf.ResetAll}\t{self._sample_id}\n"
+            f"{tf.Bold}UID:{tf.ResetAll}\t\t{self._uid}\n"
             f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}\n"
         )
 
