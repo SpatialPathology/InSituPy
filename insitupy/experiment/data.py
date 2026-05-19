@@ -37,7 +37,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.experiment.filters import FilterManager, FilterSpec
+from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
@@ -54,7 +54,8 @@ logger = logging.getLogger(__name__)
 # Set to True to enable spatialdata mode functionality
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
-_FILTERS_SCHEMA_VERSION = 1
+_FILTERS_SCHEMA_VERSION = 2
+_SUPPORTED_FILTER_VERSIONS = {1, 2}
 _METADATA_SCHEMA_VERSION = 1
 _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 
@@ -232,44 +233,105 @@ class InSituExperiment:
         self._path = None
         self._colors = {}
         self._filters = {}
+        self._composites: dict = {}
         self._applied_filters: list[str] = []
         self._data_type = data_type
 
     def __repr__(self):
-        """
-        Provide a string representation of the InSituExperiment object.
-
-        Returns:
-            str: A string summarizing the InSituExperiment object, including the number of samples
-            and a table of metadata with loaded modalities.
-        """
-        # extract metadata
-        mdf = self._metadata.copy()
-        num_samples = len(mdf)
-
-        # Add data type indicator
+        n_samples = len(self._metadata)
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
         mode_str = f" ({tf.Bold}{self._data_type}{tf.ResetAll} mode)"
 
-        # check which modalities are loaded and add information as string to the copied metadata dataframe
-        loaded_list = []
-        for _, data in self.iterdata():
-            if self._data_type == "insitupy":
-                loaded_modalities = data.get_loaded_modalities()
-            else:  # spatialdata mode
-                loaded_modalities = self._get_loaded_modalities_spatialdata(data)
-            loaded_string = "".join(["+" if m in loaded_modalities else "-" for m in MODALITIES])
-            loaded_list.append(loaded_string)
-        mdf.insert(1, MODALITIES_ABBR, loaded_list)
-
-        # generate string summary
-        sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
-        filters_info = ""
+        header = f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str}\n"
+        header += f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}"
         if self.applied_filters:
-            filters_info = f"\nApplied filters: {' -> '.join(self.applied_filters)}"
+            header += f"\n{tf.Bold}Applied filters:{tf.ResetAll} {' -> '.join(self.applied_filters)}"
 
-        return (f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str} with {num_samples} samples:{filters_info}\n"
-                f"{sample_summary}")
+        arrow = f"\n{tf.SPACER}{tf.RARROWHEAD}{tf.Bold}"
+        indent = f"\n{tf.SPACER}{tf.SPACER}"  # two SPACERs: one for arrow level, one for content
+
+        # data section — sample count + wrapped quoted column names
+        cols = list(self._metadata.columns)
+        cols_quoted = [f'"{c}"' for c in cols]
+        col_lines, current = [], ""
+        max_col_width = 80 - 2 * len(tf.SPACER)
+        for q in cols_quoted:
+            candidate = current + (", " if current else "") + q
+            if len(candidate) > max_col_width and current:
+                col_lines.append(current)
+                current = q
+            else:
+                current = candidate
+        col_lines.append(current)
+        col_display = indent.join(col_lines)
+        data_section = (
+            f"{arrow} data{tf.ResetAll}"
+            + indent + f"{n_samples} samples"
+            + indent + f"{len(cols)} metadata columns:"
+            + indent + col_display
+        )
+
+        # filters section
+        filters_repr = self.filters.__repr__()
+        filters_section = (
+            f"{arrow} filters{tf.ResetAll}"
+            + indent + filters_repr.replace("\n", indent)
+        )
+
+        # table section
+        table_keys = self.table.keys()
+        n_layers = len(table_keys)
+        if n_layers == 0:
+            table_str = "no tables built"
+        elif n_layers == 1:
+            table_str = f"1 layer: {table_keys[0]}"
+        else:
+            table_str = f"{n_layers} layers: {', '.join(table_keys)}"
+        table_section = f"{arrow} table{tf.ResetAll}" + indent + table_str
+
+        return header + data_section + filters_section + table_section
+
+    def _repr_html_(self):
+        n_samples = len(self._metadata)
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
+
+        parts = [
+            f"<b>{object_name}</b> <i>({self._data_type} mode)</i><br>",
+            f"<b>Path:</b> {self._path}<br>",
+        ]
+        if self.applied_filters:
+            parts.append(f"<b>Applied filters:</b> {' → '.join(self.applied_filters)}<br>")
+
+        # data section — metadata column summary with quoted names
+        cols = list(self._metadata.columns)
+        cols_str = ", ".join(f'"{c}"' for c in cols)
+        parts.append(
+            f"<b>▶ data</b><br>"
+            f"<div style='padding-left:1em'>{n_samples} samples<br>"
+            f"{len(cols)} metadata columns:<br>"
+            f"{cols_str}</div>"
+        )
+
+        # filters section
+        parts.append(
+            f"<b>▶ filters</b><br>"
+            f"<div style='padding-left:1em'>"
+            + self.filters._repr_html_()
+            + "</div>"
+        )
+
+        # table section
+        table_keys = self.table.keys()
+        n_layers = len(table_keys)
+        if n_layers == 0:
+            table_content = "no tables built"
+        elif n_layers == 1:
+            table_content = f"1 layer: {table_keys[0]}"
+        else:
+            table_content = f"{n_layers} layers: {', '.join(table_keys)}"
+        parts.append(f"<b>▶ table</b><br><div style='padding-left:1em'>{table_content}</div>")
+
+        return "".join(parts)
 
     @property
     def is_view(self) -> bool:
@@ -345,6 +407,8 @@ class InSituExperiment:
                     "mask": mask_arr[selected_indices].tolist(),
                     "note": note,
                 }
+
+        new_experiment._composites = deepcopy(self._composites) if self._composites else {}
 
         # Keep linkage only for view objects
         if as_view:
@@ -2216,6 +2280,7 @@ class InSituExperiment:
 
         # Reload filters
         self._filters = {}
+        self._composites = {}
         self._applied_filters = []
         filters_path = path / "filters.json"
         if filters_path.exists():
@@ -2224,10 +2289,10 @@ class InSituExperiment:
                     filters_payload = json.load(f)
                 version = filters_payload.get("version", None)
                 filters = filters_payload.get("filters", None)
-                if version != _FILTERS_SCHEMA_VERSION:
+                if version not in _SUPPORTED_FILTER_VERSIONS:
                     raise ValueError(
                         f"Unsupported filters schema version: {version}. "
-                        f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                        f"Supported versions: {sorted(_SUPPORTED_FILTER_VERSIONS)}."
                     )
                 if isinstance(filters, dict):
                     for name, entry in filters.items():
@@ -2242,6 +2307,19 @@ class InSituExperiment:
                             )
                             continue
                         self._filters[name] = {"mask": mask_arr.tolist(), "note": spec.note}
+                if version == 2:
+                    composites = filters_payload.get("composites", {})
+                    if isinstance(composites, dict):
+                        for name, entry in composites.items():
+                            try:
+                                comp = CompositeFilterSpec.from_entry(name, entry)
+                                self._composites[name] = comp.to_dict()
+                            except (ValueError, KeyError) as err:
+                                warnings.warn(
+                                    f"Could not load composite filter '{name}': {err}. Skipping.",
+                                    UserWarning,
+                                    stacklevel=2,
+                                )
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
@@ -3755,6 +3833,7 @@ class InSituExperiment:
 
         # Load filters (optional)
         filters = {}
+        raw_composites: dict = {}
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
@@ -3773,16 +3852,19 @@ class InSituExperiment:
             version = filters_payload.get("version", None)
             filters = filters_payload.get("filters", None)
 
-            if version != _FILTERS_SCHEMA_VERSION:
+            if version not in _SUPPORTED_FILTER_VERSIONS:
                 raise ValueError(
                     f"Unsupported filters schema version: {version}. "
-                    f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                    f"Supported versions: {sorted(_SUPPORTED_FILTER_VERSIONS)}."
                 )
 
             if not isinstance(filters, dict):
                 raise ValueError(
                     "Invalid filters schema: 'filters' must be a dictionary mapping filter keys to filter entries."
                 )
+
+            if version == 2:
+                raw_composites = filters_payload.get("composites", {}) or {}
 
         # Load each dataset
         data = []
@@ -3798,6 +3880,7 @@ class InSituExperiment:
         experiment._path = path
         experiment._colors = colors
         experiment._filters = {}
+        experiment._composites = {}
 
         # Backfill _uid from experiment metadata for legacy datasets (saved before uid feature)
         if "uid" in metadata.columns:
@@ -3836,10 +3919,22 @@ class InSituExperiment:
                     "note": note,
                 }
 
+        for name, entry in raw_composites.items():
+            try:
+                comp = CompositeFilterSpec.from_entry(name, entry)
+                experiment._composites[name] = comp.to_dict()
+            except (ValueError, KeyError) as err:
+                warnings.warn(
+                    f"Could not load composite filter '{name}': {err}. Skipping.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         if filter_key is not None:
-            if filter_key not in experiment._filters:
+            if filter_key not in experiment._filters and filter_key not in experiment._composites:
                 raise KeyError(
-                    f"Filter '{filter_key}' not found. Available filters: {list(experiment._filters.keys())}"
+                    f"Filter '{filter_key}' not found. "
+                    f"Available filters: {list(experiment.filters.keys())}"
                 )
             experiment = experiment.filters.apply(filter_key)
 
@@ -3850,11 +3945,16 @@ class InSituExperiment:
         payload: dict[str, Any] = {
             "version": _FILTERS_SCHEMA_VERSION,
             "filters": {},
+            "composites": {},
         }
 
         for key, entry in self._filters.items():
             spec = FilterSpec.from_entry(key, entry)
             payload["filters"][key] = spec.to_dict()
+
+        for key, entry in self._composites.items():
+            comp = CompositeFilterSpec.from_entry(key, entry)
+            payload["composites"][key] = comp.to_dict()
 
         return payload
 
