@@ -33,7 +33,7 @@ from insitupy._constants import (
 )
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
+from insitupy._io.files import check_overwrite_and_remove_if_true, read_json, write_dict_to_json
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
@@ -2470,6 +2470,10 @@ class InSituExperiment:
             removal.  ``delete_from_disk=False`` (default) leaves the dataset
             directory untouched on disk.
 
+            This method does **not** automatically persist the updated experiment
+            to disk after removal.  Call ``self.save()`` explicitly afterwards
+            if you want the change to be durable.
+
             When called on an :class:`InSituExperimentView` with
             ``delete_from_disk=False``, only the view's ``_data`` and
             ``_metadata`` are updated; the parent experiment is unaffected.
@@ -2508,8 +2512,8 @@ class InSituExperiment:
                 print(
                     f"The dataset directory will also be permanently deleted from disk: {path}"
                 )
-            answer = input("Proceed? [Y/n]: ").strip()
-            if answer.lower() not in ("", "y"):
+            answer = input("Proceed? [y/N]: ").strip()
+            if answer.lower() != "y":
                 print("Removal cancelled.")
                 return
 
@@ -2522,10 +2526,6 @@ class InSituExperiment:
         # Disk deletion
         if delete_from_disk and path is not None:
             shutil.rmtree(path)
-
-        # Persist experiment metadata
-        if self._path is not None:
-            self.save()
 
     def save(self,
              verbose: bool = False,
@@ -2556,6 +2556,9 @@ class InSituExperiment:
 
         Raises:
             ValueError: If no experiment save path is available or dataset paths are inconsistent.
+            RuntimeError: If one or more datasets fail to save. All datasets are attempted
+                regardless of individual failures; experiment-level files (metadata, colors,
+                filters) are written only when all datasets succeed.
         """
         self._check_mode_compatibility("save")
 
@@ -2587,14 +2590,33 @@ class InSituExperiment:
                 f"the InSituExperiment save path. Affected uids: {invalid_uids}"
             )
 
+        failures = []
+
         if collect_warnings_mode:
             with collect_warnings() as collector:
                 for xd in tqdm(self._data):
-                    xd.save(verbose=verbose, **kwargs)
+                    try:
+                        xd.save(verbose=verbose, **kwargs)
+                    except Exception as exc:
+                        failures.append((xd.uid, exc))
             collector.print_summary()
         else:
             for xd in tqdm(self._data):
-                xd.save(verbose=verbose, **kwargs)
+                try:
+                    xd.save(verbose=verbose, **kwargs)
+                except Exception as exc:
+                    failures.append((xd.uid, exc))
+
+        if failures:
+            summary = "\n".join(
+                f"  - {uid}: {type(exc).__name__}: {exc}"
+                for uid, exc in failures
+            )
+            raise RuntimeError(
+                f"save() failed for {len(failures)}/{len(self._data)} dataset(s):\n{summary}\n"
+                "Experiment-level files (metadata, colors, filters) were NOT updated. "
+                "Fix the failing datasets and call save() again."
+            )
 
         self.save_metadata(overwrite=True)
         self.save_colors(overwrite=True)
@@ -2814,8 +2836,7 @@ class InSituExperiment:
                 f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
             )
 
-        with open(colors_path, 'w') as f:
-            json.dump(self.colors, f)
+        write_dict_to_json(self.colors, colors_path)
 
     def save_images(
         self,
@@ -3000,39 +3021,43 @@ class InSituExperiment:
         """
         self._check_mode_compatibility("saveas")
 
-        # Create the main directory if it doesn't exist
         path = Path(path)
+        staging = path.parent / (path.name + ".__ispy_tmp__")
 
-        # check overwrite
+        # clean any stale staging dir left by a previous failed write
+        check_overwrite_and_remove_if_true(staging, overwrite=True)
+        # enforce the overwrite flag on the final target
         check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
 
         logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
-        if collect_warnings_mode:
-            with collect_warnings() as collector:
-                # Iterate over the datasets and save each one in a numbered subfolder
+        try:
+            if collect_warnings_mode:
+                with collect_warnings() as collector:
+                    for index, dataset in enumerate(tqdm(self._data)):
+                        subfolder_path = staging / f"data-{str(index).zfill(3)}"
+                        dataset.saveas(subfolder_path, verbose=False, **kwargs)
+                collector.print_summary()
+            else:
                 for index, dataset in enumerate(tqdm(self._data)):
-                    subfolder_path = path / f"data-{str(index).zfill(3)}"
+                    subfolder_path = staging / f"data-{str(index).zfill(3)}"
                     dataset.saveas(subfolder_path, verbose=False, **kwargs)
-                    if free_after_save:
-                        dataset._release_data()
-                        gc.collect()
 
-            # Print collected warnings at the end
-            collector.print_summary()
-        else:
-            # Original behavior - warnings shown inline
-            for index, dataset in enumerate(tqdm(self._data)):
-                subfolder_path = path / f"data-{str(index).zfill(3)}"
-                dataset.saveas(subfolder_path, verbose=False, **kwargs)
-                if free_after_save:
-                    dataset._release_data()
-                    gc.collect()
+            self.save_metadata(path=staging, overwrite=True)
+            self.save_colors(path=staging, overwrite=True)
+            self.save_filters(path=staging)
+
+            os.rename(staging, path)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
 
         self._path = path
-        self.save_metadata(path=path, overwrite=True)
-        self.save_colors(path=path, overwrite=True)
-        self.save_filters(path=path)
+
+        if free_after_save:
+            for dataset in self._data:
+                dataset._release_data()
+            gc.collect()
 
         logger.info("Saved.") if verbose else None
 
@@ -3070,8 +3095,7 @@ class InSituExperiment:
             )
 
         filters_payload = self._build_filters_payload()
-        with open(filters_path, 'w') as f:
-            json.dump(filters_payload, f)
+        write_dict_to_json(filters_payload, filters_path)
 
     def show(
         self,
