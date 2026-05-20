@@ -21,7 +21,7 @@ class FilterSpec:
     def to_dict(self) -> dict[str, Any]:
         """Serialise this filter spec to a JSON-compatible dict."""
         return {
-            "mask": list(np.asarray(self.mask, dtype=bool)),
+            "mask": np.asarray(self.mask, dtype=bool).tolist(),
             "note": self.note,
         }
 

@@ -236,6 +236,7 @@ class InSituExperiment:
         self._filters = {}
         self._composites: dict = {}
         self._applied_filters: list[str] = []
+        self._parent_indices: list[int] | None = None
         self._data_type = data_type
 
     def __repr__(self):
@@ -359,8 +360,11 @@ class InSituExperiment:
             added_filter: Optional filter key to append to applied filter history.
         """
         if isinstance(key, int):
-            if key > (len(self) - 1):
-                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
+            n = len(self)
+            if key < -n or key >= n:
+                raise IndexError(f"Index ({key}) is out of range {n}.")
+            if key < 0:
+                key += n
             key = slice(key, key + 1)
 
         elif isinstance(key, list):
@@ -375,6 +379,8 @@ class InSituExperiment:
 
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
+            if not key.index.equals(self._metadata.index):
+                key = key.reset_index(drop=True)
             selected_indices = list(self._metadata.index[key])
             new_experiment = subset_cls(data_type=self._data_type)
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
@@ -414,6 +420,10 @@ class InSituExperiment:
         # Keep linkage only for view objects
         if as_view:
             new_experiment._path = self._path
+            if getattr(self, "_parent_indices", None) is not None:
+                new_experiment._parent_indices = [self._parent_indices[i] for i in selected_indices]
+            else:
+                new_experiment._parent_indices = list(selected_indices)
         else:
             new_experiment._path = None
 
@@ -701,6 +711,9 @@ class InSituExperiment:
 
         # Concatenate the new metadata with the existing metadata
         self._metadata = pd.concat([self._metadata, new_metadata], axis=0, ignore_index=True)
+
+        for entry in self._filters.values():
+            entry["mask"].append(False)
 
 
     def add_metadata_column(
@@ -2380,6 +2393,11 @@ class InSituExperiment:
             KeyError: If *idx* is a UID string not present in the experiment.
             ValueError: If this experiment has no path set (cannot write to disk).
         """
+        if self.is_view:
+            raise ValueError(
+                "replace() is not supported on an InSituExperimentView. "
+                "Call replace() on the parent experiment and re-create the view."
+            )
         # Resolve idx to an integer position
         if isinstance(idx, str):
             uid_series = self._metadata["uid"]
@@ -2451,7 +2469,19 @@ class InSituExperiment:
             Filter masks are truncated to match the new dataset count after
             removal.  ``delete_from_disk=False`` (default) leaves the dataset
             directory untouched on disk.
+
+            When called on an :class:`InSituExperimentView` with
+            ``delete_from_disk=False``, only the view's ``_data`` and
+            ``_metadata`` are updated; the parent experiment is unaffected.
+            Use ``delete_from_disk=True`` on the parent experiment to
+            permanently delete a dataset from disk.
         """
+        if self.is_view and delete_from_disk:
+            raise ValueError(
+                "delete_from_disk=True is not allowed on an InSituExperimentView "
+                "because the parent experiment still references this dataset. "
+                "Call remove() on the parent experiment instead."
+            )
         # Resolve idx to an integer position
         if isinstance(idx, str):
             uid_series = self._metadata["uid"]
@@ -2509,6 +2539,14 @@ class InSituExperiment:
 
         For partial save workflows, use dedicated methods:
         ``save_metadata()``, ``save_colors()``, ``save_images()``, and ``save_filters()``.
+
+        When called on an :class:`InSituExperimentView`, ``save()`` only writes
+        each dataset's per-dataset state. It deliberately does **not** write
+        experiment-level files (``metadata.parquet``, ``colors.json``,
+        ``filters.json``) — those would otherwise corrupt the parent. To export
+        a subset as a standalone experiment, call ``view.saveas(path)``. To
+        update individual columns of the parent's metadata from a view, call
+        ``view.save_metadata()``.
 
         Args:
             verbose: If True, print verbose output for dataset-level save operations.
@@ -3001,6 +3039,7 @@ class InSituExperiment:
     def save_filters(
         self,
         path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
     ):
         """
         Save only experiment filters to ``filters.json``.
@@ -3008,9 +3047,11 @@ class InSituExperiment:
         Args:
             path: Directory where ``filters.json`` should be written.
                 If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``filters.json``.
 
         Raises:
             ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``filters.json`` exists and ``overwrite`` is False.
         """
         if path is None:
             if self.path is None:
@@ -3022,8 +3063,14 @@ class InSituExperiment:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
+        filters_path = path / "filters.json"
+        if filters_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {filters_path}. Set `overwrite=True` to replace it."
+            )
+
         filters_payload = self._build_filters_payload()
-        with open(path / "filters.json", 'w') as f:
+        with open(filters_path, 'w') as f:
             json.dump(filters_payload, f)
 
     def show(
@@ -4108,7 +4155,17 @@ class InSituExperiment:
 
 
 class InSituExperimentView(InSituExperiment):
-    """Lightweight linked view of an InSituExperiment subset."""
+    """Lightweight linked view of an InSituExperiment subset.
+
+    Dataset references are shared with the parent experiment. Mutating
+    ``view._data[i]`` (or any attribute reached through it, such as
+    ``view.cells[...]``, ``xd.cells.table``, or annotation/region containers)
+    mutates the parent's state in place. Methods that mutate dataset internals
+    on a view — for example ``sync_colors``, ``import_from_anndata``,
+    ``import_from_table``, ``calculate_metrics``, ``save_cells`` — propagate to
+    the parent. This is deliberate (a view is a lightweight filter, not a copy);
+    use ``view.saveas(path)`` to materialise an independent copy.
+    """
 
     @property
     def is_view(self) -> bool:
@@ -4199,6 +4256,187 @@ class InSituExperimentView(InSituExperiment):
         stale_schema = self._metadata_schema_path(write_path)
         if stale_schema.exists():
             stale_schema.unlink()
+
+    def save_colors(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view colors by merging with the parent's on-disk ``colors.json``.
+
+        Loads the parent's existing color dict from ``self.path``, merges the
+        view's colors on top (view wins on shared keys), and writes the result.
+        This prevents view-only ``sync_colors`` calls from silently deleting
+        color entries for datasets not included in the view.
+
+        Args:
+            path: Directory where ``colors.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``colors.json``.
+
+        Raises:
+            ValueError: If ``self.path`` is not set.
+            FileExistsError: If ``colors.json`` exists and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view colors: parent experiment path is not set."
+            )
+
+        on_disk_path = self.path / "colors.json"
+        if on_disk_path.exists():
+            on_disk = read_json(on_disk_path)
+        else:
+            on_disk = {}
+
+        merged = {**on_disk, **self._colors}
+
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+        colors_path = write_path / "colors.json"
+
+        if colors_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
+            )
+
+        with open(colors_path, "w") as f:
+            json.dump(merged, f)
+
+    def save_filters(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view filters by merging masks back into the parent's ``filters.json``.
+
+        Loads the full filter payload from the parent path (``self.path``),
+        splices the view's per-filter masks into the full-length parent masks at
+        the positions recorded in ``_parent_indices``, and writes the merged
+        result. This mirrors the behaviour of :meth:`save_metadata` and prevents
+        view-sliced (shorter) masks from being written back to the parent file.
+
+        New filters created on the view are added with ``False`` for all rows
+        outside the view. Composite filters are merged by key.
+
+        Args:
+            path: Directory where ``filters.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``filters.json``.
+
+        Raises:
+            ValueError: If ``self.path`` is not set, or if ``_parent_indices``
+                is missing (view was not created through ``_subset``).
+            FileExistsError: If ``filters.json`` exists and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view filters: parent experiment path is not set."
+            )
+
+        parent_idx = getattr(self, "_parent_indices", None)
+        if parent_idx is None:
+            raise ValueError(
+                "Cannot save view filters: _parent_indices is not set. "
+                "Recreate the view using exp[...] or exp.filters.view(...) "
+                "to enable filter merge-back."
+            )
+
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+
+        filters_json_path = write_path / "filters.json"
+        if filters_json_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {filters_json_path}. Set `overwrite=True` to replace it."
+            )
+
+        # Load on-disk filter payload from parent path.
+        on_disk_path = self.path / "filters.json"
+        if on_disk_path.exists():
+            payload = read_json(on_disk_path)
+        else:
+            payload = {
+                "version": _FILTERS_SCHEMA_VERSION,
+                "filters": {},
+                "composites": {},
+            }
+
+        if "filters" not in payload:
+            payload["filters"] = {}
+        if "composites" not in payload:
+            payload["composites"] = {}
+        payload["version"] = _FILTERS_SCHEMA_VERSION
+
+        n_parent = len(self._read_metadata_with_schema(self.path))
+
+        for key, entry in self._filters.items():
+            view_mask = np.asarray(FilterSpec.from_entry(key, entry).mask, dtype=bool)
+            existing = payload["filters"].get(key)
+            if existing is not None:
+                existing_arr = np.asarray(existing["mask"], dtype=bool)
+                full = existing_arr.copy() if len(existing_arr) == n_parent else np.zeros(n_parent, dtype=bool)
+            else:
+                full = np.zeros(n_parent, dtype=bool)
+            full[parent_idx] = view_mask
+            payload["filters"][key] = {
+                "mask": full.tolist(),
+                "note": entry.get("note"),
+            }
+
+        for key, entry in self._composites.items():
+            payload["composites"][key] = CompositeFilterSpec.from_entry(key, entry).to_dict()
+
+        with open(filters_json_path, "w") as f:
+            json.dump(payload, f)
+
+    def saveas(
+        self,
+        path: str | os.PathLike | Path,
+        overwrite: bool = False,
+        verbose: bool = False,
+        collect_warnings_mode: bool = True,
+        free_after_save: bool = False,
+        **kwargs,
+    ):
+        """Export this view to a standalone InSituExperiment at *path*.
+
+        Materialises the view into a plain :class:`InSituExperiment` (copying
+        the view's datasets, metadata, colors, and filters) and delegates to the
+        base :meth:`~InSituExperiment.saveas`. The resulting directory is a
+        self-contained experiment with ``len(view)`` datasets and
+        correctly-sized filter masks.
+
+        ``self._path`` is **not** mutated. To work with the exported experiment,
+        re-read it from *path*::
+
+            view.saveas("/path/to/export")
+            exported = InSituExperiment.read("/path/to/export")
+
+        Args:
+            path: Destination directory.
+            overwrite: If True, overwrite an existing directory at *path*.
+            verbose: If True, print verbose output.
+            collect_warnings_mode: Collect and print warnings after save.
+            free_after_save: Release in-memory data after each dataset is saved.
+            **kwargs: Forwarded to :meth:`InSituData.saveas` for each dataset.
+        """
+        materialised = InSituExperiment(data_type=self._data_type)
+        materialised._data = list(self._data)
+        materialised._metadata = self._metadata.reset_index(drop=True).copy()
+        materialised._colors = deepcopy(self._colors)
+        materialised._filters = deepcopy(self._filters)
+        materialised._composites = deepcopy(self._composites)
+        materialised._applied_filters = []
+        materialised._parent_indices = None
+        materialised.saveas(
+            path,
+            overwrite=overwrite,
+            verbose=verbose,
+            collect_warnings_mode=collect_warnings_mode,
+            free_after_save=free_after_save,
+            **kwargs,
+        )
 
     @property
     def table(self) -> "ViewTableAccessor":
