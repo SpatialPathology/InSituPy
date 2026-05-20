@@ -239,6 +239,24 @@ class InSituExperiment:
         self._parent_indices: list[int] | None = None
         self._data_type = data_type
 
+    def _modality_counts(self):
+        """Return (n_total, [(name, count), ...]) for modalities present in at least one dataset."""
+        n = len(self._data)
+        checks = {
+            "cells":       lambda xd: not xd._cells.is_empty,
+            "images":      lambda xd: not xd._images.is_empty,
+            "transcripts": lambda xd: xd._transcripts is not None,
+            "annotations": lambda xd: not xd._annotations.is_empty,
+            "regions":     lambda xd: not xd._regions.is_empty,
+            "units":       lambda xd: xd._units is not None,
+        }
+        result = []
+        for name, check in checks.items():
+            count = sum(1 for xd in self._data if check(xd))
+            if count > 0:
+                result.append((name, count))
+        return n, result
+
     def __repr__(self):
         n_samples = len(self._metadata)
         object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
@@ -251,6 +269,7 @@ class InSituExperiment:
 
         arrow = f"\n{tf.SPACER}{tf.RARROWHEAD}{tf.Bold}"
         indent = f"\n{tf.SPACER}{tf.SPACER}"  # two SPACERs: one for arrow level, one for content
+        sub_indent = indent + tf.SPACER       # three SPACERs: one extra for sub-items
 
         # data section — sample count + wrapped quoted column names
         cols = list(self._metadata.columns)
@@ -266,11 +285,22 @@ class InSituExperiment:
                 current = candidate
         col_lines.append(current)
         col_display = indent.join(col_lines)
+
+        n_total, modality_counts = self._modality_counts()
+        modality_label = indent + f"{tf.Bold}Loaded modalities{tf.ResetAll}"
+        if modality_counts:
+            modality_block = modality_label + sub_indent.join(
+                [""] + [f"{name}: {count}/{n_total}" for name, count in modality_counts]
+            )
+        else:
+            modality_block = modality_label + sub_indent + "None."
+
         data_section = (
             f"{arrow} data{tf.ResetAll}"
             + indent + f"{n_samples} samples"
             + indent + f"{len(cols)} metadata columns:"
             + indent + col_display
+            + modality_block
         )
 
         # filters section
@@ -307,11 +337,20 @@ class InSituExperiment:
         # data section — metadata column summary with quoted names
         cols = list(self._metadata.columns)
         cols_str = ", ".join(f'"{c}"' for c in cols)
+
+        n_total, modality_counts = self._modality_counts()
+        if modality_counts:
+            mod_lines = "<br>".join(f"{name}: {count}/{n_total}" for name, count in modality_counts)
+        else:
+            mod_lines = "None."
+        modality_html = f"<b>Loaded modalities</b><br><div style='padding-left:1em'>{mod_lines}</div>"
+
         parts.append(
             f"<b>▶ data</b><br>"
             f"<div style='padding-left:1em'>{n_samples} samples<br>"
             f"{len(cols)} metadata columns:<br>"
-            f"{cols_str}</div>"
+            f"{cols_str}<br>"
+            f"{modality_html}</div>"
         )
 
         # filters section
