@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 680 720" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;">
+    <path d="M640,46L640,199C640,207.831 632.831,215 624,215L56,215C47.169,215 40,207.831 40,199L40,46C40,37.169 47.169,30 56,30L624,30C632.831,30 640,37.169 640,46Z" style="fill:rgb(60,52,137);stroke:rgb(175,169,236);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,340,56)">
+        <text x="-53.303px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(206,203,246);">InSituExperiment</text>
+    </g>
+    <path d="M175,84L175,120C175,124.415 171.415,128 167,128L73,128C68.585,128 65,124.415 65,120L65,84C65,79.585 68.585,76 73,76L167,76C171.415,76 175,79.585 175,84Z" style="fill:rgb(8,80,65);stroke:rgb(93,202,165);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,120,96)">
+        <text x="-29.572px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(159,225,203);">Sample 0</text>
+    </g>
+    <g transform="matrix(1,0,0,1,120,114)">
+        <text x="-28.017px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(93,202,165);">InSituData</text>
+    </g>
+    <path d="M305,84L305,120C305,124.415 301.415,128 297,128L203,128C198.585,128 195,124.415 195,120L195,84C195,79.585 198.585,76 203,76L297,76C301.415,76 305,79.585 305,84Z" style="fill:rgb(8,80,65);stroke:rgb(93,202,165);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,250,96)">
+        <text x="-29.572px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(159,225,203);">Sample 1</text>
+    </g>
+    <g transform="matrix(1,0,0,1,250,114)">
+        <text x="-28.017px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(93,202,165);">InSituData</text>
+    </g>
+    <path d="M435,84L435,120C435,124.415 431.415,128 427,128L333,128C328.585,128 325,124.415 325,120L325,84C325,79.585 328.585,76 333,76L427,76C431.415,76 435,79.585 435,84Z" style="fill:rgb(8,80,65);stroke:rgb(93,202,165);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,380,96)">
+        <text x="-29.572px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(159,225,203);">Sample 2</text>
+    </g>
+    <g transform="matrix(1,0,0,1,380,114)">
+        <text x="-28.017px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(93,202,165);">InSituData</text>
+    </g>
+    <path d="M605,84L605,120C605,124.415 601.415,128 597,128L463,128C458.585,128 455,124.415 455,120L455,84C455,79.585 458.585,76 463,76L597,76C601.415,76 605,79.585 605,84Z" style="fill:rgb(44,44,42);stroke:rgb(180,178,169);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,530,102)">
+        <text x="-33.012px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(180,178,169);">... Sample N</text>
+    </g>
+    <path d="M215,158L215,186C215,190.415 211.415,194 207,194L73,194C68.585,194 65,190.415 65,186L65,158C65,153.585 68.585,150 73,150L207,150C211.415,150 215,153.585 215,158Z" style="fill:rgb(44,44,42);stroke:rgb(180,178,169);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,140,172)">
+        <text x="-41.631px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(211,209,199);">metadata.csv</text>
+    </g>
+    <path d="M370,158L370,186C370,190.415 366.415,194 362,194L243,194C238.585,194 235,190.415 235,186L235,158C235,153.585 238.585,150 243,150L362,150C366.415,150 370,153.585 370,158Z" style="fill:rgb(114,36,62);stroke:rgb(237,147,177);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,302,172)">
+        <g transform="matrix(14,0,0,14,-31.5103,0)">
+        </g>
+        <g transform="matrix(14,0,0,14,-27.6206,0)">
+        </g>
+        <text x="-31.51px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(244,192,209);">ﬁlters.json</text>
+    </g>
+    <path d="M605,158L605,186C605,190.415 601.415,194 597,194L398,194C393.585,194 390,190.415 390,186L390,158C390,153.585 393.585,150 398,150L597,150C601.415,150 605,153.585 605,158Z" style="fill:rgb(44,44,42);stroke:rgb(180,178,169);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,497,172)">
+        <text x="-55.248px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(211,209,199);">colors.json / other</text>
+    </g>
+    <path d="M640,282L640,384C640,391.727 633.727,398 626,398L54,398C46.273,398 40,391.727 40,384L40,282C40,274.273 46.273,268 54,268L626,268C633.727,268 640,274.273 640,282Z" style="fill:rgb(114,36,62);stroke:rgb(237,147,177);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,340,292)">
+        <g transform="matrix(14,0,0,14,47.0791,0)">
+        </g>
+        <g transform="matrix(14,0,0,14,50.9688,0)">
+        </g>
+        <text x="-78.189px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(244,192,209);">FilterManager  (exp.ﬁlter)</text>
+    </g>
+    <g transform="matrix(1,0,0,1,340,310)">
+        <g transform="matrix(12,0,0,12,51.0439,0)">
+        </g>
+        <g transform="matrix(12,0,0,12,54.3779,0)">
+        </g>
+        <text x="-105.062px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(237,147,177);">Stored at: {experiment_path}/ﬁlters.json</text>
+    </g>
+    <g transform="matrix(1,0,0,1,195,328)">
+        <text x="-18.343px" y="0px" style="font-family:'Arial-ItalicMT', 'Arial', sans-serif;font-style:italic;font-size:12px;fill:rgb(237,147,177);">Mutate</text>
+    </g>
+    <path d="M330,340L330,380C330,383.311 327.311,386 324,386L66,386C62.689,386 60,383.311 60,380L60,340C60,336.689 62.689,334 66,334L324,334C327.311,334 330,336.689 330,340Z" style="fill:rgb(44,44,42);stroke:rgb(180,178,169);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,195,353)">
+        <text x="-53.01px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(180,178,169);">.create() / .remove()</text>
+    </g>
+    <g transform="matrix(1,0,0,1,195,370)">
+        <text x="-49.676px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(180,178,169);">.rename() / .clear()</text>
+    </g>
+    <g transform="matrix(1,0,0,1,495,328)">
+        <text x="-19.345px" y="0px" style="font-family:'Arial-ItalicMT', 'Arial', sans-serif;font-style:italic;font-size:12px;fill:rgb(237,147,177);">Inspect</text>
+    </g>
+    <path d="M620,340L620,380C620,383.311 617.311,386 614,386L356,386C352.689,386 350,383.311 350,380L350,340C350,336.689 352.689,334 356,334L614,334C617.311,334 620,336.689 620,340Z" style="fill:rgb(44,44,42);stroke:rgb(180,178,169);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,485,353)">
+        <text x="-45.999px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(180,178,169);">.keys() / .masks()</text>
+    </g>
+    <g transform="matrix(1,0,0,1,485,370)">
+        <text x="-30.331px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(180,178,169);">.summary()</text>
+    </g>
+    <path d="M140,194L200,268" style="fill:none;fill-rule:nonzero;stroke:rgb(153,53,86);stroke-width:1.5px;"/>
+    <g transform="matrix(1,0,0,1,162.561,240)">
+        <g transform="matrix(12,0,0,12,-39.3516,0)">
+        </g>
+        <g transform="matrix(12,0,0,12,-36.0176,0)">
+        </g>
+        <text x="-39.352px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(153,53,86);">ﬁlter on</text>
+    </g>
+    <g transform="matrix(1,0,0,1,162.561,254)">
+        <text x="-68.707px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(153,53,86);">metadata col</text>
+    </g>
+    <path d="M302,194L302,266" style="fill:none;fill-rule:nonzero;stroke:rgb(153,53,86);stroke-width:1.5px;"/>
+    <g transform="matrix(1,0,0,1,340,455)">
+        <text x="-24.514px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;">Outputs</text>
+    </g>
+    <path d="M310,482L310,538C310,544.623 304.623,550 298,550L52,550C45.377,550 40,544.623 40,538L40,482C40,475.377 45.377,470 52,470L298,470C304.623,470 310,475.377 310,482Z" style="fill:rgb(60,52,137);stroke:rgb(175,169,236);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,175,494)">
+        <text x="-68.349px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(206,203,246);">InSituExperimentV<tspan x="47.342px 50.453px " y="0px 0px ">ie</tspan>w</text>
+    </g>
+    <g transform="matrix(1,0,0,1,175,514)">
+        <text x="-67.597px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(175,169,236);">Lazy<tspan x="-43.14px -39.806px " y="0px 0px ">, </tspan>non-copying subset</text>
+    </g>
+    <g transform="matrix(1,0,0,1,175,532)">
+        <g transform="matrix(12,0,0,12,35.8535,0)">
+        </g>
+        <g transform="matrix(12,0,0,12,39.1875,0)">
+        </g>
+        <text x="-80.531px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(175,169,236);">Remembers parent + ﬁlter key</text>
+    </g>
+    <path d="M640,482L640,538C640,544.623 634.623,550 628,550L382,550C375.377,550 370,544.623 370,538L370,482C370,475.377 375.377,470 382,470L628,470C634.623,470 640,475.377 640,482Z" style="fill:rgb(39,80,10);stroke:rgb(151,196,89);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,505,494)">
+        <text x="-69.251px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(192,221,151);">New InSituExperiment</text>
+    </g>
+    <g transform="matrix(1,0,0,1,505,514)">
+        <text x="-78.703px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(151,196,89);">Full copy of selected samples</text>
+    </g>
+    <g transform="matrix(1,0,0,1,505,532)">
+        <text x="-60.718px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(151,196,89);">Independent, saveable</text>
+    </g>
+    <path d="M220,398L175,468" style="fill:none;fill-rule:nonzero;stroke:rgb(83,74,183);stroke-width:1.5px;"/>
+    <g transform="matrix(1,0,0,1,189.916,436)">
+        <text x="-63.007px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(83,74,183);">.view(key)</text>
+    </g>
+    <path d="M460,398L505,468" style="fill:none;fill-rule:nonzero;stroke:rgb(59,109,17);stroke-width:1.5px;"/>
+    <g transform="matrix(1,0,0,1,490.911,436)">
+        <text x="0px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(59,109,17);">.apply(key)</text>
+    </g>
+    <g transform="matrix(1,0,0,1,340,598)">
+        <text x="-52.521px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;">Downstream use</text>
+    </g>
+    <path d="M310,622L310,662C310,666.415 306.415,670 302,670L48,670C43.585,670 40,666.415 40,662L40,622C40,617.585 43.585,614 48,614L302,614C306.415,614 310,617.585 310,622Z" style="fill:rgb(12,68,124);stroke:rgb(133,183,235);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,175,634)">
+        <text x="-30.741px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(181,212,244);">view<tspan x="-3.507px 0.383px " y="0px 0px ">.t</tspan>able</text>
+    </g>
+    <g transform="matrix(1,0,0,1,175,652)">
+        <text x="-56.019px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(133,183,235);">Row-sliced zarr table</text>
+    </g>
+    <path d="M640,622L640,662C640,666.415 636.415,670 632,670L378,670C373.585,670 370,666.415 370,662L370,622C370,617.585 373.585,614 378,614L632,614C636.415,614 640,617.585 640,622Z" style="fill:rgb(113,43,19);stroke:rgb(240,153,123);stroke-width:1px;"/>
+    <g transform="matrix(1,0,0,1,505,634)">
+        <text x="-49.414px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:14px;fill:rgb(245,196,179);">new_exp.save()</text>
+    </g>
+    <g transform="matrix(1,0,0,1,505,652)">
+        <text x="-56.689px" y="0px" style="font-family:'ArialMT', 'Arial', sans-serif;font-size:12px;fill:rgb(240,153,123);">Persist subset to disk</text>
+    </g>
+    <path d="M175,552L175,612" style="fill:none;fill-rule:nonzero;stroke:rgb(24,95,165);stroke-width:1px;stroke-dasharray:4,3;"/>
+    <path d="M505,552L505,612" style="fill:none;fill-rule:nonzero;stroke:rgb(153,60,29);stroke-width:1px;stroke-dasharray:4,3;"/>
+</svg>

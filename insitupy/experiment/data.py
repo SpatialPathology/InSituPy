@@ -37,7 +37,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true, read_json
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
-from insitupy.experiment.filters import FilterManager, FilterSpec
+from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
@@ -54,9 +54,11 @@ logger = logging.getLogger(__name__)
 # Set to True to enable spatialdata mode functionality
 # Currently disabled while the feature is under development
 _SPATIALDATA_MODE_ENABLED = False
-_FILTERS_SCHEMA_VERSION = 1
+_FILTERS_SCHEMA_VERSION = 2
+_SUPPORTED_FILTER_VERSIONS = {1, 2}
 _METADATA_SCHEMA_VERSION = 1
 _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
+_METADATA_PARQUET_FILENAME = "metadata.parquet"
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -227,49 +229,111 @@ class InSituExperiment:
                 "Please use data_type='insitupy' for now."
             )
 
-        self._metadata = pd.DataFrame(columns=['uid', 'slide_id', 'sample_id'])
+        self._metadata = pd.DataFrame(columns=['uid'])
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
         self._colors = {}
         self._filters = {}
+        self._composites: dict = {}
         self._applied_filters: list[str] = []
+        self._parent_indices: list[int] | None = None
         self._data_type = data_type
 
     def __repr__(self):
-        """
-        Provide a string representation of the InSituExperiment object.
-
-        Returns:
-            str: A string summarizing the InSituExperiment object, including the number of samples
-            and a table of metadata with loaded modalities.
-        """
-        # extract metadata
-        mdf = self._metadata.copy()
-        num_samples = len(mdf)
-
-        # Add data type indicator
+        n_samples = len(self._metadata)
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
         mode_str = f" ({tf.Bold}{self._data_type}{tf.ResetAll} mode)"
 
-        # check which modalities are loaded and add information as string to the copied metadata dataframe
-        loaded_list = []
-        for _, data in self.iterdata():
-            if self._data_type == "insitupy":
-                loaded_modalities = data.get_loaded_modalities()
-            else:  # spatialdata mode
-                loaded_modalities = self._get_loaded_modalities_spatialdata(data)
-            loaded_string = "".join(["+" if m in loaded_modalities else "-" for m in MODALITIES])
-            loaded_list.append(loaded_string)
-        mdf.insert(1, MODALITIES_ABBR, loaded_list)
-
-        # generate string summary
-        sample_summary = mdf.to_string(index=True, col_space=4, max_colwidth=15, max_cols=10)
-        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
-        filters_info = ""
+        header = f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str}\n"
+        header += f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}"
         if self.applied_filters:
-            filters_info = f"\nApplied filters: {' -> '.join(self.applied_filters)}"
+            header += f"\n{tf.Bold}Applied filters:{tf.ResetAll} {' -> '.join(self.applied_filters)}"
 
-        return (f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str} with {num_samples} samples:{filters_info}\n"
-                f"{sample_summary}")
+        arrow = f"\n{tf.SPACER}{tf.RARROWHEAD}{tf.Bold}"
+        indent = f"\n{tf.SPACER}{tf.SPACER}"  # two SPACERs: one for arrow level, one for content
+
+        # data section — sample count + wrapped quoted column names
+        cols = list(self._metadata.columns)
+        cols_quoted = [f'"{c}"' for c in cols]
+        col_lines, current = [], ""
+        max_col_width = 80 - 2 * len(tf.SPACER)
+        for q in cols_quoted:
+            candidate = current + (", " if current else "") + q
+            if len(candidate) > max_col_width and current:
+                col_lines.append(current)
+                current = q
+            else:
+                current = candidate
+        col_lines.append(current)
+        col_display = indent.join(col_lines)
+        data_section = (
+            f"{arrow} data{tf.ResetAll}"
+            + indent + f"{n_samples} samples"
+            + indent + f"{len(cols)} metadata columns:"
+            + indent + col_display
+        )
+
+        # filters section
+        filters_repr = self.filters.__repr__()
+        filters_section = (
+            f"{arrow} filters{tf.ResetAll}"
+            + indent + filters_repr.replace("\n", indent)
+        )
+
+        # table section
+        table_keys = self.table.keys()
+        n_layers = len(table_keys)
+        if n_layers == 0:
+            table_str = "no tables built"
+        elif n_layers == 1:
+            table_str = f"1 layer: {table_keys[0]}"
+        else:
+            table_str = f"{n_layers} layers: {', '.join(table_keys)}"
+        table_section = f"{arrow} table{tf.ResetAll}" + indent + table_str
+
+        return header + data_section + filters_section + table_section
+
+    def _repr_html_(self):
+        n_samples = len(self._metadata)
+        object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
+
+        parts = [
+            f"<b>{object_name}</b> <i>({self._data_type} mode)</i><br>",
+            f"<b>Path:</b> {self._path}<br>",
+        ]
+        if self.applied_filters:
+            parts.append(f"<b>Applied filters:</b> {' → '.join(self.applied_filters)}<br>")
+
+        # data section — metadata column summary with quoted names
+        cols = list(self._metadata.columns)
+        cols_str = ", ".join(f'"{c}"' for c in cols)
+        parts.append(
+            f"<b>▶ data</b><br>"
+            f"<div style='padding-left:1em'>{n_samples} samples<br>"
+            f"{len(cols)} metadata columns:<br>"
+            f"{cols_str}</div>"
+        )
+
+        # filters section
+        parts.append(
+            f"<b>▶ filters</b><br>"
+            f"<div style='padding-left:1em'>"
+            + self.filters._repr_html_()
+            + "</div>"
+        )
+
+        # table section
+        table_keys = self.table.keys()
+        n_layers = len(table_keys)
+        if n_layers == 0:
+            table_content = "no tables built"
+        elif n_layers == 1:
+            table_content = f"1 layer: {table_keys[0]}"
+        else:
+            table_content = f"{n_layers} layers: {', '.join(table_keys)}"
+        parts.append(f"<b>▶ table</b><br><div style='padding-left:1em'>{table_content}</div>")
+
+        return "".join(parts)
 
     @property
     def is_view(self) -> bool:
@@ -296,8 +360,11 @@ class InSituExperiment:
             added_filter: Optional filter key to append to applied filter history.
         """
         if isinstance(key, int):
-            if key > (len(self) - 1):
-                raise IndexError(f"Index ({key}) is out of range {len(self)}.")
+            n = len(self)
+            if key < -n or key >= n:
+                raise IndexError(f"Index ({key}) is out of range {n}.")
+            if key < 0:
+                key += n
             key = slice(key, key + 1)
 
         elif isinstance(key, list):
@@ -312,6 +379,8 @@ class InSituExperiment:
 
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
+            if not key.index.equals(self._metadata.index):
+                key = key.reset_index(drop=True)
             selected_indices = list(self._metadata.index[key])
             new_experiment = subset_cls(data_type=self._data_type)
             new_experiment._data = [d for d, k in zip(self._data, key) if k]
@@ -346,9 +415,15 @@ class InSituExperiment:
                     "note": note,
                 }
 
+        new_experiment._composites = deepcopy(self._composites) if self._composites else {}
+
         # Keep linkage only for view objects
         if as_view:
             new_experiment._path = self._path
+            if getattr(self, "_parent_indices", None) is not None:
+                new_experiment._parent_indices = [self._parent_indices[i] for i in selected_indices]
+            else:
+                new_experiment._parent_indices = list(selected_indices)
         else:
             new_experiment._path = None
 
@@ -596,7 +671,7 @@ class InSituExperiment:
             dataset = data
         else:
             if mode == "insitupy":
-                dataset = InSituData.read(data)
+                dataset = InSituData.read(data, load_all=False)
             elif mode == "xenium":
                 dataset = read_xenium(data)
             else:
@@ -606,14 +681,26 @@ class InSituExperiment:
         if dataset.__class__ is not InSituData:
             raise TypeError(f"Loaded dataset is not an InSituData object. Instead: '{dataset.__class__}'")
 
+        # Resolve the UID for this slot
+        existing_uids = list(self._metadata["uid"]) if "uid" in self._metadata.columns else []
+        if dataset.uid is not None and dataset.uid in existing_uids:
+            # idempotent re-add: dataset already belongs to this experiment slot
+            slot_uid = dataset.uid
+            idx = existing_uids.index(slot_uid)
+            self._data[idx] = dataset
+            return
+        else:
+            # assign a fresh UID for this experiment context
+            slot_uid = str(uuid4()).split("-")[0]
+
+        dataset._uid = slot_uid
+
         # Add the dataset to the data collection
         self._data.append(dataset)
 
         # Create a new DataFrame for the new metadata
         new_metadata = {
-            'uid': str(uuid4()).split("-")[0],
-            'slide_id': dataset.slide_id,
-            'sample_id': dataset.sample_id
+            'uid': slot_uid,
         }
 
         # add information from metadata argument
@@ -624,6 +711,9 @@ class InSituExperiment:
 
         # Concatenate the new metadata with the existing metadata
         self._metadata = pd.concat([self._metadata, new_metadata], axis=0, ignore_index=True)
+
+        for entry in self._filters.values():
+            entry["mask"].append(False)
 
 
     def add_metadata_column(
@@ -644,6 +734,14 @@ class InSituExperiment:
         Warns:
             UserWarning: If the column already exists and overwrite is False.
         """
+        if column_name in ("slide_id", "sample_id"):
+            warnings.warn(
+                f'"{column_name}" is also an intrinsic attribute of InSituData objects. '
+                f"This column is independent — changes to InSituData.{column_name} will not be reflected here automatically.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         if column_name in self._metadata.columns and not overwrite:
             warnings.warn(
                 f"Column '{column_name}' already exists in metadata. "
@@ -918,32 +1016,18 @@ class InSituExperiment:
     def update_metadata(self):
         """Sync ``slide_id`` and ``sample_id`` from child datasets into the experiment metadata.
 
-        Reads :attr:`~insitupy._core.data.InSituData.slide_id` and
-        :attr:`~insitupy._core.data.InSituData.sample_id` from every dataset in
-        :attr:`data` and overwrites the corresponding values in :attr:`metadata`.
-        All other metadata columns are left untouched.
-
-        Call this method after changing ``slide_id`` or ``sample_id`` on one or more
-        :class:`~insitupy._core.data.InSituData` objects that belong to this experiment.
-
-        Examples:
-            >>> exp.data[0].slide_id = '0005405'
-            >>> exp.update_metadata()
+        .. deprecated::
+            ``slide_id`` and ``sample_id`` are no longer stored in the experiment metadata.
+            This method is a no-op and will be removed in a future release.
+            Access these values directly via ``exp.data[i].slide_id`` and ``exp.data[i].sample_id``.
         """
-        changed = 0
-        for i, dataset in enumerate(self._data):
-            old_slide = self._metadata.at[i, 'slide_id']
-            old_sample = self._metadata.at[i, 'sample_id']
-            new_slide = dataset.slide_id
-            new_sample = dataset.sample_id
-            if old_slide != new_slide or old_sample != new_sample:
-                self._metadata.at[i, 'slide_id'] = new_slide
-                self._metadata.at[i, 'sample_id'] = new_sample
-                changed += 1
-        if changed:
-            logger.info("update_metadata: synced slide_id/sample_id for %d dataset(s).", changed)
-        else:
-            logger.info("update_metadata: all slide_id/sample_id values already in sync.")
+        warnings.warn(
+            "update_metadata() is deprecated and has no effect. "
+            "slide_id and sample_id are no longer stored in InSituExperiment metadata. "
+            "Access them directly via exp.data[i].slide_id and exp.data[i].sample_id.",
+            FutureWarning,
+            stacklevel=2,
+        )
 
     def rename_metadata_column(self, old_name: str, new_name: str):
         """Rename a column in the experiment metadata.
@@ -2193,9 +2277,8 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.reload(skip=skip, verbose=False)
 
-        # Reload experiment metadata
-        metadata_path = path / "metadata.csv"
-        if metadata_path.exists():
+        # Reload experiment metadata (Parquet canonical or legacy CSV).
+        if (path / _METADATA_PARQUET_FILENAME).exists() or (path / "metadata.csv").exists():
             self._metadata = self._read_metadata_with_schema(path)
             if verbose:
                 logger.info("Reloaded metadata, colors, and filters from disk.")
@@ -2210,6 +2293,7 @@ class InSituExperiment:
 
         # Reload filters
         self._filters = {}
+        self._composites = {}
         self._applied_filters = []
         filters_path = path / "filters.json"
         if filters_path.exists():
@@ -2218,10 +2302,10 @@ class InSituExperiment:
                     filters_payload = json.load(f)
                 version = filters_payload.get("version", None)
                 filters = filters_payload.get("filters", None)
-                if version != _FILTERS_SCHEMA_VERSION:
+                if version not in _SUPPORTED_FILTER_VERSIONS:
                     raise ValueError(
                         f"Unsupported filters schema version: {version}. "
-                        f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                        f"Supported versions: {sorted(_SUPPORTED_FILTER_VERSIONS)}."
                     )
                 if isinstance(filters, dict):
                     for name, entry in filters.items():
@@ -2236,6 +2320,19 @@ class InSituExperiment:
                             )
                             continue
                         self._filters[name] = {"mask": mask_arr.tolist(), "note": spec.note}
+                if version == 2:
+                    composites = filters_payload.get("composites", {})
+                    if isinstance(composites, dict):
+                        for name, entry in composites.items():
+                            try:
+                                comp = CompositeFilterSpec.from_entry(name, entry)
+                                self._composites[name] = comp.to_dict()
+                            except (ValueError, KeyError) as err:
+                                warnings.warn(
+                                    f"Could not load composite filter '{name}': {err}. Skipping.",
+                                    UserWarning,
+                                    stacklevel=2,
+                                )
             except Exception as err:
                 warnings.warn(f"Could not reload filters.json: {err}", UserWarning, stacklevel=2)
 
@@ -2278,6 +2375,158 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.unload(modalities=modalities, verbose=False)
 
+    def replace(self, idx: int | str, new_data: "InSituData", *, confirm: bool = True) -> None:
+        """Replace a dataset in this experiment with *new_data*.
+
+        The slot's UID and on-disk path are inherited by *new_data* so the experiment
+        metadata row remains consistent.  The in-memory swap happens unconditionally;
+        the disk write only occurs after optional confirmation.
+
+        Args:
+            idx: Integer position or UID string of the slot to replace.
+            new_data: The replacement :class:`~insitupy._core.data.InSituData` object.
+            confirm: If ``True`` (default), prompt before overwriting the directory on disk.
+                Set to ``False`` for scripted use.
+
+        Raises:
+            IndexError: If *idx* is an integer outside the valid range.
+            KeyError: If *idx* is a UID string not present in the experiment.
+            ValueError: If this experiment has no path set (cannot write to disk).
+        """
+        if self.is_view:
+            raise ValueError(
+                "replace() is not supported on an InSituExperimentView. "
+                "Call replace() on the parent experiment and re-create the view."
+            )
+        # Resolve idx to an integer position
+        if isinstance(idx, str):
+            uid_series = self._metadata["uid"]
+            matches = uid_series[uid_series == idx].index.tolist()
+            if not matches:
+                raise KeyError(f"No dataset with UID '{idx}' found in this experiment.")
+            pos = matches[0]
+        else:
+            pos = idx
+            if pos < 0 or pos >= len(self._data):
+                raise IndexError(
+                    f"Index {pos} out of range. Valid range: 0 to {len(self._data) - 1}."
+                )
+
+        bad_path = self._data[pos].path
+        slot_uid = self._metadata.loc[pos, "uid"]
+
+        if new_data.uid is not None:
+            warnings.warn(
+                f"new_data already has uid='{new_data.uid}'. "
+                f"It will be overwritten with the slot uid='{slot_uid}'.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Memory swap (non-destructive, unconditional)
+        new_data._uid = slot_uid
+        new_data._path = bad_path
+        self._data[pos] = new_data
+
+        if confirm:
+            print(f"The following directory will be permanently overwritten: {bad_path}")
+            answer = input("Proceed? [Y/n]: ").strip()
+            if answer.lower() not in ("", "y"):
+                print(
+                    "Disk write cancelled. The in-memory swap is active but the directory on disk is unchanged."
+                )
+                return
+
+        if bad_path is None:
+            raise ValueError(
+                "Cannot write to disk: the replaced slot has no path. "
+                "Use confirm=False only after verifying the path is set."
+            )
+
+        new_data.saveas(bad_path, overwrite=True)
+
+    def remove(self, idx: int | str, *, confirm: bool = True, delete_from_disk: bool = False) -> None:
+        """Remove a dataset from this experiment.
+
+        Drops the dataset at the given position from the in-memory list and
+        experiment metadata.  Filter masks are truncated to match the new
+        dataset count.  The on-disk directory is left untouched unless
+        ``delete_from_disk=True``.
+
+        Args:
+            idx: Integer position or UID string of the dataset to remove.
+            confirm: If ``True`` (default), print a summary and prompt for
+                confirmation before proceeding.  Set to ``False`` for scripted use.
+            delete_from_disk: If ``True``, permanently delete the dataset
+                directory from disk using :func:`shutil.rmtree`.  Skipped
+                silently when the dataset has no path set.  Default ``False``.
+
+        Raises:
+            IndexError: If *idx* is an integer outside the valid range.
+            KeyError: If *idx* is a UID string not present in the experiment.
+
+        Note:
+            Filter masks are truncated to match the new dataset count after
+            removal.  ``delete_from_disk=False`` (default) leaves the dataset
+            directory untouched on disk.
+
+            When called on an :class:`InSituExperimentView` with
+            ``delete_from_disk=False``, only the view's ``_data`` and
+            ``_metadata`` are updated; the parent experiment is unaffected.
+            Use ``delete_from_disk=True`` on the parent experiment to
+            permanently delete a dataset from disk.
+        """
+        if self.is_view and delete_from_disk:
+            raise ValueError(
+                "delete_from_disk=True is not allowed on an InSituExperimentView "
+                "because the parent experiment still references this dataset. "
+                "Call remove() on the parent experiment instead."
+            )
+        # Resolve idx to an integer position
+        if isinstance(idx, str):
+            uid_series = self._metadata["uid"]
+            matches = uid_series[uid_series == idx].index.tolist()
+            if not matches:
+                raise KeyError(f"No dataset with UID '{idx}' found in this experiment.")
+            pos = matches[0]
+        else:
+            pos = idx
+            if pos < 0 or pos >= len(self._data):
+                raise IndexError(
+                    f"Index {pos} out of range. Valid range: 0 to {len(self._data) - 1}."
+                )
+
+        path = self._data[pos].path
+        uid = self._metadata.loc[pos, "uid"]
+
+        if confirm:
+            print(
+                f"Dataset at position {pos} (uid='{uid}', path={path}) will be removed "
+                "from this experiment."
+            )
+            if delete_from_disk and path is not None:
+                print(
+                    f"The dataset directory will also be permanently deleted from disk: {path}"
+                )
+            answer = input("Proceed? [Y/n]: ").strip()
+            if answer.lower() not in ("", "y"):
+                print("Removal cancelled.")
+                return
+
+        # Memory removal
+        del self._data[pos]
+        self._metadata = self._metadata.drop(index=pos).reset_index(drop=True)
+        for entry in self._filters.values():
+            entry["mask"].pop(pos)
+
+        # Disk deletion
+        if delete_from_disk and path is not None:
+            shutil.rmtree(path)
+
+        # Persist experiment metadata
+        if self._path is not None:
+            self.save()
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
@@ -2290,6 +2539,14 @@ class InSituExperiment:
 
         For partial save workflows, use dedicated methods:
         ``save_metadata()``, ``save_colors()``, ``save_images()``, and ``save_filters()``.
+
+        When called on an :class:`InSituExperimentView`, ``save()`` only writes
+        each dataset's per-dataset state. It deliberately does **not** write
+        experiment-level files (``metadata.parquet``, ``colors.json``,
+        ``filters.json``) — those would otherwise corrupt the parent. To export
+        a subset as a standalone experiment, call ``view.saveas(path)``. To
+        update individual columns of the parent's metadata from a view, call
+        ``view.save_metadata()``.
 
         Args:
             verbose: If True, print verbose output for dataset-level save operations.
@@ -2348,7 +2605,10 @@ class InSituExperiment:
         path: str | os.PathLike | Path | None = None,
         overwrite: bool = True,
     ):
-        """Save experiment metadata to ``metadata.csv`` and ``metadata.schema.json``.
+        """Save experiment metadata to ``metadata.parquet`` (canonical) and ``metadata.csv`` (export).
+
+        The Parquet file is the authoritative store; ``metadata.csv`` is regenerated on every save
+        as a human-readable reference and should not be edited directly.
 
         Args:
             path: Directory where metadata files should be written.
@@ -2368,18 +2628,31 @@ class InSituExperiment:
 
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        metadata_path = path / "metadata.csv"
-        metadata_schema_path = self._metadata_schema_path(path)
+        parquet_path = path / _METADATA_PARQUET_FILENAME
+        csv_path = path / "metadata.csv"
 
-        if (metadata_path.exists() or metadata_schema_path.exists()) and not overwrite:
+        if (parquet_path.exists() or csv_path.exists()) and not overwrite:
             raise FileExistsError(
                 "Metadata file(s) already exist. "
-                f"Found: {metadata_path} and/or {metadata_schema_path}. "
+                f"Found: {parquet_path} and/or {csv_path}. "
                 "Set `overwrite=True` to replace them."
             )
 
-        self._metadata.to_csv(metadata_path, index=True)
-        self._save_metadata_schema(path, self._metadata)
+        # Atomic Parquet write: write to a temp file first, then replace.
+        # Path.replace() uses os.replace(), which overwrites the target atomically on all platforms.
+        tmp_path = path / "metadata.parquet.tmp"
+        self._metadata.to_parquet(tmp_path, index=False)
+        tmp_path.replace(parquet_path)
+
+        # Regenerate CSV as a human-readable export (not the canonical source).
+        with open(csv_path, "w") as f:
+            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+            self._metadata.to_csv(f, index=True)
+
+        # Remove stale schema sidecar written by older versions.
+        stale_schema = self._metadata_schema_path(path)
+        if stale_schema.exists():
+            stale_schema.unlink()
 
     @staticmethod
     def _metadata_schema_path(path: Path) -> Path:
@@ -2454,13 +2727,23 @@ class InSituExperiment:
 
     @classmethod
     def _read_metadata_with_schema(cls, path: Path) -> pd.DataFrame:
-        """Read metadata.csv and restore dtypes from optional schema sidecar."""
+        """Read experiment metadata, preferring the Parquet canonical store.
+
+        Falls back to ``metadata.csv`` + optional schema sidecar for legacy directories
+        that predate the Parquet format.
+        """
+        parquet_path = path / _METADATA_PARQUET_FILENAME
+        if parquet_path.exists():
+            metadata = pd.read_parquet(parquet_path)
+            return cls._migrate_legacy_metadata(metadata)
+
+        # Legacy path: CSV + optional dtype schema sidecar.
         metadata_path = path / "metadata.csv"
         dtype_map = cls._load_metadata_dtype_map(path)
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: dict[str, Any] = {}
+        read_csv_kwargs: dict[str, Any] = {"comment": "#"}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -2474,7 +2757,7 @@ class InSituExperiment:
         metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
 
         if not dtype_map:
-            return metadata
+            return cls._migrate_legacy_metadata(metadata)
 
         for column, dtype in dtype_map.items():
             if column not in metadata.columns:
@@ -2489,7 +2772,15 @@ class InSituExperiment:
                     err,
                 )
 
-        return metadata
+        return cls._migrate_legacy_metadata(metadata)
+
+    @staticmethod
+    def _migrate_legacy_metadata(df: pd.DataFrame) -> pd.DataFrame:
+        """Discard legacy slide_id/sample_id columns from loaded metadata CSVs."""
+        legacy_cols = [c for c in ("slide_id", "sample_id") if c in df.columns]
+        if legacy_cols:
+            df = df.drop(columns=legacy_cols)
+        return df
 
     def save_colors(
         self,
@@ -2748,6 +3039,7 @@ class InSituExperiment:
     def save_filters(
         self,
         path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
     ):
         """
         Save only experiment filters to ``filters.json``.
@@ -2755,9 +3047,11 @@ class InSituExperiment:
         Args:
             path: Directory where ``filters.json`` should be written.
                 If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``filters.json``.
 
         Raises:
             ValueError: If neither ``path`` nor ``self.path`` is set.
+            FileExistsError: If ``filters.json`` exists and ``overwrite`` is False.
         """
         if path is None:
             if self.path is None:
@@ -2769,8 +3063,14 @@ class InSituExperiment:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
+        filters_path = path / "filters.json"
+        if filters_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {filters_path}. Set `overwrite=True` to replace it."
+            )
+
         filters_payload = self._build_filters_payload()
-        with open(path / "filters.json", 'w') as f:
+        with open(filters_path, 'w') as f:
             json.dump(filters_payload, f)
 
     def show(
@@ -2788,7 +3088,7 @@ class InSituExperiment:
         dataset = self.data[index]
         dataset.show(verbose=verbose)
 
-    def show_modality(self, modality, uid_column: str = "sample_id"):
+    def show_modality(self, modality, uid_column: str = "uid"):
         """Show a modality for all datasets."""
         repr_string = ""
         for meta, data in self.iterdata():
@@ -2912,8 +3212,9 @@ class InSituExperiment:
                 is set unless you call :meth:`saveas` afterwards).
 
                 ``"move"`` — each dataset directory is moved (not copied) to
-                ``path``, the experiment-level files (``metadata.csv``,
-                ``colors.json``, ``filters.json``) are written there, and the
+                ``path``, the experiment-level files (``metadata.parquet``,
+                ``metadata.csv``, ``colors.json``, ``filters.json``) are written
+                there, and the
                 original experiment root directories are removed.  This is
                 disk-efficient because no data is duplicated.
 
@@ -3104,6 +3405,7 @@ class InSituExperiment:
         # Subset experiments have no root path and are skipped.
         _EXPECTED_ROOT_FILES = {
             "metadata.csv",
+            _METADATA_PARQUET_FILENAME,
             _METADATA_SCHEMA_FILENAME,
             "colors.json",
             "filters.json",
@@ -3205,7 +3507,7 @@ class InSituExperiment:
             ctx = collect_warnings(warning_collector) if collect_warnings_mode else contextlib.nullcontext()
             with ctx:
                 if resolved_mode == "insitupy":
-                    dataset = InSituData.read(dataset_path)
+                    dataset = InSituData.read(dataset_path, load_all=False)
                 elif resolved_mode == "xenium":
                     dataset = read_xenium(dataset_path, verbose=False, **kwargs)
                 else:
@@ -3215,9 +3517,9 @@ class InSituExperiment:
 
             # Extract metadata from the row, excluding the 'directory' column
             metadata = row.drop(labels=['directory']).to_dict()
-            metadata['uid'] = str(uuid4()).split("-")[0]
-            metadata['slide_id'] = dataset.slide_id
-            metadata['sample_id'] = dataset.sample_id
+            slot_uid = str(uuid4()).split("-")[0]
+            metadata['uid'] = slot_uid
+            dataset._uid = slot_uid
 
             # Append the metadata to the experiment's metadata DataFrame
             experiment._metadata = pd.concat([experiment._metadata, pd.DataFrame([metadata])], ignore_index=True)
@@ -3422,8 +3724,6 @@ class InSituExperiment:
             # Create metadata entry
             metadata_entry = {
                 'uid': sample_id if sample_id != 'single' else str(uuid4()).split("-")[0],
-                'slide_id': sample_id if sample_id != 'single' else 'unknown',
-                'sample_id': sample_id if sample_id != 'single' else 'unknown',
             }
             experiment._metadata = pd.concat([
                 experiment._metadata,
@@ -3596,7 +3896,6 @@ class InSituExperiment:
         path = Path(path)
 
         # Load metadata
-        metadata_path = path / "metadata.csv"
         metadata = cls._read_metadata_with_schema(path)
 
         try:
@@ -3608,6 +3907,7 @@ class InSituExperiment:
 
         # Load filters (optional)
         filters = {}
+        raw_composites: dict = {}
         filters_path = path / "filters.json"
         if filters_path.exists():
             try:
@@ -3626,10 +3926,10 @@ class InSituExperiment:
             version = filters_payload.get("version", None)
             filters = filters_payload.get("filters", None)
 
-            if version != _FILTERS_SCHEMA_VERSION:
+            if version not in _SUPPORTED_FILTER_VERSIONS:
                 raise ValueError(
                     f"Unsupported filters schema version: {version}. "
-                    f"Expected version {_FILTERS_SCHEMA_VERSION}."
+                    f"Supported versions: {sorted(_SUPPORTED_FILTER_VERSIONS)}."
                 )
 
             if not isinstance(filters, dict):
@@ -3637,11 +3937,14 @@ class InSituExperiment:
                     "Invalid filters schema: 'filters' must be a dictionary mapping filter keys to filter entries."
                 )
 
+            if version == 2:
+                raw_composites = filters_payload.get("composites", {}) or {}
+
         # Load each dataset
         data = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
         for dataset_path in tqdm(dataset_paths):
-            dataset = InSituData.read(dataset_path)
+            dataset = InSituData.read(dataset_path, load_all=False)
             data.append(dataset)
 
         # Create a new InSituExperiment object
@@ -3651,6 +3954,24 @@ class InSituExperiment:
         experiment._path = path
         experiment._colors = colors
         experiment._filters = {}
+        experiment._composites = {}
+
+        # Backfill _uid from experiment metadata for legacy datasets (saved before uid feature)
+        if "uid" in metadata.columns:
+            backfilled = []
+            for i, dataset in enumerate(data):
+                if dataset._uid is None and i < len(metadata):
+                    uid_val = metadata.iloc[i]["uid"]
+                    if pd.notna(uid_val):
+                        dataset._uid = uid_val
+                        backfilled.append(i)
+            if backfilled:
+                warnings.warn(
+                    f"{len(backfilled)} dataset(s) had no uid stored on disk and were "
+                    f"backfilled from the experiment metadata. Call .save_geometries() on each dataset to persist the uids.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         # Validate and store filters
         if filters:
@@ -3672,10 +3993,22 @@ class InSituExperiment:
                     "note": note,
                 }
 
+        for name, entry in raw_composites.items():
+            try:
+                comp = CompositeFilterSpec.from_entry(name, entry)
+                experiment._composites[name] = comp.to_dict()
+            except (ValueError, KeyError) as err:
+                warnings.warn(
+                    f"Could not load composite filter '{name}': {err}. Skipping.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
         if filter_key is not None:
-            if filter_key not in experiment._filters:
+            if filter_key not in experiment._filters and filter_key not in experiment._composites:
                 raise KeyError(
-                    f"Filter '{filter_key}' not found. Available filters: {list(experiment._filters.keys())}"
+                    f"Filter '{filter_key}' not found. "
+                    f"Available filters: {list(experiment.filters.keys())}"
                 )
             experiment = experiment.filters.apply(filter_key)
 
@@ -3686,11 +4019,16 @@ class InSituExperiment:
         payload: dict[str, Any] = {
             "version": _FILTERS_SCHEMA_VERSION,
             "filters": {},
+            "composites": {},
         }
 
         for key, entry in self._filters.items():
             spec = FilterSpec.from_entry(key, entry)
             payload["filters"][key] = spec.to_dict()
+
+        for key, entry in self._composites.items():
+            comp = CompositeFilterSpec.from_entry(key, entry)
+            payload["composites"][key] = comp.to_dict()
 
         return payload
 
@@ -3817,12 +4155,288 @@ class InSituExperiment:
 
 
 class InSituExperimentView(InSituExperiment):
-    """Lightweight linked view of an InSituExperiment subset."""
+    """Lightweight linked view of an InSituExperiment subset.
+
+    Dataset references are shared with the parent experiment. Mutating
+    ``view._data[i]`` (or any attribute reached through it, such as
+    ``view.cells[...]``, ``xd.cells.table``, or annotation/region containers)
+    mutates the parent's state in place. Methods that mutate dataset internals
+    on a view — for example ``sync_colors``, ``import_from_anndata``,
+    ``import_from_table``, ``calculate_metrics``, ``save_cells`` — propagate to
+    the parent. This is deliberate (a view is a lightweight filter, not a copy);
+    use ``view.saveas(path)`` to materialise an independent copy.
+    """
 
     @property
     def is_view(self) -> bool:
         """Return True; this object is a linked view of a parent experiment."""
         return True
+
+    def save_metadata(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view metadata by merging changes back into the full on-disk metadata.
+
+        Rather than writing only the view's subset rows (which would silently drop all
+        non-selected datasets from the file), this method:
+
+        1. Loads the full metadata from the parent experiment path (``self.path``).
+        2. Updates matching rows using the ``uid`` column.
+        3. Adds any new columns that exist in the view but not on disk, filling
+           non-view rows with ``pd.NA``.
+        4. Writes the complete merged metadata to ``path`` (or ``self.path`` if
+           ``path`` is None).
+
+        Args:
+            path: Directory where metadata files should be written.
+                If None, uses ``self.path`` (the parent experiment path).
+            overwrite: If True, overwrite existing metadata files.
+
+        Raises:
+            ValueError: If neither ``path`` nor ``self.path`` is set, or if the
+                on-disk metadata has no ``uid`` column (legacy format).
+            FileExistsError: If metadata files exist and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view metadata: the parent experiment path is not set. "
+                "Load the experiment from disk before calling save_metadata() on a view."
+            )
+
+        # Load the authoritative full metadata from the parent path.
+        on_disk = self._read_metadata_with_schema(self.path)
+
+        if "uid" not in on_disk.columns:
+            raise ValueError(
+                "The on-disk metadata has no 'uid' column. "
+                "This experiment was saved with an older version of InSituPy that did not "
+                "assign UIDs. Re-add all datasets and save the full experiment first."
+            )
+        if "uid" not in self._metadata.columns:
+            raise ValueError(
+                "The view metadata has no 'uid' column and cannot be safely merged."
+            )
+
+        # Merge: update only the rows present in this view, keyed by uid.
+        on_disk_idx = on_disk.set_index("uid")
+        view_idx = self._metadata.set_index("uid")
+
+        # Add columns that are new in the view (e.g., from add_metadata_column).
+        for col in view_idx.columns:
+            if col not in on_disk_idx.columns:
+                on_disk_idx[col] = pd.NA
+
+        on_disk_idx.update(view_idx)
+        merged = on_disk_idx.reset_index()
+
+        # Resolve write path.
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+
+        parquet_path = write_path / _METADATA_PARQUET_FILENAME
+        csv_path = write_path / "metadata.csv"
+
+        if (parquet_path.exists() or csv_path.exists()) and not overwrite:
+            raise FileExistsError(
+                "Metadata file(s) already exist. "
+                f"Found: {parquet_path} and/or {csv_path}. "
+                "Set `overwrite=True` to replace them."
+            )
+
+        tmp_path = write_path / "metadata.parquet.tmp"
+        merged.to_parquet(tmp_path, index=False)
+        tmp_path.replace(parquet_path)
+
+        with open(csv_path, "w") as f:
+            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+            merged.to_csv(f, index=True)
+
+        stale_schema = self._metadata_schema_path(write_path)
+        if stale_schema.exists():
+            stale_schema.unlink()
+
+    def save_colors(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view colors by merging with the parent's on-disk ``colors.json``.
+
+        Loads the parent's existing color dict from ``self.path``, merges the
+        view's colors on top (view wins on shared keys), and writes the result.
+        This prevents view-only ``sync_colors`` calls from silently deleting
+        color entries for datasets not included in the view.
+
+        Args:
+            path: Directory where ``colors.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``colors.json``.
+
+        Raises:
+            ValueError: If ``self.path`` is not set.
+            FileExistsError: If ``colors.json`` exists and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view colors: parent experiment path is not set."
+            )
+
+        on_disk_path = self.path / "colors.json"
+        if on_disk_path.exists():
+            on_disk = read_json(on_disk_path)
+        else:
+            on_disk = {}
+
+        merged = {**on_disk, **self._colors}
+
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+        colors_path = write_path / "colors.json"
+
+        if colors_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
+            )
+
+        with open(colors_path, "w") as f:
+            json.dump(merged, f)
+
+    def save_filters(
+        self,
+        path: str | os.PathLike | Path | None = None,
+        overwrite: bool = True,
+    ):
+        """Save view filters by merging masks back into the parent's ``filters.json``.
+
+        Loads the full filter payload from the parent path (``self.path``),
+        splices the view's per-filter masks into the full-length parent masks at
+        the positions recorded in ``_parent_indices``, and writes the merged
+        result. This mirrors the behaviour of :meth:`save_metadata` and prevents
+        view-sliced (shorter) masks from being written back to the parent file.
+
+        New filters created on the view are added with ``False`` for all rows
+        outside the view. Composite filters are merged by key.
+
+        Args:
+            path: Directory where ``filters.json`` should be written.
+                If None, uses ``self.path``.
+            overwrite: If True, overwrite an existing ``filters.json``.
+
+        Raises:
+            ValueError: If ``self.path`` is not set, or if ``_parent_indices``
+                is missing (view was not created through ``_subset``).
+            FileExistsError: If ``filters.json`` exists and ``overwrite`` is False.
+        """
+        if self.path is None:
+            raise ValueError(
+                "Cannot save view filters: parent experiment path is not set."
+            )
+
+        parent_idx = getattr(self, "_parent_indices", None)
+        if parent_idx is None:
+            raise ValueError(
+                "Cannot save view filters: _parent_indices is not set. "
+                "Recreate the view using exp[...] or exp.filters.view(...) "
+                "to enable filter merge-back."
+            )
+
+        write_path = Path(path) if path is not None else self.path
+        write_path.mkdir(parents=True, exist_ok=True)
+
+        filters_json_path = write_path / "filters.json"
+        if filters_json_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"File already exists: {filters_json_path}. Set `overwrite=True` to replace it."
+            )
+
+        # Load on-disk filter payload from parent path.
+        on_disk_path = self.path / "filters.json"
+        if on_disk_path.exists():
+            payload = read_json(on_disk_path)
+        else:
+            payload = {
+                "version": _FILTERS_SCHEMA_VERSION,
+                "filters": {},
+                "composites": {},
+            }
+
+        if "filters" not in payload:
+            payload["filters"] = {}
+        if "composites" not in payload:
+            payload["composites"] = {}
+        payload["version"] = _FILTERS_SCHEMA_VERSION
+
+        n_parent = len(self._read_metadata_with_schema(self.path))
+
+        for key, entry in self._filters.items():
+            view_mask = np.asarray(FilterSpec.from_entry(key, entry).mask, dtype=bool)
+            existing = payload["filters"].get(key)
+            if existing is not None:
+                existing_arr = np.asarray(existing["mask"], dtype=bool)
+                full = existing_arr.copy() if len(existing_arr) == n_parent else np.zeros(n_parent, dtype=bool)
+            else:
+                full = np.zeros(n_parent, dtype=bool)
+            full[parent_idx] = view_mask
+            payload["filters"][key] = {
+                "mask": full.tolist(),
+                "note": entry.get("note"),
+            }
+
+        for key, entry in self._composites.items():
+            payload["composites"][key] = CompositeFilterSpec.from_entry(key, entry).to_dict()
+
+        with open(filters_json_path, "w") as f:
+            json.dump(payload, f)
+
+    def saveas(
+        self,
+        path: str | os.PathLike | Path,
+        overwrite: bool = False,
+        verbose: bool = False,
+        collect_warnings_mode: bool = True,
+        free_after_save: bool = False,
+        **kwargs,
+    ):
+        """Export this view to a standalone InSituExperiment at *path*.
+
+        Materialises the view into a plain :class:`InSituExperiment` (copying
+        the view's datasets, metadata, colors, and filters) and delegates to the
+        base :meth:`~InSituExperiment.saveas`. The resulting directory is a
+        self-contained experiment with ``len(view)`` datasets and
+        correctly-sized filter masks.
+
+        ``self._path`` is **not** mutated. To work with the exported experiment,
+        re-read it from *path*::
+
+            view.saveas("/path/to/export")
+            exported = InSituExperiment.read("/path/to/export")
+
+        Args:
+            path: Destination directory.
+            overwrite: If True, overwrite an existing directory at *path*.
+            verbose: If True, print verbose output.
+            collect_warnings_mode: Collect and print warnings after save.
+            free_after_save: Release in-memory data after each dataset is saved.
+            **kwargs: Forwarded to :meth:`InSituData.saveas` for each dataset.
+        """
+        materialised = InSituExperiment(data_type=self._data_type)
+        materialised._data = list(self._data)
+        materialised._metadata = self._metadata.reset_index(drop=True).copy()
+        materialised._colors = deepcopy(self._colors)
+        materialised._filters = deepcopy(self._filters)
+        materialised._composites = deepcopy(self._composites)
+        materialised._applied_filters = []
+        materialised._parent_indices = None
+        materialised.saveas(
+            path,
+            overwrite=overwrite,
+            verbose=verbose,
+            collect_warnings_mode=collect_warnings_mode,
+            free_after_save=free_after_save,
+            **kwargs,
+        )
 
     @property
     def table(self) -> "ViewTableAccessor":

@@ -222,6 +222,7 @@ class InSituData:
             self._path = None
         self._slide_id = slide_id
         self._sample_id = sample_id
+        self._uid: str | None = None
 
         if metadata is None:
             # initialize metadata
@@ -276,6 +277,7 @@ class InSituData:
             f"{tf.Bold}Method:{tf.ResetAll}\t\t{method}\n"
             f"{tf.Bold}Slide ID:{tf.ResetAll}\t{self._slide_id}\n"
             f"{tf.Bold}Sample ID:{tf.ResetAll}\t{self._sample_id}\n"
+            f"{tf.Bold}UID:{tf.ResetAll}\t\t{self._uid}\n"
             f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}\n"
         )
 
@@ -366,11 +368,6 @@ class InSituData:
 
         Args:
             value (str or None): New slide id.
-
-        Note:
-            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
-            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
-            metadata in sync.
         """
         if value is not None and not isinstance(value, str):
             raise TypeError(f"slide_id must be a str or None, got {type(value).__name__!r}")
@@ -390,15 +387,15 @@ class InSituData:
 
         Args:
             value (str or None): New sample id.
-
-        Note:
-            If this object is part of an :class:`~insitupy.experiment.data.InSituExperiment`,
-            call ``experiment.update_metadata()`` afterwards to keep the experiment-level
-            metadata in sync.
         """
         if value is not None and not isinstance(value, str):
             raise TypeError(f"sample_id must be a str or None, got {type(value).__name__!r}")
         self._sample_id = value
+
+    @property
+    def uid(self) -> str | None:
+        """Return the experiment-assigned UID of this dataset, or None if not yet added to an experiment."""
+        return self._uid
 
     @property
     def from_insitudata(self):
@@ -1647,11 +1644,14 @@ class InSituData:
             NoProjectLoadWarning()
 
     @classmethod
-    def read(cls, path: str | os.PathLike | Path):
+    def read(cls, path: str | os.PathLike | Path, load_all: bool = True):
         """Read an InSituData object from a specified folder.
 
         Args:
             path (Union[str, os.PathLike, Path]): The path to the folder where data is saved.
+            load_all (bool): If ``True`` (default), automatically load all available
+                modalities after reading.  Set to ``False`` to defer loading, e.g. when
+                loading is controlled at the :class:`InSituExperiment` level.
 
         Returns:
             InSituData: A new InSituData object with the loaded data.
@@ -1672,6 +1672,9 @@ class InSituData:
         slide_id = metadata["slide_id"]
         sample_id = metadata["sample_id"]
 
+        # retrieve uid assigned by InSituExperiment.add() (absent in old files)
+        dataset_uid = metadata.get("uid", None)
+
         # save paths of this project in metadata
         metadata["path"] = abspath(path).replace("\\", "/")
         metadata["metadata_file"] = ISPY_METADATA_FILE
@@ -1681,6 +1684,9 @@ class InSituData:
                    slide_id=slide_id,
                    sample_id=sample_id
                    )
+        data._uid = dataset_uid
+        if load_all:
+            data.load_all()
         return data
 
 
@@ -1733,6 +1739,7 @@ class InSituData:
         path.mkdir(parents=True, exist_ok=True)
 
         # store basic information about experiment
+        self._metadata["uid"] = self._uid
         self._metadata["slide_id"] = self._slide_id
         self._metadata["sample_id"] = self._sample_id
 
@@ -1983,6 +1990,7 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
+        self._metadata["uid"] = self._uid
         self._metadata["slide_id"] = self._slide_id
         self._metadata["sample_id"] = self._sample_id
 
@@ -2043,6 +2051,7 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
+        self._metadata["uid"] = self._uid
         self._metadata["slide_id"] = self._slide_id
         self._metadata["sample_id"] = self._sample_id
 
@@ -2594,6 +2603,7 @@ class InSituData:
             logger.info("Updating project in %s", path)
 
         # sync identifiers into metadata before writing
+        self._metadata["uid"] = self._uid
         self._metadata["slide_id"] = self._slide_id
         self._metadata["sample_id"] = self._sample_id
 

@@ -48,8 +48,6 @@ def _make_experiment(n_samples=2, **kwargs):
         exp._data.append(xd)
     exp._metadata = pd.DataFrame({
         "uid": [f"sample_{i}" for i in range(n_samples)],
-        "slide_id": ["slide1"] * n_samples,
-        "sample_id": [f"s{i}" for i in range(n_samples)],
     })
     return exp
 

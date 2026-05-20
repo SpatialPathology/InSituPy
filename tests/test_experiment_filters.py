@@ -1,9 +1,9 @@
-"""Tests for insitupy.experiment.filters — FilterSpec serialization."""
+"""Tests for insitupy.experiment.filters — FilterSpec and CompositeFilterSpec."""
 
 import numpy as np
 import pytest
 
-from insitupy.experiment.filters import FilterSpec
+from insitupy.experiment.filters import CompositeFilterSpec, FilterSpec
 
 
 class TestFilterSpecToDict:
@@ -103,3 +103,105 @@ class TestFilterSpecRoundtrip:
         original = FilterSpec(key="all_false", mask=[False, False])
         restored = FilterSpec.from_entry("all_false", original.to_dict())
         assert restored.mask == [False, False]
+
+
+# ── CompositeFilterSpec tests ──────────────────────────────────────────────────
+
+class TestCompositeFilterSpecEvaluate:
+    def test_and_operation(self):
+        comp = CompositeFilterSpec(
+            key="c", operation="and",
+            source_keys=["a", "b"], negated=[],
+        )
+        masks = {"a": [True, True, False, False], "b": [True, False, True, False]}
+        assert comp.evaluate(masks) == [True, False, False, False]
+
+    def test_or_operation(self):
+        comp = CompositeFilterSpec(
+            key="c", operation="or",
+            source_keys=["a", "b"], negated=[],
+        )
+        masks = {"a": [True, True, False, False], "b": [True, False, True, False]}
+        assert comp.evaluate(masks) == [True, True, True, False]
+
+    def test_negate_single_key(self):
+        comp = CompositeFilterSpec(
+            key="c", operation="and",
+            source_keys=["a"], negated=["a"],
+        )
+        masks = {"a": [True, False, True]}
+        assert comp.evaluate(masks) == [False, True, False]
+
+    def test_negate_one_of_two_and(self):
+        comp = CompositeFilterSpec(
+            key="c", operation="and",
+            source_keys=["a", "b"], negated=["b"],
+        )
+        masks = {"a": [True, True, False], "b": [True, False, False]}
+        # a AND NOT b  →  [T AND F, T AND T, F AND T]  →  [F, T, F]
+        assert comp.evaluate(masks) == [False, True, False]
+
+    def test_three_keys_and(self):
+        comp = CompositeFilterSpec(
+            key="c", operation="and",
+            source_keys=["a", "b", "c2"], negated=[],
+        )
+        masks = {
+            "a":  [True, True, True, False],
+            "b":  [True, True, False, True],
+            "c2": [True, False, True, True],
+        }
+        assert comp.evaluate(masks) == [True, False, False, False]
+
+
+class TestCompositeFilterSpecFormulaStr:
+    def test_and_no_negate(self):
+        comp = CompositeFilterSpec(key="c", operation="and", source_keys=["a", "b"], negated=[])
+        assert comp.formula_str() == "a AND b"
+
+    def test_or_with_negate(self):
+        comp = CompositeFilterSpec(key="c", operation="or", source_keys=["a", "b"], negated=["b"])
+        assert comp.formula_str() == "a OR NOT b"
+
+    def test_single_negated(self):
+        comp = CompositeFilterSpec(key="c", operation="and", source_keys=["a"], negated=["a"])
+        assert comp.formula_str() == "NOT a"
+
+
+class TestCompositeFilterSpecSerialisation:
+    def test_to_dict_keys(self):
+        comp = CompositeFilterSpec(key="c", operation="and", source_keys=["a", "b"], negated=["b"], note="test")
+        d = comp.to_dict()
+        assert set(d.keys()) == {"operation", "source_keys", "negated", "note"}
+
+    def test_roundtrip(self):
+        original = CompositeFilterSpec(
+            key="c", operation="or", source_keys=["x", "y"], negated=["y"], note="combined",
+        )
+        restored = CompositeFilterSpec.from_entry("c", original.to_dict())
+        assert restored.key == "c"
+        assert restored.operation == "or"
+        assert restored.source_keys == ["x", "y"]
+        assert restored.negated == ["y"]
+        assert restored.note == "combined"
+
+    def test_from_entry_defaults_negated_to_empty(self):
+        entry = {"operation": "and", "source_keys": ["a", "b"]}
+        comp = CompositeFilterSpec.from_entry("c", entry)
+        assert comp.negated == []
+
+    def test_from_entry_raises_for_non_dict(self):
+        with pytest.raises(ValueError, match="dictionary"):
+            CompositeFilterSpec.from_entry("c", ["and", "a"])
+
+    def test_from_entry_raises_for_missing_operation(self):
+        with pytest.raises(ValueError, match="operation"):
+            CompositeFilterSpec.from_entry("c", {"source_keys": ["a"]})
+
+    def test_from_entry_raises_for_missing_source_keys(self):
+        with pytest.raises(ValueError, match="source_keys"):
+            CompositeFilterSpec.from_entry("c", {"operation": "and"})
+
+    def test_from_entry_raises_for_invalid_operation(self):
+        with pytest.raises(ValueError, match="'xor'"):
+            CompositeFilterSpec.from_entry("c", {"operation": "xor", "source_keys": ["a"]})
