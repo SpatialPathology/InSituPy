@@ -2667,9 +2667,12 @@ class InSituExperiment:
         tmp_path.replace(parquet_path)
 
         # Regenerate CSV as a human-readable export (not the canonical source).
-        with open(csv_path, "w") as f:
-            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+        # Write to a tmp file first, then replace atomically.
+        tmp_csv_path = path / "metadata.csv.tmp"
+        with open(tmp_csv_path, "w", newline="") as f:
+            f.write("# AUTO-GENERATED — human-readable export only; edits are ignored (canonical data is in metadata.parquet)\n")
             self._metadata.to_csv(f, index=True)
+        tmp_csv_path.replace(csv_path)
 
         # Remove stale schema sidecar written by older versions.
         stale_schema = self._metadata_schema_path(path)
@@ -4273,9 +4276,11 @@ class InSituExperimentView(InSituExperiment):
         merged.to_parquet(tmp_path, index=False)
         tmp_path.replace(parquet_path)
 
-        with open(csv_path, "w") as f:
-            f.write("# AUTO-GENERATED - do not edit; canonical data is in metadata.parquet\n")
+        tmp_csv_path = write_path / "metadata.csv.tmp"
+        with open(tmp_csv_path, "w", newline="") as f:
+            f.write("# AUTO-GENERATED — human-readable export only; edits are ignored (canonical data is in metadata.parquet)\n")
             merged.to_csv(f, index=True)
+        tmp_csv_path.replace(csv_path)
 
         stale_schema = self._metadata_schema_path(write_path)
         if stale_schema.exists():
