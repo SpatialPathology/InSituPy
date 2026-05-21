@@ -32,55 +32,75 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Setup
 
-### 1. Install InSituPy with the MCP extra
+### 1. Clone the repository
+
+Navigate to the directory where you want to download the repository:
 
 ```bash
-pip install -e ".[mcp]"
+cd /path/to/your/projects
 ```
 
-Or install `mcp` separately:
+Then clone the repository and enter it:
 
 ```bash
-pip install "mcp[cli]>=1.0.0"
+git clone https://github.com/SpatialPathology/InSituPy.git
+cd InSituPy
 ```
 
-### 2. Configure your MCP client
+### 2. Install
+
+Create a virtual environment (Python >=3.12 required) and install the package with the MCP optional dependency:
+
+```bash
+uv venv .venv --python 3.13
+uv pip install -e ".[mcp]"
+```
+
+### 3. Verify
+
+```bash
+# Windows
+.venv\Scripts\insitupy-mcp.exe
+
+# macOS/Linux
+.venv/bin/insitupy-mcp
+```
+
+The server should start. Press Ctrl+C to stop.
+
+### 4. Configure your MCP client
+
+#### Claude Desktop
+
+Add the following to your `claude_desktop_config.json`:
+
+```json
+"mcpServers": {
+  "insitupy": {
+    "command": "/path/to/InSituPy/.venv/Scripts/insitupy-mcp.exe",
+    "args": []
+  }
+}
+```
+
+Replace `/path/to/InSituPy` with the actual path to your cloned repository. On macOS/Linux, replace the executable path with `.venv/bin/insitupy-mcp`.
+
+Restart Claude Desktop to connect the server.
 
 #### Claude Code (auto-discovery)
 
 The `.mcp.json` file in the repository root enables auto-discovery. Just open the repo in Claude Code and the server will be available.
-
-#### Claude Desktop
-
-Add this to your Claude Desktop config (`claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "insitupy": {
-      "command": "python",
-      "args": ["-m", "tools.mcp_server"],
-      "cwd": "/path/to/InSituPy"
-    }
-  }
-}
-```
 
 #### Other MCP clients
 
 Run the server via stdio:
 
 ```bash
-cd /path/to/InSituPy
-python -m tools.mcp_server
-```
+# Windows
+.venv\Scripts\insitupy-mcp.exe
 
-### 3. Verify
-
-Test that the server starts correctly:
-
-```bash
-python -c "from tools.mcp_server.server import mcp; print('OK')"
+# macOS/Linux
+.venv/bin/insitupy-mcp
 ```
 
 ## How It Works
@@ -88,3 +108,5 @@ python -c "from tools.mcp_server.server import mcp; print('OK')"
 The server uses Python's `inspect`, `importlib`, and `ast` modules to introspect the installed `insitupy` package at runtime. Source file paths are derived from `insitupy.__file__`, so no hardcoded paths are needed.
 
 All tool outputs are truncated to 2000 characters (4000 for source files) to keep responses concise.
+
+**Note:** Because the package is installed in editable mode (`-e`), any changes to the insitupy source are immediately reflected without reinstalling.
