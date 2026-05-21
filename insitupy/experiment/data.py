@@ -2566,6 +2566,8 @@ class InSituExperiment:
         if delete_from_disk and path is not None:
             shutil.rmtree(path)
 
+        print("Experiment updated in memory but not yet saved to disk. Call .save() to persist the change.")
+
     def save(self,
              verbose: bool = False,
              collect_warnings_mode: bool = True,
