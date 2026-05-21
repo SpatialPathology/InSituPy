@@ -3,6 +3,7 @@ import functools as ft
 import logging
 import os
 import shutil
+import zipfile
 from copy import deepcopy
 from datetime import datetime
 from numbers import Number
@@ -1738,90 +1739,104 @@ class InSituData:
         # create output directory if it does not exist yet
         path.mkdir(parents=True, exist_ok=True)
 
-        # store basic information about experiment
-        self._metadata["uid"] = self._uid
-        self._metadata["slide_id"] = self._slide_id
-        self._metadata["sample_id"] = self._sample_id
+        # Snapshot metadata before mutations so we can restore on write failure
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            # store basic information about experiment
+            self._metadata["uid"] = self._uid
+            self._metadata["slide_id"] = self._slide_id
+            self._metadata["sample_id"] = self._sample_id
 
-        # clean old entries in data metadata
-        self._metadata["data"] = {}
+            # clean old entries in data metadata
+            self._metadata["data"] = {}
 
-        # save images
-        if not self._images.is_empty:
-            images = self._images
-            _save_images(
-                imagedata=images,
-                path=path,
-                metadata=self._metadata,
-                images_as_zarr=images_as_zarr,
-                zipped=zarr_zipped,
-                max_resolution=images_max_resolution,
-                debug=debug,
-                verbose=False
+            # save images
+            if not self._images.is_empty:
+                images = self._images
+                _save_images(
+                    imagedata=images,
+                    path=path,
+                    metadata=self._metadata,
+                    images_as_zarr=images_as_zarr,
+                    zipped=zarr_zipped,
+                    max_resolution=images_max_resolution,
+                    debug=debug,
+                    verbose=False
+                    )
+
+            # save cells
+            if not self._cells.is_empty:
+                cells = self._cells
+                _save_cells(
+                    cells=cells,
+                    path=path,
+                    metadata=self._metadata,
+                    zipped=zarr_zipped,
+                    max_resolution_boundaries=images_max_resolution
                 )
 
-        # save cells
-        if not self._cells.is_empty:
-            cells = self._cells
-            _save_cells(
-                cells=cells,
-                path=path,
-                metadata=self._metadata,
-                zipped=zarr_zipped,
-                max_resolution_boundaries=images_max_resolution
-            )
+            # save transcripts
+            if self._transcripts is not None:
+                transcripts = self._transcripts
+                _save_transcripts(
+                    transcripts=transcripts,
+                    path=path,
+                    metadata=self._metadata
+                    )
 
-        # save transcripts
-        if self._transcripts is not None:
-            transcripts = self._transcripts
-            _save_transcripts(
-                transcripts=transcripts,
-                path=path,
-                metadata=self._metadata
+            # save units
+            if self._units is not None:
+                units = self._units
+                _save_units(
+                    units=units,
+                    path=path,
+                    metadata=self._metadata
+                    )
+
+            # save annotations
+            if not self._annotations.is_empty:
+                annotations = self._annotations
+                _save_annotations(
+                    annotations=annotations,
+                    path=path,
+                    metadata=self._metadata
                 )
 
-        # save units
-        if self._units is not None:
-            units = self._units
-            _save_units(
-                units=units,
-                path=path,
-                metadata=self._metadata
+            # save regions
+            if not self._regions.is_empty:
+                regions = self._regions
+                _save_regions(
+                    regions=regions,
+                    path=path,
+                    metadata=self._metadata
                 )
 
-        # save annotations
-        if not self._annotations.is_empty:
-            annotations = self._annotations
-            _save_annotations(
-                annotations=annotations,
-                path=path,
-                metadata=self._metadata
-            )
+            # save version of InSituPy
+            self._metadata["version"] = __version__
 
-        # save regions
-        if not self._regions.is_empty:
-            regions = self._regions
-            _save_regions(
-                regions=regions,
-                path=path,
-                metadata=self._metadata
-            )
+            if "method_params" in self._metadata:
+                # move method_param key to end of metadata
+                self._metadata["method_params"] = self._metadata.pop("method_params")
 
-        # save version of InSituPy
-        self._metadata["version"] = __version__
-
-        if "method_params" in self._metadata:
-            # move method_param key to end of metadata
-            self._metadata["method_params"] = self._metadata.pop("method_params")
-
-        # write Xeniumdata metadata to json file
-        xd_metadata_path = path / ISPY_METADATA_FILE
-        write_dict_to_json(dictionary=self._metadata, file=xd_metadata_path)
+            # write Xeniumdata metadata to json file
+            xd_metadata_path = path / ISPY_METADATA_FILE
+            write_dict_to_json(dictionary=self._metadata, file=xd_metadata_path)
+        except Exception:
+            self._metadata = _saved_meta
+            raise
 
         # Optionally: zip the resulting directory
         if zip_output:
+            zip_path = Path(str(path) + ".zip")
             shutil.make_archive(path, 'zip', path, verbose=False)
-            shutil.rmtree(path) # delete directory
+            with zipfile.ZipFile(zip_path) as zf:
+                bad = zf.testzip()
+            if bad is not None:
+                raise RuntimeError(
+                    f"Zip archive appears corrupt (first bad entry: {bad!r}). "
+                    f"Uncompressed data is still at {path}."
+                )
+            shutil.rmtree(path)
 
         # # change path to the new one
         # self._path = path.resolve()
@@ -1920,11 +1935,11 @@ class InSituData:
                         "Cannot save: dataset UID mismatch. The save target was created by a different dataset."
                     )
             else:
-                warn(
-                    f"No `.ispy` metadata file in {path}. Directory is probably no valid InSituPy project. "
-                    f"Use `saveas()` instead to save the data to a new InSituPy project."
-                    )
-
+                raise RuntimeError(
+                    f"Path {path} exists but is not a valid InSituPy dataset "
+                    f"(no {ISPY_METADATA_FILE!r} found). "
+                    "Use .saveas() to write to a new directory."
+                )
 
         else:
             if verbose:

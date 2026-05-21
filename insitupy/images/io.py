@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
@@ -453,23 +454,26 @@ def write_zarr(
     if verbose:
         logger.info(f"Saving image to {str(file)}")
 
-    # get suffix
     file = Path(file)
 
-    if file.exists():
-        if overwrite:
-            if file.is_dir():
-                import shutil
-                shutil.rmtree(file)  # delete directory for .zarr folders
-            else:
-                file.unlink()  # delete file for .zarr.zip
-        else:
-            raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
+    # Raise early if file exists and overwrite is not allowed
+    if file.exists() and not overwrite:
+        raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
     suffix = file.name.split(".", 1)[-1]
 
     # check if the suffix contains zip
     zipped = "zip" in suffix
+
+    # Write to a staging path; commit to final path only after a successful write
+    tmp_file = file.parent / (file.name + ".__ispy_tmp__")
+
+    # Clean any stale staging left by a previous failed write
+    if tmp_file.exists():
+        if tmp_file.is_dir():
+            shutil.rmtree(tmp_file)
+        else:
+            tmp_file.unlink()
 
     # decide whether to save as pyramid or not
     if isinstance(image, list):
@@ -486,7 +490,7 @@ def write_zarr(
 
     # Use ExitStack to handle context manager differences between Zarr v2 and v3
     with ExitStack() as stack:
-        dirstore = _get_zarr_store(file, mode="w", zipped=zipped)
+        dirstore = _get_zarr_store(tmp_file, mode="w", zipped=zipped)
 
         # In Zarr v2, stores are context managers and need to be entered
         if not ZARR_V3:
@@ -510,8 +514,14 @@ def write_zarr(
         # open zarr store save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
         store.attrs.put(make_json_serializable(img_metadata))
-    # for k,v in img_metadata.items():
-    #     store.attrs[k] = v
+
+    # Commit: delete original only after new write has fully completed
+    if file.exists():
+        if file.is_dir():
+            shutil.rmtree(file)
+        else:
+            file.unlink()
+    os.rename(tmp_file, file)
 
 def write_ome_tiff(
     image: np.ndarray | da.core.Array | list[da.core.Array],
@@ -594,11 +604,10 @@ def write_ome_tiff(
         significant_bits = 16
 
     file = Path(file)
-    if file.exists():
-        if overwrite:
-            file.unlink() # delete file
-        else:
-            raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
+
+    # Raise early if file exists and overwrite is not allowed
+    if file.exists() and not overwrite:
+        raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
     # create metadata
     if pixelsize != 1:
@@ -625,8 +634,12 @@ def write_ome_tiff(
             }
         }
 
+    # Write to a staging path; commit to final path only after a successful write
+    tmp_file = file.parent / (file.name + ".__ispy_tmp__")
+    if tmp_file.exists():
+        tmp_file.unlink()
 
-    with TiffWriter(file, bigtiff=True) as tif:
+    with TiffWriter(tmp_file, bigtiff=True) as tif:
         options = dict(
             photometric=photometric,
             tile=tile,
@@ -652,6 +665,11 @@ def write_ome_tiff(
                 resolution=(1e4 / scale / pixelsize,1e4 / scale / pixelsize),
                 **options
             )
+
+    # Commit: delete original only after new write has fully completed
+    if file.exists():
+        file.unlink()
+    os.rename(tmp_file, file)
 
 def read_zarr_pyramid(dirstore, persist):
     """Read a pyramid from an already-opened Zarr store.

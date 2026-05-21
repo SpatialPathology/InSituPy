@@ -201,3 +201,80 @@ class TestInSituExperimentSaveCells:
             xd._path = tmp_path / f"data-{str(i).zfill(3)}"
         exp.save_cells()
         assert len(calls) == 2
+
+
+# ── InSituExperiment.save collect-then-raise (M1) ────────────────────────────
+
+def _make_experiment_with_paths(tmp_path, n_samples=3):
+    """Experiment with consistent paths set (simulates post-saveas state)."""
+    exp = InSituExperiment()
+    exp._path = tmp_path
+    for i in range(n_samples):
+        xd = _make_insitudata(seed=i)
+        xd._uid = f"sample_{i}"
+        xd._path = tmp_path / f"sample_{i}"
+        exp._data.append(xd)
+    exp._metadata = pd.DataFrame({"uid": [f"sample_{i}" for i in range(n_samples)]})
+    return exp
+
+
+class TestInSituExperimentSaveCollectFailures:
+    def test_all_datasets_attempted_when_some_fail(self, tmp_path, monkeypatch):
+        exp = _make_experiment_with_paths(tmp_path, n_samples=3)
+        calls = []
+
+        def patched_save(self_xd, **kwargs):
+            calls.append(self_xd.uid)
+            if self_xd.uid in ("sample_1", "sample_2"):
+                raise RuntimeError("injected failure")
+
+        monkeypatch.setattr("insitupy._core.data.InSituData.save", patched_save)
+
+        with pytest.raises(RuntimeError):
+            exp.save(collect_warnings_mode=False)
+
+        assert set(calls) == {"sample_0", "sample_1", "sample_2"}
+
+    def test_error_names_failing_uids_and_count(self, tmp_path, monkeypatch):
+        exp = _make_experiment_with_paths(tmp_path, n_samples=3)
+
+        def patched_save(self_xd, **kwargs):
+            if self_xd.uid in ("sample_1", "sample_2"):
+                raise RuntimeError("injected failure")
+
+        monkeypatch.setattr("insitupy._core.data.InSituData.save", patched_save)
+
+        with pytest.raises(RuntimeError, match=r"save\(\) failed for 2/3") as exc_info:
+            exp.save(collect_warnings_mode=False)
+
+        msg = str(exc_info.value)
+        assert "sample_1" in msg
+        assert "sample_2" in msg
+
+    def test_experiment_level_files_not_written_on_failure(self, tmp_path, monkeypatch):
+        exp = _make_experiment_with_paths(tmp_path, n_samples=2)
+        written = []
+
+        def always_fails(self_xd, **kwargs):
+            raise RuntimeError("injected failure")
+
+        monkeypatch.setattr("insitupy._core.data.InSituData.save", always_fails)
+        monkeypatch.setattr(exp, "save_metadata", lambda **kw: written.append("metadata"))
+        monkeypatch.setattr(exp, "save_colors", lambda **kw: written.append("colors"))
+        monkeypatch.setattr(exp, "save_filters", lambda **kw: written.append("filters"))
+
+        with pytest.raises(RuntimeError):
+            exp.save(collect_warnings_mode=False)
+
+        assert written == []
+
+    def test_collect_warnings_mode_also_collects_failures(self, tmp_path, monkeypatch):
+        exp = _make_experiment_with_paths(tmp_path, n_samples=2)
+
+        def patched_save(self_xd, **kwargs):
+            raise RuntimeError("injected failure")
+
+        monkeypatch.setattr("insitupy._core.data.InSituData.save", patched_save)
+
+        with pytest.raises(RuntimeError, match=r"save\(\) failed for 2/2"):
+            exp.save(collect_warnings_mode=True)
