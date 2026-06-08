@@ -3143,8 +3143,13 @@ class InSituExperiment:
                 "To overwrite it, please set the `overwrite` parameter to True."
             )
 
+        backup = path.parent / (path.name + ".__ispy_bak__")
+        # clean any stale backup left by a previous failed write
+        check_overwrite_and_remove_if_true(backup, overwrite=True)
+
         logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
+        destination_backed_up = False
         try:
             if collect_warnings_mode:
                 with collect_warnings() as collector:
@@ -3161,13 +3166,29 @@ class InSituExperiment:
             self.save_colors(path=staging, overwrite=True)
             self.save_filters(path=staging)
 
-            # Delete the old destination only after staging is fully written.
+            # Atomic swap: move the old destination aside so it can be restored if
+            # the final rename fails, then move staging into place.
             if path.exists():
-                shutil.rmtree(path)
+                os.rename(path, backup)
+                destination_backed_up = True
             os.rename(staging, path)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
+            if destination_backed_up and not path.exists() and backup.exists():
+                try:
+                    os.rename(backup, path)
+                except Exception:
+                    logger.error(
+                        "saveas failed AND the previous experiment could not be restored "
+                        "automatically. Your original data is preserved at '%s' — rename it "
+                        "back to '%s' manually.", backup, path,
+                    )
             raise
+        finally:
+            # Remove the backup only once the destination is confirmed in place.
+            # If neither swap nor restore succeeded, keep it — it is the only surviving copy.
+            if backup.exists() and path.exists():
+                shutil.rmtree(backup, ignore_errors=True)
 
         self._path = path.resolve()
 
