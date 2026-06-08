@@ -1577,6 +1577,8 @@ class InSituExperiment:
                 f"Available columns: {list(self._metadata.columns)}"
             )
 
+        self._assert_cells_loaded(cells_layer)
+
         adatas: dict[Any, anndata.AnnData] = {}
 
         for i, (meta, xd) in enumerate(self.iterdata()):
@@ -1760,6 +1762,45 @@ class InSituExperiment:
                 return read_json(legacy)
         return {"label_col": "uid"}
 
+    def _latest_cells_save_dir(self, xd: "InSituData", *, label: str | None = None) -> Path:
+        """Return the most recent timestamped cells save directory for *xd*.
+
+        Locates ``<xd path>/cells`` and returns its newest (by timestamp) layer
+        directory.  Shared by :meth:`_resolve_cell_layer_from_disk` and
+        :meth:`_resolve_per_sample_h5ad_paths`; callers read the
+        ``.multicelldata`` sidecar inside the returned directory as needed.
+
+        Args:
+            xd: Dataset whose saved cells directory should be located.
+            label: Optional dataset identifier (e.g. a uid) interpolated into
+                error messages to keep them actionable.
+
+        Returns:
+            Path: The most recent timestamped directory under ``cells/``.
+
+        Raises:
+            ValueError: If *xd* has no save path, no ``cells`` directory, or no
+                saved cells timestamp directory.
+        """
+        from insitupy.utils._helpers import sort_paths_by_datetime
+
+        desc = f" for dataset '{label}'" if label is not None else ""
+        if xd._path is None:
+            raise ValueError(
+                f"Cannot locate saved cells{desc}: dataset has no save path. "
+                "Save the dataset(s) to disk (e.g. via saveas()) first."
+            )
+        cells_dir = xd._path / "cells"
+        if not cells_dir.exists():
+            raise ValueError(
+                f"No cells directory found{desc} at '{cells_dir}'. "
+                "Ensure the dataset has been saved with cell data."
+            )
+        timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
+        if not timestamp_dirs:
+            raise ValueError(f"No saved cells found{desc} in '{cells_dir}'.")
+        return sort_paths_by_datetime(timestamp_dirs)[0]
+
     def _resolve_per_sample_h5ad_paths(
         self,
         cells_layer: str | None = None,
@@ -1778,33 +1819,12 @@ class InSituExperiment:
             ValueError: If any dataset has no save path, has no saved cells
                 directory, or if the h5ad file cannot be located.
         """
-        from insitupy.utils._helpers import sort_paths_by_datetime
-
         results = []
         for meta, xd in self.iterdata():
             uid = meta["uid"]
             label_value = meta[label_col]
 
-            if xd._path is None:
-                raise ValueError(
-                    f"Dataset '{uid}' has no save path. "
-                    "Save all datasets before using method='concat_on_disk'."
-                )
-
-            cells_dir = xd._path / "cells"
-            if not cells_dir.exists():
-                raise ValueError(
-                    f"No cells directory found for dataset '{uid}' at '{cells_dir}'. "
-                    "Ensure the dataset has been saved with cell data."
-                )
-
-            timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
-            if not timestamp_dirs:
-                raise ValueError(
-                    f"No saved cells found for dataset '{uid}' in '{cells_dir}'."
-                )
-
-            most_recent = sort_paths_by_datetime(timestamp_dirs)[0]
+            most_recent = self._latest_cells_save_dir(xd, label=uid)
 
             # Determine the layer directory name
             if cells_layer is None:
@@ -1921,6 +1941,40 @@ class InSituExperiment:
         """
         return TableAccessor(self)
 
+    def _resolve_cell_layer_from_disk(self, xd: "InSituData") -> str:
+        """Return the main cell layer name for *xd* by reading .multicelldata from disk.
+
+        Used by ``build_table(method='concat_on_disk')`` to resolve
+        ``cells_layer=None`` without requiring cells to be in memory.
+
+        Raises:
+            ValueError: If *xd* has no save path or no saved cells directory.
+        """
+        most_recent = self._latest_cells_save_dir(xd)
+        mc_meta = read_json(most_recent / ".multicelldata")
+        return mc_meta["key_main"]
+
+    def _assert_cells_loaded(self, cells_layer: str | None) -> None:
+        """Raise a clear ValueError if any dataset is missing *cells_layer*.
+
+        Args:
+            cells_layer: Layer name to check, or None to check for any loaded layer.
+        """
+        missing = []
+        for i, (meta, xd) in enumerate(self.iterdata()):
+            keys = xd.cells.keys()
+            if cells_layer is None:
+                if xd.cells.main_key is None:
+                    missing.append((i, meta.get("uid", i)))
+            else:
+                if cells_layer not in keys:
+                    missing.append((i, meta.get("uid", i)))
+        if missing:
+            raise ValueError(
+                f"Cells not loaded for {len(missing)} dataset(s) (index/uid: {missing}). "
+                f"Call load_cells() on the experiment before build_table()/to_anndata()."
+            )
+
     def build_table(
         self,
         cells_layer: str | None = None,
@@ -1998,6 +2052,10 @@ class InSituExperiment:
                 "Call `saveas()` first to give the experiment a path."
             )
 
+        # concat_on_disk never touches in-memory cells; in_memory does.
+        if method != "concat_on_disk":
+            self._assert_cells_loaded(cells_layer)
+
         # Validate concat_on_disk restrictions
         if method == "concat_on_disk":
             unsupported = {
@@ -2018,10 +2076,16 @@ class InSituExperiment:
 
         # Resolve cells_layer=None to the actual layer key so the output filename
         # is always explicit (e.g. "main" rather than the ambiguous None).
+        # concat_on_disk reads from .multicelldata on disk; in_memory reads cells in memory.
         if cells_layer is None:
-            _, cells_layer = _get_cell_layer(
-                next(self.iterdata())[1].cells, cells_layer=None, return_layer_name=True
-            )
+            if method == "concat_on_disk":
+                cells_layer = self._resolve_cell_layer_from_disk(
+                    next(self.iterdata())[1]
+                )
+            else:
+                _, cells_layer = _get_cell_layer(
+                    next(self.iterdata())[1].cells, cells_layer=None, return_layer_name=True
+                )
 
         output_path = self._get_table_path(cells_layer)
         check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
@@ -3055,12 +3119,14 @@ class InSituExperiment:
             verbose: If True, print verbose output.
             collect_warnings_mode: If True, collect warnings and print summary at end
                 instead of displaying them inline (prevents progress bar disruption).
-            free_after_save: If True, each region's in-memory modality data is
-                released immediately after it has been written to disk.  This
-                reduces peak RAM when saving many large regions (e.g. after
-                ``from_regions(lazy=True)``).  After ``saveas`` completes the
-                ``InSituExperiment`` object will have empty data containers and
-                should be reloaded from disk for further use.  Defaults to False.
+            free_after_save: If True, every dataset's in-memory modality data is
+                released **after the full save completes** (all datasets written
+                and the destination swapped into place).  This frees RAM once the
+                experiment is safely on disk; it does **not** reduce peak RAM
+                *during* the write, since all datasets remain in memory until the
+                save finishes.  Afterwards the ``InSituExperiment`` object has
+                empty data containers and should be reloaded from disk for further
+                use.  Defaults to False.
             **kwargs: Additional keyword arguments passed to dataset.saveas().
         """
         self._check_mode_compatibility("saveas")
@@ -3070,8 +3136,12 @@ class InSituExperiment:
 
         # clean any stale staging dir left by a previous failed write
         check_overwrite_and_remove_if_true(staging, overwrite=True)
-        # enforce the overwrite flag on the final target
-        check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
+        # check overwrite flag on the final target (delete deferred to inside try)
+        if path.exists() and not overwrite:
+            raise FileExistsError(
+                f"The output file already exists at {path}. "
+                "To overwrite it, please set the `overwrite` parameter to True."
+            )
 
         logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
@@ -3091,12 +3161,18 @@ class InSituExperiment:
             self.save_colors(path=staging, overwrite=True)
             self.save_filters(path=staging)
 
+            # Delete the old destination only after staging is fully written.
+            if path.exists():
+                shutil.rmtree(path)
             os.rename(staging, path)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             raise
 
-        self._path = path
+        self._path = path.resolve()
+
+        for index, dataset in enumerate(self._data):
+            dataset._path = (path / f"data-{str(index).zfill(3)}").resolve()
 
         if free_after_save:
             for dataset in self._data:
@@ -3335,6 +3411,15 @@ class InSituExperiment:
 
         # --- mode="move" precondition checks ---
         if mode == "move":
+            for obj in objs:
+                if getattr(obj, "is_view", False):
+                    raise ValueError(
+                        "concat(..., mode='move') cannot operate on an InSituExperimentView. "
+                        "A view shares its datasets with the parent experiment; moving them would "
+                        "relocate the parent's data and then delete the parent directory. "
+                        "Materialise the view first (view.saveas(path); "
+                        "InSituExperiment.read(path)) or use mode='copy'."
+                    )
             for i, obj in enumerate(objs):
                 if not isinstance(obj, InSituExperiment):
                     raise TypeError("All objects must be instances of InSituExperiment.")
@@ -3427,6 +3512,8 @@ class InSituExperiment:
 
         # Warn upfront about subset experiments whose roots will not be cleaned up.
         for i, obj in enumerate(objs):
+            if getattr(obj, "is_view", False):
+                continue
             if obj._path is None and obj._data:
                 inferred_root = obj._data[0]._path.parent
                 warnings.warn(
@@ -3479,6 +3566,8 @@ class InSituExperiment:
             "filters.json",
         }
         for obj in objs:
+            if getattr(obj, "is_view", False):
+                continue
             if obj._path is None:
                 continue
             remaining = {p.name for p in obj._path.iterdir()}
@@ -4240,6 +4329,81 @@ class InSituExperimentView(InSituExperiment):
         """Return True; this object is a linked view of a parent experiment."""
         return True
 
+    def build_table(self, *args, **kwargs):
+        """Raise NotImplementedError — views cannot build their own table.
+
+        ``build_table`` writes to the experiment's save directory.  A view
+        shares its save path with the parent, so writing would corrupt the
+        parent's table.  Build the table on the parent experiment and access
+        the view-filtered result via ``view.table[<layer>]``.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "build_table() is not supported on an InSituExperimentView. "
+            "Call build_table() on the parent experiment and read the result "
+            "via view.table[<layer>]."
+        )
+
+    def add(self, *args, **kwargs):
+        """Raise NotImplementedError — datasets cannot be added to a view.
+
+        A view is a linked subset of the parent experiment.  Adding a dataset
+        would extend the parent's ``_data`` without updating the parent's
+        ``_metadata`` and ``_filters`` in a consistent way.  Call ``add()``
+        on the parent experiment directly.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "add() is not supported on an InSituExperimentView. "
+            "Call add() on the parent experiment instead."
+        )
+
+    def reload(self, skip=None, verbose=True):
+        """Reload only the datasets included in this view from disk.
+
+        Unlike the base ``reload``, this override does **not** re-read the
+        experiment-level metadata, colors, or filters from the parent path.
+        Those files describe the full experiment; overwriting the view's
+        in-memory slices with the full-experiment data would desync the view.
+
+        Args:
+            skip: Modality name(s) forwarded to each dataset's reload.
+            verbose: If True, log progress.
+        """
+        if verbose:
+            logger.info(
+                "Reloading %d dataset(s) in view (skipping experiment-level files).",
+                len(self._data),
+            )
+        for xd in self._data:
+            xd.reload(skip=skip, verbose=False)
+
+    def copy(self):
+        """Return a standalone deep copy of this view as a plain InSituExperiment.
+
+        Unlike the base ``copy`` (which returns another view), this override
+        returns an independent ``InSituExperiment`` with deep-copied datasets,
+        metadata, colors, and filters.  Mutating the returned object does not
+        affect the parent experiment.
+
+        Returns:
+            InSituExperiment: A deep copy of this view's content.
+        """
+        new = InSituExperiment(data_type=self._data_type)
+        new._data = [deepcopy(d) for d in self._data]
+        new._metadata = self._metadata.reset_index(drop=True).copy()
+        new._colors = deepcopy(self._colors)
+        new._filters = deepcopy(self._filters)
+        new._composites = deepcopy(self._composites)
+        new._applied_filters = []
+        new._parent_indices = None
+        new._path = None
+        return new
+
     def save_metadata(
         self,
         path: str | os.PathLike | Path | None = None,
@@ -4488,9 +4652,25 @@ class InSituExperimentView(InSituExperiment):
             overwrite: If True, overwrite an existing directory at *path*.
             verbose: If True, print verbose output.
             collect_warnings_mode: Collect and print warnings after save.
-            free_after_save: Release in-memory data after each dataset is saved.
+            free_after_save: **Not supported on a view** — must be False. A view
+                shares its datasets with the parent experiment, so releasing
+                their in-memory data would also empty the parent. Passing True
+                raises ``ValueError``; materialise first
+                (``view.copy().saveas(path, free_after_save=True)``) instead.
             **kwargs: Forwarded to :meth:`InSituData.saveas` for each dataset.
+
+        Raises:
+            ValueError: If ``free_after_save=True`` (unsupported on a view).
         """
+        if free_after_save:
+            raise ValueError(
+                "free_after_save=True is not supported on an InSituExperimentView. "
+                "A view shares its datasets with the parent experiment, so releasing "
+                "their in-memory data would also empty the parent. To export with "
+                "memory release, materialise the view first: "
+                "view.copy().saveas(path, free_after_save=True)."
+            )
+
         materialised = InSituExperiment(data_type=self._data_type)
         materialised._data = list(self._data)
         materialised._metadata = self._metadata.reset_index(drop=True).copy()
@@ -4499,14 +4679,24 @@ class InSituExperimentView(InSituExperiment):
         materialised._composites = deepcopy(self._composites)
         materialised._applied_filters = []
         materialised._parent_indices = None
-        materialised.saveas(
-            path,
-            overwrite=overwrite,
-            verbose=verbose,
-            collect_warnings_mode=collect_warnings_mode,
-            free_after_save=free_after_save,
-            **kwargs,
-        )
+
+        # Snapshot child _paths: the base saveas (with R8) repaths each dataset
+        # object's _path to the export location. Because materialised shares
+        # those objects with the parent, we must restore the originals so the
+        # parent's save()/path guard keeps working.
+        original_child_paths = [xd._path for xd in self._data]
+        try:
+            materialised.saveas(
+                path,
+                overwrite=overwrite,
+                verbose=verbose,
+                collect_warnings_mode=collect_warnings_mode,
+                free_after_save=free_after_save,
+                **kwargs,
+            )
+        finally:
+            for xd, original in zip(self._data, original_child_paths):
+                xd._path = original
 
     @property
     def table(self) -> "ViewTableAccessor":

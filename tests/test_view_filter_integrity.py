@@ -221,25 +221,23 @@ def test_m1_save_colors_preserves_parent_categories(tmp_path):
 # ── M3 ────────────────────────────────────────────────────────────────────────
 
 
-def test_m3_add_extends_filter_masks():
-    """add() must keep filter masks in sync with metadata after adding a dataset."""
+def test_m3_add_raises_on_view():
+    """view.add() must raise NotImplementedError (M2/R5 fix).
+
+    Adding a dataset to a view would corrupt the parent experiment's state
+    (desync metadata, data, and filter masks).  The view override rejects
+    add() entirely and tells the user to add on the parent instead.
+    """
     n = 5
     exp = InSituExperiment()
     exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
     exp._data = _make_datasets(n)
     exp._filters = {"qc": {"mask": [True] * n, "note": None}}
-    # No exp._path so save() is not triggered.
 
     view = exp._subset(slice(0, 3), as_view=True)
-    initial_meta_len = len(view._metadata)
 
-    view.add(InSituData())
-
-    assert len(view._metadata) == initial_meta_len + 1
-    assert len(view._filters["qc"]["mask"]) == len(view._metadata), (
-        "filter mask must stay in sync with metadata after add()"
-    )
-    assert not view._filters["qc"]["mask"][-1], "new entry must default to False"
+    with pytest.raises(NotImplementedError, match="parent experiment"):
+        view.add(InSituData())
 
 
 # ── m1 ────────────────────────────────────────────────────────────────────────
@@ -288,3 +286,178 @@ def test_parent_indices_composition():
     assert view_of_view._parent_indices == [2, 7], (
         "view-of-view indices must reference root experiment positions"
     )
+
+
+# ── New fix tests (R1–R8, R11) ────────────────────────────────────────────────
+
+
+def test_r1_build_table_raises_on_view(tmp_path):
+    """C1/R1: view.build_table() must raise NotImplementedError."""
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0", "u1"]})
+    exp._data = _make_datasets(2)
+    exp._path = tmp_path
+
+    view = exp._subset(slice(0, 1), as_view=True)
+    with pytest.raises(NotImplementedError, match="build_table"):
+        view.build_table()
+
+
+def test_r2_concat_move_rejects_view(tmp_path):
+    """C2/R2: concat([view], mode='move') must raise early before any file ops."""
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0", "u1"]})
+    exp._data = _make_datasets(2)
+    for i, xd in enumerate(exp._data):
+        xd._path = tmp_path / f"data-{i:03d}"
+        xd._path.mkdir()
+    exp._path = tmp_path
+
+    view = exp._subset(slice(0, 1), as_view=True)
+
+    dest = tmp_path / "concat_out"
+    with pytest.raises(ValueError, match="InSituExperimentView"):
+        InSituExperiment.concat([view], mode="move", path=dest)
+
+    # Parent paths must be untouched.
+    assert (tmp_path / "data-000").exists(), "parent data dir must not be moved"
+
+
+def test_r4_reload_on_view_does_not_re_read_metadata(tmp_path):
+    """M1/R4: view.reload() must not overwrite view metadata with full-experiment data."""
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0", "u1", "u2"], "group": ["A", "B", "C"]})
+    exp._data = _make_datasets(3)
+
+    view = exp._subset(slice(0, 2), as_view=True)
+    original_len = len(view._metadata)
+
+    # Reload should be a no-op for in-memory datasets with no path; the key
+    # invariant is that _metadata is not replaced with the parent's full table.
+    view.reload()
+
+    assert len(view._metadata) == original_len, "metadata length must not change after reload"
+
+
+def test_r5_add_raises_on_view():
+    """M2/R5: view.add() must raise NotImplementedError."""
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0"]})
+    exp._data = _make_datasets(1)
+    view = exp._subset(slice(0, 1), as_view=True)
+
+    with pytest.raises(NotImplementedError, match="parent experiment"):
+        view.add(InSituData())
+
+
+def test_r7_copy_returns_independent_experiment():
+    """M4/R7: view.copy() must return a standalone InSituExperiment (not a view)."""
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0", "u1", "u2"]})
+    exp._data = _make_datasets(3)
+    exp._colors = {"A": "#FF0000"}
+
+    view = exp._subset(slice(0, 2), as_view=True)
+    copied = view.copy()
+
+    assert isinstance(copied, InSituExperiment)
+    assert not isinstance(copied, InSituExperimentView), "copy must not be a view"
+    assert copied._parent_indices is None
+    assert copied._path is None
+    assert len(copied._data) == 2
+
+    # Mutating the copy must not touch the parent.
+    original_uid = exp._data[0]._uid
+    copied._data[0]._uid = "MUTATED"
+    assert exp._data[0]._uid == original_uid, "parent dataset must be unaffected by copy mutation"
+
+
+def test_r8_r11_view_saveas_restores_parent_paths(tmp_path):
+    """M5+M6 / R8+R11: view.saveas() must not leave parent child _paths stale."""
+    import numpy as np
+    from anndata import AnnData
+    from insitupy.containers.cell_data import CellData
+
+    def _make_xd(seed, n_cells=5, n_genes=3):
+        rng = np.random.default_rng(seed)
+        X = rng.integers(0, 10, size=(n_cells, n_genes)).astype(float)
+        obs = pd.DataFrame(index=pd.Index([f"c{i}" for i in range(n_cells)]))
+        var = pd.DataFrame(index=pd.Index([f"g{j}" for j in range(n_genes)]))
+        table = AnnData(X=X, obs=obs, var=var)
+        cd = CellData(table=table, boundaries=None)
+        xd = InSituData(path=None, metadata=None,
+                        slide_id="s", sample_id="s", method_name="t", method_params={})
+        xd.cells.add_celldata(cd=cd, key="main", is_main=True)
+        return xd
+
+    exp = InSituExperiment()
+    for i in range(3):
+        exp._data.append(_make_xd(i))
+    exp._metadata = pd.DataFrame({"uid": [f"s{i}" for i in range(3)]})
+
+    parent_dir = tmp_path / "parent"
+    exp.saveas(parent_dir)
+
+    original_paths = [xd._path for xd in exp._data]
+
+    view = exp._subset(slice(0, 2), as_view=True)
+    export_dir = tmp_path / "export"
+    view.saveas(export_dir)
+
+    # Parent child paths must be restored to their original locations.
+    for i, (xd, orig) in enumerate(zip(exp._data, original_paths)):
+        assert xd._path == orig, f"parent _data[{i}]._path was mutated by view.saveas()"
+
+
+def test_r8_saveas_relative_path_then_save(tmp_path, monkeypatch):
+    """M5/R8: saveas() with a *relative* path must leave exp.save() working.
+
+    Regression: saveas() resolved each child ``_path`` via ``.resolve()`` but
+    left ``self._path`` unresolved, so the save() parent-path guard compared an
+    absolute child parent against a relative experiment path and raised
+    ``ValueError`` ("save path ... does not lie inside ..."). Absolute-path
+    tests do not catch this because ``Path(abs).resolve() == Path(abs)``.
+    """
+    import numpy as np
+    from anndata import AnnData
+    from insitupy.containers.cell_data import CellData
+
+    def _make_xd(seed, n_cells=5, n_genes=3):
+        rng = np.random.default_rng(seed)
+        X = rng.integers(0, 10, size=(n_cells, n_genes)).astype(float)
+        obs = pd.DataFrame(index=pd.Index([f"c{i}" for i in range(n_cells)]))
+        var = pd.DataFrame(index=pd.Index([f"g{j}" for j in range(n_genes)]))
+        table = AnnData(X=X, obs=obs, var=var)
+        cd = CellData(table=table, boundaries=None)
+        xd = InSituData(path=None, metadata=None,
+                        slide_id="s", sample_id="s", method_name="t", method_params={})
+        xd.cells.add_celldata(cd=cd, key="main", is_main=True)
+        return xd
+
+    exp = InSituExperiment()
+    for i in range(2):
+        exp._data.append(_make_xd(i))
+    exp._metadata = pd.DataFrame({"uid": [f"s{i}" for i in range(2)]})
+
+    # Use a RELATIVE path: chdir into tmp_path so "rel_exp" resolves there.
+    monkeypatch.chdir(tmp_path)
+    exp.saveas("rel_exp")
+
+    # save() must not raise the parent-path guard error after a relative saveas.
+    exp.save()
+
+
+def test_view_saveas_rejects_free_after_save(tmp_path):
+    """view.saveas(free_after_save=True) must raise: it would empty the shared parent data.
+
+    A view's datasets are the parent's objects, so the base saveas' end-of-save
+    _release_data() would wipe the parent's in-memory modalities. The view
+    override rejects the flag up front (before any materialise/write).
+    """
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": ["u0", "u1"]})
+    exp._data = _make_datasets(2)
+    view = exp._subset(slice(0, 1), as_view=True)
+
+    with pytest.raises(ValueError, match="free_after_save"):
+        view.saveas(tmp_path / "export", free_after_save=True)

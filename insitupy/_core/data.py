@@ -1838,8 +1838,8 @@ class InSituData:
                 )
             shutil.rmtree(path)
 
-        # # change path to the new one
-        # self._path = path.resolve()
+        # change path to the new one
+        self._path = path.resolve()
 
         # # reload the modalities
         # self.reload(verbose=False)
