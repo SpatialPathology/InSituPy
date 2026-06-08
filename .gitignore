@@ -135,6 +135,9 @@ dmypy.json
 # Jetbrains IDE
 .idea/
 
+# Session logs and backlog (private, synced via Nextcloud symlink)
+.log/
+
 # Coala
 *.orig
 
@@ -162,3 +165,4 @@ docs/source/generated/
 .claude/*
 !.claude/commands/
 !.claude/settings.json
+!.claude/setup-notes.md

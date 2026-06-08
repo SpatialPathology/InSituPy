@@ -90,6 +90,12 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
   changed files
 - Backlog → `.log/backlog.md`
 
+### `.log/` is not tracked by git — symlink required on each machine
+
+`.log/` is excluded from version control and backed up via a private cloud-synced folder.
+On a fresh clone, recreate `.log/` as a symlink to that folder. See `.claude/setup-notes.md`
+for instructions.
+
 ## Coding workflow
 
 This project uses a two-command plan→implement workflow with per-phase model tiering. The
