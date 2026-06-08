@@ -156,5 +156,9 @@ docs/source/generated/
 # VS code
 .vscode/
 
-# Claude
-.claude/
+# Claude — ignore local artifacts, track shared config (commands + project settings.json).
+# Note: blanket `.claude/` would stop git descending into the dir, so a later `!` re-include
+# fails. Ignore the contents with `.claude/*`, then re-include the shared paths.
+.claude/*
+!.claude/commands/
+!.claude/settings.json
