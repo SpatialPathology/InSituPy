@@ -74,7 +74,7 @@ def dge(
         AssertionError: If the specified region or annotation is not found in the data.
 
     Example:
-        >>> result = differential_gene_expression(
+        >>> result = dge(
                 target=my_data,
                 target_annotation_tuple=("pathologist", "tumor"),
                 ref=my_ref_data,
