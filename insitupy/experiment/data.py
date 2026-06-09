@@ -59,6 +59,7 @@ _SUPPORTED_FILTER_VERSIONS = {1, 2}
 _METADATA_SCHEMA_VERSION = 1
 _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 _METADATA_PARQUET_FILENAME = "metadata.parquet"
+_TABLE_FORMAT_VERSION = 2
 
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
@@ -72,7 +73,6 @@ class TableAccessor:
 
         exp.table["main"]    # AnnData for the "main" segmentation
         exp.table["proseg"]  # AnnData for the "proseg" segmentation
-        exp.table[None]      # auto-select when only one table exists
         exp.table.keys()     # list available layer names
 
     .. note::
@@ -99,6 +99,17 @@ class TableAccessor:
         )
 
     def __getitem__(self, cells_layer: str | None) -> AnnData | None:
+        if cells_layer is None:
+            available = self.keys()
+            hint = (
+                f"Available layers: {available}."
+                if available
+                else "No tables have been built yet — call build_table() first."
+            )
+            raise KeyError(
+                "table[None] is no longer supported; pass an explicit layer name "
+                f"(e.g. table['main']). {hint}"
+            )
         return self._load(cells_layer)
 
     def __repr__(self) -> str:
@@ -111,17 +122,18 @@ class TableAccessor:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load(self, cells_layer: str | None) -> AnnData | None:
+    def _read_raw(self, cells_layer: str | None) -> AnnData | None:
+        """Return the stored union table verbatim, or None with a warning."""
         try:
             table_path = self._exp._get_table_path(cells_layer)
         except ValueError as exc:
-            warnings.warn(str(exc), UserWarning, stacklevel=3)
+            warnings.warn(str(exc), UserWarning, stacklevel=4)
             return None
         if table_path is None or not table_path.exists():
             warnings.warn(
                 "No concatenated table found. Call `build_table()` to create one.",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
             return None
         try:
@@ -129,20 +141,155 @@ class TableAccessor:
         except ImportError:
             return anndata.read_zarr(table_path)
 
+    def _read_presence_meta(
+        self, cells_layer: str | None
+    ) -> "tuple[int, np.ndarray, np.ndarray] | None":
+        """Read the format-version, presence_labels, and gene_presence from the zarr uns.
+
+        Returns None for legacy stores that lack the format-version marker. If the
+        marker *is* present, the store is treated as presence-aware and any
+        failure to read the presence record is raised as a ``RuntimeError`` rather
+        than silently degrading: falling back to the legacy path would return the
+        raw union table, which holds fill values for unmeasured genes.
+        """
+        try:
+            table_path = self._exp._get_table_path(cells_layer)
+        except ValueError:
+            return None
+        if table_path is None or not table_path.exists():
+            return None
+
+        import zarr as _zarr
+        # Detection phase: is this a presence-aware (versioned) store? If we cannot
+        # even inspect it, treat it as legacy — _read_raw has already opened the
+        # store successfully, so this rarely fails in practice.
+        try:
+            z = _zarr.open_group(str(table_path), mode="r")
+            uns = z.get("uns")
+            has_marker = uns is not None and "_insitupy_table_format_version" in uns
+        except Exception:
+            return None
+        if not has_marker:
+            return None
+
+        # The store is versioned. From here a read failure is corruption or a
+        # version incompatibility — surface it loudly instead of returning the
+        # union table (with fill values) through the legacy path.
+        if "_insitupy_presence_labels" not in uns or "_insitupy_gene_presence" not in uns:
+            raise RuntimeError(
+                f"Table at '{table_path}' has a format-version marker but is missing "
+                "presence arrays. The store may be corrupted — rebuild with build_table()."
+            )
+        try:
+            version = int(uns["_insitupy_table_format_version"][()])
+            # List comprehension handles zarr 3.x StringDType arrays
+            # (np.asarray(..., dtype=str) fails on StringDType in numpy >= 2).
+            labels = np.array([str(l) for l in uns["_insitupy_presence_labels"][:]])
+            presence = np.asarray(uns["_insitupy_gene_presence"][:], dtype=bool)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Table at '{table_path}' has a gene-presence format marker but its "
+                "presence record could not be read (corrupted or written by an "
+                "incompatible version). Rebuild it with build_table()."
+            ) from exc
+        return version, labels, presence
+
+    @staticmethod
+    def _reconstruct(
+        full: AnnData,
+        *,
+        covered_labels: "list | np.ndarray",
+        labels: np.ndarray,
+        presence: np.ndarray,
+        label_col: str,
+        row_filter: bool,
+    ) -> AnnData:
+        """Return the inner-over-covered subset of *full*.
+
+        Keeps only genes present in ALL covered datasets and (when row_filter=True)
+        only rows whose label_col value is in covered_labels.
+        """
+        covered_set = set(str(l) for l in covered_labels)
+        labels_str = np.asarray(labels, dtype=str)
+        idx_rows = np.where(np.isin(labels_str, list(covered_set)))[0]
+        sub = presence[idx_rows]
+        var_mask = sub.all(axis=0)
+
+        if row_filter:
+            if label_col in full.obs.columns:
+                obs_vals = np.asarray(full.obs[label_col], dtype=str)
+                row_mask = np.isin(obs_vals, list(covered_set))
+                return full[row_mask][:, var_mask]
+            else:
+                warnings.warn(
+                    f"Column '{label_col}' not found in concatenated table obs. "
+                    "Returning full table with var-axis reconstruction only.",
+                    UserWarning,
+                    stacklevel=4,
+                )
+                return full[:, var_mask]
+        return full[:, var_mask]
+
+    def _load(self, cells_layer: str | None) -> AnnData | None:
+        full = self._read_raw(cells_layer)
+        if full is None:
+            return None
+        meta = self._read_presence_meta(cells_layer)
+        if meta is None:
+            return full
+        version, labels, presence = meta
+        covered = list(labels)
+        label_col = self._exp._read_build_params(cells_layer).get("label_col", "uid")
+        return self._reconstruct(
+            full,
+            covered_labels=covered,
+            labels=labels,
+            presence=presence,
+            label_col=label_col,
+            row_filter=False,
+        )
+
 
 class ViewTableAccessor(TableAccessor):
     """Table accessor for :class:`InSituExperimentView`.
 
-    Behaves identically to :class:`TableAccessor` but row-filters the loaded
-    AnnData to only the samples present in the view.
+    Behaves identically to :class:`TableAccessor` but reconstructs the correct
+    gene set for the view's datasets (inner join over the view's samples) and
+    row-filters to only those samples.
     """
 
     def _load(self, cells_layer: str | None) -> AnnData | None:
-        full_table = super()._load(cells_layer)
-        if full_table is None:
+        full = self._read_raw(cells_layer)
+        if full is None:
             return None
 
         label_col = self._exp._read_build_params(cells_layer).get("label_col", "uid")
+        meta = self._read_presence_meta(cells_layer)
+
+        if meta is None:
+            # Legacy inner table: row-filter only, no var reconstruction
+            if label_col not in self._exp._metadata.columns:
+                warnings.warn(
+                    f"Column '{label_col}' not found in view metadata. "
+                    "Cannot filter table by view samples.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return full
+            view_sample_ids = set(str(v) for v in self._exp._metadata[label_col].values)
+            if label_col not in full.obs.columns:
+                warnings.warn(
+                    f"Column '{label_col}' not found in concatenated table obs. "
+                    "Cannot filter by view samples.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return full
+            obs_values = np.asarray(full.obs[label_col], dtype=str)
+            mask = np.isin(obs_values, list(view_sample_ids))
+            return full[mask]
+
+        version, labels, presence = meta
 
         if label_col not in self._exp._metadata.columns:
             warnings.warn(
@@ -151,23 +298,34 @@ class ViewTableAccessor(TableAccessor):
                 UserWarning,
                 stacklevel=3,
             )
-            return full_table
+            return full
 
-        view_sample_ids = set(self._exp._metadata[label_col].values)
-
-        if label_col not in full_table.obs.columns:
+        labels_str = set(str(l) for l in labels)
+        view_labels = [
+            str(v) for v in self._exp._metadata[label_col].values
+            if str(v) in labels_str
+        ]
+        if not view_labels and len(self._exp._metadata) > 0:
+            # The view selects one or more samples, but none are present in the
+            # built table (table likely predates these samples). Warn but still
+            # fall through to _reconstruct, which returns a 0-row result.
             warnings.warn(
-                f"Column '{label_col}' not found in concatenated table obs. "
-                "Cannot filter by view samples.",
+                "No view samples found in the built table. "
+                "Rebuild the table to include these samples.",
                 UserWarning,
                 stacklevel=3,
             )
-            return full_table
 
-        import numpy as np
-        obs_values = np.asarray(full_table.obs[label_col])
-        mask = np.isin(obs_values, list(view_sample_ids))
-        return full_table[mask]
+        # An empty view (0 samples) reaches here with view_labels == [] and no
+        # warning; _reconstruct returns a 0-row AnnData over the union var axis.
+        return self._reconstruct(
+            full,
+            covered_labels=view_labels,
+            labels=labels,
+            presence=presence,
+            label_col=label_col,
+            row_filter=True,
+        )
 
 
 class InSituExperiment:
@@ -316,9 +474,11 @@ class InSituExperiment:
         if n_layers == 0:
             table_str = "no tables built"
         elif n_layers == 1:
-            table_str = f"1 layer: {table_keys[0]}"
+            status = self._table_status(table_keys[0])
+            table_str = f"1 layer: {table_keys[0]} ({status})"
         else:
-            table_str = f"{n_layers} layers: {', '.join(table_keys)}"
+            layer_parts = [f"{k} ({self._table_status(k)})" for k in table_keys]
+            table_str = f"{n_layers} layers: {', '.join(layer_parts)}"
         table_section = f"{arrow} table{tf.ResetAll}" + indent + table_str
 
         return header + data_section + filters_section + table_section
@@ -367,9 +527,11 @@ class InSituExperiment:
         if n_layers == 0:
             table_content = "no tables built"
         elif n_layers == 1:
-            table_content = f"1 layer: {table_keys[0]}"
+            status = self._table_status(table_keys[0])
+            table_content = f"1 layer: {table_keys[0]} ({status})"
         else:
-            table_content = f"{n_layers} layers: {', '.join(table_keys)}"
+            layer_parts = [f"{k} ({self._table_status(k)})" for k in table_keys]
+            table_content = f"{n_layers} layers: {', '.join(layer_parts)}"
         parts.append(f"<b>▶ table</b><br><div style='padding-left:1em'>{table_content}</div>")
 
         return "".join(parts)
@@ -1547,7 +1709,7 @@ class InSituExperiment:
         metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
         join: Literal["inner", "outer"] = "inner",
-        min_shared_genes: int | None = None,
+        fill_value: float | None = None,
     ) -> anndata.AnnData:
         """Concatenate all sample AnnData objects into a single AnnData.
 
@@ -1564,8 +1726,9 @@ class InSituExperiment:
             make_obs_names_unique: If True, prepends dataset index to obs names.
             join: How to join variables. ``"inner"`` keeps only shared genes;
                 ``"outer"`` keeps all genes with fill values.
-            min_shared_genes: If set and ``join="inner"``, warn when the
-                number of shared genes falls below this threshold.
+            fill_value: Fill value for missing genes when ``join="outer"``.
+                ``None`` uses anndata's default (typically NaN). Pass ``0`` for
+                sparse-friendly storage in the union table.
 
         Returns:
             AnnData: A concatenated AnnData object.
@@ -1618,25 +1781,15 @@ class InSituExperiment:
 
             adatas[meta[label_col]] = adata
 
-        adata_concat = anndata.concat(
-            adatas,
+        concat_kwargs: dict = dict(
             axis='obs',
             join=join,
             label=label_col,
-            merge="unique"
+            merge="unique",
         )
-
-        # Warn if inner join result has fewer shared genes than threshold
-        if join == "inner" and min_shared_genes is not None:
-            n_genes = adata_concat.n_vars
-            if n_genes < min_shared_genes:
-                warnings.warn(
-                    f"Only {n_genes} shared genes after inner join "
-                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
-                    "to retain all genes.",
-                    UserWarning,
-                    stacklevel=3,
-                )
+        if fill_value is not None:
+            concat_kwargs["fill_value"] = fill_value
+        adata_concat = anndata.concat(adatas, **concat_kwargs)
 
         # Move label_col to first position in obs columns
         if label_col in adata_concat.obs.columns:
@@ -1644,6 +1797,55 @@ class InSituExperiment:
             adata_concat.obs = adata_concat.obs[cols]
 
         return adata_concat
+
+    def _collect_gene_presence(
+        self,
+        cells_layer: str | None,
+        label_col: str,
+        union_vars: "list | np.ndarray",
+    ) -> "tuple[np.ndarray, np.ndarray]":
+        """Return (labels_array, presence_matrix) for the union var axis.
+
+        Columns of the presence matrix are aligned to *union_vars*.
+        Reads only var_names from each sample — does not copy X.
+        """
+        union_vars_str = [str(g) for g in union_vars]
+        labels = []
+        rows = []
+        for meta, xd in self.iterdata():
+            label = str(meta[label_col])
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            sample_vars = set(str(v) for v in celldata.table.var_names)
+            row = np.array([g in sample_vars for g in union_vars_str], dtype=bool)
+            labels.append(label)
+            rows.append(row)
+        return np.array(labels, dtype=str), np.vstack(rows)
+
+    def _collect_gene_presence_from_h5ads(
+        self,
+        cells_layer: str | None,
+        label_col: str,
+        union_vars: "list | np.ndarray",
+    ) -> "tuple[np.ndarray, np.ndarray]":
+        """Return (labels_array, presence_matrix) for the union var axis (concat_on_disk).
+
+        Reads var_names from each per-sample h5ad using h5py — does not load X.
+        """
+        import h5py
+        sample_paths = self._resolve_per_sample_h5ad_paths(cells_layer, label_col)
+        union_vars_str = [str(g) for g in union_vars]
+        labels = []
+        rows = []
+        for label, h5ad_path in sample_paths:
+            with h5py.File(str(h5ad_path), "r") as f:
+                raw = f["var"]["_index"][:]
+                sample_vars = set(
+                    v.decode("utf-8") if isinstance(v, bytes) else str(v) for v in raw
+                )
+            row = np.array([g in sample_vars for g in union_vars_str], dtype=bool)
+            labels.append(str(label))
+            rows.append(row)
+        return np.array(labels, dtype=str), np.vstack(rows)
 
     def to_anndata(
         self,
@@ -1743,24 +1945,78 @@ class InSituExperiment:
             return table_path.with_suffix(".json")
         return Path(self.path) / "tables" / "build_params.json"
 
-    def _read_build_params(self, cells_layer: str | None = None) -> dict:
-        """Read build parameters from the per-layer sidecar JSON, with sensible defaults.
+    def _read_build_params_from_zarr(self, cells_layer: str | None) -> dict | None:
+        """Return the build_params dict embedded in the table's zarr uns, or None.
 
-        Falls back to the legacy ``tables/build_params.json`` for datasets built
-        before the per-layer convention was introduced.
+        Returns None for legacy stores that predate embedded build params, or if the
+        entry cannot be read — callers then fall back to the legacy sidecar JSON.
+        """
+        try:
+            table_path = self._get_table_path(cells_layer)
+        except ValueError:
+            return None
+        if table_path is None or not table_path.exists():
+            return None
+        try:
+            import zarr as _zarr
+            from anndata.io import read_elem
+            z = _zarr.open_group(str(table_path), mode="r")
+            uns = z.get("uns")
+            if uns is None or "_insitupy_build_params" not in uns:
+                return None
+            params = read_elem(uns["_insitupy_build_params"])
+            return {str(k): v for k, v in dict(params).items()}
+        except Exception:
+            return None
+
+    def _read_build_params(self, cells_layer: str | None = None) -> dict:
+        """Read build parameters embedded in the table's zarr uns, with sensible defaults.
+
+        Build params are stored inside the table's zarr store under
+        ``uns["_insitupy_build_params"]`` (written by :meth:`build_table`). Falls back to
+        the legacy per-layer sidecar ``tables/{cells_layer}.json`` and the older shared
+        ``tables/build_params.json`` for tables built before params were embedded.
 
         Returns:
-            dict with at least ``label_col``, ``method``, and ``cells_layer`` keys.
+            dict with at least a ``label_col`` key.
         """
+        # Primary: read from the zarr uns (single source of truth).
+        params = self._read_build_params_from_zarr(cells_layer)
+        if params is not None:
+            return params
+        # Legacy fallback: per-layer sidecar JSON written by older versions.
         params_path = self._get_build_params_path(cells_layer)
         if params_path is not None and params_path.exists():
             return read_json(params_path)
-        # Legacy fallback: shared build_params.json from earlier versions
+        # Legacy fallback: shared build_params.json from even earlier versions.
         if self.path is not None:
             legacy = Path(self.path) / "tables" / "build_params.json"
             if legacy.exists():
                 return read_json(legacy)
         return {"label_col": "uid"}
+
+    def _table_status(self, cells_layer: str | None) -> str:
+        """Return a membership-freshness string for the built table.
+
+        Returns one of: 'matches current samples', 'samples changed — rebuild',
+        or 'unknown' (for legacy tables or on any read error).
+        """
+        try:
+            accessor = TableAccessor(self)
+            meta = accessor._read_presence_meta(cells_layer)
+            if meta is None:
+                return "unknown"
+            _version, labels, _presence = meta
+            label_col = self._read_build_params(cells_layer).get("label_col", "uid")
+            if label_col not in self._metadata.columns:
+                return "unknown"
+            built = set(str(l) for l in labels)
+            current = set(str(v) for v in self._metadata[label_col].values)
+            if self.is_view:
+                return "matches current samples" if current <= built else "samples changed — rebuild"
+            return "matches current samples" if built == current else "samples changed — rebuild"
+        except Exception:
+            return "unknown"
 
     def _latest_cells_save_dir(self, xd: "InSituData", *, label: str | None = None) -> Path:
         """Return the most recent timestamped cells save directory for *xd*.
@@ -1849,8 +2105,7 @@ class InSituExperiment:
         output_path: Path,
         cells_layer: str | None = None,
         label_col: str = "uid",
-        join: Literal["inner", "outer"] = "inner",
-        min_shared_genes: int | None = None,
+        join: Literal["inner", "outer"] = "outer",
         make_obs_names_unique: bool = True,
     ) -> None:
         """Concatenate per-sample h5ad files on disk without loading all into RAM.
@@ -1868,8 +2123,8 @@ class InSituExperiment:
             output_path: Destination zarr path.
             cells_layer: Cell layer to use. ``None`` selects the main layer.
             label_col: Metadata column used as sample identifier label.
-            join: ``"inner"`` or ``"outer"`` variable join.
-            min_shared_genes: Warn if fewer shared genes after inner join.
+            join: Variable join strategy. Defaults to ``"outer"`` (union) for
+                the internal union store written by :meth:`build_table`.
             make_obs_names_unique: If True, prepend label value to obs names
                 using a ``"-"`` separator.
 
@@ -1899,26 +2154,6 @@ class InSituExperiment:
             merge="unique",
         )
 
-        if min_shared_genes is not None and join == "inner":
-            import zarr
-            try:
-                z = zarr.open_group(str(output_path), mode="r")
-                # var index is stored as a zarr array; shape gives gene count
-                var_group = z["var"]
-                # anndata stores the index under "_index"
-                n_genes = var_group["_index"].shape[0]
-            except Exception:
-                n_genes = None
-
-            if n_genes is not None and n_genes < min_shared_genes:
-                warnings.warn(
-                    f"Only {n_genes} shared genes after inner join "
-                    f"(threshold: {min_shared_genes}). Consider using join='outer' "
-                    "to retain all genes.",
-                    UserWarning,
-                    stacklevel=4,
-                )
-
         logger.info(
             "Built concatenated table (concat_on_disk) at '%s'.", output_path
         )
@@ -1931,7 +2166,6 @@ class InSituExperiment:
 
             exp.table["main"]    # AnnData for the "main" segmentation
             exp.table["proseg"]  # AnnData for the "proseg" segmentation
-            exp.table[None]      # auto-select when only one table exists
             exp.table.keys()     # list available layer names
 
         Call :meth:`build_table` first to create a table.
@@ -1970,10 +2204,63 @@ class InSituExperiment:
                 if cells_layer not in keys:
                     missing.append((i, meta.get("uid", i)))
         if missing:
+            if cells_layer is None:
+                hint = "Call load_cells() on the experiment to load cells into memory first."
+            else:
+                hint = (
+                    f"Layer '{cells_layer}' is missing for the listed dataset(s). "
+                    f"If this segmentation has not been imported yet, use "
+                    f"xd.cells.add_celldata() for each affected sample. "
+                    f"If it exists on disk but is not loaded, call "
+                    f"load_cells(cells_layer='{cells_layer}') first."
+                )
             raise ValueError(
-                f"Cells not loaded for {len(missing)} dataset(s) (index/uid: {missing}). "
-                f"Call load_cells() on the experiment before build_table()/to_anndata()."
+                f"Cells layer '{cells_layer}' not found for {len(missing)} dataset(s) "
+                f"(index/uid: {missing}). {hint}"
             )
+
+    @staticmethod
+    def _atomic_replace_dir(staging: Path, destination: Path, *, what: str = "write") -> None:
+        """Atomically replace directory *destination* with directory *staging*.
+
+        Moves an existing *destination* aside to a backup, renames *staging* into
+        place, and deletes the backup only once *destination* is confirmed
+        present. On failure the original *destination* is restored and *staging*
+        is removed; if neither the swap nor the restore succeeds, the backup is
+        kept as the only surviving copy. Any stale backup left by a previous
+        failed write is cleared first.
+
+        Args:
+            staging: Freshly written directory to move into place. Must exist.
+            destination: Final path to replace.
+            what: Verb used in the unrecoverable-failure log message.
+        """
+        backup = destination.parent / (destination.name + ".__ispy_bak__")
+        # Clear any stale backup left by a previous failed write.
+        check_overwrite_and_remove_if_true(backup, overwrite=True)
+
+        destination_backed_up = False
+        try:
+            if destination.exists():
+                os.rename(destination, backup)
+                destination_backed_up = True
+            os.rename(staging, destination)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            if destination_backed_up and not destination.exists() and backup.exists():
+                try:
+                    os.rename(backup, destination)
+                except Exception:
+                    logger.error(
+                        "%s failed AND the previous data could not be restored "
+                        "automatically. Your original data is preserved at '%s' — "
+                        "rename it back to '%s' manually.", what, backup, destination,
+                    )
+            raise
+        finally:
+            # Remove the backup only once the destination is confirmed in place.
+            if backup.exists() and destination.exists():
+                shutil.rmtree(backup, ignore_errors=True)
 
     def build_table(
         self,
@@ -1987,7 +2274,6 @@ class InSituExperiment:
         layer_keys: list[str] | str | Literal["all"] | None = None,
         metadata_keys: list[str] | str | Literal["all"] | None = None,
         make_obs_names_unique: bool = True,
-        join: Literal["inner", "outer"] = "inner",
         min_shared_genes: int | None = None,
         overwrite: bool = False,
         method: Literal["in_memory", "concat_on_disk"] = "in_memory",
@@ -1995,25 +2281,30 @@ class InSituExperiment:
         """Build a zarr-backed concatenated AnnData across all samples.
 
         Concatenates all per-sample AnnData objects and writes the result to
-        ``{experiment_path}/tables/concat.zarr``. After building, access the
-        result via :attr:`table`.
+        ``{experiment_path}/tables/{cells_layer}.zarr``. After building, access
+        the result via :attr:`table`.
 
-        Two concatenation strategies are available via ``method``:
+        The on-disk store always holds the **union** (outer) gene axis with
+        ``fill_value=0``. A gene-presence record (``uns["_insitupy_gene_presence"]``)
+        is written alongside the data so that accessors can reconstruct the correct
+        **inner** gene set per request:
 
-        - ``"in_memory"`` *(default)*: loads every sample's AnnData into RAM,
-          concatenates with :func:`anndata.concat`, then writes zarr.
-          Supports all filtering and metadata options.
-        - ``"concat_on_disk"``: streams each sample's saved ``table.h5ad``
-          file directly to the output zarr store using
-          :func:`anndata.experimental.concat_on_disk`.
-          Requires all datasets to be saved on disk. Does **not** support
-          ``obs_keys``, ``var_keys``, ``obsm_keys``, ``varm_keys``,
-          ``uns_keys``, ``layer_keys``, or ``metadata_keys``. Obs name
-          prefixes use the label value (e.g. ``"uid-cell_0"``) rather than
-          the numeric index (``"0-cell_0"``).
+        - ``exp.table[layer]`` returns the inner join over **all** built datasets.
+        - ``view.table[layer]`` returns the inner join over only the **view's**
+          datasets — correctly recovering genes shared by the subset but absent
+          from the full experiment.
+
+        Because all returned values come from the inner-over-covered set, no
+        fill values are ever surfaced through ``.table``.
 
         .. note::
             This feature is experimental and may change in future versions.
+            The ``join`` parameter has been removed; storage is always the union
+            (inner) result follows from the presence record.
+
+        .. note::
+            Storing the union grows the zarr when per-sample gene panels differ.
+            For identical panels, union == inner (no extra storage).
 
         Args:
             cells_layer: Cell layer to extract from each sample.
@@ -2030,10 +2321,8 @@ class InSituExperiment:
                 (``in_memory`` only).
             make_obs_names_unique: Prepend a prefix to obs names to guarantee
                 uniqueness across samples.
-            join: How to join variables. ``"inner"`` (default) keeps only
-                shared genes; ``"outer"`` keeps all genes with fill values.
-            min_shared_genes: Warn when fewer than this many genes remain after
-                an inner join.
+            min_shared_genes: Warn when fewer than this many genes are shared
+                by all datasets (inner join over all).
             overwrite: If True, overwrite an existing table.
             method: Concatenation strategy. ``"in_memory"`` (default) or
                 ``"concat_on_disk"`` for memory-efficient on-disk streaming.
@@ -2088,12 +2377,27 @@ class InSituExperiment:
                 )
 
         output_path = self._get_table_path(cells_layer)
-        check_overwrite_and_remove_if_true(path=output_path, overwrite=overwrite)
+        # Defer deleting any existing table to the atomic swap below, so an
+        # interrupted or failing build never destroys the previous table; here we
+        # only enforce the overwrite flag.
+        if output_path.exists() and not overwrite:
+            raise FileExistsError(
+                f"The output file already exists at {output_path}. To overwrite "
+                "it, please set the `overwrite` parameter to True."
+            )
         output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Build into a staging directory and atomically swap it into place once
+        # complete, so the previous table survives a failed or partial build.
+        staging_path = output_path.parent / (output_path.name + ".__ispy_tmp__")
+        check_overwrite_and_remove_if_true(staging_path, overwrite=True)
 
         build_params = {"label_col": label_col, "method": method, "cells_layer": cells_layer}
 
         if method == "in_memory":
+            # Always store the union (outer) so views can recover subset-shared genes.
+            # X holds fill_value=0 for genes a dataset did not measure;
+            # only .table[...] (inner-over-covered) returns analysis-safe values.
             adata = self._concatenate_samples(
                 cells_layer=cells_layer,
                 label_col=label_col,
@@ -2105,26 +2409,74 @@ class InSituExperiment:
                 layer_keys=layer_keys,
                 metadata_keys=metadata_keys,
                 make_obs_names_unique=make_obs_names_unique,
-                join=join,
-                min_shared_genes=min_shared_genes,
+                join="outer",
+                fill_value=0,
             )
+            union_vars = list(adata.var_names)
+            presence_labels, presence_matrix = self._collect_gene_presence(
+                cells_layer, label_col, union_vars
+            )
+            adata.uns["_insitupy_table_format_version"] = _TABLE_FORMAT_VERSION
+            adata.uns["_insitupy_gene_presence"] = presence_matrix
+            adata.uns["_insitupy_presence_labels"] = presence_labels
             adata.uns["_insitupy_build_params"] = build_params
-            adata.write_zarr(output_path)
+            try:
+                adata.write_zarr(staging_path)
+            except Exception:
+                shutil.rmtree(staging_path, ignore_errors=True)
+                raise
+            self._atomic_replace_dir(staging_path, output_path, what="build_table")
             logger.info(
-                "Built concatenated table at '%s' (%d cells, %d genes).",
+                "Built concatenated table at '%s' (%d cells, %d genes in union).",
                 output_path,
                 adata.n_obs,
                 adata.n_vars,
             )
 
         elif method == "concat_on_disk":
-            self._concat_samples_on_disk(
-                output_path=output_path,
-                cells_layer=cells_layer,
-                label_col=label_col,
-                join=join,
-                min_shared_genes=min_shared_genes,
-                make_obs_names_unique=make_obs_names_unique,
+            import zarr as _zarr
+            from anndata.io import write_elem as _write_elem
+            # Stream-concat into the staging store, then stamp the presence uns
+            # before the atomic swap. A crash leaves only the staging dir, which
+            # keys()/auto-resolve ignore (its suffix is not ".zarr").
+            try:
+                self._concat_samples_on_disk(
+                    output_path=staging_path,
+                    cells_layer=cells_layer,
+                    label_col=label_col,
+                    join="outer",
+                    make_obs_names_unique=make_obs_names_unique,
+                )
+                # Read union var names from the staging store (no X loaded).
+                z_tmp = _zarr.open_group(str(staging_path), mode="r")
+                union_vars = [str(g) for g in z_tmp["var"]["_index"][:]]
+                del z_tmp  # release the read handle before mutating the store
+
+                presence_labels, presence_matrix = self._collect_gene_presence_from_h5ads(
+                    cells_layer, label_col, union_vars
+                )
+                # Remove consolidated metadata so we can write new uns entries
+                zmeta = staging_path / ".zmetadata"
+                if zmeta.exists():
+                    zmeta.unlink()
+                z_write = _zarr.open_group(str(staging_path), mode="a")
+                uns_grp = z_write.require_group("uns")
+                _write_elem(uns_grp, "_insitupy_table_format_version", np.int32(_TABLE_FORMAT_VERSION))
+                _write_elem(uns_grp, "_insitupy_gene_presence", presence_matrix)
+                _write_elem(uns_grp, "_insitupy_presence_labels", presence_labels)
+                _write_elem(uns_grp, "_insitupy_build_params", build_params)
+                _zarr.consolidate_metadata(str(staging_path))
+                del uns_grp, z_write  # release write handles before the swap
+            except Exception:
+                shutil.rmtree(staging_path, ignore_errors=True)
+                raise
+
+            self._atomic_replace_dir(staging_path, output_path, what="build_table")
+
+            logger.info(
+                "Built concatenated table (concat_on_disk) at '%s' (%d genes in union).",
+                output_path,
+                len(union_vars),
             )
 
         else:
@@ -2132,9 +2484,16 @@ class InSituExperiment:
                 f"Unknown method '{method}'. Choose 'in_memory' or 'concat_on_disk'."
             )
 
-        # Write per-layer sidecar build params (readable by both methods without loading zarr)
-        import json as _json
-        self._get_build_params_path(cells_layer).write_text(_json.dumps(build_params))
+        # Warn if fewer than min_shared_genes genes are shared by all datasets
+        if min_shared_genes is not None:
+            n_inner = int(presence_matrix.all(axis=0).sum())
+            if n_inner < min_shared_genes:
+                warnings.warn(
+                    f"Only {n_inner} genes shared by all datasets "
+                    f"(threshold: {min_shared_genes}).",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
     def load_all(self,
                  skip: str | None = None,
@@ -4353,18 +4712,19 @@ class InSituExperimentView(InSituExperiment):
     def build_table(self, *args, **kwargs):
         """Raise NotImplementedError — views cannot build their own table.
 
-        ``build_table`` writes to the experiment's save directory.  A view
+        ``build_table`` writes to the experiment's save directory. A view
         shares its save path with the parent, so writing would corrupt the
-        parent's table.  Build the table on the parent experiment and access
-        the view-filtered result via ``view.table[<layer>]``.
+        parent's table. Build the table on the parent experiment and access
+        the view's correct gene set automatically via ``view.table[<layer>]``
+        — which returns the inner join over only the view's datasets.
 
         Raises:
             NotImplementedError: Always.
         """
         raise NotImplementedError(
             "build_table() is not supported on an InSituExperimentView. "
-            "Call build_table() on the parent experiment and read the result "
-            "via view.table[<layer>]."
+            "Call build_table() on the parent experiment; view.table[<layer>] "
+            "then automatically returns the correct gene set for this view's datasets."
         )
 
     def add(self, *args, **kwargs):

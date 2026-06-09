@@ -1,6 +1,7 @@
 """Tests for InSituExperiment build_table(), .table[], import_from_table(), and view.table[]."""
 
 import json
+import pathlib
 
 import numpy as np
 import pandas as pd
@@ -143,26 +144,26 @@ class TestBuildTableBasic:
         exp = _make_experiment_with_path(tmp_path)
         exp.build_table()
         assert isinstance(exp.table, TableAccessor)
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert isinstance(tbl, AnnData)
 
     def test_shape(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=10, n_genes=5)
         exp.build_table()
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert tbl.n_obs == 20
         assert tbl.n_vars == 5
 
     def test_obs_names_unique(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
         exp.build_table(make_obs_names_unique=True)
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert tbl.obs_names.is_unique
 
     def test_obs_names_pattern(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=3)
         exp.build_table(make_obs_names_unique=True)
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         # Each obs name should contain a "-" separator from the prefix
         for name in tbl.obs_names:
             assert "-" in str(name)
@@ -170,40 +171,32 @@ class TestBuildTableBasic:
     def test_label_col_in_obs(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
         exp.build_table()
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert "uid" in tbl.obs.columns
 
     def test_dataset_name_column_values(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path, n_samples=2)
         exp.build_table()
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         sample_ids = set(np.unique(np.asarray(tbl.obs["uid"])))
         assert "sample_0" in sample_ids
         assert "sample_1" in sample_ids
 
 
 class TestBuildTableJoin:
-    def test_join_inner(self, tmp_path):
+    def test_inner_result_from_asymmetric_panels(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_genes=6,
                                          shared_genes=False)
-        exp.build_table(join="inner")
-        tbl = exp.table[None]
-        # Only the 3 shared genes (n_genes // 2 = 3)
+        exp.build_table()
+        tbl = exp.table["main"]
+        # inner-over-all = 3 shared genes (n_genes // 2 = 3)
         assert tbl.n_vars == 3
-
-    def test_join_outer(self, tmp_path):
-        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_genes=6,
-                                         shared_genes=False)
-        exp.build_table(join="outer")
-        tbl = exp.table[None]
-        # All genes: 3 shared + 3 unique per sample = 9
-        assert tbl.n_vars == 9
 
     def test_min_shared_genes_warning(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_genes=6,
                                          shared_genes=False)
-        with pytest.warns(UserWarning, match="shared genes"):
-            exp.build_table(join="inner", min_shared_genes=10)
+        with pytest.warns(UserWarning, match="shared"):
+            exp.build_table(min_shared_genes=10)
 
 
 class TestBuildTableOverwrite:
@@ -240,11 +233,21 @@ class TestTableAccessorNoBuild:
         assert isinstance(exp.table, TableAccessor)
         assert exp.table.keys() == []
 
-    def test_getitem_none_warns_and_returns_none(self, tmp_path):
+    def test_getitem_explicit_layer_not_built_warns_and_returns_none(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
         with pytest.warns(UserWarning, match="build_table"):
-            result = exp.table[None]
+            result = exp.table["main"]
         assert result is None
+
+    def test_getitem_none_raises_keyerror(self, tmp_path):
+        # Before any build: KeyError points at build_table.
+        exp = _make_experiment_with_path(tmp_path)
+        with pytest.raises(KeyError, match="build_table"):
+            _ = exp.table[None]
+        # After build: KeyError lists the available layer(s).
+        exp.build_table()
+        with pytest.raises(KeyError, match="main"):
+            _ = exp.table[None]
 
 
 # ── Multi-layer tables ─────────────────────────────────────────────────────────
@@ -292,21 +295,21 @@ class TestBuildTableMultiLayer:
         assert tbl_main.n_obs == 20   # 2 samples × 10 cells
         assert tbl_proseg.n_obs == 16  # 2 samples × 8 cells
 
-    def test_table_auto_resolve_single(self, tmp_path):
-        """When only one layer is built, table[None] auto-selects it."""
+    def test_table_none_raises_keyerror_single_layer(self, tmp_path):
+        """table[None] raises KeyError even when exactly one layer is built."""
         exp = _make_multilayer_experiment(tmp_path)
         exp.build_table(cells_layer="main")
-        tbl = exp.table[None]
-        assert isinstance(tbl, AnnData)
+        with pytest.raises(KeyError, match="explicit layer"):
+            _ = exp.table[None]
 
-    def test_table_ambiguous_raises_warning(self, tmp_path):
-        """When two layers exist, table[None] emits a warning and returns None."""
+    def test_table_none_raises_keyerror_multi_layer(self, tmp_path):
+        """table[None] raises KeyError listing all built layers."""
         exp = _make_multilayer_experiment(tmp_path)
         exp.build_table(cells_layer="main")
         exp.build_table(cells_layer="proseg")
-        with pytest.warns(UserWarning, match="cells_layer="):
-            result = exp.table[None]
-        assert result is None
+        with pytest.raises(KeyError) as exc:
+            _ = exp.table[None]
+        assert "main" in str(exc.value) and "proseg" in str(exc.value)
 
     def test_table_keys(self, tmp_path):
         exp = _make_multilayer_experiment(tmp_path)
@@ -314,14 +317,14 @@ class TestBuildTableMultiLayer:
         exp.build_table(cells_layer="proseg")
         assert set(exp.table.keys()) == {"main", "proseg"}
 
-    def test_sidecar_per_layer(self, tmp_path):
+    def test_build_params_embedded_per_layer(self, tmp_path):
         exp = _make_multilayer_experiment(tmp_path)
         exp.build_table(cells_layer="main")
         exp.build_table(cells_layer="proseg")
-        main_params = json.loads((tmp_path / "tables" / "main.json").read_text())
-        proseg_params = json.loads((tmp_path / "tables" / "proseg.json").read_text())
-        assert main_params["cells_layer"] == "main"
-        assert proseg_params["cells_layer"] == "proseg"
+        assert not (tmp_path / "tables" / "main.json").exists()
+        assert not (tmp_path / "tables" / "proseg.json").exists()
+        assert exp._read_build_params("main")["cells_layer"] == "main"
+        assert exp._read_build_params("proseg")["cells_layer"] == "proseg"
 
     def test_overwrite_one_layer_leaves_other(self, tmp_path):
         exp = _make_multilayer_experiment(tmp_path)
@@ -387,7 +390,7 @@ class TestViewTable:
 
         # Create a view with only the first 2 samples
         view = exp._subset(slice(0, 2), as_view=True)
-        tbl = view.table[None]
+        tbl = view.table["main"]
 
         assert isinstance(tbl, AnnData)
         # Only 2 samples × 10 cells = 20 rows
@@ -402,7 +405,7 @@ class TestViewTable:
 
         view = exp._subset(slice(0, 1), as_view=True)
         with pytest.warns(UserWarning, match="build_table"):
-            result = view.table[None]
+            result = view.table["main"]
         assert result is None
 
     def test_view_inherits_path(self, tmp_path):
@@ -475,32 +478,30 @@ class TestConcatOnDisk:
     def test_shape(self, tmp_path):
         exp = _make_saved_experiment(tmp_path, n_samples=2, n_cells=10, n_genes=5)
         exp.build_table(method="concat_on_disk")
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert tbl.n_obs == 20
         assert tbl.n_vars == 5
 
     def test_label_col_in_obs(self, tmp_path):
         exp = _make_saved_experiment(tmp_path)
         exp.build_table(method="concat_on_disk")
-        tbl = exp.table[None]
+        tbl = exp.table["main"]
         assert "uid" in tbl.obs.columns
 
-    def test_build_params_sidecar_written(self, tmp_path):
+    def test_build_params_embedded_in_zarr(self, tmp_path):
         exp = _make_saved_experiment(tmp_path)
         exp.build_table(method="concat_on_disk")
-        params_path = tmp_path / "tables" / "main.json"
-        assert params_path.exists()
-        params = json.loads(params_path.read_text())
+        assert not (tmp_path / "tables" / "main.json").exists()
+        params = exp._read_build_params("main")
         assert params["label_col"] == "uid"
         assert params["method"] == "concat_on_disk"
         assert params["cells_layer"] == "main"
 
-    def test_in_memory_also_writes_sidecar(self, tmp_path):
+    def test_in_memory_params_embedded_in_zarr(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
         exp.build_table(method="in_memory")
-        params_path = tmp_path / "tables" / "main.json"
-        assert params_path.exists()
-        params = json.loads(params_path.read_text())
+        assert not (tmp_path / "tables" / "main.json").exists()
+        params = exp._read_build_params("main")
         assert params["method"] == "in_memory"
         assert params["cells_layer"] == "main"
 
@@ -533,13 +534,13 @@ class TestConcatOnDisk:
         exp.build_table(method="concat_on_disk", overwrite=True)  # Should not raise
         assert (tmp_path / "tables" / "main.zarr").exists()
 
-    def test_join_inner(self, tmp_path):
-        """Inner join retains only shared genes."""
+    def test_asymmetric_panels_inner_result(self, tmp_path):
+        """With asymmetric gene panels, exp.table returns the inner-over-all gene set."""
+        import anndata as ad
         exp = _make_saved_experiment(tmp_path, n_samples=2, n_genes=6, n_cells=5)
-        # Give sample 1 different genes by patching its h5ad with different var names
+        # Patch sample 1 to have different genes
         TIMESTAMP_DIR = "260101-000000000000-a1b2c3d4"
         rng = np.random.default_rng(99)
-        import anndata as ad
         shared = [f"gene_{j}" for j in range(3)]
         unique = [f"other_gene_{j}" for j in range(3)]
         h5ad_path = tmp_path / "sample_1" / "cells" / TIMESTAMP_DIR / "main" / "table.h5ad"
@@ -551,6 +552,320 @@ class TestConcatOnDisk:
         )
         adata.write_h5ad(h5ad_path)
 
-        exp.build_table(method="concat_on_disk", join="inner")
-        tbl = exp.table[None]
-        assert tbl.n_vars == 3  # only 3 shared genes
+        exp.build_table(method="concat_on_disk")
+        tbl = exp.table["main"]
+        # inner-over-all = only 3 shared genes
+        assert tbl.n_vars == 3
+
+
+# ── Presence-record reconstruction helpers ────────────────────────────────────
+
+def _make_asymmetric_experiment(tmp_path):
+    """3-sample experiment with asymmetric gene panels.
+
+    s0: {gA, gB, gC}
+    s1: {gA, gB, gD}
+    s2: {gA, gE, gF}
+
+    full inner = {gA} (1 gene)
+    view[0,1] inner = {gA, gB} (2 genes) — the key regression case
+    """
+    gene_sets = [
+        ["gA", "gB", "gC"],
+        ["gA", "gB", "gD"],
+        ["gA", "gE", "gF"],
+    ]
+    exp = InSituExperiment()
+    for i, genes in enumerate(gene_sets):
+        xd = _make_insitudata(
+            n_cells=5, n_genes=3, gene_names=genes,
+            seed=i, cell_prefix=f"s{i}cell",
+        )
+        exp._data.append(xd)
+    exp._metadata = pd.DataFrame({
+        "uid": [f"sample_{i}" for i in range(3)],
+        "slide_id": ["slide1"] * 3,
+        "sample_id": [f"s{i}" for i in range(3)],
+    })
+    exp._path = tmp_path
+    return exp
+
+
+def _make_saved_asymmetric_experiment(tmp_path):
+    """3-sample on-disk experiment with asymmetric gene panels (for concat_on_disk)."""
+    TIMESTAMP_DIR = "260101-000000000000-a1b2c3d4"
+    gene_sets = [
+        ["gA", "gB", "gC"],
+        ["gA", "gB", "gD"],
+        ["gA", "gE", "gF"],
+    ]
+    exp = InSituExperiment()
+    exp._path = tmp_path
+    for i, genes in enumerate(gene_sets):
+        xd = _make_insitudata(
+            n_cells=5, n_genes=3, gene_names=genes,
+            seed=i, cell_prefix=f"s{i}cell",
+        )
+        sample_dir = tmp_path / f"sample_{i}"
+        sample_dir.mkdir()
+        cells_ts_dir = sample_dir / "cells" / TIMESTAMP_DIR
+        main_dir = cells_ts_dir / "main"
+        main_dir.mkdir(parents=True)
+        xd.cells.table.write_h5ad(main_dir / "table.h5ad")
+        multicelldata_meta = {
+            "key_main": "main",
+            "all_keys": ["main"],
+            "version": "test",
+        }
+        (cells_ts_dir / ".multicelldata").write_text(json.dumps(multicelldata_meta))
+        xd._path = sample_dir
+        exp._data.append(xd)
+    exp._metadata = pd.DataFrame({
+        "uid": [f"sample_{i}" for i in range(3)],
+        "slide_id": ["slide1"] * 3,
+        "sample_id": [f"s{i}" for i in range(3)],
+    })
+    return exp
+
+
+# ── Presence-record reconstruction tests ──────────────────────────────────────
+
+class TestPresenceReconstruction:
+    def test_view_table_recovers_subset_shared_genes(self, tmp_path):
+        """Core regression: view.table returns inner-over-view, not inner-over-all."""
+        exp = _make_asymmetric_experiment(tmp_path)
+        exp.build_table()
+
+        # Full inner = only gA (shared by all 3)
+        full_tbl = exp.table["main"]
+        assert set(full_tbl.var_names) == {"gA"}
+
+        # View over s0+s1: inner = {gA, gB} — previously returned {gA}
+        view = exp._subset([0, 1], as_view=True)
+        view_tbl = view.table["main"]
+        assert set(view_tbl.var_names) == {"gA", "gB"}
+
+    def test_view_table_recovers_correct_values(self, tmp_path):
+        """Values in view.table match the per-sample sources (no 0-fills surfaced)."""
+        exp = _make_asymmetric_experiment(tmp_path)
+        exp.build_table()
+
+        view = exp._subset([0, 1], as_view=True)
+        view_tbl = view.table["main"]
+
+        # Trusted reference via in-memory re-concat
+        ref = view.to_anndata()
+
+        # var_names should match
+        assert set(view_tbl.var_names) == set(ref.var_names)
+
+        # Values should match per uid label (align by uid)
+        X_view = np.asarray(view_tbl.X)
+        uid_view = np.asarray(view_tbl.obs["uid"], dtype=str)
+        X_ref = ref[:, list(view_tbl.var_names)].X
+        uid_ref = np.asarray(ref.obs["uid"], dtype=str)
+
+        for gene_idx, gene in enumerate(view_tbl.var_names):
+            ref_gene_idx = list(ref.var_names).index(gene)
+            for uid in ["sample_0", "sample_1"]:
+                view_vals = sorted(X_view[uid_view == uid, gene_idx].tolist())
+                ref_vals = sorted(X_ref[uid_ref == uid, ref_gene_idx].tolist())
+                assert view_vals == ref_vals, f"Mismatch for gene {gene}, uid {uid}"
+
+    def test_table_inner_has_no_nan_no_fill(self, tmp_path):
+        """Neither base nor view table contains NaN or fabricated fill values."""
+        exp = _make_asymmetric_experiment(tmp_path)
+        exp.build_table()
+
+        full_tbl = exp.table["main"]
+        X_full = np.asarray(full_tbl.X)
+        assert not np.isnan(X_full).any(), "NaN in base table"
+
+        view = exp._subset([0, 1], as_view=True)
+        view_tbl = view.table["main"]
+        X_view = np.asarray(view_tbl.X)
+        assert not np.isnan(X_view).any(), "NaN in view table"
+
+        # All values should be > 0 (the test data is rng integers 0..20, and
+        # every returned gene is genuinely measured in every returned sample)
+        assert (X_view >= 0).all(), "Negative values in view table"
+
+    def test_uns_records_presence_and_format_version(self, tmp_path):
+        """The built zarr stores format version, presence labels, and presence matrix."""
+        import zarr
+        exp = _make_asymmetric_experiment(tmp_path)
+        exp.build_table()
+
+        z = zarr.open_group(str(tmp_path / "tables" / "main.zarr"), mode="r")
+        uns = z["uns"]
+
+        assert int(uns["_insitupy_table_format_version"][()]) == 2
+
+        labels = np.array([str(l) for l in uns["_insitupy_presence_labels"][:]])
+        assert set(labels) == {"sample_0", "sample_1", "sample_2"}
+
+        presence = np.asarray(uns["_insitupy_gene_presence"][:], dtype=bool)
+        n_datasets, n_vars = presence.shape
+        assert n_datasets == 3
+        assert n_vars == 6  # union of {gA, gB, gC, gD, gE, gF}
+
+    def test_table_status_membership(self, tmp_path):
+        """_table_status returns the correct membership string."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2)
+        exp.build_table()
+
+        assert exp._table_status("main") == "matches current samples"
+        assert "matches current samples" in repr(exp)
+
+        # Drop a dataset to make metadata diverge from built set
+        exp._data = exp._data[:1]
+        exp._metadata = exp._metadata.iloc[:1].reset_index(drop=True)
+
+        assert exp._table_status("main") == "samples changed — rebuild"
+        assert "samples changed" in repr(exp)
+
+    def test_view_build_table_raises_with_pointer(self, tmp_path):
+        """view.build_table() raises NotImplementedError pointing to view.table."""
+        exp = _make_experiment_with_path(tmp_path)
+        view = exp._subset(slice(0, 1), as_view=True)
+        with pytest.raises(NotImplementedError, match=r"view\.table"):
+            view.build_table()
+
+    def test_legacy_table_without_presence_still_loads(self, tmp_path):
+        """Tables built by old code (no presence uns) still load via base and view."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+
+        # Write a legacy zarr manually: inner join result, no presence entries
+        tables_dir = tmp_path / "tables"
+        tables_dir.mkdir(parents=True)
+        zarr_path = tables_dir / "main.zarr"
+
+        # Build an inner-join AnnData (what old code would have written)
+        legacy_adata = exp.to_anndata()
+        legacy_adata.write_zarr(zarr_path)
+        (tables_dir / "main.json").write_text(json.dumps({
+            "label_col": "uid", "method": "in_memory", "cells_layer": "main"
+        }))
+
+        # Base access should return the stored table as-is
+        result = exp.table["main"]
+        assert result is not None
+        assert result.n_vars == 3
+
+        # View access should use the legacy row-filter-only path
+        view = exp._subset(slice(0, 1), as_view=True)
+        view_result = view.table["main"]
+        assert view_result is not None
+        assert view_result.n_obs == 5  # 1 sample × 5 cells
+
+    def test_concat_on_disk_view_recovers_subset_genes(self, tmp_path):
+        """concat_on_disk path also writes presence uns and view recovers subset genes."""
+        import zarr
+        exp = _make_saved_asymmetric_experiment(tmp_path)
+        exp.build_table(method="concat_on_disk")
+
+        # Verify presence uns was written
+        z = zarr.open_group(str(tmp_path / "tables" / "main.zarr"), mode="r")
+        assert "_insitupy_table_format_version" in z["uns"]
+
+        # Full inner = 1 gene
+        full_tbl = exp.table["main"]
+        assert set(full_tbl.var_names) == {"gA"}
+
+        # View over s0+s1: inner = {gA, gB}
+        view = exp._subset([0, 1], as_view=True)
+        view_tbl = view.table["main"]
+        assert set(view_tbl.var_names) == {"gA", "gB"}
+
+    def test_versioned_table_missing_presence_raises(self, tmp_path):
+        """A versioned store missing its presence arrays must raise — not silently
+        fall back to returning the raw union table (which holds fill values)."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+
+        tables_dir = tmp_path / "tables"
+        tables_dir.mkdir(parents=True)
+        zarr_path = tables_dir / "main.zarr"
+
+        # Write a store that carries the format-version marker but NO presence
+        # arrays, simulating a partial/interrupted or version-incompatible write.
+        adata = exp.to_anndata()
+        adata.uns["_insitupy_table_format_version"] = 2
+        adata.write_zarr(zarr_path)
+        (tables_dir / "main.json").write_text(json.dumps({
+            "label_col": "uid", "method": "in_memory", "cells_layer": "main"
+        }))
+
+        with pytest.raises(RuntimeError, match="presence"):
+            _ = exp.table["main"]
+
+    def test_failed_build_preserves_previous_table(self, tmp_path, monkeypatch):
+        """An interrupted rebuild must not destroy the previously built table."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+        exp.build_table()
+        n_vars_before = exp.table["main"].n_vars
+
+        # Make the next build fail partway through (before the atomic swap).
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated build failure")
+        monkeypatch.setattr(type(exp), "_collect_gene_presence", _boom)
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            exp.build_table(overwrite=True)
+
+        # The previous table survives intact, with no leftover staging/backup dirs.
+        tables_dir = tmp_path / "tables"
+        assert (tables_dir / "main.zarr").exists()
+        assert not (tables_dir / "main.zarr.__ispy_tmp__").exists()
+        assert not (tables_dir / "main.zarr.__ispy_bak__").exists()
+        assert exp.table["main"].n_vars == n_vars_before
+
+    def test_empty_view_table_returns_zero_rows(self, tmp_path):
+        """An empty view (0 samples) returns a 0-row AnnData, NOT the full union, and
+        does not emit the 'No view samples' warning."""
+        import warnings as _warnings
+        exp = _make_asymmetric_experiment(tmp_path)   # union = {gA..gF} = 6 vars
+        exp.build_table()
+        full = exp.table["main"]
+
+        empty_view = exp._subset(slice(0, 0), as_view=True)
+        with _warnings.catch_warnings(record=True) as rec:
+            _warnings.simplefilter("always")
+            tbl = empty_view.table["main"]
+        assert tbl.n_obs == 0
+        assert tbl.n_obs != full.n_obs
+        assert not any("No view samples" in str(w.message) for w in rec)
+        # _reconstruct([]) keeps the union var axis (vacuous-truth all-True var mask).
+        assert tbl.n_vars == 6
+
+    def test_view_table_samples_not_in_built_table_warns_and_empty(self, tmp_path):
+        """A view selecting only samples absent from the built table warns AND returns 0 rows."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+        exp.build_table()  # built labels = {sample_0, sample_1}
+
+        # Append a 3rd sample WITHOUT rebuilding, then view only that sample.
+        extra = _make_insitudata(n_cells=5, n_genes=3, seed=42, cell_prefix="s2cell")
+        exp._data.append(extra)
+        exp._metadata = pd.concat(
+            [exp._metadata,
+             pd.DataFrame({"uid": ["sample_2"], "slide_id": ["slide1"], "sample_id": ["s2"]})],
+            ignore_index=True,
+        )
+        view = exp._subset([2], as_view=True)   # uid == sample_2, not in built labels
+        with pytest.warns(UserWarning, match="No view samples"):
+            tbl = view.table["main"]
+        assert tbl.n_obs == 0
+
+    def test_empty_view_legacy_table_returns_zero_rows(self, tmp_path):
+        """Legacy (no-presence) stores also return 0 rows for an empty view."""
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+        tables_dir = tmp_path / "tables"
+        tables_dir.mkdir(parents=True)
+        exp.to_anndata().write_zarr(tables_dir / "main.zarr")
+        (tables_dir / "main.json").write_text(json.dumps(
+            {"label_col": "uid", "method": "in_memory", "cells_layer": "main"}
+        ))
+
+        empty_view = exp._subset(slice(0, 0), as_view=True)
+        tbl = empty_view.table["main"]
+        assert tbl is not None
+        assert tbl.n_obs == 0

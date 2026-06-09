@@ -20,9 +20,10 @@ This feature is experimental and may change in future versions.
 The workflow has three phases:
 
 1. **Build** — `build_table()` concatenates all per-sample AnnData objects and
-   writes the result to `{experiment_path}/tables/concat.zarr`.
-2. **Analyse** — access the concatenated table via `.table`, run any scanpy /
-   scvi-tools workflow on it, and write the result back to the same zarr store.
+   writes the result to `{experiment_path}/tables/{cells_layer}.zarr`
+   (e.g. `tables/main.zarr`).
+2. **Analyse** — access the concatenated table via `.table[<layer>]`, run any
+   scanpy / scvi-tools workflow on it, and write results back to the zarr store.
 3. **Import** — `import_from_table()` transfers selected obs columns and obsm
    keys from the zarr table back into the individual per-sample AnnData objects
    so results are available for spatial visualisation.
@@ -56,13 +57,14 @@ exp
 exp.build_table(
     label_col="uid",           # Metadata column that identifies each sample
     obsm_keys="spatial",       # Keep spatial coordinates (default)
-    join="inner",              # Keep only genes shared across all samples
     make_obs_names_unique=True,# Prefix each cell name with "{sample_index}-"
 )
 ```
 
-This creates `{experiment_path}/tables/concat.zarr` and a small sidecar
-`tables/build_params.json` that records how the table was built.
+This creates a per-layer zarr table at
+`{experiment_path}/tables/{cells_layer}.zarr` (e.g. `tables/main.zarr`). The
+build metadata (label column, method, layer name) is stored inside the zarr
+store under `uns["_insitupy_build_params"]` — no separate JSON file is written.
 
 ### Selecting what to include
 
@@ -75,7 +77,6 @@ exp.build_table(
     obsm_keys=["spatial"],
     layer_keys=["counts"],     # Include the raw counts layer
     obs_keys="all",            # Include all existing obs columns
-    join="inner",
 )
 ```
 
@@ -85,19 +86,26 @@ each cell's obs row:
 ```python
 exp.build_table(
     metadata_keys=["condition", "batch"],  # Columns from exp.metadata
-    join="inner",
 )
 ```
 
-### Outer join — retain all genes
+### Gene panels that differ across samples
 
-When samples were measured with different gene panels, use `join="outer"` to
-keep all genes across samples (cells from samples without a gene receive `NaN`):
+There is no join strategy to choose. `build_table()` always stores the
+**union** of all genes on disk and reconstructs the correct **inner** gene set
+automatically each time you read `.table`:
+
+- `exp.table[<layer>]` returns the genes shared by **all** samples.
+- `view.table[<layer>]` returns the genes shared by only the **view's**
+  samples — recovering genes that are common within the subset even when they
+  are absent from some other sample in the full experiment.
+
+No fill values are ever surfaced through `.table`. Pass `min_shared_genes` to
+get a warning when very few genes are shared across *all* samples:
 
 ```python
 exp.build_table(
-    join="outer",
-    min_shared_genes=100,      # Warn if fewer than 100 genes are shared
+    min_shared_genes=100,      # Warn if fewer than 100 genes are shared by all samples
 )
 ```
 
@@ -124,7 +132,6 @@ simultaneously.
 ```python
 exp.build_table(
     method="concat_on_disk",
-    join="inner",
     make_obs_names_unique=True,
 )
 ```
@@ -145,12 +152,14 @@ exp.build_table(
 ### Accessing `.table`
 
 ```python
-tbl = exp.table   # Returns lazily-loaded AnnData (or eager if xarray unavailable)
+# `.table` is a dict-like accessor — index it by cells-layer name:
+tbl = exp.table["main"]   # lazily-loaded AnnData for the "main" layer
+# exp.table.keys()        # list available layer names
 tbl
 ```
 
-If `build_table()` has not been called yet, `.table` returns `None` and
-emits a `UserWarning`.
+If `build_table()` has not been called yet, indexing `.table` returns `None`
+and emits a `UserWarning`.
 
 ### Running a scanpy workflow
 
@@ -160,7 +169,7 @@ scvi-tools function works directly on it.
 ```python
 import scanpy as sc
 
-tbl = exp.table
+tbl = exp.table["main"]   # reconstructed inner gene set — no fill values
 
 # Normalise and log-transform
 sc.pp.normalize_total(tbl, target_sum=1e4)
@@ -181,16 +190,18 @@ sc.pl.umap(tbl, color=["uid", "leiden_integrated"])
 
 ### Saving results back to the zarr table
 
-Write any new obs columns or obsm keys back to the zarr store so
-`import_from_table()` can read them:
+`import_from_table()` reads from the **raw** on-disk store, so write new obs
+columns or obsm keys back to it directly — not via `exp.table[...]`, which
+returns a reconstructed gene subset that would not round-trip the union layout:
 
 ```python
 import anndata as ad
 
-zarr_path = Path(exp.path) / "tables" / "concat.zarr"
-tbl = ad.read_zarr(zarr_path)          # Load fully into memory
+zarr_path = Path(exp.path) / "tables" / "main.zarr"
+tbl = ad.read_zarr(zarr_path)          # raw union table (holds fill values)
 
-# ... run analysis, e.g. batch correction, clustering ...
+# Run the analysis itself on the fill-free `exp.table["main"]`, then attach the
+# resulting obs columns / obsm keys (e.g. clustering, embeddings) onto `tbl`.
 
 tbl.write_zarr(zarr_path)              # Write updated table back to disk
 ```
@@ -232,20 +243,23 @@ sc.pl.umap(exp.data[0].cells.table, color="leiden_integrated")
 ## Working with filters and views
 
 `InSituExperimentView` — created by `exp.filters.apply()` or direct slicing —
-has its own `.table` property that returns a row slice of the parent
-experiment's zarr table containing only the samples present in the view:
+has its own `.table` accessor. It does **not** merely row-slice the parent
+table: it reconstructs the correct gene set for the view's samples — the inner
+join over only the view's datasets — and row-filters to those samples. This
+recovers genes shared within the subset even when they are absent from some
+other sample in the full experiment:
 
 ```python
 # Apply a filter defined on the experiment
 view = exp.filters.apply("high_quality")
 
-# Access the filtered concatenated table
-view_tbl = view.table
+# View's table: inner-over-view genes, restricted to the view's rows
+view_tbl = view.table["main"]
 print(f"View covers {view_tbl.n_obs} cells from {len(view)} samples")
 ```
 
-This is read-only: analysing a view's table and writing results back requires
-operating on the full parent table and then subsetting.
+This is read-only, and a view cannot call `build_table()` — build on the
+parent experiment, then read the per-view result via `view.table[...]`.
 
 ---
 
@@ -263,12 +277,11 @@ exp = InSituExperiment.read("path/to/my_experiment")
 # 2. Build zarr table (large experiment → use concat_on_disk)
 exp.build_table(
     method="concat_on_disk",
-    join="inner",
     make_obs_names_unique=True,
 )
 
 # 3. Load and analyse
-zarr_path = Path(exp.path) / "tables" / "concat.zarr"
+zarr_path = Path(exp.path) / "tables" / "main.zarr"
 tbl = ad.read_zarr(zarr_path)
 
 sc.pp.normalize_total(tbl, target_sum=1e4)
@@ -290,7 +303,7 @@ exp.import_from_table(
 exp.save()
 
 # 6. Visualise spatially
-sc.pl.umap(exp.table, color=["uid", "leiden_integrated"])
+sc.pl.umap(exp.table["main"], color=["uid", "leiden_integrated"])
 ```
 
 ---
@@ -299,10 +312,10 @@ sc.pl.umap(exp.table, color=["uid", "leiden_integrated"])
 
 | Method / attribute | Description |
 |---|---|
-| `exp.build_table(...)` | Build `tables/concat.zarr`; supports `in_memory` and `concat_on_disk` |
-| `exp.table` | Lazily load the concatenated AnnData from zarr |
+| `exp.build_table(...)` | Build `tables/{cells_layer}.zarr` (e.g. `main.zarr`); supports `in_memory` and `concat_on_disk` |
+| `exp.table[<layer>]` | Lazily load the concatenated AnnData (inner gene set over all samples) |
 | `exp.import_from_table(obs_columns, obsm_keys)` | Transfer columns/keys from the zarr table back to per-sample objects |
-| `view.table` | Row-sliced view of the parent table for the samples in a filter view |
+| `view.table[<layer>]` | View's table: inner gene set over the view's samples, row-filtered to them |
 
 ```{eval-rst}
 .. seealso::
