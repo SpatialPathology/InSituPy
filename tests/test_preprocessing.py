@@ -7,8 +7,10 @@ import pytest
 from anndata import AnnData
 from scipy.sparse import issparse
 
+from insitupy import pp
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
+from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing import (
     calculate_qc_metrics,
     cluster_cells,
@@ -269,3 +271,125 @@ class TestPseudobulk:
     def test_requires_decoupler(self):
         decoupler = pytest.importorskip("decoupler")  # noqa: F841
         pytest.skip("requires InSituExperiment setup; covered by integration tests")
+
+
+# ── InSituExperiment fixture ──────────────────────────────────────────────────
+
+def _make_experiment(n_samples=2, n_cells=30, n_genes=15):
+    """Build a small in-memory InSituExperiment (no file path needed)."""
+    exp = InSituExperiment()
+    for i in range(n_samples):
+        exp._data.append(_make_insitudata(n_cells=n_cells, n_genes=n_genes, seed=i))
+    exp._metadata = pd.DataFrame({
+        "uid": [f"sample_{i}" for i in range(n_samples)],
+    })
+    return exp
+
+
+# ── qc_summary ────────────────────────────────────────────────────────────────
+
+class TestQcSummary:
+    def test_returns_row_per_dataset(self):
+        exp = _make_experiment(n_samples=2)
+        calculate_qc_metrics(exp)
+        df = exp.qc_summary()
+        assert len(df) == 2
+        assert df.index.name == "uid"
+        expected_cols = {
+            "cells_layer", "n_cells", "median_total_counts",
+            "mean_total_counts", "median_n_genes_by_counts", "mean_n_genes_by_counts",
+        }
+        assert expected_cols.issubset(df.columns)
+
+    def test_values_match_manual_aggregation(self):
+        exp = _make_experiment(n_samples=2)
+        calculate_qc_metrics(exp)
+        df = exp.qc_summary()
+        for i, (_, dataset) in enumerate(exp.iterdata()):
+            obs = dataset.cells.table.obs
+            assert df.iloc[i]["n_cells"] == dataset.cells.table.n_obs
+            np.testing.assert_allclose(
+                df.iloc[i]["median_total_counts"], obs["total_counts"].median()
+            )
+            np.testing.assert_allclose(
+                df.iloc[i]["mean_total_counts"], obs["total_counts"].mean()
+            )
+            np.testing.assert_allclose(
+                df.iloc[i]["median_n_genes_by_counts"], obs["n_genes_by_counts"].median()
+            )
+            np.testing.assert_allclose(
+                df.iloc[i]["mean_n_genes_by_counts"], obs["n_genes_by_counts"].mean()
+            )
+
+    def test_raises_without_precomputed_metrics(self):
+        exp = _make_experiment(n_samples=2)
+        with pytest.raises(ValueError, match="total_counts"):
+            exp.qc_summary()
+
+    def test_add_to_metadata_writes_columns(self):
+        exp = _make_experiment(n_samples=2)
+        calculate_qc_metrics(exp)
+        exp.qc_summary(add_to_metadata=True)
+        for col in [
+            "n_cells", "median_total_counts", "mean_total_counts",
+            "median_n_genes_by_counts", "mean_n_genes_by_counts",
+        ]:
+            assert col in exp._metadata.columns
+
+    def test_cells_layer_recorded(self):
+        exp = _make_experiment(n_samples=2)
+        calculate_qc_metrics(exp)
+        df = exp.qc_summary()
+        assert "cells_layer" in df.columns
+        assert df.attrs["cells_layer"] is not None
+        assert df["cells_layer"].nunique() == 1
+
+    def test_subset_metadata_is_independent_of_parent(self):
+        exp = _make_experiment(n_samples=3)
+        calculate_qc_metrics(exp)
+        sub = exp._subset(slice(0, 2))
+        sub_df = sub.qc_summary(add_to_metadata=True)
+        assert len(sub_df) == 2
+        assert set(sub_df.index) == set(exp._metadata["uid"].iloc[:2])
+        assert "n_cells" in sub._metadata.columns
+        assert "n_cells" not in exp._metadata.columns
+
+
+# ── calculate_qc_metrics deprecation ─────────────────────────────────────────
+
+class TestCalculateQcMetricsDeprecation:
+    def test_warns(self):
+        exp = _make_experiment(n_samples=2)
+        with pytest.warns(DeprecationWarning, match="calculate_qc_metrics"):
+            exp.calculate_qc_metrics()
+
+    def test_still_writes_legacy_columns(self):
+        exp = _make_experiment(n_samples=2)
+        with pytest.warns(DeprecationWarning):
+            exp.calculate_qc_metrics()
+        assert "median_genes_per_cell" in exp._metadata.columns
+        assert "median_transcripts_per_cell" in exp._metadata.columns
+        assert "num_cells" in exp._metadata.columns
+
+
+# ── calculate_mad_thresholds relocation ──────────────────────────────────────
+
+class TestMadThresholds:
+    def test_available_in_experimental(self):
+        from insitupy.experimental import calculate_mad_thresholds
+        assert callable(calculate_mad_thresholds)
+
+    def test_pp_wrapper_warns(self):
+        xd = _make_insitudata()
+        calculate_qc_metrics(xd)
+        with pytest.warns(DeprecationWarning, match="deprecated"):
+            pp.calculate_mad_thresholds(xd)
+
+    def test_pp_result_matches_experimental(self):
+        from insitupy.experimental import calculate_mad_thresholds as exp_fn
+        xd = _make_insitudata()
+        calculate_qc_metrics(xd)
+        with pytest.warns(DeprecationWarning):
+            result_pp = pp.calculate_mad_thresholds(xd)
+        result_exp = exp_fn(xd)
+        pd.testing.assert_frame_equal(result_pp, result_exp)

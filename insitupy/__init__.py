@@ -1,4 +1,4 @@
-from . import _core, containers, datasets, experiment, io, utils
+from . import _core, containers, datasets, experiment, experimental, io, utils
 from . import images as im
 from . import plotting as pl
 from . import preprocessing as pp
@@ -23,6 +23,7 @@ __all__ = [
     "containers",
     "datasets",
     "experiment",
+    "experimental",
     "im",
     "io",
     "pl",

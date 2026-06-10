@@ -4653,6 +4653,14 @@ class InSituExperiment:
             If return_metrics is True, returns dict with 'median_genes_per_cell'
             and 'median_transcripts_per_cell' lists. Otherwise returns None.
         """
+        warnings.warn(
+            "InSituExperiment.calculate_qc_metrics is deprecated and will be removed in "
+            "a future release. Compute per-cell QC with "
+            "pp.calculate_qc_metrics(exp, cells_layer=...) and aggregate per dataset with "
+            "exp.qc_summary(cells_layer=...).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from insitupy.utils._checks import _calculate_single_metrics
 
         median_genes = []
@@ -4689,6 +4697,97 @@ class InSituExperiment:
                 transcripts_col: median_transcripts,
                 cells_col: num_cells,
             }
+
+    def qc_summary(
+        self,
+        cells_layer: str | None = None,
+        add_to_metadata: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Summarize per-cell QC metrics into a per-dataset table.
+
+        Reads the QC columns produced by :func:`insitupy.pp.calculate_qc_metrics`
+        from each sample's cell table ``obs`` and aggregates them per dataset.
+        This does **not** recompute the metrics — run
+        ``pp.calculate_qc_metrics(exp, cells_layer=...)`` first.
+
+        Args:
+            cells_layer: Cell segmentation layer to summarize. Defaults to None
+                (the main layer). QC metrics are stored per layer, so this must
+                match the layer passed to ``pp.calculate_qc_metrics``.
+            add_to_metadata: If True, also write the summary columns into
+                ``exp.metadata`` (default False). For a non-main layer the columns
+                are suffixed with `` (<layer>)`` so layers do not overwrite each
+                other. On an ``InSituExperimentView`` this writes to the view's
+                own (in-memory, subset) metadata and does **not** propagate to the
+                parent experiment; persist with ``view.save_metadata()``.
+
+        Returns:
+            pandas.DataFrame: One row per dataset, indexed by ``uid``, with columns
+            ``cells_layer``, ``n_cells``, ``median_total_counts``,
+            ``mean_total_counts``, ``median_n_genes_by_counts``,
+            ``mean_n_genes_by_counts``. ``df.attrs["cells_layer"]`` records the
+            resolved layer.
+
+        Raises:
+            ValueError: If the required QC columns are not present in the selected
+                layer's ``obs`` (i.e. ``pp.calculate_qc_metrics`` was not run for
+                that layer).
+        """
+        required = ["total_counts", "n_genes_by_counts"]
+        uids, layer_names = [], []
+        n_cells, med_counts, mean_counts, med_genes, mean_genes = [], [], [], [], []
+
+        for row, dataset in self.iterdata():
+            if dataset.cells.is_empty:
+                logger.warning("Cells were not loaded. Loading cells.")
+                dataset.load_cells()
+
+            celldata, resolved_layer = _get_cell_layer(
+                cells=dataset.cells, cells_layer=cells_layer, return_layer_name=True
+            )
+            obs = celldata.table.obs
+            missing = [c for c in required if c not in obs]
+            if missing:
+                raise ValueError(
+                    f"QC columns {missing} not found in obs of cells layer "
+                    f"'{resolved_layer}'. Run "
+                    f"pp.calculate_qc_metrics(exp, cells_layer={cells_layer!r}) first."
+                )
+
+            uids.append(row["uid"])
+            layer_names.append(resolved_layer)
+            n_cells.append(celldata.table.n_obs)
+            med_counts.append(obs["total_counts"].median())
+            mean_counts.append(obs["total_counts"].mean())
+            med_genes.append(obs["n_genes_by_counts"].median())
+            mean_genes.append(obs["n_genes_by_counts"].mean())
+
+        summary = pd.DataFrame(
+            {
+                "cells_layer": layer_names,
+                "n_cells": n_cells,
+                "median_total_counts": med_counts,
+                "mean_total_counts": mean_counts,
+                "median_n_genes_by_counts": med_genes,
+                "mean_n_genes_by_counts": mean_genes,
+            },
+            index=pd.Index(uids, name="uid"),
+        )
+        summary.attrs["cells_layer"] = cells_layer if cells_layer is not None else (
+            layer_names[0] if layer_names else None
+        )
+
+        if add_to_metadata:
+            suffix = "" if cells_layer is None else f" ({cells_layer})"
+            metric_cols = [
+                "n_cells", "median_total_counts", "mean_total_counts",
+                "median_n_genes_by_counts", "mean_n_genes_by_counts",
+            ]
+            for col in metric_cols:
+                self._metadata[f"{col}{suffix}"] = summary[col].to_numpy()
+
+        return summary
 
 
 class InSituExperimentView(InSituExperiment):

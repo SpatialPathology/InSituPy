@@ -37,6 +37,12 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 
     Notebook introducing a multi-sample analysis workflow based on AnnData objects.
 
+.. card:: Per-sample QC workflow
+    :link: InSituPy_qc_workflow
+    :link-type: doc
+
+    Two-step QC workflow: compute per-cell metrics with ``pp.calculate_qc_metrics``, summarize per dataset with ``exp.qc_summary()``, visualize distributions, compute MAD thresholds, and tag low-quality samples as filters.
+
 .. card:: Cross-sample concatenated table (`.table`)
     :link: InSituPy_table_workflow
     :link-type: doc
@@ -59,6 +65,7 @@ InSituPy_split_datasets
 InSituPy_Pseudobulk
 InSituPy_extract_individual_images
 InSituPy_Anndata_workflow
+InSituPy_qc_workflow
 InSituPy_table_workflow
 InSituPy_Vannan_paper_import
 ```
