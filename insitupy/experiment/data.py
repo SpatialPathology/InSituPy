@@ -1700,13 +1700,13 @@ class InSituExperiment:
         self,
         cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: list[str] | str | Literal["all"] | None = None,
-        var_keys: list[str] | str | Literal["all"] | None = None,
+        obs_keys: list[str] | str | Literal["all"] | None = "all",
+        var_keys: list[str] | str | Literal["all"] | None = "all",
         obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
         varm_keys: list[str] | str | Literal["all"] | None = None,
         uns_keys: list[str] | str | Literal["all"] | None = None,
         layer_keys: list[str] | str | Literal["all"] | None = None,
-        metadata_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = "all",
         make_obs_names_unique: bool = True,
         join: Literal["inner", "outer"] = "inner",
         fill_value: float | None = None,
@@ -1716,13 +1716,19 @@ class InSituExperiment:
         Args:
             cells_layer: The layer name to extract cell data from.
             label_col: Column name in metadata to use as labels. Defaults to "uid".
-            obs_keys: Keys to select from obs dataframe.
-            var_keys: Keys to select from var dataframe.
-            obsm_keys: Keys to select from obsm dictionary.
+            obs_keys: Keys to select from obs dataframe. ``"all"`` (default)
+                keeps every column, ``None`` drops all, or pass a list/name.
+            var_keys: Keys to select from var dataframe. Defaults to ``"all"``.
+            obsm_keys: Keys to select from obsm dictionary. Defaults to
+                ``"spatial"``.
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
-            metadata_keys: Metadata columns to add to obs dataframe.
+            metadata_keys: Experiment metadata columns to add to obs. ``"all"``
+                (default) adds every metadata column. ``label_col`` is always
+                written by the concat and is never duplicated here. A metadata
+                key that collides with a retained obs column is stored under a
+                ``_meta`` suffix instead of overwriting the per-cell data.
             make_obs_names_unique: If True, prepends dataset index to obs names.
             join: How to join variables. ``"inner"`` keeps only shared genes;
                 ``"outer"`` keeps all genes with fill values.
@@ -1742,7 +1748,32 @@ class InSituExperiment:
 
         self._assert_cells_loaded(cells_layer)
 
+        # Resolve and validate the metadata columns to add once, up front, so the
+        # collision rename below is decided consistently across all samples.
+        # ``label_col`` is always written by ``anndata.concat(label=...)`` below, so
+        # it is dropped here to avoid a redundant — and potentially colliding —
+        # duplicate column.
+        metadata_keys_to_add: list = []
+        if metadata_keys is not None:
+            if metadata_keys == "all":
+                metadata_keys_to_add = list(self._metadata.columns)
+            else:
+                metadata_keys_to_add = convert_to_list(metadata_keys)
+                missing = [
+                    key for key in metadata_keys_to_add
+                    if key not in self._metadata.columns
+                ]
+                if missing:
+                    raise ValueError(
+                        f"Column(s) {missing} not found in metadata. "
+                        f"Available columns: {list(self._metadata.columns)}"
+                    )
+            metadata_keys_to_add = [
+                key for key in metadata_keys_to_add if key != label_col
+            ]
+
         adatas: dict[Any, anndata.AnnData] = {}
+        metas_by_label: dict[Any, Any] = {}
 
         for i, (meta, xd) in enumerate(self.iterdata()):
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
@@ -1759,27 +1790,42 @@ class InSituExperiment:
                 layer_keys=layer_keys
             )
 
-            # Add metadata columns to obs
-            if metadata_keys is not None:
-                if metadata_keys == "all":
-                    keys_to_add = list(meta.index)
-                else:
-                    # make sure keys are a list
-                    keys_to_add = convert_to_list(metadata_keys)
-
-                for key in keys_to_add:
-                    if key in meta.index:
-                        adata.obs[key] = meta[key]
-                    else:
-                        raise ValueError(
-                            f"Column '{key}' not found in metadata. "
-                            f"Available columns: {list(self._metadata.columns)}"
-                        )
-
             if make_obs_names_unique:
                 adata.obs_names = f"{str(i)}-" + adata.obs_names
 
-            adatas[meta[label_col]] = adata
+            label = meta[label_col]
+            adatas[label] = adata
+            metas_by_label[label] = meta
+
+        # Add experiment metadata as obs columns *after* obs selection, so a
+        # metadata key that collides with a retained per-cell obs column is stored
+        # under a ``_meta`` suffix instead of overwriting the per-cell data. The
+        # rename is decided against the union of retained obs columns (and the
+        # already-assigned targets) so the column naming stays consistent across
+        # all samples and the concatenation.
+        if metadata_keys_to_add:
+            taken: set = set().union(
+                *(adata.obs.columns for adata in adatas.values())
+            ) if adatas else set()
+            rename_map: dict[str, str] = {}
+            for key in metadata_keys_to_add:
+                target = key
+                if target in taken:
+                    target = f"{key}_meta"
+                    while target in taken:
+                        target = f"{target}_meta"
+                    logger.warning(
+                        "Metadata column '%s' collides with an existing obs "
+                        "column; storing it as '%s' to avoid overwriting "
+                        "per-cell data.",
+                        key, target,
+                    )
+                rename_map[key] = target
+                taken.add(target)
+            for label, adata in adatas.items():
+                meta = metas_by_label[label]
+                for key, target in rename_map.items():
+                    adata.obs[target] = meta[key]
 
         concat_kwargs: dict = dict(
             axis='obs',
@@ -1851,13 +1897,13 @@ class InSituExperiment:
         self,
         cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: list[str] | str | Literal["all"] | None = None,
-        var_keys: list[str] | str | Literal["all"] | None = None,
+        obs_keys: list[str] | str | Literal["all"] | None = "all",
+        var_keys: list[str] | str | Literal["all"] | None = "all",
         obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
         varm_keys: list[str] | str | Literal["all"] | None = None,
         uns_keys: list[str] | str | Literal["all"] | None = None,
         layer_keys: list[str] | str | Literal["all"] | None = None,
-        metadata_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = "all",
         make_obs_names_unique: bool = True,
     ) -> anndata.AnnData:
         """
@@ -1866,13 +1912,18 @@ class InSituExperiment:
         Args:
             cells_layer: The layer name to extract cell data from.
             label_col: Column name in metadata to use as labels. Defaults to "uid".
-            obs_keys: Keys to select from obs dataframe.
-            var_keys: Keys to select from var dataframe.
-            obsm_keys: Keys to select from obsm dictionary.
+            obs_keys: Keys to select from obs dataframe. ``"all"`` (default)
+                keeps every column, ``None`` drops all, or pass a list/name.
+            var_keys: Keys to select from var dataframe. Defaults to ``"all"``.
+            obsm_keys: Keys to select from obsm dictionary. Defaults to
+                ``"spatial"``.
             varm_keys: Keys to select from varm dictionary.
             uns_keys: Keys to select from uns dictionary.
             layer_keys: Keys to select from layers dictionary.
-            metadata_keys: Metadata columns to add to obs dataframe. Can be a list of column names, a single column name, or "all" for all columns.
+            metadata_keys: Experiment metadata columns to add to obs. Can be a
+                list of column names, a single column name, or ``"all"`` (default)
+                for all columns. A metadata key that collides with a retained obs
+                column is stored under a ``_meta`` suffix instead of overwriting it.
             make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
 
         Returns:
@@ -2266,13 +2317,13 @@ class InSituExperiment:
         self,
         cells_layer: str | None = None,
         label_col: str = "uid",
-        obs_keys: list[str] | str | Literal["all"] | None = None,
-        var_keys: list[str] | str | Literal["all"] | None = None,
+        obs_keys: list[str] | str | Literal["all"] | None = "all",
+        var_keys: list[str] | str | Literal["all"] | None = "all",
         obsm_keys: list[str] | str | Literal["all"] | None = "spatial",
         varm_keys: list[str] | str | Literal["all"] | None = None,
         uns_keys: list[str] | str | Literal["all"] | None = None,
         layer_keys: list[str] | str | Literal["all"] | None = None,
-        metadata_keys: list[str] | str | Literal["all"] | None = None,
+        metadata_keys: list[str] | str | Literal["all"] | None = "all",
         make_obs_names_unique: bool = True,
         min_shared_genes: int | None = None,
         overwrite: bool = False,
@@ -2310,15 +2361,19 @@ class InSituExperiment:
             cells_layer: Cell layer to extract from each sample.
             label_col: Metadata column used as the sample identifier label.
                 Defaults to ``"uid"``.
-            obs_keys: Obs columns to retain (``in_memory`` only).
-            var_keys: Var columns to retain (``in_memory`` only).
+            obs_keys: Obs columns to retain (``in_memory`` only). Defaults to
+                ``"all"`` (keep every column); ``None`` drops all.
+            var_keys: Var columns to retain (``in_memory`` only). Defaults to
+                ``"all"``.
             obsm_keys: Obsm keys to retain (``in_memory`` only). Defaults to
                 ``"spatial"``.
             varm_keys: Varm keys to retain (``in_memory`` only).
             uns_keys: Uns keys to retain (``in_memory`` only).
             layer_keys: Layer keys to retain (``in_memory`` only).
             metadata_keys: Experiment metadata columns to add to obs
-                (``in_memory`` only).
+                (``in_memory`` only). Defaults to ``"all"``. A metadata key that
+                collides with a retained obs column is stored under a ``_meta``
+                suffix instead of overwriting the per-cell data.
             make_obs_names_unique: Prepend a prefix to obs names to guarantee
                 uniqueness across samples.
             min_shared_genes: Warn when fewer than this many genes are shared
@@ -2345,16 +2400,20 @@ class InSituExperiment:
         if method != "concat_on_disk":
             self._assert_cells_loaded(cells_layer)
 
-        # Validate concat_on_disk restrictions
+        # Validate concat_on_disk restrictions. This streaming path keeps every
+        # element verbatim, so the per-element defaults ("all" / "spatial") are
+        # consistent with what it produces and are treated as "no filter
+        # requested". Only an explicit non-default filter — which the path cannot
+        # honor — is rejected.
         if method == "concat_on_disk":
             unsupported = {
-                "obs_keys": obs_keys,
-                "var_keys": var_keys,
+                "obs_keys": obs_keys if obs_keys != "all" else None,
+                "var_keys": var_keys if var_keys != "all" else None,
                 "obsm_keys": obsm_keys if obsm_keys != "spatial" else None,
                 "varm_keys": varm_keys,
                 "uns_keys": uns_keys,
                 "layer_keys": layer_keys,
-                "metadata_keys": metadata_keys,
+                "metadata_keys": metadata_keys if metadata_keys != "all" else None,
             }
             active = [k for k, v in unsupported.items() if v is not None]
             if active:

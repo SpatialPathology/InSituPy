@@ -132,6 +132,43 @@ class TestImportFromAnnDataUnchanged:
             )
 
 
+class TestFullTableDefaults:
+    """Default build_table()/to_anndata() retain obs + experiment metadata."""
+
+    def test_metadata_columns_added_by_default(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        adata = exp.to_anndata()
+        assert "slide_id" in adata.obs.columns
+        assert "sample_id" in adata.obs.columns
+        # label_col present exactly once (added by the concat, not duplicated)
+        assert list(adata.obs.columns).count("uid") == 1
+
+    def test_per_cell_obs_retained_by_default(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        for xd in exp._data:
+            xd.cells.table.obs["qc_flag"] = "ok"
+        adata = exp.to_anndata()
+        assert "qc_flag" in adata.obs.columns
+
+    def test_metadata_obs_collision_gets_meta_suffix(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        # per-cell obs column name collides with metadata column "sample_id"
+        for i, xd in enumerate(exp._data):
+            xd.cells.table.obs["sample_id"] = f"percell_{i}"
+        adata = exp.to_anndata()
+        # per-cell column preserved with its values; metadata stored under _meta
+        assert "sample_id" in adata.obs.columns
+        assert "sample_id_meta" in adata.obs.columns
+        assert adata.obs["sample_id"].astype(str).str.startswith("percell_").all()
+
+    def test_build_table_persists_metadata_columns(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        exp.build_table()
+        tbl = exp.table["main"]
+        assert "slide_id" in tbl.obs.columns
+        assert "sample_id" in tbl.obs.columns
+
+
 # ── Phase 2: build_table() + .table[] ─────────────────────────────────────────
 
 class TestBuildTableBasic:
@@ -511,9 +548,12 @@ class TestConcatOnDisk:
             exp.build_table(method="concat_on_disk", obs_keys=["some_col"])
 
     def test_unsupported_metadata_keys_raises(self, tmp_path):
+        # "all" is the accepted default (concat_on_disk keeps everything it can),
+        # but an explicit metadata request cannot be honored by the streaming
+        # path and must still raise.
         exp = _make_saved_experiment(tmp_path)
         with pytest.raises(ValueError, match="does not support"):
-            exp.build_table(method="concat_on_disk", metadata_keys="all")
+            exp.build_table(method="concat_on_disk", metadata_keys=["slide_id"])
 
     def test_no_saved_path_raises(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
