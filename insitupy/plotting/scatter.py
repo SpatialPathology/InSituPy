@@ -200,6 +200,37 @@ def _get_vmin_vmax(
     return vmin, vmax
 
 
+def _apply_highlight(
+    color_dict: dict,
+    highlight: Sequence,
+    highlight_color: str,
+) -> tuple[dict, dict]:
+    """
+    De-emphasize non-highlighted categories by recoloring them to a single light color.
+
+    Returns (plot_dict, legend_dict) where plot_dict has dimmed categories first
+    (highlighted last so they are drawn on top in the matplotlib backend) and
+    legend_dict contains only the highlighted categories with their original colors.
+    Highlight values absent from color_dict trigger a UserWarning.
+    """
+    highlight_set = {str(h) for h in highlight}
+    present = {str(cat) for cat in color_dict}
+    missing = highlight_set - present
+    if missing:
+        warnings.warn(
+            f"highlight categories not found in data: {sorted(missing)}",
+            UserWarning, stacklevel=2,
+        )
+
+    dim_items = [(cat, highlight_color) for cat in color_dict
+                 if str(cat) not in highlight_set]
+    hi_items = [(cat, col) for cat, col in color_dict.items()
+                if str(cat) in highlight_set]
+    plot_dict = dict(dim_items + hi_items)
+    legend_dict = dict(hi_items)
+    return plot_dict, legend_dict
+
+
 def _plot_static_categorical(
     ax: plt.Axes,
     df: pd.DataFrame,
@@ -546,6 +577,8 @@ def embedding(
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
     nan_color: str | None = None,
+    highlight: str | Sequence[str] | None = None,
+    highlight_color: str = "#E0E0E0",
     cmap: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -589,6 +622,19 @@ def embedding(
             categorical columns. If None (default), NaN cells are excluded from the
             plot. If a color string (e.g. "lightgray"), NaN cells are shown in that
             color with a "NaN" legend entry. Has no effect on continuous columns.
+        highlight (str or Sequence[str], optional): One or more categories of the
+            categorical color key to emphasize. All other categories are recolored to
+            ``highlight_color`` (a very light grey), putting visual focus on the
+            selected categories; the legend then lists only the highlighted categories.
+            Has no effect on continuous color keys or when no key is given, and is
+            ignored (with a warning) for interactive plots. Highlight values not present
+            in the data trigger a warning. When ``nan_color`` is also set, the NaN
+            pseudo-category is treated as background and recolored to ``highlight_color``.
+            Default is None (no highlighting).
+        highlight_color (str): Color applied to the non-highlighted categories when
+            ``highlight`` is set. Default is "#E0E0E0", a very light grey chosen to read
+            as a faded background rather than a real category color. Tune for a stronger
+            or weaker focus effect.
         cmap (str, optional): Colormap for continuous values. Default is "viridis".
         vmin (float, optional): Minimum value for continuous color scale. Default is
             data minimum.
@@ -683,6 +729,14 @@ def embedding(
 
     n_panels = len(keys)
 
+    # Normalize highlight to list
+    if highlight is None:
+        highlight_list = None
+    elif isinstance(highlight, str):
+        highlight_list = [highlight]
+    else:
+        highlight_list = list(highlight)
+
     # Normalize tooltip to list
     tooltip_keys = None
     if tooltip is not None:
@@ -712,6 +766,13 @@ def embedding(
                 "and render_mode='plotly' (interactive).",
                 UserWarning, stacklevel=2
             )
+
+    if highlight_list is not None and interactive:
+        warnings.warn(
+            "highlight is only supported for static plots (interactive=False); "
+            "it will be ignored.",
+            UserWarning, stacklevel=2,
+        )
 
     # Interactive mode
     if interactive:
@@ -928,6 +989,7 @@ def embedding(
         panel_box_aspect = (figsize[1] / nrows) / (figsize[0] / ncols_plot)
 
     legend_figs = []
+    _highlight_warned = False
 
     for i, c in enumerate(keys):
         ax = axes[i]
@@ -952,14 +1014,26 @@ def embedding(
             if color_type == "categorical":
                 if _had_nan and nan_color is not None:
                     colormap["NaN"] = nan_color
+                legend_colormap = colormap
+                if highlight_list is not None:
+                    colormap, legend_colormap = _apply_highlight(
+                        colormap, highlight_list, highlight_color
+                    )
                 if use_datashader:
                     _plot_static_categorical(ax, df, c, colormap, point_size)
                 else:
                     _plot_static_categorical_mpl(ax, df, c, colormap, point_size, point_edge_color, point_edge_width, rasterized)
-                legend_fig = _add_legend(ax, colormap, legend_mode, legend_max_categories, legend_entries_per_col)
-                if legend_fig:
-                    legend_figs.append(legend_fig)
+                if legend_colormap:
+                    legend_fig = _add_legend(ax, legend_colormap, legend_mode, legend_max_categories, legend_entries_per_col)
+                    if legend_fig:
+                        legend_figs.append(legend_fig)
             else:
+                if highlight_list is not None and not _highlight_warned:
+                    warnings.warn(
+                        "highlight has no effect on continuous color keys.",
+                        UserWarning, stacklevel=2,
+                    )
+                    _highlight_warned = True
                 vmin_use, vmax_use = _get_vmin_vmax(df[c].values, vmin, vmax, vmax_percentile)
                 if use_datashader:
                     _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
@@ -971,6 +1045,12 @@ def embedding(
                 )
                 plt.colorbar(sm, ax=ax, shrink=0.6)
         else:
+            if highlight_list is not None and not _highlight_warned:
+                warnings.warn(
+                    "highlight has no effect when no color key is given.",
+                    UserWarning, stacklevel=2,
+                )
+                _highlight_warned = True
             if use_datashader:
                 import datashader as ds
                 import datashader.transfer_functions as tf
@@ -1045,6 +1125,8 @@ def umap(
         keys (str or Sequence[str], optional): Key(s) for color encoding.
             Deprecated alias: ``color``.
         color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
+        highlight (str or Sequence[str], optional): Categories of a categorical color
+            key to emphasize; all others are greyed out. See embedding().
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",

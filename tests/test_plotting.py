@@ -10,6 +10,7 @@ matplotlib.use("Agg")  # must be set before any other matplotlib import
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
@@ -21,7 +22,7 @@ from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.facs import facs
 from insitupy.plotting.go import go_plot
 from insitupy.plotting.qc import plot_qc_metrics
-from insitupy.plotting.scatter import pca, tsne, umap
+from insitupy.plotting.scatter import _apply_highlight, pca, tsne, umap
 from insitupy.plotting.volcano import single_volcano, volcano
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -251,4 +252,77 @@ class TestEmbeddingWrappers:
         fig = pca(adata_pca_only, show=False, return_fig=True)
         assert fig is not None
         plt.close("all")
+        plt.close("all")
+
+
+# ── highlight ─────────────────────────────────────────────────────────────────
+
+class TestApplyHighlight:
+    def test_recolors_and_trims_legend(self):
+        color_dict = {"A": "#111111", "B": "#222222", "C": "#333333"}
+        plot_dict, legend_dict = _apply_highlight(color_dict, ["A"], "#E0E0E0")
+
+        assert plot_dict["A"] == "#111111"
+        assert plot_dict["B"] == "#E0E0E0"
+        assert plot_dict["C"] == "#E0E0E0"
+        assert legend_dict == {"A": "#111111"}
+        assert list(plot_dict)[-1] == "A"
+
+    def test_warns_on_missing_category(self):
+        color_dict = {"A": "#111111", "B": "#222222"}
+        with pytest.warns(UserWarning, match="highlight categories not found"):
+            _apply_highlight(color_dict, ["Z"], "#E0E0E0")
+
+    def test_multiple_highlights(self):
+        color_dict = {"A": "#111111", "B": "#222222", "C": "#333333"}
+        plot_dict, legend_dict = _apply_highlight(color_dict, ["A", "C"], "#E0E0E0")
+
+        assert plot_dict["A"] == "#111111"
+        assert plot_dict["C"] == "#333333"
+        assert plot_dict["B"] == "#E0E0E0"
+        assert set(legend_dict.keys()) == {"A", "C"}
+
+
+class TestEmbeddingHighlight:
+    def test_umap_highlight_returns_figure(self):
+        adata = _make_adata_with_embeddings()
+        fig = umap(adata, keys="celltype", highlight="A", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_umap_highlight_matplotlib_backend(self):
+        adata = _make_adata_with_embeddings()
+        fig = umap(
+            adata, keys="celltype", highlight="A",
+            render_mode="matplotlib", show=False, return_fig=True
+        )
+        assert fig is not None
+        plt.close("all")
+
+    def test_highlight_warns_on_continuous_key(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="highlight has no effect on continuous"):
+            fig = umap(adata, keys="g0", highlight="A", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_highlight_warns_on_no_key(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="highlight has no effect when no color key"):
+            fig = umap(adata, keys=None, highlight="A", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_highlight_warns_when_interactive(self):
+        pytest.importorskip("holoviews")
+        pytest.importorskip("datashader")
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="highlight is only supported for static plots"):
+            umap(adata, keys="celltype", highlight="A", interactive=True, show=False)
+
+    def test_highlight_absent_category_warns(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="highlight categories not found"):
+            fig = umap(adata, keys="celltype", highlight="Z", show=False, return_fig=True)
+        assert fig is not None
         plt.close("all")
