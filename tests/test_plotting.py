@@ -22,7 +22,7 @@ from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.facs import facs
 from insitupy.plotting.go import go_plot
 from insitupy.plotting.qc import plot_qc_metrics
-from insitupy.plotting.scatter import _apply_highlight, pca, tsne, umap
+from insitupy.plotting.scatter import _apply_dim, _apply_highlight, pca, tsne, umap
 from insitupy.plotting.volcano import single_volcano, volcano
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -326,3 +326,81 @@ class TestEmbeddingHighlight:
             fig = umap(adata, keys="celltype", highlight="Z", show=False, return_fig=True)
         assert fig is not None
         plt.close("all")
+
+
+# ── dim ────────────────────────────────────────────────────────────────────────
+
+class TestApplyDim:
+    def test_recolors_and_trims_legend(self):
+        color_dict = {"A": "#111111", "B": "#222222", "C": "#333333"}
+        plot_dict, legend_dict = _apply_dim(color_dict, ["A"], "#E0E0E0")
+
+        assert plot_dict["A"] == "#E0E0E0"
+        assert plot_dict["B"] == "#222222"
+        assert plot_dict["C"] == "#333333"
+        assert legend_dict == {"B": "#222222", "C": "#333333"}
+        assert list(plot_dict)[0] == "A"
+
+    def test_warns_on_missing_category(self):
+        color_dict = {"A": "#111111", "B": "#222222"}
+        with pytest.warns(UserWarning, match="dim categories not found"):
+            _apply_dim(color_dict, ["Z"], "#E0E0E0")
+
+    def test_multiple_dims(self):
+        color_dict = {"A": "#111111", "B": "#222222", "C": "#333333"}
+        plot_dict, legend_dict = _apply_dim(color_dict, ["A", "C"], "#E0E0E0")
+
+        assert plot_dict["A"] == "#E0E0E0"
+        assert plot_dict["C"] == "#E0E0E0"
+        assert plot_dict["B"] == "#222222"
+        assert set(legend_dict.keys()) == {"B"}
+
+
+class TestEmbeddingDim:
+    def test_umap_dim_returns_figure(self):
+        adata = _make_adata_with_embeddings()
+        fig = umap(adata, keys="celltype", dim="B", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_umap_dim_matplotlib_backend(self):
+        adata = _make_adata_with_embeddings()
+        fig = umap(
+            adata, keys="celltype", dim="B",
+            render_mode="matplotlib", show=False, return_fig=True
+        )
+        assert fig is not None
+        plt.close("all")
+
+    def test_dim_warns_on_continuous_key(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="dim has no effect on continuous"):
+            fig = umap(adata, keys="g0", dim="B", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_dim_warns_on_no_key(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="dim has no effect when no color key"):
+            fig = umap(adata, keys=None, dim="B", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_dim_warns_when_interactive(self):
+        pytest.importorskip("holoviews")
+        pytest.importorskip("datashader")
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="dim is only supported for static plots"):
+            umap(adata, keys="celltype", dim="B", interactive=True, show=False)
+
+    def test_dim_absent_category_warns(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.warns(UserWarning, match="dim categories not found"):
+            fig = umap(adata, keys="celltype", dim="Z", show=False, return_fig=True)
+        assert fig is not None
+        plt.close("all")
+
+    def test_highlight_and_dim_mutually_exclusive(self):
+        adata = _make_adata_with_embeddings()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            umap(adata, keys="celltype", highlight="A", dim="B", show=False)

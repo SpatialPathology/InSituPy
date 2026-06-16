@@ -183,6 +183,25 @@ def _get_vmin_vmax(
     return vmin, vmax
 
 
+def _recolor_background(
+    color_dict: dict,
+    keep_set: set,
+    bg_color: str,
+) -> tuple[dict, dict]:
+    """
+    Core for highlight/dim: recolor every category not in keep_set to bg_color.
+
+    Returns (plot_dict, legend_dict). plot_dict lists background categories first and
+    kept categories last (so kept points draw on top in the matplotlib backend);
+    legend_dict contains only the kept categories with their original colors.
+    """
+    bg_items = [(cat, bg_color) for cat in color_dict if str(cat) not in keep_set]
+    keep_items = [(cat, col) for cat, col in color_dict.items() if str(cat) in keep_set]
+    plot_dict = dict(bg_items + keep_items)
+    legend_dict = dict(keep_items)
+    return plot_dict, legend_dict
+
+
 def _apply_highlight(
     color_dict: dict,
     highlight: Sequence,
@@ -204,14 +223,33 @@ def _apply_highlight(
             f"highlight categories not found in data: {sorted(missing)}",
             UserWarning, stacklevel=2,
         )
+    return _recolor_background(color_dict, highlight_set, highlight_color)
 
-    dim_items = [(cat, highlight_color) for cat in color_dict
-                 if str(cat) not in highlight_set]
-    hi_items = [(cat, col) for cat, col in color_dict.items()
-                if str(cat) in highlight_set]
-    plot_dict = dict(dim_items + hi_items)
-    legend_dict = dict(hi_items)
-    return plot_dict, legend_dict
+
+def _apply_dim(
+    color_dict: dict,
+    dim: Sequence,
+    dim_color: str,
+) -> tuple[dict, dict]:
+    """
+    De-emphasize the named categories by recoloring them to a single light color,
+    leaving all other categories with their original colors.
+
+    Returns (plot_dict, legend_dict) where plot_dict has the dimmed categories first
+    (kept categories last so they draw on top in the matplotlib backend) and
+    legend_dict contains only the non-dimmed categories with their original colors.
+    Dim values absent from color_dict trigger a UserWarning.
+    """
+    dim_set = {str(d) for d in dim}
+    present = {str(cat) for cat in color_dict}
+    missing = dim_set - present
+    if missing:
+        warnings.warn(
+            f"dim categories not found in data: {sorted(missing)}",
+            UserWarning, stacklevel=2,
+        )
+    keep_set = present - dim_set
+    return _recolor_background(color_dict, keep_set, dim_color)
 
 
 def _plot_static_categorical(
@@ -562,6 +600,8 @@ def embedding(
     nan_color: str | None = None,
     highlight: str | Sequence[str] | None = None,
     highlight_color: str = "#E0E0E0",
+    dim: str | Sequence[str] | None = None,
+    dim_color: str = "#E0E0E0",
     cmap: str | None = None,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -618,6 +658,16 @@ def embedding(
             ``highlight`` is set. Default is "#E0E0E0", a very light grey chosen to read
             as a faded background rather than a real category color. Tune for a stronger
             or weaker focus effect.
+        dim (str or Sequence[str], optional): One or more categories of the categorical
+            color key to push into the background. The named categories are recolored to
+            ``dim_color`` (a very light grey) while all other categories keep their colors;
+            the legend then lists only the non-dimmed categories. The inverse of
+            ``highlight``. Has no effect on continuous color keys or when no key is given,
+            and is ignored (with a warning) for interactive plots. Dim values not present in
+            the data trigger a warning. Cannot be combined with ``highlight``. Default is
+            None (no dimming).
+        dim_color (str): Color applied to the dimmed categories when ``dim`` is set.
+            Default is "#E0E0E0", a very light grey. Tune for a stronger or weaker fade.
         cmap (str, optional): Colormap for continuous values. Default is "viridis".
         vmin (float, optional): Minimum value for continuous color scale. Default is
             data minimum.
@@ -720,6 +770,17 @@ def embedding(
     else:
         highlight_list = list(highlight)
 
+    # Normalize dim to list
+    if dim is None:
+        dim_list = None
+    elif isinstance(dim, str):
+        dim_list = [dim]
+    else:
+        dim_list = list(dim)
+
+    if highlight_list is not None and dim_list is not None:
+        raise ValueError("highlight and dim are mutually exclusive; provide only one.")
+
     # Normalize tooltip to list
     tooltip_keys = None
     if tooltip is not None:
@@ -750,9 +811,10 @@ def embedding(
                 UserWarning, stacklevel=2
             )
 
-    if highlight_list is not None and interactive:
+    if (highlight_list is not None or dim_list is not None) and interactive:
+        _name = "highlight" if highlight_list is not None else "dim"
         warnings.warn(
-            "highlight is only supported for static plots (interactive=False); "
+            f"{_name} is only supported for static plots (interactive=False); "
             "it will be ignored.",
             UserWarning, stacklevel=2,
         )
@@ -973,6 +1035,7 @@ def embedding(
 
     legend_figs = []
     _highlight_warned = False
+    _dim_warned = False
 
     for i, c in enumerate(keys):
         ax = axes[i]
@@ -1002,6 +1065,10 @@ def embedding(
                     colormap, legend_colormap = _apply_highlight(
                         colormap, highlight_list, highlight_color
                     )
+                elif dim_list is not None:
+                    colormap, legend_colormap = _apply_dim(
+                        colormap, dim_list, dim_color
+                    )
                 if use_datashader:
                     _plot_static_categorical(ax, df, c, colormap, point_size)
                 else:
@@ -1021,6 +1088,12 @@ def embedding(
                         UserWarning, stacklevel=2,
                     )
                     _highlight_warned = True
+                if dim_list is not None and not _dim_warned:
+                    warnings.warn(
+                        "dim has no effect on continuous color keys.",
+                        UserWarning, stacklevel=2,
+                    )
+                    _dim_warned = True
                 vmin_use, vmax_use = _get_vmin_vmax(df[c].values, vmin, vmax, vmax_percentile)
                 if use_datashader:
                     _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
@@ -1041,6 +1114,12 @@ def embedding(
                     UserWarning, stacklevel=2,
                 )
                 _highlight_warned = True
+            if dim_list is not None and not _dim_warned:
+                warnings.warn(
+                    "dim has no effect when no color key is given.",
+                    UserWarning, stacklevel=2,
+                )
+                _dim_warned = True
             if use_datashader:
                 import datashader as ds
                 import datashader.transfer_functions as tf
@@ -1119,6 +1198,9 @@ def umap(
         color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
         highlight (str or Sequence[str], optional): Categories of a categorical color
             key to emphasize; all others are greyed out. See embedding().
+        dim (str or Sequence[str], optional): Categories of a categorical color key to
+            grey out while all others keep their colors; the inverse of ``highlight``.
+            See embedding().
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",
