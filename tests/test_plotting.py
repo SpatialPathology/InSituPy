@@ -265,7 +265,7 @@ class TestApplyHighlight:
         assert plot_dict["A"] == "#111111"
         assert plot_dict["B"] == "#E0E0E0"
         assert plot_dict["C"] == "#E0E0E0"
-        assert legend_dict == {"A": "#111111"}
+        assert legend_dict == {"A": "#111111", "Other": "#E0E0E0"}
         assert list(plot_dict)[-1] == "A"
 
     def test_warns_on_missing_category(self):
@@ -280,7 +280,7 @@ class TestApplyHighlight:
         assert plot_dict["A"] == "#111111"
         assert plot_dict["C"] == "#333333"
         assert plot_dict["B"] == "#E0E0E0"
-        assert set(legend_dict.keys()) == {"A", "C"}
+        assert set(legend_dict.keys()) == {"A", "C", "Other"}
 
 
 class TestEmbeddingHighlight:
@@ -338,7 +338,7 @@ class TestApplyDim:
         assert plot_dict["A"] == "#E0E0E0"
         assert plot_dict["B"] == "#222222"
         assert plot_dict["C"] == "#333333"
-        assert legend_dict == {"B": "#222222", "C": "#333333"}
+        assert legend_dict == {"B": "#222222", "C": "#333333", "Other": "#E0E0E0"}
         assert list(plot_dict)[0] == "A"
 
     def test_warns_on_missing_category(self):
@@ -353,7 +353,7 @@ class TestApplyDim:
         assert plot_dict["A"] == "#E0E0E0"
         assert plot_dict["C"] == "#E0E0E0"
         assert plot_dict["B"] == "#222222"
-        assert set(legend_dict.keys()) == {"B"}
+        assert set(legend_dict.keys()) == {"B", "Other"}
 
 
 class TestEmbeddingDim:

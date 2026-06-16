@@ -199,6 +199,8 @@ def _recolor_background(
     keep_items = [(cat, col) for cat, col in color_dict.items() if str(cat) in keep_set]
     plot_dict = dict(bg_items + keep_items)
     legend_dict = dict(keep_items)
+    if bg_items:
+        legend_dict["Other"] = bg_color
     return plot_dict, legend_dict
 
 
