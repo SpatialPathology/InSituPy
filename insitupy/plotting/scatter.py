@@ -21,6 +21,7 @@ Optional dependencies (install as needed):
 
 from __future__ import annotations
 
+import importlib.util
 import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
@@ -42,48 +43,30 @@ from insitupy._constants import with_insitupy_style
 
 def _check_datashader():
     """Check if datashader and matplotlib are available."""
-    try:
-        import datashader
-        import matplotlib.pyplot
-        return True
-    except ImportError:
-        return False
+    return (
+        importlib.util.find_spec("datashader") is not None
+        and importlib.util.find_spec("matplotlib") is not None
+    )
 
 
 def _check_holoviews():
     """Check if holoviews is available."""
-    try:
-        import holoviews
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("holoviews") is not None
 
 
 def _check_jscatter():
     """Check if jupyter-scatter is available."""
-    try:
-        import jscatter
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("jscatter") is not None
 
 
 def _check_plotly():
     """Check if plotly is available."""
-    try:
-        import plotly
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("plotly") is not None
 
 
 def _check_scanpy():
     """Check if scanpy is available (for color palettes)."""
-    try:
-        import scanpy
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("scanpy") is not None
 
 
 def _get_color_values(
@@ -245,7 +228,7 @@ def _plot_static_categorical(
 
     df["color"] = df[color_key].map(color_dict)
     spread_px = max(1, int(round(point_size)))
-    shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+    shade_hook = None if spread_px <= 1 else (lambda img, _px=spread_px: tf.spread(img, px=_px))
     dsshow(
         df,
         ds.Point("x", "y"),
@@ -274,7 +257,7 @@ def _plot_static_continuous(
     df = df.copy()
     df[color_key] = df[color_key].clip(lower=vmin, upper=vmax)
     spread_px = max(1, int(round(point_size)))
-    shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+    shade_hook = None if spread_px <= 1 else (lambda img, _px=spread_px: tf.spread(img, px=_px))
 
     dsshow(
         df,
@@ -1022,9 +1005,13 @@ def embedding(
                 if use_datashader:
                     _plot_static_categorical(ax, df, c, colormap, point_size)
                 else:
-                    _plot_static_categorical_mpl(ax, df, c, colormap, point_size, point_edge_color, point_edge_width, rasterized)
+                    _plot_static_categorical_mpl(
+                        ax, df, c, colormap, point_size, point_edge_color, point_edge_width, rasterized
+                    )
                 if legend_colormap:
-                    legend_fig = _add_legend(ax, legend_colormap, legend_mode, legend_max_categories, legend_entries_per_col)
+                    legend_fig = _add_legend(
+                        ax, legend_colormap, legend_mode, legend_max_categories, legend_entries_per_col
+                    )
                     if legend_fig:
                         legend_figs.append(legend_fig)
             else:
@@ -1038,7 +1025,10 @@ def embedding(
                 if use_datashader:
                     _plot_static_continuous(ax, df, c, colormap, point_size, vmin_use, vmax_use)
                 else:
-                    _plot_static_continuous_mpl(ax, df, c, colormap, point_size, vmin_use, vmax_use, point_edge_color, point_edge_width, rasterized)
+                    _plot_static_continuous_mpl(
+                        ax, df, c, colormap, point_size, vmin_use, vmax_use,
+                        point_edge_color, point_edge_width, rasterized
+                    )
                 sm = plt.cm.ScalarMappable(
                     cmap=colormap,
                     norm=mcolors.Normalize(vmin=vmin_use, vmax=vmax_use)
@@ -1057,12 +1047,14 @@ def embedding(
                 from datashader.mpl_ext import dsshow
 
                 spread_px = max(1, int(round(point_size)))
-                shade_hook = None if spread_px <= 1 else (lambda img: tf.spread(img, px=spread_px))
+                shade_hook = None if spread_px <= 1 else (lambda img, _px=spread_px: tf.spread(img, px=_px))
                 dsshow(df, ds.Point("x", "y"), ds.count(), cmap="viridis", shade_hook=shade_hook, ax=ax)
             else:
                 lw = point_edge_width if point_edge_color is not None else 0
                 ec = point_edge_color if point_edge_color is not None else "none"
-                ax.scatter(df["x"], df["y"], c="steelblue", s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec)
+                ax.scatter(
+                    df["x"], df["y"], c="steelblue", s=point_size, rasterized=rasterized, linewidths=lw, edgecolors=ec
+                )
             c = "density"
 
         ax.set_title(title or c)
