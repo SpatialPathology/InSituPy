@@ -159,3 +159,21 @@ def test_cellular_composition_requires_modality_when_geom_key_set():
             geom_key="region",
             modality=None,
         )
+
+
+def test_embedding_layer_static_smoke(monkeypatch):
+    adata = _make_adata_with_umap()
+    adata.var.index = pd.Index([f"g{i}" for i in range(adata.n_vars)])
+    adata.layers["counts"] = adata.X * 2
+    monkeypatch.setattr(scatter_module, "_check_datashader", lambda: False)
+
+    scatter_module.embedding(
+        adata=adata, basis="X_umap", keys="g0", layer="counts",
+        interactive=False, show=False,
+    )
+
+    with pytest.raises(KeyError, match=r"Layer 'missing' not found"):
+        scatter_module.embedding(
+            adata=adata, basis="X_umap", keys="g0", layer="missing",
+            interactive=False, show=False,
+        )

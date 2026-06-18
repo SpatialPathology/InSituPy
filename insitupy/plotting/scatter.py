@@ -71,12 +71,14 @@ def _check_scanpy():
 
 def _get_color_values(
     adata: ad.AnnData,
-    key: str
+    key: str,
+    layer: str | None = None,
 ) -> tuple[np.ndarray, Literal["categorical", "continuous"]]:
     """
-    Retrieve color values from adata.obs or adata.X.
+    Retrieve color values from adata.obs, or from adata.X / adata.layers[layer].
 
-    Returns array of values and type ("categorical" or "continuous").
+    obs columns take precedence and ignore `layer`; `layer` only affects
+    gene-expression (var_names) lookups.
     """
     if key in adata.obs.columns:
         values = adata.obs[key]
@@ -90,7 +92,15 @@ def _get_color_values(
             return values.values, "continuous"
 
     if key in adata.var_names:
-        expr = adata[:, key].X
+        if layer is not None:
+            if layer not in adata.layers:
+                raise KeyError(
+                    f"Layer '{layer}' not found in adata.layers. "
+                    f"Available layers: {list(adata.layers)}"
+                )
+            expr = adata[:, key].layers[layer]
+        else:
+            expr = adata[:, key].X
         if hasattr(expr, "toarray"):
             expr = expr.toarray()
         return np.asarray(expr).flatten(), "continuous"
@@ -599,6 +609,7 @@ def embedding(
     basis: str = "X_umap",
     keys: str | Sequence[str] | None = None,
     color: str | Sequence[str] | None = None,
+    layer: str | None = None,
     nan_color: str | None = None,
     highlight: str | Sequence[str] | None = None,
     highlight_color: str = "#E0E0E0",
@@ -643,6 +654,10 @@ def embedding(
             adata.obs first, then adata.var_names. Can be single key or list of keys
             for multiple panels.
         color (str or Sequence[str], optional): Deprecated. Use ``keys`` instead.
+        layer (str, optional): Name of an ``adata.layers`` entry to read gene-expression
+            values from instead of ``adata.X``. Only affects keys resolved against
+            ``var_names``; keys found in ``adata.obs`` ignore this. Default None (use
+            ``.X``).
         nan_color (str, optional): Color for cells with missing values (NaN) in
             categorical columns. If None (default), NaN cells are excluded from the
             plot. If a color string (e.g. "lightgray"), NaN cells are shown in that
@@ -750,6 +765,12 @@ def embedding(
     if basis not in adata.obsm:
         raise KeyError(f"'{basis}' not found in adata.obsm")
 
+    if layer is not None and layer not in adata.layers:
+        raise KeyError(
+            f"Layer '{layer}' not found in adata.layers. "
+            f"Available layers: {list(adata.layers)}"
+        )
+
     coords = adata.obsm[basis]
     if coords.shape[1] < 2:
         raise ValueError(f"'{basis}' must have at least 2 dimensions")
@@ -841,7 +862,7 @@ def embedding(
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
-                    values, color_type = _get_color_values(adata, c)
+                    values, color_type = _get_color_values(adata, c, layer=layer)
                     _had_nan = False
                     if color_type == "categorical" and values.isna().any():
                         _had_nan = True
@@ -899,7 +920,7 @@ def embedding(
                 df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
                 if c is not None:
-                    values, color_type = _get_color_values(adata, c)
+                    values, color_type = _get_color_values(adata, c, layer=layer)
                     _had_nan = False
                     if color_type == "categorical" and values.isna().any():
                         _had_nan = True
@@ -961,7 +982,7 @@ def embedding(
             df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
             if c is not None:
-                values, color_type = _get_color_values(adata, c)
+                values, color_type = _get_color_values(adata, c, layer=layer)
                 _had_nan = False
                 _nan_keep = None
                 if color_type == "categorical" and values.isna().any():
@@ -1044,7 +1065,7 @@ def embedding(
         df = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1]})
 
         if c is not None:
-            values, color_type = _get_color_values(adata, c)
+            values, color_type = _get_color_values(adata, c, layer=layer)
             _had_nan = False
             if color_type == "categorical" and values.isna().any():
                 _had_nan = True
@@ -1203,6 +1224,8 @@ def umap(
         dim (str or Sequence[str], optional): Categories of a categorical color key to
             grey out while all others keep their colors; the inverse of ``highlight``.
             See embedding().
+        layer (str, optional): AnnData layer to read gene-expression from. Forwarded to
+            embedding(). See embedding() for details.
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",
@@ -1222,6 +1245,10 @@ def pca(
 
     Wrapper around embedding() with basis="X_pca".
     See embedding() for full parameter documentation.
+
+    Args:
+        layer (str, optional): AnnData layer to read gene-expression from. Forwarded to
+            embedding(). See embedding() for details.
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",
@@ -1241,6 +1268,10 @@ def tsne(
 
     Wrapper around embedding() with basis="X_tsne".
     See embedding() for full parameter documentation.
+
+    Args:
+        layer (str, optional): AnnData layer to read gene-expression from. Forwarded to
+            embedding(). See embedding() for details.
     """
     if color is not None:
         warnings.warn("'color' is deprecated, use 'keys' instead.",
