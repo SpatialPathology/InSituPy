@@ -221,7 +221,7 @@ if WITH_NAPARI:
                     )
 
     def _add_cells_to_viewer(
-        data: Union["InSituData", "StructuredSpatialData"],
+        data: "InSituData",
         viewer: napari.viewer,
         keys: str,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
@@ -278,7 +278,7 @@ if WITH_NAPARI:
                 viewer.add_layer(Layer.create(*layer))
 
     def _add_widgets_to_viewer(
-        data: Union["InSituData", "StructuredSpatialData"],
+        data: "InSituData",
         viewer: napari.Viewer,
         widgets_max_width: int = 500
         ):
@@ -479,7 +479,7 @@ if WITH_NAPARI:
         viewer.window.add_dock_widget(utility_buttons, area='right', name="Utilities")
 
     def _add_transcript_viewer_to_viewer(
-        data: Union["InSituData", "StructuredSpatialData"],
+        data: "InSituData",
         viewer: napari.Viewer,
         lazy_loading: bool = True,
         transcript_config: TranscriptViewerConfig | None = None,
@@ -488,7 +488,7 @@ if WITH_NAPARI:
         """Add transcript viewer widget to the napari viewer.
 
         Args:
-            data: InSituData or StructuredSpatialData object containing transcript data.
+            data: InSituData object containing transcript data.
             viewer: The napari viewer instance.
             lazy_loading: If True, use lazy loading mode for large datasets.
             transcript_config: Configuration for the transcript viewer widget.
@@ -532,7 +532,7 @@ if WITH_NAPARI:
 
 
     def _show(
-        data: Union["InSituData", "StructuredSpatialData"],
+        data: "InSituData",
         keys: str | None = None,
         key_type: Literal["genes", "obs", "obsm"] = "genes",
         cells_layer: str | None = None,
