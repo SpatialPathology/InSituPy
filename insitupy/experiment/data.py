@@ -3102,31 +3102,52 @@ class InSituExperiment:
                 "or set `self.path` by reading an existing experiment."
             )
 
-        parent_path_identical = [
-            (d.path is not None) and (Path(d.path).parent == self.path)
-            for d in self.data
-        ]
-        if not np.all(parent_path_identical):
-            invalid_uids = self._metadata.loc[~np.array(parent_path_identical), "uid"].tolist()
-            raise ValueError(
-                "Saving failed: save path of some InSituData objects does not lie inside "
-                f"the InSituExperiment save path. Affected uids: {invalid_uids}"
-            )
+        # Pre-pass: validate paths and assign free slots for datasets with no path.
+        # _newly_assigned tracks resolved paths assigned in this pass so that two
+        # no-path datasets don't receive the same free slot before either is written.
+        _newly_assigned: set[Path] = set()
+        for i, d in enumerate(self._data):
+            if d.path is None:
+                j = 0
+                while True:
+                    candidate = (Path(self.path) / f"data-{str(j).zfill(3)}").resolve()
+                    if not candidate.exists() and candidate not in _newly_assigned:
+                        break
+                    j += 1
+                d._path = candidate
+                _newly_assigned.add(candidate)
+            elif Path(d.path).parent != Path(self.path):
+                uid = self._metadata.iloc[i]["uid"]
+                raise ValueError(
+                    f"Saving failed: dataset with uid '{uid}' has a path outside the "
+                    "InSituExperiment directory. External datasets must be moved inside "
+                    "the experiment directory before calling save(). "
+                    f"Affected path: {d.path}"
+                )
 
         failures = []
+
+        def _save_one(xd, **kwargs):
+            if Path(xd._path) not in _newly_assigned:
+                xd.save(verbose=verbose, **kwargs)
+            else:
+                saveas_keys = {"zarr_zipped", "images_as_zarr",
+                               "images_max_resolution", "debug", "zip_output"}
+                saveas_kwargs = {k: v for k, v in kwargs.items() if k in saveas_keys}
+                xd.saveas(xd._path, verbose=False, **saveas_kwargs)
 
         if collect_warnings_mode:
             with collect_warnings() as collector:
                 for xd in tqdm(self._data):
                     try:
-                        xd.save(verbose=verbose, **kwargs)
+                        _save_one(xd, **kwargs)
                     except Exception as exc:
                         failures.append((xd.uid, exc))
             collector.print_summary()
         else:
             for xd in tqdm(self._data):
                 try:
-                    xd.save(verbose=verbose, **kwargs)
+                    _save_one(xd, **kwargs)
                 except Exception as exc:
                     failures.append((xd.uid, exc))
 
