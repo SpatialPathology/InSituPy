@@ -6,7 +6,7 @@ This tutorial explains how to connect an AI assistant (Claude, Cursor, Windsurf,
 
 ## What is the MCP Server?
 
-**MCP** (Model Context Protocol) is an open standard that lets AI assistants call external tools. The InSituPy MCP server exposes 23 tools that give an AI assistant live access to:
+**MCP** (Model Context Protocol) is an open standard that lets AI assistants call external tools. The InSituPy MCP server exposes 22 tools that give an AI assistant live access to:
 
 - The full InSituPy API (functions, classes, signatures, docstrings)
 - Searchable source code and test files
@@ -86,14 +86,28 @@ This is all you need. `uvx` downloads `insitupy-spatial` with its MCP dependenci
 
 ### Claude Code (CLI)
 
-The repository already contains a `.mcp.json` file configured for Claude Code. When you run `claude` from inside the repository root, the server starts automatically.
+There are two ways to use the InSituPy MCP server with Claude Code depending on whether you have the repository cloned locally.
 
-```bash
-cd /path/to/InSituPy
-claude
+**Option A — No repository clone (recommended for most users)**
+
+Add the server to Claude Code's global MCP config (`~/.claude/mcp.json` on macOS/Linux, `%USERPROFILE%\.claude\mcp.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+    }
+  }
+}
 ```
 
-The `.mcp.json` uses `python -m tools.mcp_server`, which requires `python` to resolve to your InSituPy environment. Activate it first:
+The server will then be available in any Claude Code session, regardless of which directory you're working in.
+
+**Option B — Working inside the InSituPy repository**
+
+The repository already contains a `.mcp.json` file configured for Claude Code. When you run `claude` from inside the repository root, the server starts automatically. The `.mcp.json` uses `python -m tools.mcp_server`, which requires `python` to resolve to your InSituPy environment. Activate it first:
 
 ```bash
 conda activate insitupy
@@ -202,6 +216,8 @@ Or edit `cline_mcp_settings.json` directly (accessible from the Cline MCP panel)
 
 ### ChatGPT and Other Non-MCP Clients
 
+> **Note:** The options below have **not been tested** by the InSituPy team, as we do not have access to a ChatGPT account with plugin/tool support. If you try either approach and run into issues — or if it works well — we'd love to hear from you. Please open an [issue](https://github.com/SpatialPathology/InSituPy/issues) or reach out via our [Zulip chat](https://insitupy.zulipchat.com).
+
 ChatGPT and similar web-based assistants do not natively support MCP. There are two practical options:
 
 **Option 1 — Use an MCP-to-HTTP bridge**
@@ -256,7 +272,7 @@ Once connected, try these prompts to get started:
 
 ## Tool Reference
 
-The server exposes the following tools. Your AI assistant selects the appropriate one automatically.
+The server exposes the following 22 tools. Your AI assistant selects the appropriate one automatically.
 
 ### Generic Introspection
 

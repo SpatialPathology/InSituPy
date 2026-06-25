@@ -14,7 +14,8 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 | `get_class_info` | Detailed class info: methods, properties, docstring |
 | `get_function_source` | Source code of any function/method/class |
 | `get_docstring` | Full docstring for any module/class/function |
-| `search_codebase` | Regex search across all source files |
+| `search_codebase` | Regex search across all source and test files |
+| `list_test_files` | List all test files with descriptions |
 | `read_source_file` | Read a source file with line numbers |
 
 ### InSituPy-Specific
@@ -29,34 +30,52 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 | `get_public_api` | Top-level namespace exports and submodule shorthands |
 | `get_workflow_guide` | Step-by-step workflow examples |
 | `get_storage_format` | On-disk storage architecture and metadata schema |
+| `get_datasets_guide` | Available sample datasets and how to download them |
+| `get_result_types` | Result objects returned by analysis tools |
+| `get_interactive_guide` | napari-based interactive visualization |
+| `get_images_api` | Image I/O and utility functions |
+| `get_spatialdata_api` | SpatialData conversion functions |
 
 ## Setup
 
-### 1. Clone the repository
+### Recommended: zero-install via `uvx`
 
-Navigate to the directory where you want to download the repository:
+No repository clone or manual environment setup needed. Add the following to your MCP client config:
 
-```bash
-cd /path/to/your/projects
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+    }
+  }
+}
 ```
 
-Then clone the repository and enter it:
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) downloads and runs the server in an isolated environment automatically. Install `uv` first if you haven't already — see [uv installation](https://docs.astral.sh/uv/getting-started/installation/).
+
+For client-specific config file paths and step-by-step instructions, see **[MCP_TUTORIAL.md](../../MCP_TUTORIAL.md)**.
+
+### Local development setup
+
+Use this approach if you want to run the server from a local repository clone — for example, to test unreleased changes.
+
+**1. Clone the repository:**
 
 ```bash
 git clone https://github.com/SpatialPathology/InSituPy.git
 cd InSituPy
 ```
 
-### 2. Install
-
-Create a virtual environment (Python >=3.12 required) and install the package with the MCP optional dependency:
+**2. Install with MCP dependencies:**
 
 ```bash
-uv venv .venv --python 3.13
+uv venv .venv --python 3.12
 uv pip install -e ".[mcp]"
 ```
 
-### 3. Verify
+**3. Verify:**
 
 ```bash
 # Windows
@@ -68,40 +87,20 @@ uv pip install -e ".[mcp]"
 
 The server should start. Press Ctrl+C to stop.
 
-### 4. Configure your MCP client
-
-#### Claude Desktop
-
-Add the following to your `claude_desktop_config.json`:
+**4. Configure your MCP client** using the local executable path:
 
 ```json
-"mcpServers": {
-  "insitupy": {
-    "command": "/path/to/InSituPy/.venv/Scripts/insitupy-mcp.exe",
-    "args": []
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "/path/to/InSituPy/.venv/bin/insitupy-mcp",
+      "args": []
+    }
   }
 }
 ```
 
-Replace `/path/to/InSituPy` with the actual path to your cloned repository. On macOS/Linux, replace the executable path with `.venv/bin/insitupy-mcp`.
-
-Restart Claude Desktop to connect the server.
-
-#### Claude Code (auto-discovery)
-
-The `.mcp.json` file in the repository root enables auto-discovery. Just open the repo in Claude Code and the server will be available.
-
-#### Other MCP clients
-
-Run the server via stdio:
-
-```bash
-# Windows
-.venv\Scripts\insitupy-mcp.exe
-
-# macOS/Linux
-.venv/bin/insitupy-mcp
-```
+On Windows, replace with `.venv\Scripts\insitupy-mcp.exe`.
 
 ## How It Works
 
@@ -109,4 +108,4 @@ The server uses Python's `inspect`, `importlib`, and `ast` modules to introspect
 
 All tool outputs are truncated to 2000 characters (4000 for source files) to keep responses concise.
 
-**Note:** Because the package is installed in editable mode (`-e`), any changes to the insitupy source are immediately reflected without reinstalling.
+**Note:** When installed in editable mode (`-e`), any changes to the InSituPy source are immediately reflected without reinstalling.
