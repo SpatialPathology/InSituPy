@@ -5,13 +5,19 @@ Covers acceptance criteria from the 260622 fix-two-bugs-before-0.12.0b4 report:
 - two pathless datasets get distinct slots (no collision)
 - dataset with path outside the experiment dir raises ValueError
 - existing on-disk datasets are updated (not recreated) alongside new ones
+
+Also covers retry-safety (260625 report):
+- Trigger A: path-less dataset is NOT mutated before a later validation error (retry succeeds)
+- Trigger B: a mid-write failure is rolled back cleanly (no litter, retry succeeds)
 """
 
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
+from pathlib import Path
 
+from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.experiment.data import InSituExperiment
@@ -120,3 +126,77 @@ def test_save_mixed_existing_and_new(tmp_path):
     assert xd_new.path is not None
     assert xd_new.path.exists()
     assert xd_new.path != existing_path
+
+
+def test_save_retry_trigger_a(tmp_path):
+    """Trigger A: path-less dataset at lower index than an external-path dataset.
+
+    After the first save() raises ValueError (external path), the path-less dataset
+    must still have path=None (not mutated to a slot), so a retry after removing the
+    offending dataset succeeds and writes it to a clean slot.
+    """
+    exp, dest = _make_and_save_exp(tmp_path, n=1)
+
+    xd_new = _make_xd(seed=40)       # path is None, will be index 1
+    exp.add(xd_new)
+
+    xd_ext = _make_xd(seed=41)
+    xd_ext._path = (tmp_path / "elsewhere" / "data-000").resolve()
+    exp._data.append(xd_ext)
+    exp._metadata = pd.concat(
+        [exp._metadata, pd.DataFrame([{"uid": "ext-uid"}])],
+        ignore_index=True,
+    )
+
+    # First save must raise — external path detected
+    with pytest.raises(ValueError, match="ext-uid"):
+        exp.save()
+
+    # The path-less dataset must NOT have been mutated (validate-before-assign)
+    assert xd_new.path is None, "path-less dataset must not be mutated before validation raises"
+    assert not (dest / "data-001").exists(), "no slot dir must be created before validation raises"
+
+    # Remove the offending external dataset and retry
+    exp._data.pop()
+    exp._metadata = exp._metadata.iloc[:2].reset_index(drop=True)
+
+    exp.save()
+
+    assert xd_new.path == (dest / "data-001").resolve()
+    assert xd_new.path.exists()
+    assert (xd_new.path / ISPY_METADATA_FILE).exists()
+
+
+def test_save_retry_trigger_b(tmp_path):
+    """Trigger B: saveas() fails mid-write; rollback removes partial dir and resets _path.
+
+    After the first save() raises RuntimeError (simulated mid-write failure), the
+    partial slot dir must be gone and the path-less dataset must have path=None.
+    A retry (without the fault) succeeds and writes it to a clean slot.
+    """
+    exp, dest = _make_and_save_exp(tmp_path, n=1)
+
+    xd_new = _make_xd(seed=50)
+    exp.add(xd_new)
+
+    def _boom(path, *a, **k):
+        Path(path).mkdir(parents=True, exist_ok=True)  # leave partial, metadata-less dir
+        raise RuntimeError("simulated mid-write failure")
+
+    xd_new.saveas = _boom
+
+    with pytest.raises(RuntimeError, match="call save\\(\\) again"):
+        exp.save()
+
+    # Rollback must have cleaned up
+    assert xd_new.path is None, "path must be reset to None after rollback"
+    assert not (dest / "data-001").exists(), "partial slot dir must be removed by rollback"
+
+    # Remove the fault and retry
+    del xd_new.saveas
+
+    exp.save()
+
+    assert xd_new.path == (dest / "data-001").resolve()
+    assert xd_new.path.exists()
+    assert (xd_new.path / ISPY_METADATA_FILE).exists()

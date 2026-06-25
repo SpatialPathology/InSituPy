@@ -3102,11 +3102,27 @@ class InSituExperiment:
                 "or set `self.path` by reading an existing experiment."
             )
 
-        # Pre-pass: validate paths and assign free slots for datasets with no path.
-        # _newly_assigned tracks resolved paths assigned in this pass so that two
-        # no-path datasets don't receive the same free slot before either is written.
-        _newly_assigned: set[Path] = set()
+        # Pre-pass 1: validate ALL dataset paths BEFORE mutating any _path.
+        # Validating up front (rather than interleaving validation with slot
+        # assignment) means a later invalid dataset can no longer leave an earlier
+        # path-less dataset with a dangling _path that breaks the documented retry.
         for i, d in enumerate(self._data):
+            if d.path is not None and Path(d.path).parent != Path(self.path):
+                uid = self._metadata.iloc[i]["uid"]
+                raise ValueError(
+                    f"Saving failed: dataset with uid '{uid}' has a path outside the "
+                    "InSituExperiment directory. External datasets must be moved inside "
+                    "the experiment directory before calling save(). "
+                    f"Affected path: {d.path}"
+                )
+
+        # Pre-pass 2: assign free slots to path-less datasets.
+        # _newly_assigned tracks resolved paths assigned in this pass so that two
+        # no-path datasets don't receive the same free slot before either is written,
+        # so the save loop can route them to saveas(), and so a failed write can be
+        # rolled back (partial dir removed, _path reset) for a clean retry.
+        _newly_assigned: set[Path] = set()
+        for d in self._data:
             if d.path is None:
                 j = 0
                 while True:
@@ -3116,14 +3132,6 @@ class InSituExperiment:
                     j += 1
                 d._path = candidate
                 _newly_assigned.add(candidate)
-            elif Path(d.path).parent != Path(self.path):
-                uid = self._metadata.iloc[i]["uid"]
-                raise ValueError(
-                    f"Saving failed: dataset with uid '{uid}' has a path outside the "
-                    "InSituExperiment directory. External datasets must be moved inside "
-                    "the experiment directory before calling save(). "
-                    f"Affected path: {d.path}"
-                )
 
         failures = []
 
@@ -3136,12 +3144,21 @@ class InSituExperiment:
                 saveas_kwargs = {k: v for k, v in kwargs.items() if k in saveas_keys}
                 xd.saveas(xd._path, verbose=False, **saveas_kwargs)
 
+        def _rollback_assigned_slot(xd):
+            slot = Path(xd._path) if xd._path is not None else None
+            if slot is not None and slot in _newly_assigned:
+                if slot.exists():
+                    shutil.rmtree(slot, ignore_errors=True)
+                _newly_assigned.discard(slot)
+                xd._path = None
+
         if collect_warnings_mode:
             with collect_warnings() as collector:
                 for xd in tqdm(self._data):
                     try:
                         _save_one(xd, **kwargs)
                     except Exception as exc:
+                        _rollback_assigned_slot(xd)
                         failures.append((xd.uid, exc))
             collector.print_summary()
         else:
@@ -3149,6 +3166,7 @@ class InSituExperiment:
                 try:
                     _save_one(xd, **kwargs)
                 except Exception as exc:
+                    _rollback_assigned_slot(xd)
                     failures.append((xd.uid, exc))
 
         if failures:
