@@ -118,6 +118,53 @@ def test_saveas_failure_in_write_loop_keeps_old(tmp_path, monkeypatch):
     assert not (tmp_path / "exp.__ispy_bak__").exists(), "no backup should exist (swap never reached)"
 
 
+def test_saveas_recovers_orphaned_backup_overwrite_false(tmp_path):
+    """An orphaned backup (path missing, backup present) must be recovered, not deleted.
+
+    Simulates the interrupted-swap crash state: backup exists, path is gone.
+    With overwrite=False the next saveas must raise FileExistsError (protecting
+    the recovered data) and leave the original 2-dataset experiment intact.
+    Under the pre-fix code the backup was deleted unconditionally and a 3-dataset
+    write would proceed silently.
+    """
+    exp2 = _make_exp(n=2)
+    dest = tmp_path / "exp"
+    exp2.saveas(dest)
+
+    # Simulate interrupted swap: rename dest to backup so path is missing.
+    backup = tmp_path / "exp.__ispy_bak__"
+    os.rename(dest, backup)
+    assert not dest.exists()
+    assert backup.exists()
+
+    exp3 = _make_exp(n=3)
+    with pytest.raises(FileExistsError, match="Recovered"):
+        exp3.saveas(dest, overwrite=False)
+
+    # The original 2-dataset experiment must be back at dest.
+    assert dest.exists(), "recovered experiment must be at dest"
+    assert len(list(dest.glob("data-*"))) == 2, "recovered dest must hold 2 datasets"
+    assert not backup.exists(), "backup sibling must be gone after recovery"
+
+
+def test_saveas_recovers_orphaned_backup_then_overwrites(tmp_path):
+    """After recovering an orphaned backup, overwrite=True proceeds with the new write."""
+    exp2 = _make_exp(n=2)
+    dest = tmp_path / "exp"
+    exp2.saveas(dest)
+
+    backup = tmp_path / "exp.__ispy_bak__"
+    os.rename(dest, backup)
+
+    exp3 = _make_exp(n=3)
+    exp3.saveas(dest, overwrite=True)
+
+    assert dest.exists()
+    assert len(list(dest.glob("data-*"))) == 3, "dest must hold the new 3-dataset experiment"
+    assert not (tmp_path / "exp.__ispy_bak__").exists()
+    assert not (tmp_path / "exp.__ispy_tmp__").exists()
+
+
 def test_saveas_failure_at_swap_restores_old(tmp_path, monkeypatch):
     """A failure at the final os.rename(staging, path) must restore the old destination."""
     exp = _make_exp()
