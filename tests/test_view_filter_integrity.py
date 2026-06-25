@@ -447,6 +447,79 @@ def test_r8_saveas_relative_path_then_save(tmp_path, monkeypatch):
     exp.save()
 
 
+# ── persistence-minor-fixes m2 ────────────────────────────────────────────────
+
+
+def test_m2_save_filters_merges_by_uid_after_parent_reorder(tmp_path):
+    """view.save_filters() must write each mask to the row whose uid matches,
+    even when the parent experiment was reordered on disk after the view was created."""
+    n = 10
+    exp = _make_metadata_experiment(tmp_path, n)
+
+    # Create a view of the first 5 rows while the parent is still in original order.
+    view = exp._subset(slice(0, 5), as_view=True)
+    assert view._parent_indices == list(range(5))
+
+    # Set a discriminating view mask (alternating T/F for uid00..uid04).
+    view._filters["qc"]["mask"] = [True, False, True, False, True]
+
+    # Reorder the parent ON DISK (reversed): uid09..uid00.
+    order = list(range(n))[::-1]
+    reordered = InSituExperiment()
+    reordered._metadata = exp._metadata.iloc[order].reset_index(drop=True)
+    reordered._data = [exp._data[i] for i in order]
+    reordered._filters = {
+        "qc": {"mask": [exp._filters["qc"]["mask"][i] for i in order], "note": None}
+    }
+    reordered._colors = exp._colors
+    reordered._path = tmp_path
+    reordered.save_metadata(path=tmp_path)
+    reordered.save_filters(path=tmp_path)
+
+    # Save the view filters — must land on correct uids despite stale _parent_indices.
+    view.save_filters()
+
+    # Load the on-disk state after save.
+    import json
+    on_disk_meta = pd.read_parquet(tmp_path / "metadata.parquet")
+    with open(tmp_path / "filters.json") as f:
+        payload = json.load(f)
+
+    mask = payload["filters"]["qc"]["mask"]
+    assert len(mask) == n
+
+    # Build uid -> on-disk mask position map from the (reversed) on-disk metadata.
+    uid_to_pos = {row["uid"]: i for i, row in on_disk_meta.iterrows()}
+
+    # View rows (uid00..uid04) should carry the alternating pattern.
+    assert mask[uid_to_pos["uid00"]] is True
+    assert mask[uid_to_pos["uid01"]] is False
+    assert mask[uid_to_pos["uid02"]] is True
+    assert mask[uid_to_pos["uid03"]] is False
+    assert mask[uid_to_pos["uid04"]] is True
+
+    # Non-view rows (uid05..uid09) must keep the on-disk values from `reordered`.
+    for uid in [f"uid{i:02d}" for i in range(5, n)]:
+        expected = reordered._filters["qc"]["mask"][
+            reordered._metadata.index[reordered._metadata["uid"] == uid].tolist()[0]
+        ]
+        assert mask[uid_to_pos[uid]] == expected, f"{uid} non-view value changed"
+
+
+def test_m2_save_filters_legacy_metadata_without_uid_raises(tmp_path):
+    """view.save_filters() must raise ValueError when on-disk metadata has no uid column."""
+    n = 5
+    exp = _make_metadata_experiment(tmp_path, n)
+    view = exp._subset(slice(0, 3), as_view=True)
+
+    # Overwrite the on-disk metadata with a uid-less parquet.
+    uid_less = exp._metadata.drop(columns=["uid"])
+    uid_less.to_parquet(tmp_path / "metadata.parquet", index=False)
+
+    with pytest.raises(ValueError, match="uid"):
+        view.save_filters()
+
+
 def test_view_saveas_rejects_free_after_save(tmp_path):
     """view.saveas(free_after_save=True) must raise: it would empty the shared parent data.
 

@@ -3601,8 +3601,24 @@ class InSituExperiment:
             )
 
         backup = path.parent / (path.name + ".__ispy_bak__")
-        # clean any stale backup left by a previous failed write
-        check_overwrite_and_remove_if_true(backup, overwrite=True)
+        # Handle a backup left behind by a previously interrupted save.
+        if backup.exists():
+            if path.exists():
+                # Destination is intact, so the backup is genuinely redundant: drop it.
+                check_overwrite_and_remove_if_true(backup, overwrite=True)
+            else:
+                # Interrupted swap: `backup` is the ONLY surviving complete copy and
+                # `path` is missing. Promote it back to `path` instead of deleting it.
+                os.rename(backup, path)
+                logger.warning(
+                    "Recovered the previous experiment from an interrupted save: "
+                    "restored '%s' from backup '%s'.", path, backup,
+                )
+                if not overwrite:
+                    raise FileExistsError(
+                        f"Recovered an interrupted previous save at {path}. "
+                        "To overwrite the recovered experiment, set overwrite=True."
+                    )
 
         logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
@@ -5123,10 +5139,10 @@ class InSituExperimentView(InSituExperiment):
         """Save view filters by merging masks back into the parent's ``filters.json``.
 
         Loads the full filter payload from the parent path (``self.path``),
-        splices the view's per-filter masks into the full-length parent masks at
-        the positions recorded in ``_parent_indices``, and writes the merged
-        result. This mirrors the behaviour of :meth:`save_metadata` and prevents
-        view-sliced (shorter) masks from being written back to the parent file.
+        splices the view's per-filter masks into the full-length parent masks
+        keyed by ``uid``, and writes the merged result. This mirrors the
+        behaviour of :meth:`save_metadata` and prevents view-sliced (shorter)
+        masks from being written back to the parent file.
 
         New filters created on the view are added with ``False`` for all rows
         outside the view. Composite filters are merged by key.
@@ -5137,8 +5153,8 @@ class InSituExperimentView(InSituExperiment):
             overwrite: If True, overwrite an existing ``filters.json``.
 
         Raises:
-            ValueError: If ``self.path`` is not set, or if ``_parent_indices``
-                is missing (view was not created through ``_subset``).
+            ValueError: If ``self.path`` is not set, or if the on-disk or view
+                metadata lacks a ``uid`` column (legacy format).
             FileExistsError: If ``filters.json`` exists and ``overwrite`` is False.
         """
         if self.path is None:
@@ -5146,12 +5162,17 @@ class InSituExperimentView(InSituExperiment):
                 "Cannot save view filters: parent experiment path is not set."
             )
 
-        parent_idx = getattr(self, "_parent_indices", None)
-        if parent_idx is None:
+        on_disk_meta = self._read_metadata_with_schema(self.path)
+        if "uid" not in on_disk_meta.columns:
             raise ValueError(
-                "Cannot save view filters: _parent_indices is not set. "
-                "Recreate the view using exp[...] or exp.filters.view(...) "
-                "to enable filter merge-back."
+                "Cannot save view filters: the on-disk metadata has no 'uid' column. "
+                "This experiment was saved with an older version of InSituPy that did not "
+                "assign UIDs. Re-save the full experiment first."
+            )
+        if "uid" not in self._metadata.columns:
+            raise ValueError(
+                "Cannot save view filters: the view metadata has no 'uid' column and "
+                "cannot be safely merged back into the parent."
             )
 
         write_path = Path(path) if path is not None else self.path
@@ -5180,7 +5201,21 @@ class InSituExperimentView(InSituExperiment):
             payload["composites"] = {}
         payload["version"] = _FILTERS_SCHEMA_VERSION
 
-        n_parent = len(self._read_metadata_with_schema(self.path))
+        n_parent = len(on_disk_meta)
+
+        on_disk_uids = on_disk_meta["uid"].tolist()
+        if len(set(on_disk_uids)) != len(on_disk_uids):
+            raise ValueError(
+                "Cannot save view filters: the on-disk metadata has duplicate 'uid' values, "
+                "so filter masks cannot be unambiguously merged back."
+            )
+        uid_to_pos = {uid: pos for pos, uid in enumerate(on_disk_uids)}
+
+        view_uids = self._metadata["uid"].tolist()
+        keep = np.array([uid in uid_to_pos for uid in view_uids], dtype=bool)
+        positions = np.array(
+            [uid_to_pos[uid] for uid in view_uids if uid in uid_to_pos], dtype=int
+        )
 
         for key, entry in self._filters.items():
             view_mask = np.asarray(FilterSpec.from_entry(key, entry).mask, dtype=bool)
@@ -5190,7 +5225,7 @@ class InSituExperimentView(InSituExperiment):
                 full = existing_arr.copy() if len(existing_arr) == n_parent else np.zeros(n_parent, dtype=bool)
             else:
                 full = np.zeros(n_parent, dtype=bool)
-            full[parent_idx] = view_mask
+            full[positions] = view_mask[keep]
             payload["filters"][key] = {
                 "mask": full.tolist(),
                 "note": entry.get("note"),
