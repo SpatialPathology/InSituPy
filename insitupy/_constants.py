@@ -79,6 +79,9 @@ DEFAULT_CATEGORICAL_CMAP = palettes.tab20_mod
 REGION_CMAP = matplotlib.colormaps["tab10"]
 DEFAULT_CONTINUOUS_CMAP = "viridis"
 
+# Legend label for missing (NaN) categorical values in categorical plots.
+NA_CATEGORY = "NaN"
+
 ## fluorescence colormaps
 FLUO_CMAP = [
     #"blue",       # e.g., DAPI

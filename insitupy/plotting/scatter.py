@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from insitupy._constants import with_insitupy_style
+from insitupy.utils._colors import _warn_na_cells_hidden
 
 
 def _check_datashader():
@@ -870,6 +871,7 @@ def embedding(
                             keep = ~values.isna().values
                             df = df[keep]
                             values = values[keep]
+                            _warn_na_cells_hidden(int((~keep).sum()), c)
                         else:
                             if "NaN" not in values.cat.categories:
                                 values = values.cat.add_categories(["NaN"])
@@ -928,6 +930,7 @@ def embedding(
                             keep = ~values.isna().values
                             df = df[keep]
                             values = values[keep]
+                            _warn_na_cells_hidden(int((~keep).sum()), c)
                         else:
                             if "NaN" not in values.cat.categories:
                                 values = values.cat.add_categories(["NaN"])
@@ -991,6 +994,7 @@ def embedding(
                         _nan_keep = ~values.isna().values
                         df = df[_nan_keep]
                         values = values[_nan_keep]
+                        _warn_na_cells_hidden(int((~_nan_keep).sum()), c)
                     else:
                         if "NaN" not in values.cat.categories:
                             values = values.cat.add_categories(["NaN"])
@@ -1073,6 +1077,7 @@ def embedding(
                     keep = ~values.isna().values
                     df = df[keep]
                     values = values[keep]
+                    _warn_na_cells_hidden(int((~keep).sum()), c)
                 else:
                     if "NaN" not in values.cat.categories:
                         values = values.cat.add_categories(["NaN"])

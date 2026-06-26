@@ -41,6 +41,7 @@ from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, Filt
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
+from insitupy.utils._colors import _parse_unique_categories
 from insitupy.utils.utils import (
     _crop_transcripts,
     convert_to_list,
@@ -3812,7 +3813,6 @@ class InSituExperiment:
 
                             # retrieve categories
                             cats = celldata.table.obs[obs_col].cat.categories.values
-                            cats = np.unique(celldata.table.obs[obs_col])
                         celldata.table.uns[uns_key] = [color_dict[c] for c in cats]
 
                     # save color dict in InSituExperiment
@@ -4733,7 +4733,7 @@ class InSituExperiment:
             if obs_col in celldata.table.obs.columns:
                 if celldata.table.obs[obs_col].isna().all():
                     raise ValueError(f"Column '{obs_col}' in obs contains only NaNs. Cannot create color dictionary.")
-                cols.append(np.unique(celldata.table.obs[obs_col]))
+                cols.append(np.asarray(_parse_unique_categories(celldata.table.obs[obs_col])))
 
         if len(cols) > 0:
             all_cats = np.sort(np.unique(np.concatenate(cols)))

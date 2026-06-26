@@ -10,7 +10,7 @@ from matplotlib import cm
 from matplotlib.colors import ListedColormap, rgb2hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
-from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, DEFAULT_CONTINUOUS_CMAP
+from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, DEFAULT_CONTINUOUS_CMAP, NA_CATEGORY
 from insitupy.palettes import CustomPalettes
 from insitupy.utils._checks import check_raw
 
@@ -112,25 +112,54 @@ def _add_colorlegend_to_axis(
         ax.set_axis_off()
 
 def _parse_unique_categories(data):
-    # retrieve data
+    # pandas categorical Series -> declared categories (never include NaN)
     try:
-        unique_categories = data.cat.categories # in case of categorical pandas series
+        return data.cat.categories
     except AttributeError:
-        try:
-            unique_categories = data.categories # in case of numpy categories
-        except AttributeError:
-            data = np.array(data)
-            try:
-                unique_categories = np.sort(data[~data.isna()].unique())
-            except AttributeError:
-                try:
-                    unique_categories = np.sort(np.unique(data[~np.isnan(data)]))
-                except TypeError:
-                    #unique_categories = np.sort(np.unique(data))
-                    # Convert all elements to strings before sorting
-                    unique_categories = np.sort(np.unique(data.astype(str)))
+        pass
+    # numpy Categorical -> its categories
+    try:
+        return data.categories
+    except AttributeError:
+        pass
+    # array-like (object/numeric): drop NaN, then sort unique native values
+    s = pd.Series(data)
+    s = s[s.notna()]
+    return np.sort(np.unique(s.to_numpy()))
 
-    return unique_categories
+
+def _coerce_na_for_plot(series, na_label=NA_CATEGORY):
+    """Replace NaN in a categorical hue series with ``na_label``.
+
+    Real (non-NA) values are left untouched so they keep matching the
+    color-dict keys; only NaN is rewritten so the renderer draws those
+    points using the ``na_label`` palette entry instead of dropping them.
+    """
+    s = pd.Series(series)
+    if isinstance(s.dtype, pd.CategoricalDtype):
+        if na_label not in s.cat.categories:
+            s = s.cat.add_categories([na_label])
+        return s.fillna(na_label)
+    return s.astype(object).where(s.notna(), na_label)
+
+
+def _warn_na_cells_hidden(n_hidden, keys):
+    """Emit a UserWarning that NaN cells were not displayed.
+
+    ``keys`` may be a single key (str) or a sequence of keys.
+    """
+    import warnings
+    if isinstance(keys, str):
+        keys_str = f"'{keys}'"
+    else:
+        keys_str = ", ".join(f"'{k}'" for k in keys)
+    warnings.warn(
+        f"{n_hidden} cell(s) with missing values for {keys_str} are not displayed "
+        f"because nan_color=None. Pass nan_color (e.g. nan_color='lightgray') to "
+        f"show them in that color.",
+        UserWarning,
+        stacklevel=2,
+    )
 
 
 def create_cmap_mapping(

@@ -9,6 +9,7 @@ from typing import Literal
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import colors
@@ -18,6 +19,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from insitupy._constants import (
     DEFAULT_CATEGORICAL_CMAP,
     DEFAULT_CONTINUOUS_CMAP,
+    NA_CATEGORY,
     with_insitupy_style,
 )
 from insitupy._core._checks import _is_experiment
@@ -30,8 +32,11 @@ from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
 from insitupy.utils._colors import (
     _add_colorlegend_to_axis,
+    _coerce_na_for_plot,
     _extract_color_values,
+    _parse_unique_categories,
     _rgb2hex_robust,
+    _warn_na_cells_hidden,
     create_cmap_mapping,
 )
 from insitupy.utils.utils import (
@@ -127,6 +132,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
     spot_type: str = "o"
     background_color: str = "white"
+    nan_color: str | None = None
     cmap_center: float | None = None
     normalize: colors.Normalize | None = None
     show_legend: bool = True
@@ -278,6 +284,7 @@ def spatial(
     ylim: tuple[float, float] | None = None,
     spot_size: float = 10,
     alpha: float = 1.0,
+    nan_color: str | None = None,
 
     # layout configs
     max_cols: int | None = 4,
@@ -372,7 +379,8 @@ def spatial(
         )
     plot_config.update_values(
         xlim=xlim, ylim=ylim,
-        spot_size=spot_size, alpha=alpha
+        spot_size=spot_size, alpha=alpha,
+        nan_color=nan_color
     )
     layout_config.update_values(
         max_cols=max_cols
@@ -494,7 +502,9 @@ def _plot_to_subplots(
     else:
         n_data = 1
 
-    #i = 0
+    total_hidden = 0
+    affected_keys = set()
+
     for idx in range(n_data):
 
         # retrieve data
@@ -510,7 +520,7 @@ def _plot_to_subplots(
             add_legend = plot_config.show_legend and add_legend
 
             # plot single spatial plot in given axis
-            _single_spatial(
+            n_hidden = _single_spatial(
                 adata=ad,
                 key=key, idx_key=idx_key, name=sample_name,
                 fig=fig, ax=ax, add_legend=add_legend,
@@ -518,6 +528,12 @@ def _plot_to_subplots(
                 layout_config=layout_config, plot_config=plot_config,
                 regions_data=regions_data, annotations_data=annotations_data, image_data=image_data
             )
+            if n_hidden:
+                total_hidden += n_hidden
+                affected_keys.add(key)
+
+    if total_hidden:
+        _warn_na_cells_hidden(total_hidden, sorted(affected_keys))
 
     if layout_config.add_legend_to_last_subplot and plot_config.show_legend:
         # get axis of last subplots for color legend
@@ -528,6 +544,8 @@ def _plot_to_subplots(
         # is_categorical = color_config_key["is_categorical"]
         # if is_categorical:
         color_dict = color_config[k]["color_dict"]
+        if plot_config.nan_color is not None and color_config[k].get("has_na"):
+            color_dict = {**color_dict, NA_CATEGORY: plot_config.nan_color}
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             max_per_col=plot_config.legend_max_per_col,
@@ -560,6 +578,8 @@ def _single_spatial(
     color_values, categorical = _extract_color_values(
         adata=adata, key=key, raw=data_config.raw, layer=data_config.layer
     )
+
+    n_hidden = 0
 
     if color_values is None:
         logger.warning(f"Key '{key}' not found.")
@@ -624,6 +644,20 @@ def _single_spatial(
 
         # plot transcriptomic data
         if categorical:
+            color_values = pd.Series(color_values)
+            na_mask = color_values.isna().to_numpy()
+            n_na = int(na_mask.sum())
+            if n_na:
+                if plot_config.nan_color is None:
+                    keep = ~na_mask
+                    x_coords = x_coords[keep]
+                    y_coords = y_coords[keep]
+                    color_values = color_values[keep]
+                    n_hidden = n_na
+                else:
+                    color_values = _coerce_na_for_plot(color_values)
+                    color_dict = {**color_dict, NA_CATEGORY: plot_config.nan_color}
+
             sns.scatterplot(
                 x=x_coords, y=y_coords,
                 hue=color_values,
@@ -729,6 +763,8 @@ def _single_spatial(
             else:
                 raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
 
+    return n_hidden
+
 class _ColorConfigMultiPlot:
     def __init__(
         self,
@@ -752,12 +788,24 @@ class _ColorConfigMultiPlot:
 
         for key in keys:
             if key in exp_color_dict:
-                # use color_dict from InSituExperiment
+                # use color_dict from InSituExperiment (copy: never mutate exp.colors)
+                has_na = any(
+                    pd.isna(_extract_color_values(
+                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
+                        key=key, raw=data_config.raw, layer=data_config.layer
+                    )[0]).any()
+                    for xd in data_list
+                    if _extract_color_values(
+                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
+                        key=key, raw=data_config.raw, layer=data_config.layer
+                    )[0] is not None
+                )
                 color_entry = {
-                    "color_dict": exp_color_dict[key],
+                    "color_dict": dict(exp_color_dict[key]),
                     "max_value": None,
                     "is_categorical": True,
-                    "crange": None
+                    "crange": None,
+                    "has_na": has_na,
                 }
             else:
                 # EITHER because key is continuous
@@ -795,7 +843,8 @@ class _ColorConfigMultiPlot:
             "color_dict": None,
             "max_value": None,
             "is_categorical": False,
-            "crange": None
+            "crange": None,
+            "has_na": False,
         }
         if len(data_list) == 1:
             # one dataset
@@ -816,6 +865,7 @@ class _ColorConfigMultiPlot:
 
             if is_categorical:
                 color_entry["is_categorical"] = True
+                color_entry["has_na"] = bool(pd.isna(color_values).any())
                 # check if colors were saved in uns
                 uns_key = f"{key}_colors"
                 if uns_key in ad.uns.keys() and plot_config.palette is None:
@@ -846,6 +896,7 @@ class _ColorConfigMultiPlot:
             # multiple datasets
             value_list = []
             categorical_list = []
+            has_na = False
             for xd in data_list:
                 celldata = _get_cell_layer(
                     cells=xd.cells,
@@ -860,7 +911,8 @@ class _ColorConfigMultiPlot:
 
                 if color_values is not None:
                     if is_categorical:
-                        value_list.append(np.unique(color_values))
+                        has_na |= bool(pd.isna(color_values).any())
+                        value_list.append(np.asarray(_parse_unique_categories(color_values)))
                     else:
                         value_list.append(np.max(color_values))
 
@@ -876,6 +928,7 @@ class _ColorConfigMultiPlot:
                     all_values, cmap=plot_config.palette
                     )
                 color_entry["is_categorical"] = True
+                color_entry["has_na"] = has_na
 
             elif not np.any(categorical_list):
                 # no values are categorical - collect the maximum values
