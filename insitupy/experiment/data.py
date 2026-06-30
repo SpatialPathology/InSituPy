@@ -3786,8 +3786,10 @@ class InSituExperiment:
                         break
 
             if is_numeric:
-                if verbose:
-                    logger.info(f"Skipping sync_colors for numeric column '{obs_col}'.")
+                logger.warning(
+                    f"Skipping '{obs_col}': column is numeric. "
+                    f"Only categorical columns are supported by `sync_colors`."
+                )
                 continue
 
             if obs_col not in self.colors or overwrite:
@@ -3820,6 +3822,19 @@ class InSituExperiment:
 
                     if verbose:
                         logger.info(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+                else:
+                    searched_layer = cells_layer
+                    available_layers = []
+                    for _, xd in self.iterdata():
+                        searched_layer = cells_layer or xd.cells.main_key
+                        available_layers = list(xd.cells.keys())
+                        break
+                    logger.warning(
+                        f"Key '{obs_col}' not found in obs of any dataset "
+                        f"(searched cells_layer='{searched_layer}', "
+                        f"available layers: {available_layers}). "
+                        f"Did you pass the correct `cells_layer`?"
+                    )
             else:
                 logger.info(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
 
