@@ -1,4 +1,5 @@
 
+import copy
 import gc
 import logging
 import math
@@ -364,12 +365,14 @@ def spatial(
     keys = convert_to_list(keys)
 
     # init config classes
-    if plot_config is None:
-        plot_config = PlotConfig()
-    if layout_config is None:
-        layout_config = LayoutConfig()
-    if data_config is None:
-        data_config = DataConfig()
+    # Copy any caller-provided config so we never mutate the caller's object.
+    # calc_subplot_params() writes derived layout state (figsize, n_rows, ...)
+    # back into layout_config; reusing the same config across calls would
+    # otherwise leak a stale figsize (e.g. one sized for the full experiment
+    # onto a later subset plot), which also inflates the computed marker size.
+    plot_config = PlotConfig() if plot_config is None else copy.copy(plot_config)
+    layout_config = LayoutConfig() if layout_config is None else copy.copy(layout_config)
+    data_config = DataConfig() if data_config is None else copy.copy(data_config)
 
     # update some values depending on function arguments
     data_config.update_values(
