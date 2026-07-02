@@ -28,6 +28,10 @@ dependencies = [
     "openpyxl (>=3.1.2,<4.0.0)",
     "xmltodict>=0.13.0",
     "zarr (>=3.2.1,<4.0.0)",
+    # <2026.5.2 imports zarr.core.chunk_grids.RegularChunkGrid, removed in zarr's 3.2.0
+    # ChunkGrid refactor -> ImportError on aszarr=True reads. 2026.5.2 reworked ZarrTiffStore
+    # for the new API and requires zarr>=3.2.0.
+    "tifffile (>=2026.5.2,<2027.0.0)",
     "pyarrow (>=14.0.1,<=21.0.0)", # 22.0.0 causes issues reading cell.parquet
     "fastparquet>=2023.10.1",
     "toml (>=0.10.2,<1.0.0)",

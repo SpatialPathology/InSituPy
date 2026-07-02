@@ -490,11 +490,6 @@ class CellData(DeepCopyMixin):
                 else:
                     logger.info("CellData.sync(): no synchronization needed; table and boundaries are already aligned.")
 
-            if verbose:
-                if n_removed_table > 0:
-                    logger.info(f"Filtered out {n_removed_table} table entries not present in boundaries.")
-                logger.info(f"Filtered out {n_removed_boundaries} boundaries.")
-
             if return_summary:
                 return summary
             return None

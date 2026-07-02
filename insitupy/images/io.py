@@ -639,7 +639,7 @@ def write_ome_tiff(
     if tmp_file.exists():
         tmp_file.unlink()
 
-    with TiffWriter(tmp_file, bigtiff=True) as tif:
+    with TiffWriter(tmp_file, bigtiff=True, kind='ome') as tif:
         options = dict(
             photometric=photometric,
             tile=tile,

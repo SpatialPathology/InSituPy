@@ -271,7 +271,7 @@ def test_insufficient_matches_warns_and_returns_when_configured(dummy_data, imag
     assert len(dummy_data.images.added_images) == 0
 
 
-def test_insufficient_matches_raises_by_default(dummy_data, image_file, monkeypatch):
+def test_insufficient_matches_raises_when_configured(dummy_data, image_file, monkeypatch):
     monkeypatch.setattr(
         registration,
         "read_image",
@@ -285,4 +285,5 @@ def test_insufficient_matches_raises_by_default(dummy_data, image_file, monkeypa
             image_to_be_registered=image_file,
             channel_names=["HE"],
             save_registered_images=False,
+            raise_on_insufficient_matches=True,
         )
