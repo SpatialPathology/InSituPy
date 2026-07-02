@@ -213,6 +213,29 @@ if WITH_NAPARI:
         })
         return DirectLabelColormap(color_dict=color_dict)
 
+    def _find_layer_by_scope(viewer, scope, outline: bool = False):
+        """Return the most recently added reusable layer for a display scope, or None.
+
+        Layers created by the Show widget are tagged in metadata with
+        ``display_scope`` = (data_name, layer_name, kind), where ``kind`` is
+        "points" for point layers or the mask_key ("cells"/"nuclei") for labels
+        layers; contour layers additionally carry ``is_outline_layer`` = True.
+        This finds the reusable layer for a given scope regardless of which ``key``
+        it was last coloured by.
+
+        Returns the last matching layer (mirrors the prior points-mode ``[-1]``
+        choice when duplicates from earlier "Add new layer" calls exist), or None.
+        """
+        match = None
+        for layer in viewer.layers:
+            meta = getattr(layer, "metadata", None) or {}
+            if meta.get("display_scope") != scope:
+                continue
+            if bool(meta.get("is_outline_layer", False)) != outline:
+                continue
+            match = layer
+        return match
+
     def _create_colored_labels_layer(
         viewer: napari.Viewer,
         viewer_config: "ViewerConfig",
@@ -392,28 +415,35 @@ if WITH_NAPARI:
             color_values=color_values,
         )
         outline_cmap = _create_outline_colormap(label_ids, hidden_label_ids=hidden_label_ids)
+        scope = (viewer_config.data_name, viewer_config.layer_name, mask_key)
         legend_metadata = {
             "legend_key": key,
             "legend_is_categorical": is_categorical,
             "legend_continuous_cmap": "viridis",
             "legend_upper_climit_pct": 99,
+            "display_scope": scope,
         }
         outline_metadata = {
             "legend_source_layer": full_layer_name,
             "is_outline_layer": True,
+            "display_scope": scope,
         }
 
-        # Check if layer exists and handle accordingly
-        if full_layer_name in viewer.layers and not add_new_layer:
+        # Check if a reusable layer exists for this scope and handle accordingly
+        existing_main = None if add_new_layer else _find_layer_by_scope(viewer, scope, outline=False)
+        if existing_main is not None:
             # Update existing layer's colormap
-            layer = viewer.layers[full_layer_name]
-            layer.colormap = direct_cmap
-            layer.properties = properties
-            layer.metadata.update(legend_metadata)
+            existing_main.name = full_layer_name
+            existing_main.colormap = direct_cmap
+            existing_main.properties = properties
+            existing_main.metadata.update(legend_metadata)
+            # re-show in case the user had hidden it — displaying a new value
+            # means the layer should be visible again
+            existing_main.visible = True
             # Move to top
-            viewer.layers.move(viewer.layers.index(full_layer_name), len(viewer.layers))
+            viewer.layers.move(viewer.layers.index(existing_main), len(viewer.layers))
         else:
-            if full_layer_name in viewer.layers:
+            if add_new_layer and full_layer_name in viewer.layers:
                 show_warning(f"Layer '{full_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
                 return None
 
@@ -427,15 +457,17 @@ if WITH_NAPARI:
                 colormap=direct_cmap,
             )
 
-        if outline_layer_name in viewer.layers and not add_new_layer:
-            outline_layer = viewer.layers[outline_layer_name]
-            outline_layer.colormap = outline_cmap
-            outline_layer.properties = properties
-            outline_layer.metadata.update(outline_metadata)
-            outline_layer.contour = 1
-            viewer.layers.move(viewer.layers.index(outline_layer_name), len(viewer.layers))
+        existing_outline = None if add_new_layer else _find_layer_by_scope(viewer, scope, outline=True)
+        if existing_outline is not None:
+            existing_outline.name = outline_layer_name
+            existing_outline.colormap = outline_cmap
+            existing_outline.properties = properties
+            existing_outline.metadata.update(outline_metadata)
+            existing_outline.contour = 1
+            existing_outline.visible = True
+            viewer.layers.move(viewer.layers.index(existing_outline), len(viewer.layers))
         else:
-            if outline_layer_name in viewer.layers:
+            if add_new_layer and outline_layer_name in viewer.layers:
                 show_warning(f"Layer '{outline_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
                 return None
 
@@ -627,16 +659,25 @@ if WITH_NAPARI:
                         )
 
                     # Display as points (default behavior)
-                    # get layer names from the current data
-                    if viewer_config.layer_name == "main":
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and not elem.name.endswith(f"[{viewer_config.layer_name}]")]
+                    points_scope = (viewer_config.data_name, viewer_config.layer_name, "points")
+                    existing_points = None if add_new_layer else _find_layer_by_scope(viewer, points_scope, outline=False)
+
+                    if existing_points is not None:
+                        # update the existing points layer
+                        _update_points_layer(
+                            layer=existing_points,
+                            new_color_values=color_value,
+                            new_name=new_layer_name,
+                            categorical_cmap = colormap
+                        )
+                        # move new layer to the top
+                        viewer.layers.move(viewer.layers.index(existing_points), len(viewer.layers))
+
                     else:
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
-
-                    # select only point layers
-                    layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
-
-                    if len(layer_names_for_current_data) == 0:
+                        # Check if layer with this name already exists
+                        if add_new_layer and new_layer_name in viewer.layers:
+                            show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                            return None
 
                         # create points layer for genes
                         gene_layer = _create_points_layer(
@@ -647,42 +688,10 @@ if WITH_NAPARI:
                             point_names=cell_names,
                             point_size=size,
                             upper_climit_pct=99,
-                            categorical_cmap = colormap
+                            categorical_cmap = colormap,
+                            display_scope=points_scope,
                         )
                         return gene_layer
-                        #layers_to_add.append(gene_layer)
-                    else:
-                        if not add_new_layer:
-                            #print(f"Key '{gene}' already in layer list.", flush=True)
-                            # update the existing points layer
-                            layer = viewer.layers[layer_names_for_current_data[-1]]
-                            _update_points_layer(
-                                layer=layer,
-                                new_color_values=color_value,
-                                new_name=new_layer_name,
-                                categorical_cmap = colormap
-                            )
-                            # move new layer to the top
-                            was_moved = viewer.layers.move(viewer.layers.index(new_layer_name), len(viewer.layers))
-
-                        else:
-                            # Check if layer with this name already exists
-                            if new_layer_name in viewer.layers:
-                                show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
-                                return None
-
-                            # create new points layer for genes
-                            gene_layer = _create_points_layer(
-                                points=viewer_config.points,
-                                color_values=color_value,
-                                #name=f"{config.current_data_name}-{gene}",
-                                name=new_layer_name,
-                                point_names=cell_names,
-                                point_size=size,
-                                upper_climit_pct=99,
-                                categorical_cmap = colormap
-                            )
-                            return gene_layer
 
             if len(viewer_config.key_dict["obs"]) > 0:
                 obs_choices = viewer_config.key_dict["obs"]

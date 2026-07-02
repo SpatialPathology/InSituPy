@@ -445,6 +445,7 @@ if WITH_NAPARI:
                             upper_climit_pct: int = 99,
                             categorical_cmap: matplotlib.colors.ListedColormap = DEFAULT_CATEGORICAL_CMAP,
                             continuous_cmap = DEFAULT_CONTINUOUS_CMAP,
+                            display_scope: tuple | None = None,
                             ) -> LayerDataTuple:
         if categorical_cmap is None:
             categorical_cmap = DEFAULT_CATEGORICAL_CMAP
@@ -470,7 +471,7 @@ if WITH_NAPARI:
                 'visible': visible,
                 'border_width': border_width,
                 'border_color': border_color,
-                'metadata': {"upper_climit_pct": upper_climit_pct}
+                'metadata': {"upper_climit_pct": upper_climit_pct, "display_scope": display_scope}
                 },
             'points'
             )
@@ -503,6 +504,10 @@ if WITH_NAPARI:
 
         if new_name is not None:
             layer.name = new_name
+
+        # re-show the layer in case the user had hidden it — updating it with new
+        # values means the user wants to see it again
+        layer.visible = True
 
     def _update_units_layer(
         layer: napari.layers.Layer,

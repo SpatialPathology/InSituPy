@@ -395,3 +395,56 @@ def test_show_auto_sync_false_skips(monkeypatch):
     for xd in exp._data:
         assert "celltype_colors" not in xd.cells["main"].table.uns
     assert len(exp.colors) == 0
+
+
+# ── Part 3 — categorical color mapping for non-string categories ───────────────
+#
+# Regression for the points-mode KeyError: ``categorical_data_to_rgba`` builds its
+# lookup dict with the raw category values (e.g. ints 0, 1, 2) but the final lookup
+# used ``str(category)``, so an integer-category ``pd.Categorical`` raised KeyError.
+
+
+class TestCategoricalRgbaIntegerCategories:
+    def test_int_categorical_does_not_raise(self):
+        from insitupy.utils._colors import categorical_data_to_rgba
+
+        data = pd.Series(pd.Categorical([0, 1, 2, 1, 0], categories=[0, 1, 2]))
+        rgba = categorical_data_to_rgba(data, cmap=None)
+        assert rgba.shape == (5, 4)
+
+    def test_int_categories_match_equivalent_string_categories(self):
+        from insitupy.utils._colors import categorical_data_to_rgba
+
+        int_data = pd.Series(pd.Categorical([0, 1, 2], categories=[0, 1, 2]))
+        str_data = pd.Series(pd.Categorical(["0", "1", "2"], categories=["0", "1", "2"]))
+
+        int_rgba = categorical_data_to_rgba(int_data, cmap=None)
+        str_rgba = categorical_data_to_rgba(str_data, cmap=None)
+
+        np.testing.assert_allclose(int_rgba, str_rgba)
+
+    def test_int_categorical_with_nan_uses_nan_val(self):
+        from insitupy.utils._colors import categorical_data_to_rgba
+
+        data = pd.Series(pd.Categorical([0, 1, np.nan], categories=[0, 1]))
+        nan_val = (1.0, 1.0, 1.0, 0.0)
+        rgba = categorical_data_to_rgba(data, cmap=None, nan_val=nan_val)
+        assert rgba.shape == (3, 4)
+        np.testing.assert_allclose(rgba[2], nan_val)
+
+    def test_data_to_rgba_int_categorical(self):
+        # _data_to_rgba is the entry point used by the napari points renderer.
+        from insitupy.utils._colors import _data_to_rgba
+
+        data = pd.Series(pd.Categorical([0, 1, 2, 0], categories=[0, 1, 2]))
+        rgba, mapping, _ = _data_to_rgba(data)
+        assert rgba.shape == (4, 4)
+
+    def test_caller_supplied_dict_not_mutated(self):
+        # Passing a color dict must not add a "nan" key to the caller's object.
+        from insitupy.utils._colors import categorical_data_to_rgba
+
+        color_dict = {"A": (1.0, 0.0, 0.0, 1.0), "B": (0.0, 1.0, 0.0, 1.0)}
+        data = pd.Series(["A", "B", "A"], dtype=object)
+        categorical_data_to_rgba(data, cmap=color_dict)
+        assert set(color_dict) == {"A", "B"}

@@ -269,7 +269,8 @@ if WITH_NAPARI:
                     name=f"{cells_layer_name}-{k}",
                     point_names=cell_names,
                     point_size=point_size,
-                    visible=True
+                    visible=True,
+                    display_scope=(cells_layer_name, "main", "points"),
                 )
 
                 # add layer programmatically - does not work for all types of layers

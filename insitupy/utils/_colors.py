@@ -239,6 +239,11 @@ def categorical_data_to_rgba(data,
     else:
         category_to_rgba = cmap
 
+    # Normalize keys to str so the str-keyed lookups below also work for
+    # non-string categories (e.g. an int64 pd.Categorical whose keys are 0, 1, 2).
+    # Copying into a fresh dict also avoids mutating a caller-supplied ``cmap`` dict.
+    category_to_rgba = {str(k): v for k, v in category_to_rgba.items()}
+
     if nan_val is not None:
         # add key for nan
         category_to_rgba[str(np.nan)] = nan_val
