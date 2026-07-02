@@ -13,7 +13,7 @@ Use this if you don't need local code changes.
 ```json
 "insitupy": {
   "command": "uvx",
-  "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+  "args": ["--python", "3.13", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
 }
 ```
 
