@@ -33,7 +33,11 @@ file searching.
 3. **Implement incrementally** — smallest coherent edits first.
 4. **Run targeted tests** for the changed method/module only — not the full suite. Run
    `pytest <targeted test files>` from the environment where InSituPy is installed (see
-   `CLAUDE.md`; the specific env name/path is in your own user config).
+   `CLAUDE.md`; the specific env name/path is in your own user config). Before *adding* a test,
+   apply the altitude check: a test must exercise the **real code path against a real failure
+   mode**. Do not add change-detector tests (asserting the specific line/attribute you wrote) or
+   tests that stub the unit under test; for trivial state/glue changes, verify manually and note
+   it in the log.
 5. **Escalate when genuinely stuck:** for a hard design / security / correctness question, ask
    the user whether to invoke `@opus-consultant` (structured Opus Report contract). For a
    lightweight stall, the native `/advisor` toggle is the lower-friction option.

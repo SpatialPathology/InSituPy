@@ -39,7 +39,10 @@ stand alone without this conversation. Include:
 - **Affected files** — each with the specific change.
 - **Approach** — ordered, step by step.
 - **Edge cases & risks.**
-- **Tests** — which targeted tests to run or add (run with `pytest` from the project env).
+- **Tests** — which targeted tests to run or add, **and at what altitude**: for each change,
+  say whether it warrants a test (real failure-mode logic) or manual verification (trivial
+  state/glue). Don't prescribe change-detector or stub-the-unit tests. Run with `pytest` from
+  the project env.
 - **Acceptance criteria.**
 - **Open questions / decisions** — with any resolutions already made.
 
