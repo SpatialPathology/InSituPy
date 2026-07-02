@@ -6,6 +6,7 @@ import os
 import shutil
 import warnings
 from collections import defaultdict
+from collections.abc import MutableMapping
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Literal
@@ -17,7 +18,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
-from matplotlib.colors import ListedColormap
+from matplotlib.colors import ListedColormap, to_hex
 from matplotlib.figure import Figure
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from tqdm import tqdm
@@ -329,6 +330,67 @@ class ViewTableAccessor(TableAccessor):
         )
 
 
+class ExperimentColors(MutableMapping):
+    """Layer-aware, write-through view over ``InSituExperiment._colors``.
+
+    Bare-key ops target the experiment's default (main) cells layer::
+
+        exp.colors["celltype"]              # read the main-layer dict
+        exp.colors["celltype"] = {...}      # store + write-through to every sample's .uns
+        "celltype" in exp.colors
+        list(exp.colors)                    # iterate main-layer keys
+
+    Explicit-layer ops::
+
+        exp.colors.get("celltype", cells_layer="baysor")
+        exp.colors.set("celltype", {...}, cells_layer="baysor")
+        exp.colors.layer("baysor")          # read-only dict snapshot of one layer
+        exp.colors.layers                   # list of layer names present
+    """
+
+    def __init__(self, experiment: "InSituExperiment"):
+        self._exp = experiment
+
+    # --- bare-key (default/main layer) ---
+    def __getitem__(self, key):
+        return self._exp._colors.get(self._exp._default_color_layer(), {})[key]
+
+    def __setitem__(self, key, color_dict):
+        self._exp._apply_colors(key, color_dict, cells_layer=None)
+
+    def __delitem__(self, key):
+        del self._exp._colors[self._exp._default_color_layer()][key]
+
+    def __contains__(self, key):
+        return key in self._exp._colors.get(self._exp._default_color_layer(), {})
+
+    def __iter__(self):
+        return iter(self._exp._colors.get(self._exp._default_color_layer(), {}))
+
+    def __len__(self):
+        return len(self._exp._colors.get(self._exp._default_color_layer(), {}))
+
+    # --- explicit-layer ---
+    def set(self, key, color_dict, cells_layer: str | None = None):
+        """Store a color dict for *key* on *cells_layer* (default: main layer) and write through to ``.uns``."""
+        self._exp._apply_colors(key, color_dict, cells_layer=cells_layer)
+
+    def get(self, key, default=None, cells_layer: str | None = None):
+        """Return the color dict for *key* on *cells_layer* (default: main layer), or *default*."""
+        layer = self._exp._resolve_color_layer(cells_layer)
+        return self._exp._colors.get(layer, {}).get(key, default)
+
+    def layer(self, cells_layer: str | None = None) -> dict:
+        """Return a read-only snapshot dict of all color entries for *cells_layer*."""
+        layer = self._exp._resolve_color_layer(cells_layer)
+        return dict(self._exp._colors.get(layer, {}))
+
+    @property
+    def layers(self) -> list[str]:
+        """List the cells-layer names currently present in the color store."""
+        return list(self._exp._colors)
+
+
 class InSituExperiment:
     """
     A class to manage and analyze multiple spatially resolved single-cell transcriptomics experiments.
@@ -391,7 +453,7 @@ class InSituExperiment:
         self._metadata = pd.DataFrame(columns=['uid'])
         self._data = []  # Can hold either InSituData or StructuredSpatialData
         self._path = None
-        self._colors = {}
+        self._colors: dict[str, dict[str, dict[str, str]]] = {}  # {cells_layer: {obs_col: {category: hex}}}
         self._filters = {}
         self._composites: dict = {}
         self._applied_filters: list[str] = []
@@ -706,12 +768,20 @@ class InSituExperiment:
     @property
     def colors(self):
         """
-        Color dictionaries created by :meth:`~insitupy.experiment.data.InSituExperiment.sync_colors`.
+        Layer-aware, write-through view over the experiment's color assignments.
+
+        Bare-key access (read and write) targets the experiment's default (main)
+        cells layer, e.g. ``exp.colors["celltype"] = {...}``. Assignment
+        immediately writes an aligned hex list into every sample's
+        ``.uns[f"{key}_colors"]`` so the colors are picked up by ``pl.spatial``,
+        ``pl.cellular_composition``, ``pl.embedding``/``pl.umap``, and napari
+        without any further call. Use ``exp.colors.set(...)``/``.get(...)`` with
+        ``cells_layer=`` for non-main layers.
 
         Returns:
-            dict: A dictionary mapping metadata keys to color dictionaries.
+            ExperimentColors: A layer-aware ``MutableMapping`` over the color store.
         """
-        return self._colors
+        return ExperimentColors(self)
 
     @property
     def filters(self):
@@ -2809,7 +2879,8 @@ class InSituExperiment:
         colors_path = path / "colors.json"
         if colors_path.exists():
             with open(colors_path) as f:
-                self._colors = json.load(f)
+                raw_colors = json.load(f)
+            self._colors = self._normalize_colors_store(raw_colors, self._default_color_layer())
         else:
             self._colors = {}
 
@@ -3402,7 +3473,7 @@ class InSituExperiment:
                 f"File already exists: {colors_path}. Set `overwrite=True` to replace it."
             )
 
-        write_dict_to_json(self.colors, colors_path)
+        write_dict_to_json(self._colors, colors_path)
 
     def save_images(
         self,
@@ -3715,6 +3786,8 @@ class InSituExperiment:
     def show(
         self,
         index: int,
+        cells_layer: str | None = None,
+        auto_sync_colors: bool = True,
         verbose: bool = False
         ):
         """
@@ -3722,10 +3795,33 @@ class InSituExperiment:
 
         Args:
             index (int): The index of the dataset to display.
+            cells_layer: Name of the cell layer to display (defaults to the main layer).
+            auto_sync_colors: If True (default), harmonize categorical colors that were
+                never manually assigned/synced across all samples before opening the
+                viewer, so the same category gets the same color in every sample. Keys
+                already assigned via ``exp.colors[...] = {...}`` or a prior
+                ``sync_colors`` call are already write-through and are left untouched.
+                Set False to skip (e.g. for speed or to preserve per-sample colors).
             verbose (bool, optional): If True, show verbose output. Defaults to False.
         """
         dataset = self.data[index]
-        dataset.show(verbose=verbose)
+
+        # Pre-flight: harmonize categorical colors the user never touched, across all
+        # samples, so the viewer shows consistent colors without a manual sync_colors()
+        # call. Never let a color-sync problem prevent the viewer from opening.
+        if auto_sync_colors and self._data_type == "insitupy":
+            try:
+                celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
+                cat_keys = list(celldata.table.obs.select_dtypes("category").columns)
+                if cat_keys:
+                    self.sync_colors(
+                        cat_keys, cells_layer=cells_layer,
+                        overwrite=False, verbose=verbose,
+                    )
+            except Exception as exc:
+                logger.warning(f"Automatic color synchronization skipped: {exc}")
+
+        dataset.show(cells_layer=cells_layer, verbose=verbose)
 
     def show_modality(self, modality, uid_column: str = "uid"):
         """Show a modality for all datasets."""
@@ -3792,7 +3888,7 @@ class InSituExperiment:
                 )
                 continue
 
-            if obs_col not in self.colors or overwrite:
+            if obs_col not in self.colors.layer(cells_layer) or overwrite:
                 # create a color dictionary with all categories
                 color_dict = self._create_categorical_color_dict(
                     obs_col=obs_col,
@@ -3801,24 +3897,7 @@ class InSituExperiment:
                 )
 
                 if color_dict is not None:
-                    # iterate over all datasets and set the colors in .uns
-                    uns_key = f"{obs_col}_colors"
-                    for _, xd in self.iterdata():
-                        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-
-                        try:
-                            # try to retrieve categories
-                            cats = celldata.table.obs[obs_col].cat.categories.values
-                        except AttributeError:
-                            # convert to categorical
-                            celldata.table.obs[obs_col] = celldata.table.obs[obs_col].astype("category")
-
-                            # retrieve categories
-                            cats = celldata.table.obs[obs_col].cat.categories.values
-                        celldata.table.uns[uns_key] = [color_dict[c] for c in cats]
-
-                    # save color dict in InSituExperiment
-                    self.colors[obs_col] = color_dict
+                    self._apply_colors(obs_col, color_dict, cells_layer=cells_layer, palette=palette)
 
                     if verbose:
                         logger.info(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
@@ -3836,7 +3915,11 @@ class InSituExperiment:
                         f"Did you pass the correct `cells_layer`?"
                     )
             else:
-                logger.info(f"Key '{obs_col}' found already in `exp.colors`. To overwrite it, run `sync_colors` with `overwrite=True`.")
+                logger.warning(
+                    f"Key '{obs_col}' already exists in `exp.colors` for cells_layer="
+                    f"'{self._resolve_color_layer(cells_layer)}' and was not changed. "
+                    f"Pass `overwrite=True` to `sync_colors` to replace it."
+                )
 
 
     @classmethod
@@ -3979,10 +4062,12 @@ class InSituExperiment:
             if key is not None:
                 metadata[new_col_name] = key
             new_metadata.append(metadata)
-            # Merge colors: first-wins per key
-            for k, v in obj._colors.items():
-                if k not in merged_colors:
-                    merged_colors[k] = v
+            # Merge colors: first-wins per key, per layer
+            for layer, keydict in obj._colors.items():
+                dst = merged_colors.setdefault(layer, {})
+                for k, v in keydict.items():
+                    if k not in dst:
+                        dst[k] = v
 
         new_experiment._data = new_data
         new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
@@ -4051,10 +4136,12 @@ class InSituExperiment:
                 metadata[new_col_name] = key
             new_metadata.append(metadata)
 
-            # Merge colors first-wins
-            for k, v in obj._colors.items():
-                if k not in merged_colors:
-                    merged_colors[k] = v
+            # Merge colors first-wins, per layer
+            for layer, keydict in obj._colors.items():
+                dst = merged_colors.setdefault(layer, {})
+                for k, v in keydict.items():
+                    if k not in dst:
+                        dst[k] = v
 
         new_experiment._metadata = pd.concat(new_metadata, ignore_index=True)
         new_experiment._colors = merged_colors
@@ -4401,7 +4488,10 @@ class InSituExperiment:
         if colors_path.exists():
             try:
                 with open(colors_path) as f:
-                    experiment._colors = json.load(f)
+                    raw_colors = json.load(f)
+                experiment._colors = experiment._normalize_colors_store(
+                    raw_colors, experiment._default_color_layer()
+                )
             except Exception as e:
                 logger.warning(f"Could not load colors.json: {e}")
 
@@ -4618,7 +4708,7 @@ class InSituExperiment:
         experiment._metadata = metadata
         experiment._data = data
         experiment._path = path
-        experiment._colors = colors
+        experiment._colors = experiment._normalize_colors_store(colors, experiment._default_color_layer())
         experiment._filters = {}
         experiment._composites = {}
 
@@ -4698,6 +4788,62 @@ class InSituExperiment:
 
         return payload
 
+    def _resolve_color_layer(self, cells_layer: str | None) -> str:
+        """Return the concrete layer-name string used as a colors-store key.
+
+        ``None`` resolves to the first dataset's main cells layer (datasets are
+        expected to share layer naming in practice). An explicit ``cells_layer``
+        is returned unchanged.
+        """
+        if cells_layer is not None:
+            return cells_layer
+        # Iterate self._data directly (not self.iterdata()): this is called from
+        # load sites where metadata rows may outnumber loaded datasets (e.g. a
+        # metadata-only reload with no on-disk data-* directories yet).
+        for xd in self._data:
+            if xd.cells.is_empty:
+                continue
+            _, name = _get_cell_layer(cells=xd.cells, cells_layer=None, return_layer_name=True)
+            return name
+        return "main"
+
+    def _default_color_layer(self) -> str:
+        """Return the concrete layer-name string for the experiment's default (main) layer."""
+        return self._resolve_color_layer(None)
+
+    def _apply_colors(
+        self,
+        obs_col: str,
+        color_dict: dict,
+        cells_layer: str | None = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+    ):
+        """Store an intent color dict and write an aligned hex list into every sample's ``.uns``.
+
+        Categories present in ``color_dict`` keep the user's exact color; any
+        category absent from it gets a deterministic palette color in ``.uns``
+        only — the stored intent (``self._colors``) keeps just what was assigned.
+        """
+        self._check_mode_compatibility("colors")
+        layer_name = self._resolve_color_layer(cells_layer)
+        color_dict = dict(color_dict)
+        self._colors.setdefault(layer_name, {})[obs_col] = color_dict
+
+        uns_key = f"{obs_col}_colors"
+        for _, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            if obs_col not in celldata.table.obs.columns:
+                continue
+            col = celldata.table.obs[obs_col]
+            if not hasattr(col, "cat"):
+                celldata.table.obs[obs_col] = col.astype("category")
+            cats = celldata.table.obs[obs_col].cat.categories.values
+            celldata.table.uns[uns_key] = [
+                to_hex(color_dict[c], keep_alpha=False) if c in color_dict
+                else to_hex(palette(i % palette.N), keep_alpha=False)
+                for i, c in enumerate(cats)
+            ]
+
     def _check_mode_compatibility(self, method_name: str):
         """
         Check if the current mode is compatible with a method.
@@ -4758,6 +4904,29 @@ class InSituExperiment:
             return color_dict
         else:
             return None
+
+    @staticmethod
+    def _normalize_colors_store(raw: dict, default_layer: str) -> dict:
+        """Return colors in nested ``{layer: {key: {cat: hex}}}`` form, migrating legacy flat files.
+
+        Detection keys on value *shape* (nested = value-of-value is a dict), not on
+        names, so an old flat ``{obs_col: {category: hex}}`` file is distinguished
+        from an already-nested ``{cells_layer: {obs_col: {category: hex}}}`` file
+        regardless of what the obs columns/layers happen to be named.
+        """
+        if not raw:
+            return {}
+        for top_v in raw.values():
+            if isinstance(top_v, dict) and top_v:
+                inner = next(iter(top_v.values()))
+                if isinstance(inner, dict):
+                    return raw  # already nested
+            break
+        logger.info(
+            "Migrating legacy flat colors.json to layer-nested format under "
+            f"cells_layer='{default_layer}'."
+        )
+        return {default_layer: raw}
 
     def calculate_qc_metrics(
         self,
@@ -5132,7 +5301,9 @@ class InSituExperimentView(InSituExperiment):
         else:
             on_disk = {}
 
-        merged = {**on_disk, **self._colors}
+        merged = deepcopy(on_disk)
+        for layer, keydict in self._colors.items():
+            merged.setdefault(layer, {}).update(keydict)
 
         write_path = Path(path) if path is not None else self.path
         write_path.mkdir(parents=True, exist_ok=True)

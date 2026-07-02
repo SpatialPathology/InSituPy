@@ -36,7 +36,7 @@ def _make_metadata_experiment(tmp_path, n=10):
     exp._data = _make_datasets(n)
     qc_mask = [i < n // 2 for i in range(n)]
     exp._filters = {"qc": {"mask": list(qc_mask), "note": None}}
-    exp._colors = {"A": "#FF0000", "B": "#0000FF"}
+    exp._colors = {"main": {"A": {"a": "#FF0000"}, "B": {"b": "#0000FF"}}}
     exp._path = tmp_path
     exp.save_metadata(path=tmp_path)
     exp.save_filters(path=tmp_path)
@@ -55,7 +55,7 @@ def _make_full_experiment(parent_path, n=10):
     })
     qc_mask = [i < n // 2 for i in range(n)]
     exp._filters = {"qc": {"mask": list(qc_mask), "note": None}}
-    exp._colors = {"A": "#FF0000", "B": "#0000FF"}
+    exp._colors = {"main": {"A": {"a": "#FF0000"}, "B": {"b": "#0000FF"}}}
     exp.saveas(parent_path, overwrite=True)
     return InSituExperiment._read_insitupy(parent_path)
 
@@ -122,7 +122,7 @@ def test_c2_saveas_parent_path_overwrites_cleanly(tmp_path):
     assert len(reloaded._metadata) == 5
     assert not reloaded.is_view
     assert len(reloaded._filters["qc"]["mask"]) == 5
-    assert "A" in reloaded._colors
+    assert "A" in reloaded._colors["main"]
 
 
 # ── C3 ────────────────────────────────────────────────────────────────────────
@@ -204,18 +204,18 @@ def test_c5_replace_raises_on_view():
 def test_m1_save_colors_preserves_parent_categories(tmp_path):
     """view.save_colors() must not drop color keys absent from the view."""
     exp = _make_metadata_experiment(tmp_path)
-    assert "B" in exp._colors
+    assert "B" in exp._colors["main"]
 
     view = exp._subset(slice(0, 5), as_view=True)
     # Simulate view missing "B" (e.g. sync_colors only saw "A" datasets).
-    view._colors = {"A": "#FF0000"}
+    view._colors = {"main": {"A": {"a": "#FF0000"}}}
     view.save_colors()
 
     with open(tmp_path / "colors.json") as f:
         colors = json.load(f)
 
-    assert "B" in colors, "parent's 'B' color key must survive view.save_colors()"
-    assert "A" in colors
+    assert "B" in colors["main"], "parent's 'B' color key must survive view.save_colors()"
+    assert "A" in colors["main"]
 
 
 # ── M3 ────────────────────────────────────────────────────────────────────────

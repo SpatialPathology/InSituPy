@@ -12,9 +12,10 @@ if WITH_NAPARI:
     import pandas as pd
     from magicgui import magicgui
     from magicgui.widgets import FunctionGui
-    from matplotlib.colors import ListedColormap
+    from matplotlib.colors import ListedColormap, to_rgb
     from napari.utils import DirectLabelColormap
     from napari.utils.notifications import show_info, show_warning
+    from pandas.api.types import is_numeric_dtype
     from qtpy.QtCore import QSize, Qt
     from qtpy.QtGui import QFontMetrics
     from qtpy.QtWidgets import (
@@ -66,6 +67,10 @@ if WITH_NAPARI:
 
     # Maximum number of unique colors for labels (napari limitation)
     MAX_LABEL_COLORS = 500
+    # Number of quantization bins for continuous (viridis) label coloring. Keeps the
+    # DirectLabelColormap's distinct-color count well under napari's ~1024 render
+    # ceiling and matches viridis's own default LUT resolution.
+    N_CONTINUOUS_COLOR_BINS = 256
 
     def _as_positional_array(values) -> np.ndarray:
         """Convert array-like input to a NumPy array for position-based indexing."""
@@ -90,6 +95,46 @@ if WITH_NAPARI:
     def _has_non_missing_label_values(values: np.ndarray) -> bool:
         """Return True if at least one value is present for coloring."""
         return any(not _is_missing_label_value(value) for value in values)
+
+    def _resolve_categorical_colormap(color_value, uns, key):
+        """Resolve (color_value, colormap) so "cells" and "points" modes agree.
+
+        Ensures both render paths derive the same category->color assignment:
+
+        * If ``uns`` has saved ``"{key}_colors"``, build the ListedColormap from
+          those hex colors (unchanged behavior, used by sync_colors / scanpy).
+        * Otherwise, normalize any non-numeric column to a ``categorical`` dtype so
+          both modes read the same ``.cat.categories`` order, and build a
+          deterministic fallback ListedColormap from DEFAULT_CATEGORICAL_CMAP.
+          Colors are RGB tuples (NOT hex) so the labels renderer's
+          ``np.array(colormap.colors[i])`` yields a length-3 array.
+        * Otherwise (numeric / continuous) return ``colormap=None``.
+
+        Returns the possibly-converted ``color_value`` and the colormap (or None).
+        """
+        # Normalize object/string columns to categorical (genes/continuous untouched;
+        # bool is treated as numeric by is_numeric_dtype and is intentionally left as-is).
+        if (color_value is not None
+                and not is_numeric_dtype(color_value)
+                and not hasattr(color_value, "cat")):
+            color_value = pd.Series(color_value).astype("category")
+
+        colors_key = f"{key}_colors"
+        if colors_key in uns:
+            def _hex_to_rgb(hex_color):
+                hex_color = hex_color.lstrip("#")
+                return tuple(int(hex_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+            colormap = ListedColormap([_hex_to_rgb(c) for c in uns[colors_key]])
+        elif hasattr(color_value, "cat"):
+            n = DEFAULT_CATEGORICAL_CMAP.N
+            cats = color_value.cat.categories
+            colormap = ListedColormap(
+                [to_rgb(DEFAULT_CATEGORICAL_CMAP.colors[i % n]) for i in range(len(cats))]
+            )
+        else:
+            colormap = None
+
+        return color_value, colormap
 
     def _build_labels_properties(
         viewer_config: "ViewerConfig",
@@ -134,8 +179,15 @@ if WITH_NAPARI:
                 ]
 
         if key is not None and color_values is not None:
+            # Use np.nan (not None) as the missing-value sentinel: mixing None into a
+            # list of numpy floats forces an object-dtype properties array, which makes
+            # `_update_colorlegend`'s is_numeric_dtype(values) check misclassify a
+            # continuous key as categorical -- building a categorical legend with one
+            # entry per distinct real value is what actually hangs the GUI on large
+            # datasets, not the label coloring itself. np.nan keeps the array float64
+            # for numeric keys while still satisfying pd.isna() checks downstream.
             value_list = [
-                color_values[cell_idx] if cell_idx is not None and cell_idx < len(color_values) and not _is_missing_label_value(color_values[cell_idx]) else None
+                color_values[cell_idx] if cell_idx is not None and cell_idx < len(color_values) and not _is_missing_label_value(color_values[cell_idx]) else np.nan
                 for cell_idx in cell_indices
             ]
             properties['value'] = value_list
@@ -304,6 +356,13 @@ if WITH_NAPARI:
                 vmax = vmin + 1  # Avoid division by zero
 
             cmap_mpl = plt.cm.viridis
+            # napari's DirectLabelColormap renders incorrectly beyond ~1024 distinct
+            # colors. A per-cell continuous colormap call produces a near-unique color
+            # per cell, which can freeze the viewer on large datasets. Quantize into a
+            # fixed LUT instead (mirrors MAX_LABEL_COLORS capping for the categorical
+            # branch above).
+            n_bins = N_CONTINUOUS_COLOR_BINS
+            lut = cmap_mpl(np.linspace(0, 1, n_bins))
 
             for label_id, cell_idx in zip(label_ids, cell_indices):
                 if cell_idx is not None and cell_idx < len(color_values):
@@ -313,7 +372,8 @@ if WITH_NAPARI:
                         color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
                     else:
                         norm_val = np.clip((value - vmin) / (vmax - vmin), 0, 1)
-                        color_dict[int(label_id)] = np.array(cmap_mpl(norm_val))
+                        bin_idx = min(int(norm_val * (n_bins - 1)), n_bins - 1)
+                        color_dict[int(label_id)] = lut[bin_idx]
 
         # Create DirectLabelColormap
         direct_cmap = DirectLabelColormap(color_dict=color_dict)
@@ -549,17 +609,9 @@ if WITH_NAPARI:
                     # save last addition to add it to recent in the callback
                     viewer_config.recent_selections.append(f"{key_type}:{key}")
 
-                    if f"{key}_colors" in viewer_config.adata.uns.keys():
-                        # Convert hex colors to RGB format
-                        def hex_to_rgb(hex_color):
-                            hex_color = hex_color.lstrip('#')
-                            return tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-                        rgb_colors = [hex_to_rgb(color) for color in viewer_config.adata.uns[f"{key}_colors"]]
-
-                        # Transform to ListedColormap
-                        colormap = ListedColormap(rgb_colors)
-                    else:
-                        colormap = None
+                    color_value, colormap = _resolve_categorical_colormap(
+                        color_value, viewer_config.adata.uns, key
+                    )
 
                     # Handle display as labels (cells or nuclei boundaries)
                     if display_mode in ["cells", "nuclei"]:

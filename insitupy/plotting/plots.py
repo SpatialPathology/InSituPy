@@ -622,11 +622,10 @@ def cellular_composition(
     is_experiment = _is_experiment(data)
     if is_experiment:
         # get colors for plotting
-        if cell_type_col in data.colors:
-            color_dict = data.colors[cell_type_col]
-        else:
-            data.sync_colors(cell_type_col)
-            color_dict = data.colors[cell_type_col]
+        color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
+        if color_dict is None:
+            data.sync_colors(cell_type_col, cells_layer=cells_layer)
+            color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)

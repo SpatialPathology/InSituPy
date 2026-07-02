@@ -397,7 +397,8 @@ def spatial(
         data.sync_colors(
             keys=keys,
             cells_layer=cells_layer,
-            palette=plot_config.palette
+            palette=plot_config.palette,
+            overwrite=False
         )
     else:
         n_data = 1
@@ -782,15 +783,18 @@ class _ColorConfigMultiPlot:
 
         if _is_experiment(data):
             data_list = data.data
-            exp_color_dict = data.colors
+            exp_colors = data.colors
             # is_experiment = True
         else:
             data_list = [data]
-            exp_color_dict = {}
+            exp_colors = None
             # is_experiment = False
 
         for key in keys:
-            if key in exp_color_dict:
+            layer_color_dict = (
+                exp_colors.get(key, cells_layer=cells_layer) if exp_colors is not None else None
+            )
+            if layer_color_dict is not None:
                 # use color_dict from InSituExperiment (copy: never mutate exp.colors)
                 has_na = any(
                     pd.isna(_extract_color_values(
@@ -804,7 +808,7 @@ class _ColorConfigMultiPlot:
                     )[0] is not None
                 )
                 color_entry = {
-                    "color_dict": dict(exp_color_dict[key]),
+                    "color_dict": dict(layer_color_dict),
                     "max_value": None,
                     "is_categorical": True,
                     "crange": None,
