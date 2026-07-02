@@ -1,4 +1,4 @@
-"""Smoke test for InSituExperiment.__repr__ and InSituData.__repr__."""
+"""Tests for InSituExperiment.__repr__ and InSituData.__repr__."""
 import pandas as pd
 from insitupy.experiment.data import InSituExperiment
 
@@ -21,8 +21,6 @@ def test_empty():
     assert "0 samples" in r
     assert "filters" in r
     assert "table" in r
-    print("PASS: empty repr")
-    print(r)
 
 
 def test_with_samples():
@@ -34,8 +32,6 @@ def test_with_samples():
     assert any("metadata columns:" in l for l in lines)
     assert '"uid"' in r
     assert '"condition"' in r
-    print("PASS: 25-sample repr")
-    print(r)
 
 
 def test_column_wrapping():
@@ -45,33 +41,27 @@ def test_column_wrapping():
     assert "15 metadata columns:" in r
     lines_with_quotes = [l for l in r.splitlines() if '"very_long' in l]
     assert len(lines_with_quotes) > 1, "Expected column names to wrap to multiple lines"
-    print("PASS: column wrapping")
 
 
 def test_filter_indentation():
-    from unittest.mock import MagicMock
-    import numpy as np
     exp = InSituExperiment()
     exp._metadata = pd.DataFrame({"uid": ["a", "b", "c"], "qc": ["pass", "pass", "fail"]})
     exp._filters["qc_pass"] = {"mask": [True, True, False], "note": None}
     r = repr(exp)
     lines = r.splitlines()
-    filter_header_idx = next(i for i, l in enumerate(lines) if "filters" in l and "➤" in l)
+    assert any("filters" in l and "➤" in l for l in lines)
     base_header_idx = next(i for i, l in enumerate(lines) if "Base filters" in l)
     table_line_idx = next(i for i, l in enumerate(lines) if "qc_pass" in l)
     # table row should be indented more than "Base filters:" header
     base_indent = len(lines[base_header_idx]) - len(lines[base_header_idx].lstrip())
     table_indent = len(lines[table_line_idx]) - len(lines[table_line_idx].lstrip())
     assert table_indent > base_indent, "Table rows should be indented more than subsection header"
-    print("PASS: filter table indentation")
-    print(r)
 
 
 def test_table_human_readable():
     exp = _make_exp(3)
     r = repr(exp)
     assert "no tables built" in r
-    print("PASS: table human-readable (no tables)")
 
 
 def test_html():
@@ -85,19 +75,3 @@ def test_html():
     assert "padding-left:1em" in h  # indentation applied
     assert "table" in h
     assert "no tables built" in h
-    print("PASS: HTML repr")
-
-
-if __name__ == "__main__":
-    test_empty()
-    print()
-    test_with_samples()
-    print()
-    test_column_wrapping()
-    print()
-    test_filter_indentation()
-    print()
-    test_table_human_readable()
-    print()
-    test_html()
-    print("\nAll smoke tests passed.")

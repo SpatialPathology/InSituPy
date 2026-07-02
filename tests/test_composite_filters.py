@@ -1,4 +1,4 @@
-"""Smoke test for composite filter functionality in FilterManager."""
+"""Tests for composite filter functionality in FilterManager."""
 import pandas as pd
 from unittest.mock import MagicMock
 
@@ -23,7 +23,6 @@ def test_base_create():
     assert "3/5" in msg
     assert fm.base_keys() == ["qc_pass"]
     assert fm.composite_keys() == []
-    print("PASS: base create")
 
 
 def test_combine_and():
@@ -36,7 +35,6 @@ def test_combine_and():
     mask = fm._resolve_mask("combined")
     # pass AND R2: c(T,T), d(T,T) → [F,F,T,T,F]
     assert mask.tolist() == [False, False, True, True, False]
-    print("PASS: combine AND")
 
 
 def test_combine_or_with_negate():
@@ -48,7 +46,6 @@ def test_combine_or_with_negate():
     mask = fm._resolve_mask("qc_or_not_r2")
     # qc_pass=[T,F,T,T,F], NOT region_r2=[T,T,F,F,F]  → OR → [T,T,T,T,F]
     assert mask.tolist() == [True, True, True, True, False]
-    print("PASS: combine OR with negate")
 
 
 def test_summary_columns():
@@ -62,7 +59,6 @@ def test_summary_columns():
     assert set(df["type"].tolist()) == {"base", "composite"}
     row = df[df["filter_key"] == "combined"].iloc[0]
     assert row["formula"] == "qc_pass AND region_r2"
-    print("PASS: summary columns and formula")
 
 
 def test_invert():
@@ -73,7 +69,6 @@ def test_invert():
     mask = fm._resolve_mask("qc_fail")
     assert mask.tolist() == [False, True, False, False, True]
     assert "qc_fail" in fm.base_keys()
-    print("PASS: invert")
 
 
 def test_materialize():
@@ -86,7 +81,6 @@ def test_materialize():
     assert "combined_frozen" in fm.base_keys()
     assert "combined" in fm.composite_keys()
     assert fm._resolve_mask("combined_frozen").tolist() == [False, False, True, True, False]
-    print("PASS: materialize")
 
 
 def test_remove_blocks_if_referenced():
@@ -102,7 +96,6 @@ def test_remove_blocks_if_referenced():
         assert "combined" in str(e)
     fm.remove("combined")
     fm.remove("qc_pass")  # now allowed
-    print("PASS: remove blocks if referenced")
 
 
 def test_lazy_reevaluation():
@@ -118,16 +111,3 @@ def test_lazy_reevaluation():
     after = fm._resolve_mask("combined").tolist()
     assert before != after
     assert after == [False, False, True, True, True]
-    print("PASS: lazy re-evaluation")
-
-
-if __name__ == "__main__":
-    test_base_create()
-    test_combine_and()
-    test_combine_or_with_negate()
-    test_summary_columns()
-    test_invert()
-    test_materialize()
-    test_remove_blocks_if_referenced()
-    test_lazy_reevaluation()
-    print("\nAll smoke tests passed.")
