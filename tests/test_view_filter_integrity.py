@@ -534,3 +534,73 @@ def test_view_saveas_rejects_free_after_save(tmp_path):
 
     with pytest.raises(ValueError, match="free_after_save"):
         view.saveas(tmp_path / "export", free_after_save=True)
+
+
+# ── __getitem__ / query() always return a linked view ─────────────────────────
+
+
+def test_getitem_returns_view():
+    """exp[:3] must return an InSituExperimentView sharing datasets with the parent."""
+    n = 5
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
+    exp._data = _make_datasets(n)
+
+    subset = exp[:3]
+
+    assert isinstance(subset, InSituExperimentView)
+    assert len(subset._data) == 3
+    assert subset._data[0] is exp._data[0], "view must share dataset references, not copy them"
+
+
+def test_getitem_on_view_returns_another_view():
+    """Slicing an existing view must still return a view (propagates, doesn't collapse)."""
+    n = 5
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
+    exp._data = _make_datasets(n)
+
+    view = exp[:4]
+    view_of_view = view[:2]
+
+    assert isinstance(view_of_view, InSituExperimentView)
+    assert len(view_of_view._data) == 2
+
+
+def test_query_returns_view():
+    """query() delegates to __getitem__, so it must also return an InSituExperimentView."""
+    n = 4
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({
+        "uid": [f"uid{i}" for i in range(n)],
+        "group": ["A", "B", "A", "B"],
+    })
+    exp._data = _make_datasets(n)
+
+    subset = exp.query({"group": ["A"]})
+
+    assert isinstance(subset, InSituExperimentView)
+    assert len(subset._data) == 2
+
+
+# ── filters.apply() returns a fully independent copy ───────────────────────────
+
+
+def test_apply_deep_copies_datasets():
+    """filters.apply() must deep-copy datasets so the result is independent of the parent."""
+    n = 4
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
+    exp._data = _make_datasets(n)
+    exp._filters = {"qc": {"mask": [True, True, False, False], "note": None}}
+
+    applied = exp.filters.apply("qc")
+
+    assert isinstance(applied, InSituExperiment)
+    assert not isinstance(applied, InSituExperimentView)
+    assert len(applied._data) == 2
+    assert applied._data[0] is not exp._data[0], "apply() must deep-copy datasets, not alias them"
+
+    original_uid = exp._data[0]._uid
+    applied._data[0]._uid = "MUTATED"
+    assert exp._data[0]._uid == original_uid, "parent dataset must be unaffected by apply() mutation"

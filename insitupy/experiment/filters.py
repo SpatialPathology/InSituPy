@@ -585,7 +585,9 @@ class FilterManager:
         """Return a new :class:`InSituExperiment` containing only the filtered samples.
 
         Creates a permanent (non-view) subset of the experiment using the
-        boolean mask for *key*.  For composite filters the mask is evaluated
+        boolean mask for *key*. The selected datasets are deep-copied, so the
+        result is fully independent of the parent experiment (mutating it does
+        not affect the parent). For composite filters the mask is evaluated
         from the current state of the source filters at call time.
 
         Args:

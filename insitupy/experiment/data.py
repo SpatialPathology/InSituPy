@@ -620,7 +620,9 @@ class InSituExperiment:
 
         Args:
             key: Subsetting key (same accepted types as ``__getitem__``).
-            as_view: If True, keep path linkage and return an InSituExperimentView.
+            as_view: If True, keep path linkage and return an InSituExperimentView whose
+                datasets are shared with the parent (no copy). If False, the selected
+                datasets are deep-copied so the result is fully independent of the parent.
             added_filter: Optional filter key to append to applied filter history.
         """
         if isinstance(key, int):
@@ -640,6 +642,9 @@ class InSituExperiment:
                 key = key.tolist()
 
         subset_cls = InSituExperimentView if as_view else InSituExperiment
+        # Views share dataset references with the parent (lazy, no copy); a regular
+        # subset must be fully independent, so its datasets are deep-copied.
+        select_data = (lambda d: d) if as_view else deepcopy
 
         # Handle boolean mask
         if isinstance(key, pd.Series) and key.dtype == bool:
@@ -647,14 +652,14 @@ class InSituExperiment:
                 key = key.reset_index(drop=True)
             selected_indices = list(self._metadata.index[key])
             new_experiment = subset_cls(data_type=self._data_type)
-            new_experiment._data = [d for d, k in zip(self._data, key) if k]
+            new_experiment._data = [select_data(d) for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
 
         # Handle slices, list of ints, ndarray, or Series of ints
         else:
             selected_indices = list(self._metadata.iloc[key].index)
             new_experiment = subset_cls(data_type=self._data_type)
-            new_experiment._data = [self._data[i] for i in self._metadata.iloc[key].index]
+            new_experiment._data = [select_data(self._data[i]) for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
         # Carry over colors and filters, and subset filters to the new metadata
@@ -702,20 +707,26 @@ class InSituExperiment:
 
     def __getitem__(self, key):
         """
-        Retrieve a subset of the experiment.
+        Retrieve a lazy, linked view of a subset of the experiment.
+
+        Always returns an InSituExperimentView: its datasets are shared with this
+        experiment (no copy), so mutating them mutates the parent too. Use this for
+        inspection or chaining further subsetting. Call ``.copy()`` on the result (or
+        use ``.filters.apply(key)`` for filter-based subsets) to obtain a fully
+        independent, deep-copied ``InSituExperiment``.
 
         Args:
             key (int, slice, list, np.ndarray, pd.Series): The index, slice, list of indices, boolean mask,
                 or Series to retrieve.
 
         Returns:
-            InSituExperiment: A new InSituExperiment object with the selected subset.
+            InSituExperimentView: A linked view containing the selected subset.
 
         Raises:
             IndexError: If the index is out of range.
             ValueError: If the key is invalid.
         """
-        return self._subset(key, as_view=self.is_view)
+        return self._subset(key, as_view=True)
 
     def __len__(self):
         """Returns the number of datasets in the experiment.
@@ -2927,7 +2938,8 @@ class InSituExperiment:
                 - A string expression to evaluate using pandas.DataFrame.query().
 
         Returns:
-            InSituExperiment: A new InSituExperiment object with the selected subset.
+            InSituExperimentView: A linked view containing the selected subset (see
+            :meth:`__getitem__`). Call ``.copy()`` on the result for an independent copy.
         """
         if isinstance(criteria, dict):
             mask = pd.Series([True] * len(self._metadata), index=self._metadata.index)
