@@ -1459,12 +1459,12 @@ class InSituExperiment:
         self,
         adata: AnnData,
         uid_column: str,
-        uid_column_adata: str,
+        uid_column_adata: str | None,
         obs_columns_to_transfer: list[str] | None = None,
         obsm_keys_to_transfer: list[str] | None = None,
         cells_layer: str | None = None,
         overwrite: bool = False,
-        strip_uid_prefix: bool = True,
+        autodetect_obs_names: bool = True,
         fill_missing: bool = True,
     ) -> "InSituExperiment":
         """Transfer obs columns and obsm keys from an AnnData to per-sample AnnData objects.
@@ -1478,25 +1478,93 @@ class InSituExperiment:
             uid_column: Column in the InSituExperiment metadata that identifies
                 each sample.
             uid_column_adata: Column in ``adata.obs`` that identifies each
-                sample.
+                sample. Pass ``None`` to skip this and instead derive each
+                row's sample membership directly from the uid embedded in
+                ``adata.obs_names`` (a leading ``"{uid}-"`` prefix or trailing
+                ``"-{uid}"`` suffix, as produced by this experiment's own
+                ``build_table()``/``to_anndata()``) -- requires
+                ``autodetect_obs_names=True``, since there is then no
+                ``adata.obs`` column left to partition by.
             obs_columns_to_transfer: ``adata.obs`` columns to copy into each
                 per-sample AnnData.
             obsm_keys_to_transfer: ``adata.obsm`` keys to copy.
             cells_layer: Cell layer to receive the transferred data.
             overwrite: If True, overwrite existing columns/keys.
-            strip_uid_prefix: If True, strip the ``"{index}-"`` prefix from
-                obs_names before matching.
+            autodetect_obs_names: If True, try to recover this sample's own cell
+                names from ``adata.obs_names`` by testing known conventions and
+                keeping whichever recovers the most matches against this
+                sample's own obs_names: no prefix/suffix; this sample's uid as a
+                trailing ``"-{uid}"`` suffix (what ``build_table()``/
+                ``to_anndata()`` produce via ``anndata``'s ``index_unique``); a
+                leading ``"{token}-"`` prefix stripped at the first ``"-"`` (a
+                legacy/external convention); or this sample's uid as a leading
+                ``"{uid}-"`` prefix.
             fill_missing: If True, allow partial matches (missing cells filled
                 with NaN).
 
         Returns:
             Self, for method chaining.
         """
+        if uid_column_adata is None and not autodetect_obs_names:
+            raise ValueError(
+                "`uid_column_adata=None` requires `autodetect_obs_names=True`: sample "
+                "membership has to be derived from the uid embedded in "
+                "`adata.obs_names`, since there is no `adata.obs` column left "
+                "to partition by."
+            )
+
+        # When uid_column_adata is None, recover which sample each row of
+        # `adata` belongs to directly from `adata.obs_names`, once for the
+        # whole table -- rather than re-testing every uid against every
+        # obs_name inside the per-sample loop below, which would cost
+        # O(n_samples * n_cells) instead of O(n_cells). A row matches a sample
+        # if the substring immediately before or after one of its "-"
+        # characters exactly equals that sample's own uid; every dash
+        # position is tried (not just the first/last) since a uid may itself
+        # contain internal dashes, exactly like the uid_prefix/uid_suffix
+        # candidates below handle for the per-cell stripping step.
+        uid_positions: dict[str, list[int]] | None = None
+        if uid_column_adata is None:
+            # Coerce uids to str so matching still works when the metadata uid
+            # column is non-string-typed (e.g. integer sample labels); the
+            # candidate substrings of obs_names below are always str.
+            all_uids = {str(u) for u in self._metadata[uid_column]}
+            uid_positions = {}
+            for idx, name in enumerate(adata.obs_names):
+                name = str(name)
+                dash_positions = [i for i, c in enumerate(name) if c == '-']
+                # A uid may appear as a leading "{uid}-" prefix or a trailing
+                # "-{uid}" suffix, and may itself contain dashes, so every dash
+                # position is tried for both. When more than one uid matches
+                # (e.g. a short trailing token like "1" from a Xenium barcode
+                # colliding with a sample literally named "1"), prefer the
+                # longest match -- a longer uid is far less likely to be a
+                # coincidental substring, which resolves the prefix/suffix
+                # ambiguity toward the intended sample.
+                found_uid = None
+                for pos in dash_positions:
+                    for candidate in (name[pos + 1:], name[:pos]):
+                        if candidate in all_uids and (
+                            found_uid is None or len(candidate) > len(found_uid)
+                        ):
+                            found_uid = candidate
+                if found_uid is not None:
+                    uid_positions.setdefault(found_uid, []).append(idx)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Recovered sample membership for %d/%d cells from obs_names "
+                    "(uid_column_adata=None).",
+                    sum(len(v) for v in uid_positions.values()), len(adata),
+                )
+
         for meta, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             current_uid = meta[uid_column]
-            mask = adata.obs[uid_column_adata] == current_uid
-            subset = adata[mask].copy()
+            if uid_column_adata is None:
+                subset = adata[uid_positions.get(str(current_uid), [])].copy()
+            else:
+                mask = adata.obs[uid_column_adata] == current_uid
+                subset = adata[mask].copy()
 
             if len(subset) == 0:
                 warnings.warn(
@@ -1507,13 +1575,63 @@ class InSituExperiment:
                 )
                 continue
 
-            # Handle cell name matching
-            if strip_uid_prefix:
-                if len(subset.obs_names) > 0:
-                    sample_name = str(subset.obs_names[0])
-                    if '-' in sample_name:
-                        subset.obs_names = pd.Index([name.split('-', 1)[1] if '-' in name else name
-                                                    for name in subset.obs_names])
+            # Handle cell name matching. `adata` may come from this experiment's own
+            # build_table()/to_anndata() -- which suffix obs_names with the sample's
+            # real UID via anndata's index_unique mechanism ("{cellname}-{uid}") -- from
+            # an external pipeline with its own convention, or with no prefix/suffix at
+            # all. Rather than guessing the convention from the shape of the first cell
+            # name (which breaks on Xenium barcodes -- they contain "-" themselves), try
+            # each known convention and keep whichever recovers the most matches against
+            # this sample's own obs_names.
+            #
+            # `none` (leave names untouched) is the safety baseline: a rewriting strategy
+            # is only ever applied when it *strictly* beats leaving names alone, so
+            # already-correct names are never mutated. The rewriting strategies are tried
+            # in order of how likely they are for InSituPy's own workflow -- `uid_suffix`
+            # first, since that is exactly what build_table()/to_anndata() produce -- so
+            # the common case exits after building a single candidate. A strategy that
+            # matches every matchable cell (`min(n_subset, n_target)` -- the source may be
+            # a QC-filtered subset of the sample, or vice versa) cannot be beaten, so the
+            # search stops there. The match count is taken target-side
+            # (`target_names.isin(candidate)`) so a strategy that collapses distinct cells
+            # onto duplicate names cannot inflate its own score.
+            if autodetect_obs_names and len(subset.obs_names) > 0:
+                target_names = celldata.table.obs_names
+                n_target = len(target_names)
+                ceiling = min(len(subset), n_target)
+                n_none = int(target_names.isin(subset.obs_names).sum())
+                if n_none < ceiling:
+                    uid_prefix = f"{current_uid}-"
+                    uid_suffix = f"-{current_uid}"
+                    # uid_prefix/uid_suffix are bound as default args (not captured)
+                    # so each strategy is self-contained and lint-clean (ruff B023).
+                    rewriting_strategies = [
+                        ("uid_suffix", lambda n, s=uid_suffix: n.removesuffix(s)),
+                        ("first_dash_split",
+                         lambda n: n.split('-', 1)[1] if '-' in n else n),
+                        ("uid_prefix", lambda n, p=uid_prefix: n.removeprefix(p)),
+                    ]
+                    best_count = n_none
+                    best_index: pd.Index | None = None  # None -> keep original names
+                    best_key = "none"
+                    for key, rewrite in rewriting_strategies:
+                        candidate = pd.Index(
+                            [rewrite(str(name)) for name in subset.obs_names]
+                        )
+                        count = int(target_names.isin(candidate).sum())
+                        if count == ceiling:  # matched everything matchable -> unbeatable
+                            best_count, best_index, best_key = count, candidate, key
+                            break
+                        if count > best_count:  # strict > -> "none" wins ties
+                            best_count, best_index, best_key = count, candidate, key
+                    if best_index is not None:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "Dataset '%s': recovered obs_names using '%s' strategy "
+                                "(%d/%d cells matched).",
+                                current_uid, best_key, best_count, n_target,
+                            )
+                        subset.obs_names = best_index
 
             # Check for cell name matches
             matching_cells = celldata.table.obs_names.isin(subset.obs_names)
@@ -1587,12 +1705,12 @@ class InSituExperiment:
         self,
         adata: AnnData,
         uid_column: str,
-        uid_column_adata: str,
+        uid_column_adata: str | None,
         obs_columns_to_transfer: list[str] | None = None,
         obsm_keys_to_transfer: list[str] | None = None,
         cells_layer: str | None = None,
         overwrite: bool = False,
-        strip_uid_prefix: bool = True,
+        autodetect_obs_names: bool = True,
         fill_missing: bool = True
     ) -> "InSituExperiment":
         """
@@ -1608,12 +1726,24 @@ class InSituExperiment:
             uid_column: Column name in the InSituExperiment metadata containing
                 unique identifiers for matching datasets.
             uid_column_adata: Column name in `adata.obs` containing unique
-                identifiers for matching datasets.
+                identifiers for matching datasets. Pass `None` to skip this and
+                instead derive each row's sample membership directly from the
+                uid embedded in `adata.obs_names` (a leading `"{uid}-"` prefix
+                or trailing `"-{uid}"` suffix, as produced by this
+                experiment's own `build_table()`/`to_anndata()`) -- requires
+                `autodetect_obs_names=True`, since there is then no `adata.obs`
+                column left to partition by.
             obs_columns_to_transfer: List of column names in `adata.obs` to transfer.
             obsm_keys_to_transfer: List of keys in `adata.obsm` to transfer.
             cells_layer: The layer in `InSituData.cells` to which data should be added.
             overwrite: If True, overwrites existing columns/keys. Defaults to False.
-            strip_uid_prefix: If True, strips the "{index}-" prefix from obs_names. Defaults to True.
+            autodetect_obs_names: If True, try to recover this sample's own cell names from
+                adata.obs_names by testing known conventions and keeping whichever recovers
+                the most matches against this sample's own obs_names: no prefix/suffix; this
+                sample's uid as a trailing "-{uid}" suffix (what build_table()/to_anndata()
+                produce via anndata's index_unique); a leading "{token}-" prefix stripped at
+                the first "-" (a legacy/external convention); or this sample's uid as a
+                leading "{uid}-" prefix. Defaults to True.
             fill_missing: If True, allows partial matches with NaN filling. Defaults to True.
 
         Returns:
@@ -1635,8 +1765,9 @@ class InSituExperiment:
                 f"Available columns: {list(self._metadata.columns)}"
             )
 
-        # Validate uid_column_adata exists in adata.obs
-        if uid_column_adata not in adata.obs.columns:
+        # Validate uid_column_adata exists in adata.obs (skipped when None --
+        # sample membership is then derived from adata.obs_names instead)
+        if uid_column_adata is not None and uid_column_adata not in adata.obs.columns:
             raise ValueError(
                 f"Column '{uid_column_adata}' not found in adata.obs. "
                 f"Available columns: {list(adata.obs.columns)}"
@@ -1650,7 +1781,7 @@ class InSituExperiment:
             obsm_keys_to_transfer=obsm_keys_to_transfer,
             cells_layer=cells_layer,
             overwrite=overwrite,
-            strip_uid_prefix=strip_uid_prefix,
+            autodetect_obs_names=autodetect_obs_names,
             fill_missing=fill_missing,
         )
 
@@ -1720,7 +1851,7 @@ class InSituExperiment:
             obsm_keys_to_transfer=obsm_keys,
             cells_layer=cells_layer,
             overwrite=overwrite,
-            strip_uid_prefix=True,
+            autodetect_obs_names=True,
             fill_missing=True,
         )
 
@@ -1800,7 +1931,10 @@ class InSituExperiment:
                 written by the concat and is never duplicated here. A metadata
                 key that collides with a retained obs column is stored under a
                 ``_meta`` suffix instead of overwriting the per-cell data.
-            make_obs_names_unique: If True, prepends dataset index to obs names.
+            make_obs_names_unique: If True, appends ``"-{label_col value}"`` (the
+                sample's real uid, or whatever ``label_col`` resolves to) to each
+                obs name via ``anndata.concat``'s own ``index_unique`` mechanism,
+                matching the shape produced by ``method="concat_on_disk"``.
             join: How to join variables. ``"inner"`` keeps only shared genes;
                 ``"outer"`` keeps all genes with fill values.
             fill_value: Fill value for missing genes when ``join="outer"``.
@@ -1846,7 +1980,7 @@ class InSituExperiment:
         adatas: dict[Any, anndata.AnnData] = {}
         metas_by_label: dict[Any, Any] = {}
 
-        for i, (meta, xd) in enumerate(self.iterdata()):
+        for meta, xd in self.iterdata():
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             adata = celldata.table
 
@@ -1860,9 +1994,6 @@ class InSituExperiment:
                 uns_keys=uns_keys,
                 layer_keys=layer_keys
             )
-
-            if make_obs_names_unique:
-                adata.obs_names = f"{str(i)}-" + adata.obs_names
 
             label = meta[label_col]
             adatas[label] = adata
@@ -1903,6 +2034,7 @@ class InSituExperiment:
             join=join,
             label=label_col,
             merge="unique",
+            index_unique="-" if make_obs_names_unique else None,
         )
         if fill_value is not None:
             concat_kwargs["fill_value"] = fill_value
@@ -1995,7 +2127,8 @@ class InSituExperiment:
                 list of column names, a single column name, or ``"all"`` (default)
                 for all columns. A metadata key that collides with a retained obs
                 column is stored under a ``_meta`` suffix instead of overwriting it.
-            make_obs_names_unique: If True, prepends dataset index to obs names. Defaults to True.
+            make_obs_names_unique: If True, appends ``"-{label_col value}"`` (the
+                sample's real uid) to each obs name. Defaults to True.
 
         Returns:
             AnnData: A concatenated AnnData object.
@@ -2247,8 +2380,9 @@ class InSituExperiment:
             label_col: Metadata column used as sample identifier label.
             join: Variable join strategy. Defaults to ``"outer"`` (union) for
                 the internal union store written by :meth:`build_table`.
-            make_obs_names_unique: If True, prepend label value to obs names
-                using a ``"-"`` separator.
+            make_obs_names_unique: If True, append label value to obs names
+                using a ``"-"`` separator (``anndata``'s ``index_unique`` is
+                hardcoded to append, not prepend).
 
         Raises:
             ValueError: If any dataset cannot be located on disk.
@@ -2445,8 +2579,10 @@ class InSituExperiment:
                 (``in_memory`` only). Defaults to ``"all"``. A metadata key that
                 collides with a retained obs column is stored under a ``_meta``
                 suffix instead of overwriting the per-cell data.
-            make_obs_names_unique: Prepend a prefix to obs names to guarantee
-                uniqueness across samples.
+            make_obs_names_unique: Append the sample's ``label_col`` value
+                (e.g. its uid) to obs names to guarantee uniqueness across
+                samples. Both ``method`` values now produce the same
+                ``"{cellname}-{label_col value}"`` shape.
             min_shared_genes: Warn when fewer than this many genes are shared
                 by all datasets (inner join over all).
             overwrite: If True, overwrite an existing table.

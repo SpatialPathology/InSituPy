@@ -132,6 +132,229 @@ class TestImportFromAnnDataUnchanged:
             )
 
 
+class TestStripUidPrefixFragility:
+    """Regression tests for the self-validating obs_name matching in
+    _transfer_to_samples. Real Xenium barcodes contain "-", so a heuristic keyed on
+    "any dash in the first cell name" mis-fires on unprefixed data -- these tests
+    exercise that failure mode directly, plus a UID that itself contains "-".
+    """
+
+    def test_bare_barcode_like_names_not_falsely_stripped(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=1, n_cells=4, n_genes=3)
+        xd = exp._data[0]
+        barcodes = [f"aaacaagtatctccc{i}-1" for i in range(4)]
+        xd.cells.table.obs_names = pd.Index(barcodes)
+
+        # Source adata uses the *same* bare barcodes -- no uid prefix at all, as
+        # would come from an external pipeline that never went through
+        # build_table()/to_anndata().
+        adata = AnnData(
+            X=np.zeros((4, 1)),
+            obs=pd.DataFrame({"uid": ["sample_0"] * 4}, index=pd.Index(barcodes)),
+        )
+        adata.obs["cluster"] = [f"c{i}" for i in range(4)]
+
+        exp.import_from_anndata(
+            adata=adata,
+            uid_column="uid",
+            uid_column_adata="uid",
+            obs_columns_to_transfer=["cluster"],
+        )
+
+        result = xd.cells.table.obs["cluster"]
+        for i, bc in enumerate(barcodes):
+            assert result.loc[bc] == f"c{i}"
+
+    def test_uid_containing_dash_is_still_stripped_correctly(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=1, n_cells=3, n_genes=3)
+        exp._metadata.loc[0, "uid"] = "sample-A"  # UID itself contains "-"
+        xd = exp._data[0]
+        barcodes = [f"bc{i}-1" for i in range(3)]
+        xd.cells.table.obs_names = pd.Index(barcodes)
+
+        # Source adata prefixed with the real (dash-containing) UID, as produced by
+        # build_table(method="concat_on_disk"). A naive "split on first dash" would
+        # cut this UID in half; only exact-prefix stripping recovers it correctly.
+        prefixed = [f"sample-A-{bc}" for bc in barcodes]
+        adata = AnnData(
+            X=np.zeros((3, 1)),
+            obs=pd.DataFrame({"uid": ["sample-A"] * 3}, index=pd.Index(prefixed)),
+        )
+        adata.obs["cluster"] = [f"c{i}" for i in range(3)]
+
+        exp.import_from_anndata(
+            adata=adata,
+            uid_column="uid",
+            uid_column_adata="uid",
+            obs_columns_to_transfer=["cluster"],
+        )
+
+        result = xd.cells.table.obs["cluster"]
+        for i, bc in enumerate(barcodes):
+            assert result.loc[bc] == f"c{i}"
+
+    def test_import_from_table_after_concat_on_disk(self, tmp_path):
+        """End-to-end regression: build_table(method="concat_on_disk") suffixes
+        obs_names with the real UID ("cellname-uid", verified empirically against
+        anndata 0.12.16 -- index_unique is hardcoded to "{orig_idx}{sep}{key}"). The
+        old split-on-first-dash heuristic could not recover this shape at all -- for
+        cell names without their own "-", it would replace every obs_name with just
+        the trailing uid string, silently breaking every import_from_table() call
+        that followed a concat_on_disk build. This must pass without needing to know
+        about that implementation detail up front.
+        """
+        exp = _make_saved_experiment(tmp_path, n_samples=2, n_cells=5, n_genes=3)
+        exp.build_table(method="concat_on_disk")
+
+        import anndata as ad
+        zarr_path = tmp_path / "tables" / "main.zarr"
+        tbl = ad.read_zarr(zarr_path)
+        # Sanity check on the assumption this test is built on: confirm the actual
+        # shape is uid-*suffixed*, not prefixed.
+        assert str(tbl.obs_names[0]).endswith("-sample_0") or str(tbl.obs_names[0]).endswith("-sample_1")
+        tbl.obs["cluster"] = [f"c{i}" for i in range(tbl.n_obs)]
+        tbl.write_zarr(zarr_path)
+
+        exp.import_from_table(obs_columns=["cluster"])
+
+        for _, xd in exp.iterdata():
+            assert "cluster" in xd.cells.table.obs.columns
+            assert xd.cells.table.obs["cluster"].notna().all()
+            assert xd.cells.table.obs["cluster"].nunique() == len(xd.cells.table.obs)
+
+
+class TestUidColumnAdataNone:
+    """Regression tests for uid_column_adata=None: sample membership is derived
+    directly from the uid embedded in adata.obs_names instead of a separate
+    adata.obs column. The precomputation tries every "-" position in each name
+    (not just the first/last) so it stays correct even when a uid itself
+    contains an internal dash -- exactly the case TestStripUidPrefixFragility
+    already covers for the per-cell stripping step.
+    """
+
+    def test_recovers_from_uid_suffix_without_cross_wiring(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=4, n_genes=3)
+        for i, xd in enumerate(exp._data):
+            xd.cells.table.obs_names = pd.Index([f"cell{i}_{j}-1" for j in range(4)])
+
+        # to_anndata() now suffixes obs_names with the real uid ("cellname-uid").
+        adata = exp.to_anndata()
+        # Each row's transferred value is its own uid -- if uid_column_adata=None
+        # ever mis-derives sample membership and cross-wires rows between the
+        # two samples (the exact failure mode the original fix targeted), the
+        # per-sample assertion below catches it.
+        adata.obs["cluster"] = list(adata.obs["uid"])
+
+        exp.import_from_anndata(
+            adata=adata,
+            uid_column="uid",
+            uid_column_adata=None,
+            obs_columns_to_transfer=["cluster"],
+        )
+
+        for meta, xd in exp.iterdata():
+            obs = xd.cells.table.obs
+            assert obs["cluster"].notna().all()
+            assert (obs["cluster"] == meta["uid"]).all()
+
+    def test_recovers_uid_prefix_containing_internal_dash(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=1, n_cells=3, n_genes=3)
+        exp._metadata.loc[0, "uid"] = "sample-A"  # uid itself contains "-"
+        xd = exp._data[0]
+        barcodes = [f"bc{i}-1" for i in range(3)]
+        xd.cells.table.obs_names = pd.Index(barcodes)
+
+        # "{uid}-{name}" prefix convention, with a uid that itself has a dash --
+        # a naive "split on first/last dash" precomputation would find "sample"
+        # or "bc0", not "sample-A", and fail to recover this row's sample.
+        prefixed = [f"sample-A-{bc}" for bc in barcodes]
+        adata = AnnData(
+            X=np.zeros((3, 1)),
+            obs=pd.DataFrame(index=pd.Index(prefixed)),
+        )
+        adata.obs["cluster"] = [f"c{i}" for i in range(3)]
+
+        exp.import_from_anndata(
+            adata=adata,
+            uid_column="uid",
+            uid_column_adata=None,
+            obs_columns_to_transfer=["cluster"],
+        )
+
+        result = xd.cells.table.obs["cluster"]
+        for i, bc in enumerate(barcodes):
+            assert result.loc[bc] == f"c{i}"
+
+    def test_none_requires_autodetect_obs_names(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=1, n_cells=3, n_genes=3)
+        adata = exp.to_anndata()
+        adata.obs["cluster"] = "x"
+        with pytest.raises(ValueError, match="autodetect_obs_names"):
+            exp.import_from_anndata(
+                adata=adata,
+                uid_column="uid",
+                uid_column_adata=None,
+                obs_columns_to_transfer=["cluster"],
+                autodetect_obs_names=False,
+            )
+
+
+class TestFilteredSubsetTransfer:
+    """Regression tests for the common analysis workflow where the source AnnData is a
+    QC-filtered *subset* of the sample's cells: obs_name auto-detection must still pick
+    the right strategy (the source has fewer cells than the InSituData, so a match count
+    can never reach the full sample size -- the winner is capped at min(n_subset,
+    n_target)), transfer the analyzed cells back to their own rows without cross-wiring
+    samples, and NaN-fill the cells that were dropped during analysis.
+    """
+
+    @staticmethod
+    def _filtered_adata(exp, keep_per_sample):
+        """to_anndata() with each sample down-sampled to its first ``keep_per_sample``
+        cells, and a ``cluster`` column set to each row's full "{name}-{uid}" obs_name so
+        every transferred value is traceable back to the exact cell it came from."""
+        adata = exp.to_anndata()
+        adata.obs["cluster"] = list(adata.obs_names)
+        keep_mask = adata.obs.groupby("uid", observed=True).cumcount() < keep_per_sample
+        return adata[keep_mask.values].copy()
+
+    def _assert_filtered_transfer(self, exp, keep_per_sample, n_cells):
+        for meta, xd in exp.iterdata():
+            uid = meta["uid"]
+            cluster = xd.cells.table.obs["cluster"]
+            assert cluster.notna().sum() == keep_per_sample
+            assert cluster.isna().sum() == n_cells - keep_per_sample
+            # Every transferred value is this cell's own "{name}-{uid}" -- a mis-derived
+            # sample membership or a wrong stripping strategy would break this equality.
+            for name, val in cluster.items():
+                if pd.notna(val):
+                    assert val == f"{name}-{uid}"
+
+    def test_filtered_subset_column_membership(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=6, n_genes=3)
+        adata = self._filtered_adata(exp, keep_per_sample=4)
+        with pytest.warns(UserWarning, match="Partial match"):
+            exp.import_from_anndata(
+                adata=adata,
+                uid_column="uid",
+                uid_column_adata="uid",
+                obs_columns_to_transfer=["cluster"],
+            )
+        self._assert_filtered_transfer(exp, keep_per_sample=4, n_cells=6)
+
+    def test_filtered_subset_obs_name_membership(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=6, n_genes=3)
+        adata = self._filtered_adata(exp, keep_per_sample=4)
+        with pytest.warns(UserWarning, match="Partial match"):
+            exp.import_from_anndata(
+                adata=adata,
+                uid_column="uid",
+                uid_column_adata=None,  # membership derived from obs_names
+                obs_columns_to_transfer=["cluster"],
+            )
+        self._assert_filtered_transfer(exp, keep_per_sample=4, n_cells=6)
+
+
 class TestFullTableDefaults:
     """Default build_table()/to_anndata() retain obs + experiment metadata."""
 
@@ -201,9 +424,13 @@ class TestBuildTableBasic:
         exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=3)
         exp.build_table(make_obs_names_unique=True)
         tbl = exp.table["main"]
-        # Each obs name should contain a "-" separator from the prefix
-        for name in tbl.obs_names:
-            assert "-" in str(name)
+        # Each obs name should end with "-{uid}" for its own sample (appended,
+        # matching concat_on_disk's index_unique shape). tbl.obs is a lazy
+        # xarray-backed Dataset2D; load it to memory to use pandas groupby.
+        obs = tbl.obs.to_memory()
+        for uid, _ in obs.groupby("uid", observed=True):
+            names_for_sample = tbl.obs_names[obs["uid"] == uid]
+            assert all(str(name).endswith(f"-{uid}") for name in names_for_sample)
 
     def test_label_col_in_obs(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
@@ -218,6 +445,31 @@ class TestBuildTableBasic:
         sample_ids = set(np.unique(np.asarray(tbl.obs["uid"])))
         assert "sample_0" in sample_ids
         assert "sample_1" in sample_ids
+
+
+def test_in_memory_and_concat_on_disk_obs_names_match_shape(tmp_path):
+    """method="in_memory" and method="concat_on_disk" now both append
+    "-{uid}" to obs names via anndata's index_unique mechanism -- confirm they
+    actually produce the same shape for equivalent input."""
+    mem_path = tmp_path / "mem"
+    mem_path.mkdir()
+    exp_mem = _make_experiment_with_path(mem_path, n_samples=2, n_cells=4)
+    exp_mem.build_table(method="in_memory")
+    mem_tbl = exp_mem.table["main"]
+
+    disk_path = tmp_path / "disk"
+    disk_path.mkdir()
+    exp_disk = _make_saved_experiment(disk_path, n_samples=2, n_cells=4)
+    exp_disk.build_table(method="concat_on_disk")
+    disk_tbl = exp_disk.table["main"]
+
+    for tbl in (mem_tbl, disk_tbl):
+        # tbl.obs is a lazy xarray-backed Dataset2D; load it to memory to use
+        # pandas groupby.
+        obs = tbl.obs.to_memory()
+        for uid, _ in obs.groupby("uid", observed=True):
+            names_for_sample = tbl.obs_names[obs["uid"] == uid]
+            assert all(str(name).endswith(f"-{uid}") for name in names_for_sample)
 
 
 class TestBuildTableJoin:

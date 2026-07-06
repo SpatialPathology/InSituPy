@@ -57,7 +57,7 @@ exp
 exp.build_table(
     label_col="uid",           # Metadata column that identifies each sample
     obsm_keys="spatial",       # Keep spatial coordinates (default)
-    make_obs_names_unique=True,# Prefix each cell name with "{sample_index}-"
+    make_obs_names_unique=True,# Append "-{label_col value}" (e.g. sample's uid)
 )
 ```
 
