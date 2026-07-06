@@ -12,7 +12,6 @@ from anndata import AnnData
 from shapely import MultiPolygon, Polygon, affinity
 
 from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to_json
-from insitupy._io.geo import write_qupath_geojson
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
@@ -388,21 +387,17 @@ class SpatialUnitsData(DeepCopyMixin):
         # Create directory
         path.mkdir(parents=True, exist_ok=True)
 
-        # Save features as geojson
-        if not self._shapes.empty:
-            features_file = path / "features.geojson"
-            write_qupath_geojson(dataframe=self._shapes, file=features_file)
+        # Save shapes as parquet (unconditional, matching what .read() expects)
+        self._shapes.to_parquet(path / "shapes.parquet")
 
         # Save data as h5ad
         if self._data is not None:
             data_file = path / "data.h5ad"
-            self._data.write(data_file)
+            self._data.write_h5ad(data_file)
 
         # Save metadata
         metadata = {
             "version": __version__,
             "unit_type": self._unit_type,
-            "n_features": len(self._shapes),
-            "has_data": self._data is not None
         }
-        write_dict_to_json(dictionary=metadata, file=path / ".featuredata")
+        write_dict_to_json(dictionary=metadata, file=path / "metadata.json")

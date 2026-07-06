@@ -24,7 +24,9 @@ from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.containers.cell_data import CellData
 from insitupy.containers.image_data import ImageData
 from insitupy.containers.multi_cell_data import MultiCellData
+from insitupy.containers.multi_spatial_units_data import MultiSpatialUnitsData
 from insitupy.containers.shapes_data import AnnotationsData, RegionsData, ShapesData
+from insitupy.containers.spatial_units_data import SpatialUnitsData
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.utils.utils import (
@@ -366,6 +368,24 @@ def _read_multicelldata(
     return mcd
 
 
+def _read_multispatialunitsdata(path: str | os.PathLike | Path) -> MultiSpatialUnitsData:
+    path = Path(path)
+    marker = path / ".multispatialunitsdata"
+    musd = MultiSpatialUnitsData()
+    if marker.exists():
+        meta = read_json(marker)
+        for key in meta["all_keys"]:
+            su = SpatialUnitsData.read(path / key)
+            musd.add_units(su=su, key=key, is_main=(key == meta["key_main"]))
+    elif (path / "shapes.parquet").exists():
+        # legacy: pre-multi-unit InSituPy versions stored one flat layer directly under `units/`
+        su = SpatialUnitsData.read(path)
+        musd.add_units(su=su, key="main", is_main=True)
+    else:
+        raise FileNotFoundError(f"No spatial units data found at {path}")
+    return musd
+
+
 def _save_images(imagedata: ImageData,
                  path: str | os.PathLike,
                  metadata: dict | None = None,
@@ -448,30 +468,9 @@ def _save_transcripts(transcripts, path, metadata):
     metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()
 
 
-def _save_units(units, path, metadata):
-    # create file path
+def _save_units(units: MultiSpatialUnitsData, path, metadata, overwrite: bool = False):
     units_path = path / "units"
-    units_path.mkdir(parents=True, exist_ok=True) # create directory
-
-    # save shapes as parquet
-    shapes_file = units_path / "shapes.parquet"
-    units.shapes.to_parquet(shapes_file)
-
-    # save data as h5ad if present
-    if units.data is not None:
-        data_file = units_path / "data.h5ad"
-        units.data.write_h5ad(data_file)
-
-    # save metadata
-    meta_dict = {
-        "unit_type": units.unit_type
-    }
-    meta_file = units_path / "metadata.json"
-    import json
-    with open(meta_file, 'w') as f:
-        json.dump(meta_dict, f)
-
-    #if metadata is not None:
+    units.save(path=units_path, overwrite=overwrite)
     metadata["data"]["units"] = Path(relpath(units_path, path)).as_posix()
 
 

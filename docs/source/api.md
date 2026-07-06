@@ -182,6 +182,19 @@ Data classes are used to store the different modalities.
     containers.BoundariesData
 ```
 
+### Spatial units data
+
+```{eval-rst}
+.. module:: insitupy.containers
+.. currentmodule:: insitupy
+
+.. autosummary::
+    :toctree: generated/core_data_classes
+
+    containers.SpatialUnitsData
+    containers.MultiSpatialUnitsData
+```
+
 ### Image data
 
 ```{eval-rst}

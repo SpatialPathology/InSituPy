@@ -875,8 +875,8 @@ if WITH_NAPARI:
 
                 # get expression values
                 color_values = _get_expression_values(
-                    adata=viewer_config.units.data,
-                    X=viewer_config.units.data.X,
+                    adata=viewer_config.units.table,
+                    X=viewer_config.units.table.X,
                     key_type=key_type, key=key
                 )
 

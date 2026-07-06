@@ -81,7 +81,7 @@ if WITH_NAPARI:
                 self.has_cells = False
 
             # Check if units are available
-            self.has_units = data.units is not None
+            self.has_units = not data.units.is_empty
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -166,36 +166,35 @@ if WITH_NAPARI:
 
         @property
         def units(self):
-            """Return SpatialUnitsData object if available."""
+            """Return the main SpatialUnitsData layer, if available."""
             if self.has_units:
-                return self.data.units
-            else:
-                return None
+                return self.data.units[self.data.units.main_key]
+            return None
 
         @property
         def unit_vars(self):
             """Return variable names of spatial unit."""
-            if self.has_units and self.units.data is not None:
-                return sorted(self.units.data.var_names.tolist())
+            if self.has_units and self.units.table is not None:
+                return sorted(self.units.table.var_names.tolist())
             else:
                 return []
 
         @property
         def unit_obs(self):
             """Return observation names of spatial unit."""
-            if self.has_units and self.units.data is not None:
-                return sorted(self.units.data.obs.columns.tolist())
+            if self.has_units and self.units.table is not None:
+                return sorted(self.units.table.obs.columns.tolist())
             else:
                 return []
 
         @property
         def unit_obsm(self):
             """Return units obsm keys."""
-            if self.has_units and self.units.data is not None:
-                obsm_keys = list(self.units.data.obsm.keys())
+            if self.has_units and self.units.table is not None:
+                obsm_keys = list(self.units.table.obsm.keys())
                 obsm_cats = []
                 for k in sorted(obsm_keys):
-                    fdata = self.units.data.obsm[k]
+                    fdata = self.units.table.obsm[k]
                     if isinstance(fdata, pd.DataFrame):
                         obsm_cats.extend([f"{k}#{col}" for col in fdata.columns])
                     elif isinstance(fdata, np.ndarray):

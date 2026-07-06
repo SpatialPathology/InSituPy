@@ -469,7 +469,7 @@ class InSituExperiment:
             "transcripts": lambda xd: xd._transcripts is not None,
             "annotations": lambda xd: not xd._annotations.is_empty,
             "regions":     lambda xd: not xd._regions.is_empty,
-            "units":       lambda xd: xd._units is not None,
+            "units":       lambda xd: not xd._units.is_empty,
         }
         result = []
         for name, check in checks.items():

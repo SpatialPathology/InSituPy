@@ -50,12 +50,14 @@ from insitupy.containers import (
     AnnotationsData,
     ImageData,
     MultiCellData,
+    MultiSpatialUnitsData,
     RegionsData,
     SpatialUnitsData,
 )
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.containers.io import (
     _read_multicelldata,
+    _read_multispatialunitsdata,
     _read_shapesdata,
     _save_annotations,
     _save_cells,
@@ -93,12 +95,12 @@ def _region_overlaps_image(images, xlim, ylim) -> bool:
 # Used by _clear_modality and unload as the single source of truth for
 # how each modality is reset to its empty sentinel.
 _RESET_MAP: dict = {
-    "cells":       (MultiCellData,   "_cells"),
-    "units":       (None,            "_units"),
-    "images":      (ImageData,       "_images"),
-    "transcripts": (None,            "_transcripts"),
-    "annotations": (AnnotationsData, "_annotations"),
-    "regions":     (RegionsData,     "_regions"),
+    "cells":       (MultiCellData,       "_cells"),
+    "units":       (MultiSpatialUnitsData, "_units"),
+    "images":      (ImageData,           "_images"),
+    "transcripts": (None,                "_transcripts"),
+    "annotations": (AnnotationsData,     "_annotations"),
+    "regions":     (RegionsData,         "_regions"),
 }
 
 
@@ -246,7 +248,7 @@ class InSituData:
         # modalities
         self._images = ImageData()
         self._cells = MultiCellData()
-        self._units = None
+        self._units = MultiSpatialUnitsData()
         self._annotations = AnnotationsData()
         self._regions = RegionsData()
         self._transcripts = None
@@ -269,8 +271,8 @@ class InSituData:
 
         # check if all modalities are empty
         empty_checks = [elem.is_empty for elem in [
-            self._images, self._cells, self._annotations, self._regions
-            ]] + [self._transcripts is None, self._units is None] # transcripts and units do not have is_empty property since they are dataframes
+            self._images, self._cells, self._annotations, self._regions, self._units
+            ]] + [self._transcripts is None] # transcripts does not have is_empty property since it is a dataframe
         all_empty = np.all(empty_checks)
 
         repr = (
@@ -307,7 +309,7 @@ class InSituData:
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['cells']+tf.Bold} cells{tf.ResetAll}\n{tf.SPACER}   " + cells_repr.replace("\n", f"\n{tf.SPACER}   ")
                 )
 
-            if self._units is not None:
+            if not self._units.is_empty:
                 units_repr = self._units.__repr__()
                 repr = (
                     repr + f"\n{tf.SPACER+tf.RARROWHEAD+MODALITIES_COLOR_DICT['units']+tf.Bold} units{tf.ResetAll}\n{tf.SPACER}   " + units_repr.replace("\n", f"\n{tf.SPACER}   ")
@@ -458,7 +460,7 @@ class InSituData:
     def units(self):
         """Return spatial units data of the InSituData object.
         Returns:
-            insitupy._core.dataclasses.SpatialUnitsData: Spatial units data.
+            insitupy.containers.MultiSpatialUnitsData: Spatial units data.
         """
         return self._units
 
@@ -473,20 +475,35 @@ class InSituData:
         self._clear_modality("units", verbose=True)
         import gc; gc.collect()
 
-    def add_units(self, data: SpatialUnitsData):
+    def add_units(self, data: SpatialUnitsData, key: str | None = None,
+                  is_main: bool | None = None, overwrite: bool = False):
         """
         Add spatial units data to the InSituData object.
 
         Args:
             data (SpatialUnitsData): The spatial units data to add.
+            key: String key under which the layer is stored. Defaults to
+                ``data.unit_type`` if not provided.
+            is_main: If True, set this layer as the main (active) layer.
+                Defaults to ``True`` if this is the first layer added, else
+                ``False``.
+            overwrite: If True, allow replacing an existing layer with the
+                same ``key``.  Raises ``KeyError`` when the key already
+                exists and ``overwrite`` is False.
 
         Raises:
             TypeError: If data is not of type SpatialUnitsData.
+            KeyError: If ``key`` already exists and ``overwrite`` is False.
         """
         if not isinstance(data, SpatialUnitsData):
             raise TypeError(f"Data must be of type SpatialUnitsData, but got {type(data).__name__} instead.")
 
-        self._units = data
+        if key is None:
+            key = data.unit_type
+        if is_main is None:
+            is_main = self._units.is_empty
+
+        self._units.add_units(su=data, key=key, is_main=is_main, overwrite=overwrite)
 
     @property
     def annotations(self):
@@ -833,6 +850,9 @@ class InSituData:
                 inplace=True, verbose=False
             )
 
+        if not _self.units.is_empty:
+            _self.units.crop(shape=shape, xlim=xlim, ylim=ylim, inplace=True, verbose=verbose)
+
         if _self.transcripts is not None:
             _self.transcripts = _crop_transcripts(
                 transcript_df=_self.transcripts,
@@ -976,7 +996,7 @@ class InSituData:
             )
 
         # Transform units
-        if _self.units is not None:
+        if not _self.units.is_empty:
             if verbose:
                 logger.info("Transforming units...")
             _self.units.transform(
@@ -999,6 +1019,8 @@ class InSituData:
         source_pixel_size: Number | None = None,
         reference_pixel_size: Number | None = None,
         transfer_images: bool = False,
+        key: str | None = None,
+        overwrite: bool = False,
         verbose: bool = False
     ):
         """
@@ -1020,6 +1042,9 @@ class InSituData:
             source_pixel_size: Pixel size (in µm/pixel) of the source image (origin of units).
             reference_pixel_size: Pixel size (in µm/pixel) of the reference image (target).
             transfer_images: If True, transfer images from `other` to `self`. Defaults to False.
+            key: Key under which the aligned layer is stored in ``self.units``. Only valid
+                when ``other.units`` has exactly one layer; defaults to that layer's own key.
+            overwrite: If True, allow replacing an existing layer at the destination key.
             verbose: If True, print status messages.
 
         Raises:
@@ -1030,12 +1055,8 @@ class InSituData:
             warn("The target InSituData object (self) has no cells. "
                  "Alignment is typically done onto a dataset with cells.")
 
-        if self.units is not None:
-            raise ValueError("The target InSituData object (self) already has spatial units. "
-                             "Please remove them before aligning new units.")
-
         # Check configuration of other
-        if other.units is None:
+        if other.units.is_empty:
             raise ValueError("The source InSituData object (other) has no spatial units to align.")
 
         if not other.cells.is_empty:
@@ -1056,26 +1077,34 @@ class InSituData:
             except KeyError:
                 raise ValueError(f"Source image '{source_image_name}' not found in other.images.")
 
-        # Copy units from other
-        units_to_add = other.units.copy()
+        # Determine which layer(s) of other.units to transfer, and under which key(s)
+        keys_to_transfer = list(other.units.keys())
+        if key is not None:
+            if len(keys_to_transfer) != 1:
+                raise ValueError(
+                    "`key` override is only supported when `other` has exactly one "
+                    "spatial units layer; `other.units` has "
+                    f"{len(keys_to_transfer)}: {keys_to_transfer}."
+                )
+            rename_map = {keys_to_transfer[0]: key}
+        else:
+            rename_map = {k: k for k in keys_to_transfer}
 
-        # Transform units
         if verbose:
             logger.info("Transforming and aligning spatial units...")
 
-        units_to_add.transform(
-            transformation_matrix=transformation_matrix,
-            reference_pixel_size=reference_pixel_size,
-            source_pixel_size=source_pixel_size,
-            inplace=True,
-            verbose=verbose
-        )
-
-        # Add to self
-        self._units = units_to_add
-
-        if verbose:
-            logger.info("Spatial units aligned and added to InSituData object.")
+        for src_key, dst_key in rename_map.items():
+            su = other.units[src_key].copy()
+            su.transform(
+                transformation_matrix=transformation_matrix,
+                reference_pixel_size=reference_pixel_size,
+                source_pixel_size=source_pixel_size,
+                inplace=True,
+                verbose=verbose
+            )
+            self.add_units(su, key=dst_key, overwrite=overwrite)
+            if verbose:
+                logger.info("Spatial units aligned and added to InSituData object (key='%s').", dst_key)
 
         # Align images
         if transfer_images and not other.images.is_empty:
@@ -1563,7 +1592,10 @@ class InSituData:
         except Exception:
             self._regions = None
         self._transcripts = None
-        self._units = None
+        try:
+            self._units = MultiSpatialUnitsData()
+        except Exception:
+            self._units = None
 
     def materialize(self, layers=None, verbose: bool = True):
         """Compute lazy Dask DataFrames and replace with well-partitioned equivalents.
@@ -1613,34 +1645,7 @@ class InSituData:
                 if verbose:
                     warn(ModalityNotFoundWarning("units"), stacklevel=2)
             else:
-                import json
-
-                import geopandas as gpd
-                from anndata import read_h5ad
-
-                # Load shapes
-                shapes_file = units_path / "shapes.parquet"
-                shapes = gpd.read_parquet(shapes_file)
-
-                # Load data if present
-                data_file = units_path / "data.h5ad"
-                data = read_h5ad(data_file) if data_file.exists() else None
-
-                # Load metadata
-                meta_file = units_path / "metadata.json"
-                if meta_file.exists():
-                    with open(meta_file) as f:
-                        meta_dict = json.load(f)
-                    unit_type = meta_dict.get("unit_type", "unit")
-                else:
-                    unit_type = "unit"
-
-                # Create SpatialUnitsData object and assign
-                self._units = SpatialUnitsData(
-                    shapes=shapes,
-                    data=data,
-                    unit_type=unit_type
-                )
+                self._units = _read_multispatialunitsdata(units_path)
         else:
             NoProjectLoadWarning()
 
@@ -1785,7 +1790,7 @@ class InSituData:
                     )
 
             # save units
-            if self._units is not None:
+            if not self._units.is_empty:
                 units = self._units
                 _save_units(
                     units=units,
@@ -2660,6 +2665,11 @@ class InSituData:
                     overwrite=True
                 )
 
+            # save units
+            if not self._units.is_empty:
+                if verbose:
+                    logger.info("Updating units...")
+                _save_units(units=self._units, path=path, metadata=self._metadata, overwrite=True)
 
             # save annotations
             if not self._annotations.is_empty:
