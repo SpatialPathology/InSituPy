@@ -2,7 +2,7 @@
 
 InSituPy (`insitupy-spatial` on PyPI) is a Python framework for **histology-guided,
 multi-sample analysis of single-cell spatial transcriptomics data**, currently focused on
-10x Genomics _Xenium In Situ_ data. License: BSD-3-Clause. Requires Python >=3.11.
+10x Genomics _Xenium In Situ_ data. License: BSD-3-Clause. Requires Python >=3.12.
 
 ## Data model
 
