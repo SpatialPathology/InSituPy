@@ -116,7 +116,10 @@ def test_update_key_on_type_change_updates_magicgui_reset_defaults():
 def test_build_labels_properties_keeps_all_columns_aligned_for_cells():
     viewer_config = SimpleNamespace(
         boundaries=SimpleNamespace(nucleus_to_cell_map=None),
-        adata=SimpleNamespace(obs=pd.DataFrame({"cell_area": [1.0, 2.0]})),
+        adata=SimpleNamespace(
+            obs=pd.DataFrame({"cell_area": [1.0, 2.0]}),
+            obs_names=pd.Index(["cell_a", "cell_b"]),
+        ),
     )
 
     properties = _build_labels_properties(
@@ -134,7 +137,10 @@ def test_build_labels_properties_keeps_all_columns_aligned_for_cells():
 def test_build_labels_properties_handles_unmapped_or_out_of_bounds_nuclei():
     viewer_config = SimpleNamespace(
         boundaries=SimpleNamespace(nucleus_to_cell_map={0: 0, 1: 5}),
-        adata=SimpleNamespace(obs=pd.DataFrame({"cell_area": [4.0]})),
+        adata=SimpleNamespace(
+            obs=pd.DataFrame({"cell_area": [4.0]}),
+            obs_names=pd.Index(["cell_a"]),
+        ),
     )
 
     properties = _build_labels_properties(
@@ -189,3 +195,8 @@ def test_create_points_layer_tags_display_scope():
     _, kwargs, layer_type = layer
     assert layer_type == "points"
     assert kwargs["metadata"]["display_scope"] == points_scope
+    # min=0 disables napari's canvas-size floor, which otherwise forces a visible
+    # border_color edge on zoom-out regardless of border_width=0 (see
+    # .log/reports/260706/transcript-viewer-race-fix/report-transcript-viewer-race-fix.md,
+    # Addendum B).
+    assert kwargs["canvas_size_limits"] == (0, 10000)

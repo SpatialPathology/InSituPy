@@ -471,6 +471,11 @@ if WITH_NAPARI:
                 'visible': visible,
                 'border_width': border_width,
                 'border_color': border_color,
+                # napari>=0.7 clamps rendered marker size to a minimum of 2px when
+                # zoomed out, and forces a visible edge in border_color while doing
+                # so regardless of border_width=0. min=0 disables that floor so no
+                # border ever appears when zoomed out.
+                'canvas_size_limits': (0, 10000),
                 'metadata': {"upper_climit_pct": upper_climit_pct, "display_scope": display_scope}
                 },
             'points'

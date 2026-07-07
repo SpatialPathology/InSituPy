@@ -721,7 +721,47 @@ if WITH_NAPARI:
                 face_color="white",
                 size=self.config.point_size,
                 border_width=0,
+                # napari>=0.7 clamps rendered marker size to a minimum of 2px when
+                # zoomed out, and forces a visible edge in border_color while doing
+                # so regardless of border_width=0. min=0 disables that floor so no
+                # border ever appears (see report Addendum B).
+                canvas_size_limits=(0, 10000),
             )
+            self._install_get_value_guard(self.viewer.layers[self.LAYER_NAME])
+
+        @staticmethod
+        def _install_get_value_guard(layer) -> None:
+            """Make the layer's hover-value lookup tolerant of napari's thread race.
+
+            napari's ``StatusChecker`` runs ``Points._get_value`` on a background
+            thread while the main thread reassigns ``layer.data`` on every camera
+            move. ``_get_value`` reads internal view-state several times without a
+            consistent snapshot (napari is not threadsafe here), so a shrink between
+            reads raises ``IndexError``. A transient miss simply means "no point
+            under the cursor", so swallow it and return ``None``.
+
+            Wrapping (rather than reimplementing ``_get_value``) keeps this robust
+            across napari versions: it makes no assumption about napari's slicing
+            algorithm. Guarded so that a future napari which renames or reshapes
+            ``_get_value`` falls back to napari's own try/except with no behavioural
+            change.
+            """
+            original = getattr(layer, "_get_value", None)
+            if original is None:
+                return
+
+            def _safe_get_value(position):
+                try:
+                    return original(position)
+                except IndexError:
+                    return None
+
+            try:
+                layer._get_value = _safe_get_value
+            except (AttributeError, TypeError):
+                # Layer does not permit attribute override; rely on napari's own
+                # StatusChecker try/except.
+                pass
 
         def _update_layer(self) -> None:
             """Update the Transcripts points layer if it exists.
@@ -755,14 +795,6 @@ if WITH_NAPARI:
             if not all_coords:
                 self.status_label.setText("Points: 0 (none in view)")
                 layer = self.viewer.layers[self.LAYER_NAME]
-                # Clear stale indices before replacing data — napari's StatusChecker
-                # runs in a background thread and can read _indices_view between the
-                # data assignment and napari's internal slice recomputation, causing
-                # an IndexError. Empty indices take the safe code path in _view_data.
-                try:
-                    layer._indices_view = np.array([], dtype=int)
-                except AttributeError:
-                    pass
                 layer.data = np.empty((0, 2))
                 return
 
@@ -786,18 +818,20 @@ if WITH_NAPARI:
             # Swap x,y to y,x for napari (napari uses row, column order)
             points_yx = combined[:, ::-1]
 
-            # Update layer — clear stale indices before replacing data to prevent
-            # IndexError in napari's StatusChecker background thread (see empty
-            # path above for a full explanation).
+            # Update the layer. Fully replacing layer.data on every camera move makes
+            # napari re-pad the internal size array — newly added points inherit
+            # current_size while existing points keep their old sizes — which drifts
+            # into inconsistent point sizes once the user changes the size slider.
+            # Reassign size after data so every point stays uniform at the user's
+            # current size. (The stale-_indices_view poke that used to sit here was
+            # removed: it did not fix napari's non-threadsafe _get_value race and was
+            # itself the likely trigger of the "size 0" IndexError; the layer is now
+            # guarded via _install_get_value_guard instead.)
             layer = self.viewer.layers[self.LAYER_NAME]
-            properties = {"gene": gene_names}
-            try:
-                layer._indices_view = np.array([], dtype=int)
-            except AttributeError:
-                pass
             layer.data = points_yx
             layer.face_color = colors
-            layer.properties = properties
+            layer.properties = {"gene": gene_names}
+            layer.size = layer.current_size
 
             # Update status
             if subsampled:
