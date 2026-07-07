@@ -48,6 +48,7 @@ if WITH_NAPARI:
         _get_viewer_uid,
         config_manager,
     )
+    from insitupy.interactive._label_alignment import compute_label_cell_indices
     from insitupy.interactive._layers import (
         _create_points_layer,
         _create_units_layer,
@@ -143,8 +144,14 @@ if WITH_NAPARI:
         mask_key: str,
         key: str | None = None,
         color_values: np.ndarray | None = None,
+        label_indices: tuple[list, list] | None = None,
     ) -> dict:
-        """Build per-label properties used by napari status and tooltips."""
+        """Build per-label properties used by napari status and tooltips.
+
+        label_indices, if given, is the (boundary_indices, adata_indices) pair
+        already computed by a caller (e.g. _create_colored_labels_layer), to
+        avoid recomputing the name-based alignment a second time.
+        """
         boundaries = viewer_config.boundaries
         prop_names = ["cell_area", "surface_area"]
         cell_names_boundary = _as_positional_array(cell_names_boundary)
@@ -152,17 +159,26 @@ if WITH_NAPARI:
         if color_values is not None:
             color_values = _as_positional_array(color_values)
 
-        if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
-            nucleus_to_cell_map = boundaries.nucleus_to_cell_map
-            cell_indices = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
+        if label_indices is not None:
+            boundary_indices, adata_indices = label_indices
         else:
-            cell_indices = [i for i in range(len(label_ids))]
+            # boundary_indices index cell_names_boundary (boundary order); adata_indices
+            # index the adata-order arrays (obs columns, color_values) by cell name, so
+            # coloring stays correct even when the table was filtered without a
+            # following sync() (see insitupy.interactive._label_alignment).
+            boundary_indices, adata_indices = compute_label_cell_indices(
+                label_ids=label_ids,
+                cell_names_boundary=cell_names_boundary,
+                obs_names=viewer_config.adata.obs_names.values,
+                nucleus_to_cell_map=boundaries.nucleus_to_cell_map,
+                mask_key=mask_key,
+            )
 
         names = [
-            cell_names_boundary[cell_idx]
-            if cell_idx is not None and cell_idx < len(cell_names_boundary)
+            cell_names_boundary[b]
+            if b is not None and 0 <= b < len(cell_names_boundary)
             else "unmapped"
-            for cell_idx in cell_indices
+            for b in boundary_indices
         ]
 
         properties = {
@@ -175,7 +191,7 @@ if WITH_NAPARI:
                 prop_values = viewer_config.adata.obs[prop_name].values
                 properties[prop_name] = [
                     prop_values[cell_idx] if cell_idx is not None and cell_idx < len(prop_values) else None
-                    for cell_idx in cell_indices
+                    for cell_idx in adata_indices
                 ]
 
         if key is not None and color_values is not None:
@@ -188,7 +204,7 @@ if WITH_NAPARI:
             # for numeric keys while still satisfying pd.isna() checks downstream.
             value_list = [
                 color_values[cell_idx] if cell_idx is not None and cell_idx < len(color_values) and not _is_missing_label_value(color_values[cell_idx]) else np.nan
-                for cell_idx in cell_indices
+                for cell_idx in adata_indices
             ]
             properties['value'] = value_list
             properties[key] = value_list
@@ -301,14 +317,16 @@ if WITH_NAPARI:
             show_warning(f"All values for '{key}' are missing. No labels layer was added.")
             return None
 
-        # Handle nuclei mapping if needed
-        if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
-            nucleus_to_cell_map = boundaries.nucleus_to_cell_map
-            # Map nucleus label_ids to cell indices for color lookup
-            cell_indices = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
-        else:
-            # Direct mapping: label_id corresponds to cell index
-            cell_indices = [i for i in range(len(label_ids))]
+        # Map each label to its adata position by cell name, so coloring is correct
+        # even when the table was filtered without a following sync(). Computed once
+        # here and reused below for _build_labels_properties instead of recomputing.
+        boundary_indices, cell_indices = compute_label_cell_indices(
+            label_ids=label_ids,
+            cell_names_boundary=cell_names_boundary,
+            obs_names=viewer_config.adata.obs_names.values,
+            nucleus_to_cell_map=boundaries.nucleus_to_cell_map,
+            mask_key=mask_key,
+        )
 
         # Determine if values are categorical or continuous
         is_categorical = (
@@ -413,6 +431,7 @@ if WITH_NAPARI:
             mask_key=mask_key,
             key=key,
             color_values=color_values,
+            label_indices=(boundary_indices, cell_indices),
         )
         outline_cmap = _create_outline_colormap(label_ids, hidden_label_ids=hidden_label_ids)
         scope = (viewer_config.data_name, viewer_config.layer_name, mask_key)
