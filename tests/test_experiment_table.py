@@ -394,6 +394,35 @@ class TestFullTableDefaults:
 
 # ── Phase 2: build_table() + .table[] ─────────────────────────────────────────
 
+class TestConcatenateSamplesLabelCollision:
+    """A duplicate label_col value must raise, not silently drop a sample.
+
+    _concatenate_samples/_concat_samples_on_disk key an internal dict by the
+    sample's label_col value (the same value anndata's index_unique mechanism
+    appends to obs_names). Before the _assert_label_col_unique guard, two
+    samples sharing a label_col value silently overwrote each other in that
+    dict, so the concatenated result was silently missing a whole sample's
+    cells with no exception or warning.
+    """
+
+    def test_duplicate_label_col_raises_instead_of_dropping_sample(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=3)
+        exp._metadata["uid"] = ["dup", "dup"]  # force a collision
+        with pytest.raises(ValueError, match="duplicate"):
+            exp.to_anndata()
+
+    def test_missing_label_col_raises_clear_error(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path, n_samples=1)
+        with pytest.raises(ValueError, match="not found in metadata"):
+            exp.to_anndata(label_col="does_not_exist")
+
+    def test_duplicate_label_col_raises_for_concat_on_disk(self, tmp_path):
+        exp = _make_saved_experiment(tmp_path, n_samples=2, n_cells=3, n_genes=3)
+        exp._metadata["uid"] = ["dup", "dup"]
+        with pytest.raises(ValueError, match="duplicate"):
+            exp.build_table(method="concat_on_disk")
+
+
 class TestBuildTableBasic:
     def test_zarr_created(self, tmp_path):
         exp = _make_experiment_with_path(tmp_path)
@@ -470,6 +499,39 @@ def test_in_memory_and_concat_on_disk_obs_names_match_shape(tmp_path):
         for uid, _ in obs.groupby("uid", observed=True):
             names_for_sample = tbl.obs_names[obs["uid"] == uid]
             assert all(str(name).endswith(f"-{uid}") for name in names_for_sample)
+
+
+def test_dash_containing_native_names_get_exactly_one_uid_suffix(tmp_path):
+    """Xenium-realistic native obs_names (already containing their own "-1")
+    must gain exactly one uid suffix through to_anndata() -- not zero, not
+    two -- and must round-trip back to the exact original native name via
+    import_from_anndata() with no cross-wiring. This is the "double dash"
+    shape from the backlog's original bug report: confirms it is the correct,
+    reversible, current behavior rather than a defect.
+    """
+    exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=3)
+    for i, xd in enumerate(exp._data):
+        # Xenium-realistic: native names already contain their own "-1".
+        xd.cells.table.obs_names = pd.Index([f"native{i}_{j}-1" for j in range(3)])
+
+    adata = exp.to_anndata()
+    for i in range(2):
+        uid = f"sample_{i}"
+        expected = {f"native{i}_{j}-1-{uid}" for j in range(3)}
+        actual = {str(n) for n in adata.obs_names[adata.obs["uid"] == uid]}
+        assert actual == expected
+    assert adata.obs_names.is_unique
+
+    # round-trip: recovers the exact original native names, no cross-wiring
+    adata.obs["cluster"] = list(adata.obs["uid"])
+    exp.import_from_anndata(
+        adata=adata, uid_column="uid", uid_column_adata="uid",
+        obs_columns_to_transfer=["cluster"],
+    )
+    for i, xd in enumerate(exp._data):
+        expected_names = {f"native{i}_{j}-1" for j in range(3)}
+        assert set(str(n) for n in xd.cells.table.obs_names) == expected_names
+        assert (xd.cells.table.obs["cluster"] == f"sample_{i}").all()
 
 
 class TestBuildTableJoin:

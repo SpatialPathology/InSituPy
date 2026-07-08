@@ -1955,12 +1955,8 @@ class InSituExperiment:
         Returns:
             AnnData: A concatenated AnnData object.
         """
-        # Validate label_col exists in metadata
-        if label_col not in self._metadata.columns:
-            raise ValueError(
-                f"Column '{label_col}' not found in metadata. "
-                f"Available columns: {list(self._metadata.columns)}"
-            )
+        # Validate label_col exists in metadata and is unique across samples
+        self._assert_label_col_unique(label_col)
 
         self._assert_cells_loaded(cells_layer)
 
@@ -2396,8 +2392,11 @@ class InSituExperiment:
                 hardcoded to append, not prepend).
 
         Raises:
-            ValueError: If any dataset cannot be located on disk.
+            ValueError: If *label_col* is missing/non-unique, or any dataset
+                cannot be located on disk.
         """
+        self._assert_label_col_unique(label_col)
+
         from anndata.experimental import concat_on_disk
 
         sample_paths = self._resolve_per_sample_h5ad_paths(
@@ -2454,6 +2453,36 @@ class InSituExperiment:
         most_recent = self._latest_cells_save_dir(xd)
         mc_meta = read_json(most_recent / ".multicelldata")
         return mc_meta["key_main"]
+
+    def _assert_label_col_unique(self, label_col: str) -> None:
+        """Validate that *label_col* exists and is unique across all samples.
+
+        Both ``_concatenate_samples`` and ``_concat_samples_on_disk`` key their
+        per-sample lookup (``dict[label_value] = ...``) by this column's value —
+        it is also what ``anndata.concat``'s/``concat_on_disk``'s own
+        ``index_unique`` mechanism appends to disambiguate obs_names. A
+        duplicate value causes one sample to silently overwrite another's dict
+        entry, dropping it from the concatenated result with no error.
+
+        Raises:
+            ValueError: If *label_col* is missing, or has duplicate values.
+        """
+        if label_col not in self._metadata.columns:
+            raise ValueError(
+                f"Column '{label_col}' not found in metadata. "
+                f"Available columns: {list(self._metadata.columns)}"
+            )
+        labels = self._metadata[label_col]
+        if not labels.is_unique:
+            dup_values = sorted(labels[labels.duplicated(keep=False)].unique().tolist())
+            raise ValueError(
+                f"label_col='{label_col}' has duplicate value(s) across samples: "
+                f"{dup_values}. Concatenation keys each sample by this value, so a "
+                f"duplicate silently drops all but one same-labeled sample from the "
+                f"result instead of raising. Pass a label_col that is unique per "
+                f"sample (the default, 'uid', always is unless samples were merged "
+                f"without re-keying)."
+            )
 
     def _assert_cells_loaded(self, cells_layer: str | None) -> None:
         """Raise a clear ValueError if any dataset is missing *cells_layer*.
