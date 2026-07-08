@@ -640,6 +640,13 @@ if WITH_NAPARI:
                         key_type = recent.split(":", maxsplit=1)[0]
                         key = recent.split(":", maxsplit=1)[1]
 
+                    # The Key combo is now editable (substring type-ahead), so a typed
+                    # value may not correspond to any real key -- validate before use.
+                    valid_keys = viewer_config.key_dict.get(key_type, [])
+                    if key not in valid_keys:
+                        show_warning(f"'{key}' is not a valid {key_type} key.")
+                        return None
+
                     # get expression values
                     color_value = _get_expression_values(
                         adata=viewer_config.adata,
@@ -711,6 +718,37 @@ if WITH_NAPARI:
                             display_scope=points_scope,
                         )
                         return gene_layer
+
+            # Make the cells "Key" combo searchable with a substring, case-insensitive
+            # completer (mirrors the Transcript Viewer / units "Gene" field behavior).
+            def _make_combo_searchable(widget, choices):
+                native = getattr(widget, 'native', None)
+                if isinstance(native, QComboBox):
+                    native.setEditable(True)
+                    native.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+                    completer = QCompleter([str(c) for c in choices])
+                    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
+                    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+                    native.setCompleter(completer)
+
+            _make_combo_searchable(show_cells_widget.key, viewer_config.genes)
+
+            # Disabled until a valid "Key" or "Recent" selection makes "Show" actionable
+            def _cells_show_enabled():
+                key_type = show_cells_widget.key_type.value
+                valid_keys = viewer_config.key_dict.get(key_type, [])
+                return bool(show_cells_widget.key.value in valid_keys or show_cells_widget.recent.value)
+
+            show_cells_widget.call_button.enabled = _cells_show_enabled()
+
+            @show_cells_widget.key.changed.connect
+            def _on_cells_key_changed(event=None):
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
+
+            @show_cells_widget.recent.changed.connect
+            def _on_cells_recent_changed(event=None):
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             if len(viewer_config.key_dict["obs"]) > 0:
                 obs_choices = viewer_config.key_dict["obs"]
@@ -819,11 +857,15 @@ if WITH_NAPARI:
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
                     )
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             @show_cells_widget.key_type.changed.connect
             def update_show_cells_key_choices(event=None):
                 show_cells_widget.key.value = None
                 _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             def callback_refresh(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer
@@ -836,6 +878,8 @@ if WITH_NAPARI:
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
                     )
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             if show_cells_widget is not None:
                 show_cells_widget.call_button.clicked.connect(callback_refresh)
@@ -856,12 +900,14 @@ if WITH_NAPARI:
 
             @magicgui(
                 call_button='Show',
+                units_key={'choices': list(data.units.keys()), 'label': 'Units layer:'},
                 gene={'label': "Gene (search):"},
                 obs={'choices': obs_choices, 'label': 'Obs:'},
                 obsm={'choices': obsm_choices, 'label': 'Obsm:'},
                 add_new_layer={'label': 'Add new layer'}
             )
             def show_units_widget(
+                units_key=viewer_config.units_key,
                 gene="",
                 obs="",
                 obsm="",
@@ -899,11 +945,13 @@ if WITH_NAPARI:
                     key_type=key_type, key=key
                 )
 
-                # Create layer name
-                layer_name = f"units-{key}"
+                # Create layer name, scoped to the selected units layer so switching
+                # units layers doesn't clobber a previously drawn one
+                layer_name = f"units-{viewer_config.units_key}-{key}"
 
-                # Get existing spatial unit layers
-                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("units-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
+                # Get existing spatial unit layers for this units layer
+                unit_layer_prefix = f"units-{viewer_config.units_key}-"
+                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith(unit_layer_prefix) and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
 
                 if len(unit_layer_names) == 0:
                     # Create new spatial units layer
@@ -946,6 +994,9 @@ if WITH_NAPARI:
                         )
                         return unit_layer
 
+            # Disabled until a gene/obs/obsm selection makes "Show" actionable
+            show_units_widget.call_button.enabled = False
+
             # Make the gene text field searchable with completer
             def _setup_searchable_textfield(widget, full_choices):
                 """Configure QLineEdit to be searchable with QCompleter."""
@@ -954,10 +1005,26 @@ if WITH_NAPARI:
                     completer = QCompleter(full_choices)
                     completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
                     completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
                     widget.native.setCompleter(completer)
 
             # Setup searchable text field for genes
             _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
+
+            @show_units_widget.units_key.changed.connect
+            def _on_units_key_changed(event=None):
+                viewer_config.units_key = show_units_widget.units_key.value
+                viewer_config.refresh_unit_variables()
+                # set choices before resetting values -- assigning choices resets the
+                # combo to its first entry "", so the mutual-exclusivity callbacks
+                # below see value == "" and no-op
+                show_units_widget.obs.choices = [""] + sorted(viewer_config.unit_obs)
+                show_units_widget.obsm.choices = [""] + sorted(viewer_config.unit_obsm)
+                show_units_widget.gene.value = ""
+                show_units_widget.obs.value = ""
+                show_units_widget.obsm.value = ""
+                _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
+                show_units_widget.call_button.enabled = False
 
             # Connect callbacks to ensure mutual exclusivity
             @show_units_widget.gene.changed.connect
@@ -965,18 +1032,27 @@ if WITH_NAPARI:
                 if show_units_widget.gene.value != "":
                     show_units_widget.obs.value = ""
                     show_units_widget.obsm.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             @show_units_widget.obs.changed.connect
             def _on_obs_changed(event=None):
                 if show_units_widget.obs.value != "":
                     show_units_widget.gene.value = ""
                     show_units_widget.obsm.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             @show_units_widget.obsm.changed.connect
             def _on_obsm_changed(event=None):
                 if show_units_widget.obsm.value != "":
                     show_units_widget.gene.value = ""
                     show_units_widget.obs.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             show_units_widget.call_button.clicked.connect(callback_update_legend)
 

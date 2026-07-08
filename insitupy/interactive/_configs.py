@@ -54,6 +54,7 @@ if WITH_NAPARI:
             'layer_name',
             'has_cells',
             'has_units',
+            'units_key',
             'static_canvas',
             'recent_selections',
             'verbose',
@@ -68,11 +69,16 @@ if WITH_NAPARI:
             '_region_color_idx',
         ]
 
-        def __init__(self, data):
+        def __init__(self, data, cells_layer=None):
             self.data = data
 
             if not data.cells.is_empty:
-                self.data_name = data.cells.main_key
+                if cells_layer is not None:
+                    from insitupy.containers._utils import _get_cell_layer
+                    _, resolved = _get_cell_layer(data.cells, cells_layer=cells_layer, return_layer_name=True)
+                    self.data_name = resolved
+                else:
+                    self.data_name = data.cells.main_key
                 self.layer_name = "main"
                 self.has_cells = True
             else:
@@ -82,6 +88,7 @@ if WITH_NAPARI:
 
             # Check if units are available
             self.has_units = not data.units.is_empty
+            self.units_key = data.units.main_key if self.has_units else None
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -166,9 +173,9 @@ if WITH_NAPARI:
 
         @property
         def units(self):
-            """Return the main SpatialUnitsData layer, if available."""
-            if self.has_units:
-                return self.data.units[self.data.units.main_key]
+            """Return the selected SpatialUnitsData layer, if available."""
+            if self.has_units and self.units_key is not None:
+                return self.data.units[self.units_key]
             return None
 
         @property
@@ -208,6 +215,10 @@ if WITH_NAPARI:
             self.masks = self._extract_masks()
             self.pixel_size = self._get_pixel_size()
             self.recent_selections = []
+
+        def refresh_unit_variables(self):
+            """Rebuild only the key dictionary after switching the units layer."""
+            self.key_dict = self._build_key_dict()
 
         # def update_data_name(self, new_data_name):
         #     self.data_name = new_data_name
@@ -269,10 +280,10 @@ if WITH_NAPARI:
         def __init__(self):
             self._configs: dict[str, ViewerConfig] = {}
 
-        def add_config(self, data) -> str:
+        def add_config(self, data, cells_layer=None) -> str:
             """Create and store a new ViewerConfig instance with a unique ID."""
             uid = str(uuid4()).split("-")[0]
-            self._configs[uid] = ViewerConfig(data)
+            self._configs[uid] = ViewerConfig(data, cells_layer=cells_layer)
             return uid
 
         def __getitem__(self, config_id: str) -> ViewerConfig:

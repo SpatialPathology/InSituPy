@@ -555,6 +555,10 @@ if WITH_NAPARI:
         if new_name is not None:
             layer.name = new_name
 
+        # re-show the layer in case the user had hidden it — updating it with new
+        # values means the user wants to see it again
+        layer.visible = True
+
     def _create_units_layer(
             gdf: GeoDataFrame,
             color_values: list[Number] | None = None,

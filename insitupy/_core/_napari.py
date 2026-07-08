@@ -551,7 +551,7 @@ if WITH_NAPARI:
         _sync_cells_for_viewer_if_needed(data)
 
         # initialize a config class manager with new ID
-        uid_viewer = config_manager.add_config(data=data)
+        uid_viewer = config_manager.add_config(data=data, cells_layer=cells_layer)
         current_viewer_config = config_manager[uid_viewer] # get current viewer config
         if verbose:
             current_viewer_config.verbose = True
