@@ -272,8 +272,11 @@ class CellData(DeepCopyMixin):
 
             # get bounding box of shape
             minx, miny, maxx, maxy = shape.bounds # (minx, miny, maxx, maxy)
-            xlim = (minx, maxx)
-            ylim = (miny, maxy)
+            # make sure there are no negative values in the limits, consistent
+            # with the xlim/ylim branch below and with InSituData.crop, which
+            # clips the region bounds before cropping the images
+            xlim = (max(0.0, minx), maxx)
+            ylim = (max(0.0, miny), maxy)
 
         else:
             if xlim is None or ylim is None:
@@ -300,11 +303,7 @@ class CellData(DeepCopyMixin):
                 )
 
         # shift coordinates to correct for change of coordinates during cropping
-        if shape is not None:
-            minx, miny, _, _ = shape.bounds
-            _self.shift(x=-minx, y=-miny)
-        else:
-            _self.shift(x=-xlim[0], y=-ylim[0])
+        _self.shift(x=-xlim[0], y=-ylim[0])
 
         # sync the ids and names
         _self.sync(verbose=verbose)

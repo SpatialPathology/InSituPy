@@ -241,8 +241,11 @@ class SpatialUnitsData(DeepCopyMixin):
         else:
             if xlim is not None and ylim is not None and verbose:
                 logger.warning("Both shape and xlim/ylim provided. Using shape.")
-            xlim = shape.bounds[0], shape.bounds[2]
-            ylim = shape.bounds[1], shape.bounds[3]
+            # make sure there are no negative values in the limits, consistent
+            # with InSituData.crop, which clips the region bounds before
+            # cropping the images
+            xlim = max(0.0, shape.bounds[0]), shape.bounds[2]
+            ylim = max(0.0, shape.bounds[1]), shape.bounds[3]
 
         # Filter features that intersect
         mask = _self._shapes.geometry.intersects(shape)

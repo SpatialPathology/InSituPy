@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
@@ -133,6 +133,31 @@ class TestCropUnits:
         # u2 was at (2,2) -> shifted to (0,0); u3 was at (4,4) -> shifted to (2,2)
         np.testing.assert_allclose(bounds.iloc[0][["minx", "miny"]].values, [-0.4, -0.4], atol=1e-6)
         np.testing.assert_allclose(bounds.iloc[1][["minx", "miny"]].values, [1.6, 1.6], atol=1e-6)
+
+
+# ── shape-based crop with a bounding box extending below zero ────────────────
+#
+# Regression test: mirrors TestCropShapeNegativeBoundsRegression in
+# test_celldata_crop.py. When cropping units by a `shape` whose bounding box
+# dips below x=0 or y=0 (e.g. a region annotated in napari that slightly
+# overshoots the tissue), the coordinate shift must clip to 0 rather than
+# using the raw shape.bounds minx/miny, otherwise units end up shifted
+# relative to where the image was actually cropped.
+
+class TestCropUnitsShapeNegativeBoundsRegression:
+    def test_shape_bounds_below_zero_does_not_overshift_coordinates(self):
+        su = _make_units(["u1", "u2", "u3"], unit_type="niche")
+        # shape covers x,y in [-5, 10]; the image crop origin still clips to
+        # 0, so unit coordinates must not be shifted at all here.
+        shape = Polygon([(-5, -5), (10, -5), (10, 10), (-5, 10)])
+
+        su.crop(shape=shape, inplace=True)
+
+        assert list(su.shapes["name"]) == ["u1", "u2", "u3"]
+        bounds = su.shapes.geometry.bounds
+        np.testing.assert_allclose(bounds.iloc[0][["minx", "miny"]].values, [-0.4, -0.4], atol=1e-6)
+        np.testing.assert_allclose(bounds.iloc[1][["minx", "miny"]].values, [1.6, 1.6], atol=1e-6)
+        np.testing.assert_allclose(bounds.iloc[2][["minx", "miny"]].values, [3.6, 3.6], atol=1e-6)
 
 
 # ── InSituData.align_units() per-key relaxation ───────────────────────────────

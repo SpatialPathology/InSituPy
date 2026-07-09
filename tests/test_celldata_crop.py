@@ -8,6 +8,7 @@ returns None when inplace=True.
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from shapely.geometry import Polygon
 
 from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.containers.cell_data import CellData
@@ -129,3 +130,41 @@ class TestCropInplaceConsistency:
         original_obs = list(celldata.table.obs_names)
         celldata.crop(xlim=(2, 10), ylim=(2, 10), inplace=False)
         assert list(celldata.table.obs_names) == original_obs
+
+
+# ── shape-based crop with a bounding box extending below zero ────────────────
+#
+# Regression test: when cropping by a `shape` (e.g. a region annotated in
+# napari) whose bounding box dips below x=0 or y=0, the cell-coordinate shift
+# must clip to 0 just like InSituData.crop clips the region bounds before
+# cropping the images. Previously the shift used the raw, unclipped
+# shape.bounds minx/miny, shifting cells further than the image was actually
+# cropped and producing a mismatch between cells and the image.
+
+class TestCropShapeNegativeBoundsRegression:
+    def test_shape_bounds_below_zero_does_not_overshift_coordinates(self):
+        # shape covers x,y in [-5, 10], well past the tissue on the negative
+        # side; the image crop origin still clips to 0, so cell coordinates
+        # must not be shifted at all here.
+        celldata = _create_celldata_no_boundaries()
+        shape = Polygon([(-5, -5), (10, -5), (10, 10), (-5, 10)])
+        celldata.crop(shape=shape, inplace=True)
+
+        assert list(celldata.table.obs_names) == ["c1", "c2", "c3"]
+        np.testing.assert_allclose(
+            celldata.table.obsm["spatial"],
+            np.array([[0.0, 0.0], [2.0, 2.0], [4.0, 4.0]]),
+        )
+
+    def test_shape_bounds_below_zero_partial_selection(self):
+        # shape covers x,y in [-5, 3], selecting only c1 (0,0) and c2 (2,2);
+        # the clipped origin is still (0, 0), so coordinates stay unshifted.
+        celldata = _create_celldata_no_boundaries()
+        shape = Polygon([(-5, -5), (3, -5), (3, 3), (-5, 3)])
+        celldata.crop(shape=shape, inplace=True)
+
+        assert list(celldata.table.obs_names) == ["c1", "c2"]
+        np.testing.assert_allclose(
+            celldata.table.obsm["spatial"],
+            np.array([[0.0, 0.0], [2.0, 2.0]]),
+        )
