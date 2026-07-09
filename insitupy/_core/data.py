@@ -34,6 +34,7 @@ from insitupy._constants import (
     with_insitupy_style,
 )
 from insitupy._exceptions import (
+    InSituDataConstructorPathError,
     InSituDataRepeatedCropError,
     ModalityNotFoundError,
     ModalityNotFoundWarning,
@@ -127,7 +128,7 @@ class InSituData:
         metadata (dict): Metadata associated with the InSituData object.
         slide_id (str): Identifier for the slide.
         sample_id (str): Identifier for the sample.
-        from_insitudata (bool): Indicates whether the object was loaded from an InSituData project.
+        from_insitudata (bool): Indicates whether the object is backed by a saved InSituPy project (its path contains ``.ispy``).
 
         viewer (napari.Viewer): Napari viewer for visualizing the data.
         quicksave_dir (Path): *Experimental feature!* Directory for quicksave operations.
@@ -218,6 +219,12 @@ class InSituData:
                  ):
         """
         """
+        # Guard: a saved InSituPy project must be loaded via read(), not the constructor.
+        # (read() itself passes `metadata`, so it is exempt; raw vendor folders used by
+        #  read_xenium have no `.ispy`, so they are exempt too.)
+        if path is not None and metadata is None and (Path(path) / ISPY_METADATA_FILE).exists():
+            raise InSituDataConstructorPathError(path)
+
         # metadata
         if path is not None:
             self._path = Path(path)
@@ -402,21 +409,21 @@ class InSituData:
 
     @property
     def from_insitudata(self):
-        """Return whether this object was loaded from a saved InSituPy project.
+        """Return whether this object is backed by a saved InSituPy project.
 
-        Returns:
-            ``True`` if a valid project path is set and the directory exists,
-            ``False`` otherwise (e.g. object created in-memory via
-            :func:`~insitupy.io.read_xenium`).
+        ``True`` only when :attr:`path` points at a directory that contains the
+        InSituPy project marker (``.ispy``).  ``False`` for in-memory objects,
+        including those produced by :func:`~insitupy.io.read_xenium` /
+        :func:`~insitupy.io.read_visium` before they have been written to disk.
         """
-        if self._path is not None:
-            if Path(self._path).exists():
-                return True
-            else:
-                logger.warning("Path %s does not exist.", self._path)
-                return False
-        else:
+        if self._path is None:
             return False
+        p = Path(self._path)
+        if (p / ISPY_METADATA_FILE).exists():
+            return True
+        if not p.exists():
+            logger.warning("Path %s does not exist.", p)
+        return False
 
     @property
     def images(self):

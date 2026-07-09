@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from ._constants import ISPY_METADATA_FILE
 from .utils.utils import convert_to_list
 
 
@@ -199,6 +200,17 @@ class InvalidXeniumDirectory(Exception):
         else:
             self.message = f"The directory '{directory}' is not a valid Xenium directory. It does not contain the required 'experiment.xenium' metadata file."
         super().__init__(self.message)
+
+
+class InSituDataConstructorPathError(ValueError):
+    """Raised when a saved InSituPy project path is passed to ``InSituData()``
+    instead of ``InSituData.read()``."""
+    def __init__(self, path):
+        super().__init__(
+            f"'{path}' is already a saved InSituPy project (contains "
+            f"'{ISPY_METADATA_FILE}'). Load it with `InSituData.read(path)` "
+            f"instead of `InSituData(path)`."
+        )
 
 
 class MissingPackageError(ImportError):

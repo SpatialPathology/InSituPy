@@ -13,7 +13,9 @@ import pandas as pd
 from anndata import AnnData
 from shapely.geometry import Point
 
+from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._core.data import InSituData
+from insitupy._io.files import write_dict_to_json
 from insitupy.containers.spatial_units_data import SpatialUnitsData
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,11 +81,14 @@ def test_load_units_reads_legacy_flat_layout(tmp_path):
     su = _make_units(["u1", "u2"], unit_type="niche")
     su.save(path=proj_dir / "units")
 
-    xd = InSituData(
-        path=proj_dir, metadata=None,
-        slide_id="slide1", sample_id="s1",
-        method_name="test", method_params={},
+    # A real (if old-format) saved project always has a `.ispy` marker --
+    # only the units/ sub-layout predates multi-unit support.
+    write_dict_to_json(
+        dictionary={"slide_id": "slide1", "sample_id": "s1"},
+        file=proj_dir / ISPY_METADATA_FILE,
     )
+
+    xd = InSituData.read(proj_dir, load_all=False)
     xd.load_units(verbose=False)
 
     assert xd.units.main_key == "main"
