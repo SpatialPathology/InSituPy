@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "insitupy": {
-      "command": "python",
-      "args": ["-m", "tools.mcp_server"],
-      "type": "stdio"
-    }
-  }
-}
