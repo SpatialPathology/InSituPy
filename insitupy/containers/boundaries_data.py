@@ -16,7 +16,11 @@ from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
-from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
+from insitupy.containers._zarr_compat import (
+    ZARR_V3,
+    _get_zarr_store,
+    _write_dask_array_to_zarr,
+)
 from insitupy.images.utils import (
     _efficiently_resize_array,
     _get_scale_factor_from_max_res,
@@ -473,21 +477,17 @@ class BoundariesData(DeepCopyMixin):
                     store[f"masks/{n}"].attrs.put(meta)
 
             # save cell names
-            self.cell_names.to_zarr(
-                dirstore,
-                component="cell_names",
-                zarr_array_kwargs={"overwrite": True}
-                )
+            _write_dask_array_to_zarr(dirstore, "cell_names", self.cell_names)
 
             if self._seg_mask_value is not None:
-                self.seg_mask_value.to_zarr(dirstore, component="seg_mask_value", zarr_array_kwargs={"overwrite": True})
+                _write_dask_array_to_zarr(dirstore, "seg_mask_value", self.seg_mask_value)
 
             # Save nucleus_to_cell_map if available (for multinucleated cell support)
             if self._nucleus_to_cell_map is not None:
                 # Store as 2D array with columns [nucleus_index, cell_index]
                 nucleus_map_arr = np.array([[k, v] for k, v in self._nucleus_to_cell_map.items()], dtype=np.int64)
-                da.from_array(nucleus_map_arr).to_zarr(dirstore, component="nucleus_to_cell_map", zarr_array_kwargs={"overwrite": True})
+                _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map", da.from_array(nucleus_map_arr))
 
             # Save nucleus_count if available
             if self._nucleus_count is not None:
-                da.from_array(self._nucleus_count).to_zarr(dirstore, component="nucleus_count", zarr_array_kwargs={"overwrite": True})
+                _write_dask_array_to_zarr(dirstore, "nucleus_count", da.from_array(self._nucleus_count))
