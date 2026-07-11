@@ -18,6 +18,7 @@ import logging
 from numbers import Number
 from typing import Literal
 
+import dask.dataframe as dd
 import numpy as np
 from anndata import AnnData
 from xarray import DataArray
@@ -240,6 +241,12 @@ def _transform_transcripts_for_spatialdata(
     points = {}
     if xd.transcripts is not None:
         df = xd.transcripts
+        if isinstance(df, dd.DataFrame):
+            # Pre-compute known categories for the feature column. Without this,
+            # PointsModel.parse(..., sort=True) treats the categories as unknown and
+            # pays for an extra internal dask pass to determine them (measured ~2.25x
+            # slower on a real 42.6M-row transcript table).
+            df = df.assign(feature_name=df["feature_name"].astype("category").cat.as_known())
         parsed_points = PointsModel.parse(
             df,
             coordinates={"x": "x_location", "y": "y_location", "z": "z_location"},
@@ -315,6 +322,57 @@ def _transform_table_for_spatialdata(
                     cell_shapes[circles_sized_dict_key] = circles_sized
 
     return tables, cell_shapes
+
+
+def _transform_units_for_spatialdata(
+    xd: InSituData,
+    sample_id: str | None = None
+    ):
+    """Convert spatial units tables and shapes from an :class:`InSituData` into SpatialData elements.
+
+    For each units layer with a table, parses the AnnData into a
+    :class:`~spatialdata.models.TableModel` and the corresponding polygon
+    geometries into a :class:`~spatialdata.models.ShapesModel`. Unlike cells,
+    units already carry real polygon geometries (see :class:`SpatialUnitsData`),
+    so no circles are synthesized and no scale transform is applied.
+
+    Args:
+        xd: Source :class:`InSituData` object.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A tuple ``(tables, unit_shapes)`` where both are dicts mapping
+        SpatialData element keys to their parsed model objects.
+    """
+    tables, unit_shapes = {}, {}
+    if xd.units is not None:
+        for unit_key in xd.units.keys():
+            sud = xd.units[unit_key]
+            if sud.table is not None and not sud.is_empty:
+                shapes_key = _generate_spatialdata_key(
+                    sample_id=sample_id,
+                    modality="units",
+                    locator=[unit_key, "shapes"]
+                )
+                table_dict_key = _generate_spatialdata_key(
+                    sample_id=sample_id,
+                    modality="units",
+                    locator=[unit_key, "table"]
+                )
+
+                adata = sud.table.copy()
+                adata.obs["unit_id"] = adata.obs.index
+                adata.obs["region"] = shapes_key
+                adata.obs["region"] = adata.obs["region"].astype("category")
+                adata.uns["spatialdata_attrs"] = {
+                    "region": shapes_key,
+                    "region_key": "region",
+                    "instance_key": "unit_id",
+                }
+
+                tables[table_dict_key] = TableModel.parse(adata)
+                unit_shapes[shapes_key] = ShapesModel.parse(sud.shapes)
+    return tables, unit_shapes
 
 
 def _transform_cell_boundaries_for_spatialdata(
@@ -423,7 +481,7 @@ def _transform_regions_for_spatialdata(
     """
     # from spatialdata.models import ShapesModel
     shapes = {}
-    if xd.annotations is not None:
+    if xd.regions is not None:
         for key in xd.regions.metadata.keys():
             gdf = ShapesModel.parse(
                 xd.regions[key],

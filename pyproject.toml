@@ -53,7 +53,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.4.2", "pytest-qt>=4.2.0"]
 spatialdata = [
-    "spatialdata[extra]>=0.7.2",
+    "spatialdata[extra]>=0.8.0,<0.9.0",
     "spatialdata-io"
 ]
 mcp = ["mcp[cli]>=1.0.0"]

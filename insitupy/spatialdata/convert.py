@@ -12,6 +12,7 @@ from typing import Union
 
 import numpy as np
 
+from insitupy._constants import MODALITIES, SPATIALDATA_DIALECT_VERSION
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.containers import CellData, SpatialUnitsData
@@ -25,6 +26,7 @@ from insitupy.spatialdata._convert import (
     _transform_regions_for_spatialdata,
     _transform_table_for_spatialdata,
     _transform_transcripts_for_spatialdata,
+    _transform_units_for_spatialdata,
     _validate_boundaries_data_format,
     _validate_image_data_format,
 )
@@ -33,26 +35,24 @@ logger = logging.getLogger(__name__)
 
 
 def check_and_fix_case_insensitive_conflicts(
-    sdata: SpatialData,
-    inplace: bool = False
+    sdata: SpatialData
     ):
     """
-    Check for case-insensitive key conflicts in a SpatialData object and optionally fix them.
+    Check for case-insensitive key conflicts in a SpatialData object and fix them in place.
 
     When keys differ only in capitalization (e.g., 'ANNOTATIONS.Demo' and 'ANNOTATIONS.demo'),
     this can cause conflicts when writing to disk on case-insensitive filesystems.
 
     Args:
-        sdata: SpatialData object to check
-        inplace: If True, modify the SpatialData object in place. If False, return a modified copy.
+        sdata: SpatialData object to check and modify in place.
 
     Returns:
-        tuple: (modified_sdata, rename_map)
-            - modified_sdata: SpatialData object with renamed keys (original if inplace=True)
+        tuple: (sdata, rename_map)
+            - sdata: The same SpatialData object, with conflicting keys renamed in place.
             - rename_map: Dictionary mapping old keys to new keys (empty if no conflicts)
 
     Example:
-        >>> sdata_fixed, renames = check_and_fix_case_insensitive_conflicts(sdata, inplace=False)
+        >>> sdata, renames = check_and_fix_case_insensitive_conflicts(sdata)
         >>> print(renames)
         {'ANNOTATIONS.demo': 'ANNOTATIONS.demo_v2'}
     """
@@ -104,37 +104,24 @@ def check_and_fix_case_insensitive_conflicts(
         message_lines.append(f"  '{old_key}' -> '{new_key}'")
     logger.warning("\n".join(message_lines))
 
-    # Apply renames
-    if not inplace:
-        # Create a new SpatialData dict
-        new_elements = {}
-        for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
-            if hasattr(sdata, attr):
-                element_dict = getattr(sdata, attr)
-                if element_dict is not None:
-                    for key, value in element_dict.items():
-                        new_key = rename_map.get(key, key)
-                        new_elements[new_key] = value
-
-        sdata = SpatialData.from_elements_dict(new_elements)
-    else:
-        # Modify in place (more complex, need to handle each element type)
-        for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
-            if hasattr(sdata, attr):
-                element_dict = getattr(sdata, attr)
-                if element_dict is not None:
-                    # Create new dict with renamed keys
-                    items_to_rename = [(k, v) for k, v in element_dict.items() if k in rename_map]
-                    for old_key, value in items_to_rename:
-                        new_key = rename_map[old_key]
-                        del element_dict[old_key]
-                        element_dict[new_key] = value
+    # Apply renames in place
+    for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
+        if hasattr(sdata, attr):
+            element_dict = getattr(sdata, attr)
+            if element_dict is not None:
+                # Create new dict with renamed keys
+                items_to_rename = [(k, v) for k, v in element_dict.items() if k in rename_map]
+                for old_key, value in items_to_rename:
+                    new_key = rename_map[old_key]
+                    del element_dict[old_key]
+                    element_dict[new_key] = value
 
     return sdata, rename_map
 
 def convert_to_spatialdata_dict(
     data: Union[InSituData, "InSituExperiment"], # type: ignore
     n_pyramids: int = 5,
+    include_transcripts: bool = True,
     ):
 
     """
@@ -142,6 +129,12 @@ def convert_to_spatialdata_dict(
 
     This function integrates various data elements such as images, labels, transcripts, and annotations
     into a SpatialData object. It requires the spatialdata framework to be installed.
+
+    Args:
+        data: Source InSituData or InSituExperiment object to convert.
+        n_pyramids: Number of resolution pyramid levels to generate for image elements.
+        include_transcripts: If False, skip transcript export entirely. Transcript export is
+            the dominant cost for large experiments; set to False to omit it.
 
     Raises:
         ImportError: If the spatialdata framework is not installed.
@@ -162,14 +155,19 @@ def convert_to_spatialdata_dict(
         else:
             sample_id = meta["uid"]
         # create SpatialData dictionary
-        transcripts = _transform_transcripts_for_spatialdata(d, sample_id=sample_id)
+        if include_transcripts:
+            transcripts = _transform_transcripts_for_spatialdata(d, sample_id=sample_id)
+        else:
+            transcripts = {}
         tables, cell_shapes = _transform_table_for_spatialdata(d, sample_id=sample_id)
+        units_tables, units_shapes = _transform_units_for_spatialdata(d, sample_id=sample_id)
         annotations = _transform_annotations_for_spatialdata(d, sample_id=sample_id)
         regions = _transform_regions_for_spatialdata(d, sample_id=sample_id)
         images = _transform_images_for_spatialdata(d, n_pyramids=n_pyramids, sample_id=sample_id)
         labels = _transform_cell_boundaries_for_spatialdata(d, sample_id=sample_id)
         md = _merge_dicts_with_warning(
-            transcripts, tables, cell_shapes, annotations, regions, images, labels
+            transcripts, tables, cell_shapes, units_tables, units_shapes,
+            annotations, regions, images, labels
             )
 
         # collect resulting dictionary
@@ -179,16 +177,17 @@ def convert_to_spatialdata_dict(
 
 def convert_to_spatialdata(
     data: Union[InSituData, "InSituExperiment"], # type: ignore
-    n_pyramids: int = 5
+    n_pyramids: int = 5,
+    include_transcripts: bool = True,
     ):
 
     """
     Convert an InSituData or InSituExperiment object to a SpatialData object.
 
-    Integrates images, cell tables, cell shapes, transcripts, annotations, regions,
-    and cell boundary labels into a single SpatialData object. Automatically detects
-    and resolves case-insensitive key conflicts that would cause problems when writing
-    to disk.
+    Integrates images, cell tables, cell shapes, spatial units, transcripts,
+    annotations, regions, and cell boundary labels into a single SpatialData object.
+    Automatically detects and resolves case-insensitive key conflicts that would
+    cause problems when writing to disk.
 
     Requires the ``spatialdata`` package (``pip install spatialdata``).
 
@@ -198,32 +197,45 @@ def convert_to_spatialdata(
             object with sample-prefixed element keys.
         n_pyramids (int, optional): Number of resolution pyramid levels to generate
             for image elements. Defaults to 5.
+        include_transcripts (bool, optional): If False, skip transcript export
+            entirely. Transcript export is the dominant cost for large experiments;
+            set to False to omit it. Defaults to True.
 
     Returns:
         SpatialData: A SpatialData object whose elements are keyed as follows
-            (all keys are prefixed with ``'<sample_uid>/'`` when converting an
-            ``InSituExperiment``):
+            (all keys are prefixed with ``'SAMPLE.<sample_uid>..'`` when converting
+            an ``InSituExperiment``; see ``insitupy/spatialdata/DIALECT.md`` for the
+            full naming spec):
 
             - **images**: one entry per image channel (e.g. ``'nuclei'``, ``'morphology_focus'``).
             - **labels**: cell boundary label images (e.g. ``'cell_boundaries'``).
-            - **shapes**: cell polygon shapes (e.g. ``'cells'``) and annotation/region shapes.
-            - **tables**: cell expression table under key ``'table'``.
-            - **points**: transcript coordinates under key ``'transcripts'`` (if available).
+            - **shapes**: cell circle shapes, spatial units polygons, and annotation/region shapes.
+            - **tables**: cell expression table(s) and spatial units table(s).
+            - **points**: transcript coordinates (if available and ``include_transcripts=True``).
+
+            The store also carries a versioned dialect descriptor at
+            ``sdata.attrs["insitupy_spatialdata_dialect"]``.
 
     Raises:
         ImportError: If the ``spatialdata`` package is not installed.
     """
-    # is_experiment = _is_experiment(data)
-
-    # if is_experiment:
     sd_dict = convert_to_spatialdata_dict(
         data,
-        n_pyramids=n_pyramids
+        n_pyramids=n_pyramids,
+        include_transcripts=include_transcripts,
         )
-    sdata = SpatialData.init_from_elements(sd_dict)
+
+    dialect_attrs = {
+        "insitupy_spatialdata_dialect": {
+            "version": SPATIALDATA_DIALECT_VERSION,
+            "modalities": list(MODALITIES),
+            "sample_prefix_pattern": "SAMPLE.<uid>..",
+        }
+    }
+    sdata = SpatialData.init_from_elements(sd_dict, attrs=dialect_attrs)
 
     # Check and fix case-insensitive conflicts
-    sdata, rename_map = check_and_fix_case_insensitive_conflicts(sdata, inplace=True)
+    sdata, rename_map = check_and_fix_case_insensitive_conflicts(sdata)
 
     return sdata
 
