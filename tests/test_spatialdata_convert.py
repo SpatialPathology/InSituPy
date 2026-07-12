@@ -3,139 +3,53 @@
 All tests are skipped when the spatialdata package is not installed.
 """
 
-import geopandas as gpd
-import numpy as np
-import pandas as pd
 import pytest
-from anndata import AnnData
-from shapely.geometry import Point, Polygon
 
 # Skip the entire module if spatialdata is not installed
 pytest.importorskip("spatialdata")
 
 from insitupy._constants import SPATIALDATA_DIALECT_VERSION  # noqa: E402
-from insitupy._core.data import InSituData  # noqa: E402
-from insitupy.containers import AnnotationsData, RegionsData  # noqa: E402
-from insitupy.containers.cell_data import CellData  # noqa: E402
-from insitupy.containers.spatial_units_data import SpatialUnitsData  # noqa: E402
-from insitupy.experiment.data import InSituExperiment  # noqa: E402
 from insitupy.spatialdata._convert import _transform_regions_for_spatialdata  # noqa: E402
 from insitupy.spatialdata.convert import convert_to_spatialdata  # noqa: E402
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _make_insitudata(n_cells=10, n_genes=5, seed=0, sample_id="s1", cell_prefix="cell"):
-    """Minimal InSituData with expression table and spatial coordinates."""
-    rng = np.random.default_rng(seed)
-    X = rng.integers(0, 20, size=(n_cells, n_genes)).astype(float)
-
-    obs = pd.DataFrame(index=pd.Index([f"{cell_prefix}_{i}" for i in range(n_cells)]))
-    var = pd.DataFrame(index=pd.Index([f"gene_{j}" for j in range(n_genes)]))
-    table = AnnData(X=X, obs=obs, var=var)
-    table.obsm["spatial"] = rng.random((n_cells, 2)) * 100
-
-    celldata = CellData(table=table, boundaries=None)
-    xd = InSituData(
-        path=None, metadata=None,
-        slide_id="test", sample_id=sample_id,
-        method_name="test", method_params={},
-    )
-    xd.cells.add_celldata(cd=celldata, key="main", is_main=True)
-    return xd
-
-
-def _poly(x=0, y=0, size=10):
-    return Polygon([(x, y), (x + size, y), (x + size, y + size), (x, y + size)])
-
-
-def _poly_gdf(*names):
-    """One Polygon row per name, with unique ids."""
-    return gpd.GeoDataFrame({
-        "id": [f"{n}_{i}" for i, n in enumerate(names)],
-        "name": list(names),
-        "geometry": [_poly(i * 20) for i in range(len(names))],
-        "color": ["#ff0000"] * len(names),
-    })
-
-
-def _make_units(names, unit_type="unit", n_vars=2, seed=0):
-    """Minimal SpatialUnitsData with polygon shapes and an AnnData table."""
-    rng = np.random.default_rng(seed)
-    gdf = gpd.GeoDataFrame({
-        "name": names,
-        "geometry": [Point(i, i).buffer(0.4) for i in range(len(names))],
-    })
-    table = AnnData(
-        X=rng.random((len(names), n_vars)),
-        obs=pd.DataFrame(index=pd.Index(names, dtype=str)),
-        var=pd.DataFrame(index=[f"v{i}" for i in range(n_vars)]),
-    )
-    return SpatialUnitsData(shapes=gdf, data=table, unit_type=unit_type)
-
-
-def _make_transcripts_df(n=6, seed=0):
-    rng = np.random.default_rng(seed)
-    return pd.DataFrame({
-        "x_location": rng.random(n) * 100,
-        "y_location": rng.random(n) * 100,
-        "z_location": np.zeros(n),
-        "feature_name": [f"gene_{i % 3}" for i in range(n)],
-        "cell_id": [f"cell_{i}" for i in range(n)],
-    })
-
-
-def _make_experiment(n_samples=2, n_cells=6, n_genes=3):
-    """Multi-sample InSituExperiment; each sample has cells, units, annotations, regions."""
-    exp = InSituExperiment()
-
-    for i in range(n_samples):
-        xd = _make_insitudata(
-            n_cells=n_cells, n_genes=n_genes, seed=i,
-            sample_id=f"s{i}", cell_prefix=f"s{i}cell",
-        )
-        xd.add_units(_make_units([f"s{i}u0", f"s{i}u1"], unit_type="unit", seed=i))
-        xd.annotations.add_data(data=_poly_gdf(f"ann{i}"), key="roi", scale_factor=1.0)
-        xd.regions.add_data(data=_poly_gdf(f"reg{i}"), key="roi", scale_factor=1.0)
-        exp._data.append(xd)
-
-    exp._metadata = pd.DataFrame({
-        "uid": [f"sample_{i}" for i in range(n_samples)],
-        "slide_id": ["slide1"] * n_samples,
-        "sample_id": [f"s{i}" for i in range(n_samples)],
-    })
-    return exp
-
+from tests.spatialdata_fixtures import (  # noqa: E402
+    make_experiment,
+    make_insitudata,
+    make_transcripts_df,
+    make_units,
+    poly_gdf,
+    roundtrip_through_zarr,
+)
 
 # ── convert_to_spatialdata ────────────────────────────────────────────────────
 
 class TestConvertToSpatialdata:
     def test_returns_spatialdata_object(self):
         from spatialdata import SpatialData
-        xd = _make_insitudata()
+        xd = make_insitudata()
         sdata = convert_to_spatialdata(xd)
         assert isinstance(sdata, SpatialData)
 
     def test_tables_element_present(self):
-        xd = _make_insitudata()
+        xd = make_insitudata()
         sdata = convert_to_spatialdata(xd)
         assert len(sdata.tables) > 0
 
     def test_table_obs_shape_matches(self):
         n_cells = 8
-        xd = _make_insitudata(n_cells=n_cells)
+        xd = make_insitudata(n_cells=n_cells)
         sdata = convert_to_spatialdata(xd)
         table = next(iter(sdata.tables.values()))
         assert table.n_obs == n_cells
 
     def test_table_var_shape_matches(self):
         n_genes = 6
-        xd = _make_insitudata(n_genes=n_genes)
+        xd = make_insitudata(n_genes=n_genes)
         sdata = convert_to_spatialdata(xd)
         table = next(iter(sdata.tables.values()))
         assert table.n_vars == n_genes
 
     def test_no_images_element_when_none_loaded(self):
-        xd = _make_insitudata()
+        xd = make_insitudata()
         sdata = convert_to_spatialdata(xd)
         # Without images loaded, images dict should be empty
         assert len(sdata.images) == 0
@@ -145,7 +59,7 @@ class TestConvertToSpatialdata:
 
 class TestMultiSampleExport:
     def test_all_modalities_present_for_each_sample(self):
-        exp = _make_experiment(n_samples=2)
+        exp = make_experiment(n_samples=2)
         sdata = convert_to_spatialdata(exp)
 
         for i in range(2):
@@ -162,8 +76,8 @@ class TestMultiSampleExport:
 
 class TestUnitsExport:
     def test_units_table_and_shapes_present_and_match(self):
-        xd = _make_insitudata(n_cells=4)
-        su = _make_units(["u0", "u1", "u2"], unit_type="niche", n_vars=3, seed=7)
+        xd = make_insitudata(n_cells=4)
+        su = make_units(["u0", "u1", "u2"], unit_type="niche", n_vars=3, seed=7)
         xd.add_units(su)
 
         sdata = convert_to_spatialdata(xd)
@@ -180,14 +94,46 @@ class TestUnitsExport:
         assert shapes.geometry.iloc[0].area == pytest.approx(su.shapes.geometry.iloc[0].area)
 
 
+# ── Cell-only segmentation export regression ────────────────────────────────────
+
+class TestCellOnlySegmentationExport:
+    def test_boundaries_export_without_nucleus_layer(self):
+        """Pre-fix: add_boundaries() always creates a 'nuclei' metadata entry (data=None)
+        even when no nucleus mask was added; the exporter crashed trying to wrap that None
+        in a DataArray. This is the ordinary case (segmentation without a nucleus channel)."""
+        xd = make_insitudata(n_cells=4, with_boundaries=True)
+        sdata = convert_to_spatialdata(xd)  # must not raise
+        assert "CELLS.main.boundaries.cells" in sdata.labels
+        assert "CELLS.main.boundaries.nuclei" not in sdata.labels
+
+    def test_boundaries_export_with_nucleus_layer(self):
+        """Happy-path lock-in: when nucleus boundaries ARE present, they must still
+        export alongside cell boundaries - the fix must not skip real data too."""
+        xd = make_insitudata(n_cells=4, with_boundaries=True, with_nucleus_boundaries=True)
+        sdata = convert_to_spatialdata(xd)
+        assert "CELLS.main.boundaries.cells" in sdata.labels
+        assert "CELLS.main.boundaries.nuclei" in sdata.labels
+
+
+# ── Raw-array image export regression ───────────────────────────────────────────
+
+class TestRawArrayImageExport:
+    def test_image_added_via_raw_array_exports_without_pyramid_wrapping(self):
+        """Pre-fix: add_image() with a raw array (not a file path) stores a bare array;
+        the exporter assumed a pyramid list and crashed with IndexError."""
+        xd = make_insitudata(n_cells=2, with_image=True)
+        sdata = convert_to_spatialdata(xd)  # must not raise
+        assert "IMAGES.dapi" in sdata.images
+
+
 # ── Regions/annotations guard-bug regression (item 2) ──────────────────────────
 
 class TestRegionsAnnotationsGuardFix:
     def test_regions_exported_without_annotations(self):
         """Pre-fix: the guard checked `xd.annotations`, so regions were silently dropped."""
-        xd = _make_insitudata(n_cells=2)
+        xd = make_insitudata(n_cells=2)
         xd._annotations = None
-        xd.regions.add_data(data=_poly_gdf("r1"), key="roi", scale_factor=1.0)
+        xd.regions.add_data(data=poly_gdf("r1"), key="roi", scale_factor=1.0)
 
         shapes = _transform_regions_for_spatialdata(xd)
         assert len(shapes) == 1
@@ -195,8 +141,8 @@ class TestRegionsAnnotationsGuardFix:
     def test_no_crash_with_annotations_and_no_regions(self):
         """Pre-fix: the guard passed on `xd.annotations` but then iterated `xd.regions`,
         raising AttributeError when regions was None."""
-        xd = _make_insitudata(n_cells=2)
-        xd.annotations.add_data(data=_poly_gdf("a1"), key="roi", scale_factor=1.0)
+        xd = make_insitudata(n_cells=2)
+        xd.annotations.add_data(data=poly_gdf("a1"), key="roi", scale_factor=1.0)
         xd._regions = None
 
         shapes = _transform_regions_for_spatialdata(xd)
@@ -207,9 +153,9 @@ class TestRegionsAnnotationsGuardFix:
 
 class TestCaseInsensitiveConflictResolution:
     def test_conflicting_annotation_keys_are_renamed(self):
-        xd = _make_insitudata(n_cells=2)
-        xd.annotations.add_data(data=_poly_gdf("x"), key="Demo", scale_factor=1.0)
-        xd.annotations.add_data(data=_poly_gdf("y"), key="demo", scale_factor=1.0)
+        xd = make_insitudata(n_cells=2)
+        xd.annotations.add_data(data=poly_gdf("x"), key="Demo", scale_factor=1.0)
+        xd.annotations.add_data(data=poly_gdf("y"), key="demo", scale_factor=1.0)
 
         sdata = convert_to_spatialdata(xd)  # must not raise
 
@@ -222,14 +168,14 @@ class TestCaseInsensitiveConflictResolution:
 
 class TestIncludeTranscripts:
     def test_transcripts_included_by_default(self):
-        xd = _make_insitudata(n_cells=3)
-        xd.transcripts = _make_transcripts_df()
+        xd = make_insitudata(n_cells=3)
+        xd.transcripts = make_transcripts_df()
         sdata = convert_to_spatialdata(xd)
         assert len(sdata.points) == 1
 
     def test_transcripts_skipped_when_disabled(self):
-        xd = _make_insitudata(n_cells=3)
-        xd.transcripts = _make_transcripts_df()
+        xd = make_insitudata(n_cells=3)
+        xd.transcripts = make_transcripts_df()
         sdata = convert_to_spatialdata(xd, include_transcripts=False)
         assert len(sdata.points) == 0
 
@@ -238,7 +184,60 @@ class TestIncludeTranscripts:
 
 class TestDialectAttrs:
     def test_dialect_descriptor_present(self):
-        xd = _make_insitudata(n_cells=2)
+        xd = make_insitudata(n_cells=2)
         sdata = convert_to_spatialdata(xd)
         descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
         assert descriptor["version"] == SPATIALDATA_DIALECT_VERSION
+
+
+# ── Real disk round trip (WP5: nothing previously called sdata.write()) ───────
+
+class TestExportRoundTripsThroughDisk:
+    """Every test above asserts against the in-memory SpatialData object that
+    `convert_to_spatialdata` returns directly - none of them ever write to a zarr
+    store. These tests route the same object through a real
+    `sdata.write()` -> `spatialdata.read_zarr()` round trip via
+    `roundtrip_through_zarr`, so the actual point of an exchange format - surviving
+    a disk write/read - is exercised at least once for the single- and
+    multi-sample export paths.
+    """
+
+    def test_single_sample_survives_disk_roundtrip(self, tmp_path):
+        n_cells = 8
+        xd = make_insitudata(n_cells=n_cells)
+        sdata = convert_to_spatialdata(xd)
+        sdata2 = roundtrip_through_zarr(sdata, tmp_path, name="single.zarr")
+
+        assert len(sdata2.tables) > 0
+        table = next(iter(sdata2.tables.values()))
+        assert table.n_obs == n_cells
+
+    def test_multi_sample_modalities_survive_disk_roundtrip(self, tmp_path):
+        exp = make_experiment(n_samples=2)
+        sdata = convert_to_spatialdata(exp)
+        sdata2 = roundtrip_through_zarr(sdata, tmp_path, name="experiment.zarr")
+
+        for i in range(2):
+            prefix = f"SAMPLE.sample_{i}.."
+            assert f"{prefix}CELLS.main.table" in sdata2.tables
+            assert f"{prefix}CELLS.main.circles" in sdata2.shapes
+            assert f"{prefix}UNITS.unit.table" in sdata2.tables
+            assert f"{prefix}UNITS.unit.shapes" in sdata2.shapes
+            assert f"{prefix}ANNOTATIONS.roi" in sdata2.shapes
+            assert f"{prefix}REGIONS.roi" in sdata2.shapes
+
+    def test_units_table_and_shapes_survive_disk_roundtrip(self, tmp_path):
+        xd = make_insitudata(n_cells=4)
+        su = make_units(["u0", "u1", "u2"], unit_type="niche", n_vars=3, seed=7)
+        xd.add_units(su)
+
+        sdata = convert_to_spatialdata(xd)
+        sdata2 = roundtrip_through_zarr(sdata, tmp_path, name="units.zarr")
+
+        table = sdata2.tables["UNITS.niche.table"]
+        assert table.n_obs == 3
+        assert table.n_vars == 3
+
+        shapes = sdata2.shapes["UNITS.niche.shapes"]
+        assert len(shapes) == 3
+        assert shapes.geometry.iloc[0].area == pytest.approx(su.shapes.geometry.iloc[0].area)

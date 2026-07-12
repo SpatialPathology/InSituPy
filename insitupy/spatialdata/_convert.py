@@ -177,7 +177,7 @@ def _transform_images_for_spatialdata(
             meta = xd.images.metadata[name]
             pixel_size = meta["pixel_size"]
             transformations = {"global": Scale([pixel_size, pixel_size], axes=("x", "y"))}
-            img = image_list[0]
+            img = image_list[0] if isinstance(image_list, list) else image_list
             axes_isp = xd.images.metadata[name]["axes"]
             axes_config = ImageAxes(axes_isp)
             is_rgb = xd.images.metadata[name]["rgb"]
@@ -190,7 +190,7 @@ def _transform_images_for_spatialdata(
             if is_rgb:
                 axes = tuple(list(axes_isp.lower().replace("s", "c")))
                 array = DataArray(
-                    data=image_list[0],
+                    data=img,
                     name=name,
                     dims=axes
                     )
@@ -405,12 +405,17 @@ def _transform_cell_boundaries_for_spatialdata(
             if xd.cells[cell_key].boundaries is not None:
                 celldata = xd.cells[cell_key]
                 for name in celldata.boundaries.metadata.keys():
+                    # get list of available boundaries
+                    labels_list = celldata.boundaries[name]
+                    if labels_list is None:
+                        # e.g. an unpopulated "nuclei" slot when nuclei_boundaries=None was
+                        # passed to add_boundaries() - metadata still carries the key, but
+                        # there is no raster to export.
+                        continue
+
                     meta = celldata.boundaries.metadata[name]
                     pixel_size = meta["pixel_size"]
                     transformations = {"global": Scale([pixel_size, pixel_size], axes=("x", "y"))}
-
-                    # get list of available boundaries
-                    labels_list =  celldata.boundaries[name]
 
                     if isinstance(labels_list, list):
                         top_array = labels_list[0]
