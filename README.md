@@ -78,7 +78,7 @@ This base installation includes napari and related visualization dependencies.
 
 InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
 
-**Optional: install with SpatialData support (`spatialdata>=0.7.2`):**
+**Optional: install with SpatialData support (`spatialdata>=0.8.0,<0.9.0`):**
 
    ```bash
    pip install insitupy-spatial[spatialdata]

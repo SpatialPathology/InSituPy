@@ -393,3 +393,36 @@ class TestMadThresholds:
             result_pp = pp.calculate_mad_thresholds(xd)
         result_exp = exp_fn(xd)
         pd.testing.assert_frame_equal(result_pp, result_exp)
+
+
+# ── InSituExperimentView dispatch: mutation through a view reaches the parent ──
+
+class TestPreprocessingAcceptsView:
+    """A view's `_data` holds the same dataset objects as the parent (no copy), so
+    running a preprocessing function through a view should mutate the parent too -
+    this is the already-documented, intended view behavior. Covers both structural
+    shapes among the 6 dispatch call sites: plain in-place column mutation
+    (calculate_qc_metrics) and attribute reassignment on the shared CellData object
+    (filter_cells's `celldata.table = celldata.table[mask]`).
+    """
+
+    def test_calculate_qc_metrics_through_view_mutates_parent(self):
+        exp = _make_experiment(n_samples=3)
+        view = exp[:2]
+
+        calculate_qc_metrics(view)
+
+        assert "total_counts" in exp._data[0].cells.table.obs.columns
+        assert "total_counts" in exp._data[1].cells.table.obs.columns
+        assert "total_counts" not in exp._data[2].cells.table.obs.columns
+
+    def test_filter_cells_mask_through_view_mutates_parent(self):
+        exp = _make_experiment(n_samples=3, n_cells=10)
+        view = exp[:2]
+        mask = np.array([True] * 4 + [False] * 6)
+
+        filter_cells(view, mask=mask)
+
+        assert exp._data[0].cells.table.n_obs == 4
+        assert exp._data[1].cells.table.n_obs == 4
+        assert exp._data[2].cells.table.n_obs == 10  # untouched: outside the view

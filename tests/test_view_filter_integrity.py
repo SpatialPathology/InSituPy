@@ -8,6 +8,7 @@ import json
 import pandas as pd
 import pytest
 
+from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.experiment.data import InSituExperiment, InSituExperimentView
 
@@ -604,3 +605,43 @@ def test_apply_deep_copies_datasets():
     original_uid = exp._data[0]._uid
     applied._data[0]._uid = "MUTATED"
     assert exp._data[0]._uid == original_uid, "parent dataset must be unaffected by apply() mutation"
+
+
+# ── _is_experiment() dispatch accepts InSituExperimentView ─────────────────────
+
+
+def test_is_experiment_returns_true_for_view():
+    """A view must dispatch as an experiment, not fall into the `else: raise` branch."""
+    n = 4
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
+    exp._data = _make_datasets(n)
+
+    view = exp._subset(slice(0, 2), as_view=True)
+
+    assert _is_experiment(view) is True
+
+
+def test_is_experiment_allow_view_false_raises():
+    """A call site that opts out of view support gets a clear, actionable error."""
+    n = 4
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame({"uid": [f"uid{i}" for i in range(n)]})
+    exp._data = _make_datasets(n)
+
+    view = exp._subset(slice(0, 2), as_view=True)
+
+    with pytest.raises(NotImplementedError, match=r"\.copy\(\)"):
+        _is_experiment(view, allow_view=False)
+
+
+def test_is_experiment_exact_class_checks_unchanged():
+    """Plain InSituData/InSituExperiment dispatch must be untouched by the view fix."""
+    xd = InSituData()
+    exp = InSituExperiment()
+
+    assert _is_experiment(xd) is False
+    assert _is_experiment(exp) is True
+
+    with pytest.raises(ValueError, match="neither InSituData or InSituExperiment"):
+        _is_experiment(object())

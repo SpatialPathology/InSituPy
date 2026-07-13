@@ -54,7 +54,10 @@ MODALITIES_COLOR_DICT = {
 SAMPLE_STR = "SAMPLE"
 DEFAULT_CHUNK_SIZE_X = 4096
 DEFAULT_CHUNK_SIZE_Y = 4096
-SPATIALDATA_DIALECT_VERSION = 1
+SPATIALDATA_DIALECT_VERSION = 3
+# SpatialData-export-only modalities with no corresponding InSituData attribute (kept out of
+# MODALITIES so InSituData.get_loaded_modalities()'s getattr(self, m) isn't affected).
+SPATIALDATA_DERIVED_MODALITIES = ["tables"]
 
 # naming
 ISPY_METADATA_FILE = ".ispy"

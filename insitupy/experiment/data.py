@@ -5,7 +5,6 @@ import logging
 import os
 import shutil
 import warnings
-from collections import defaultdict
 from collections.abc import MutableMapping
 from copy import deepcopy
 from pathlib import Path
@@ -29,7 +28,6 @@ from insitupy._constants import (
     LOAD_FUNCS,
     MODALITIES,
     MODALITIES_ABBR,
-    SAMPLE_STR,
     with_insitupy_style,
 )
 from insitupy._core.data import InSituData
@@ -52,10 +50,6 @@ from insitupy.utils.utils import (
 
 logger = logging.getLogger(__name__)
 
-# Feature flag for SpatialData mode
-# Set to True to enable spatialdata mode functionality
-# Currently disabled while the feature is under development
-_SPATIALDATA_MODE_ENABLED = False
 _FILTERS_SCHEMA_VERSION = 2
 _SUPPORTED_FILTER_VERSIONS = {1, 2}
 _METADATA_SCHEMA_VERSION = 1
@@ -405,10 +399,6 @@ class InSituExperiment:
     represented as an :class:`~insitupy._core.data.InSituData` object, and maintains associated metadata in a
     `pandas.DataFrame`.
 
-    Supports two modes:
-    1. InSituPy mode (default): Stores InSituData objects
-    2. SpatialData mode: Stores StructuredSpatialData objects from SpatialData zarr stores
-
     Examples:
         >>> # Create an InSituExperiment object
         >>> experiment = InSituExperiment()
@@ -417,7 +407,8 @@ class InSituExperiment:
         >>> experiment.add(data="path/to/dataset", mode="insitupy", metadata={"experiment": "test"})
 
         >>> # Read from SpatialData
-        >>> exp = InSituExperiment.read_spatialdata("path/to/data.zarr")
+        >>> from insitupy.spatialdata import read_spatialdata
+        >>> exp = read_spatialdata("path/to/data.zarr")
 
         >>> # Perform differential gene expression analysis
         >>> experiment.dge(target_id=0, ref_id=1, target_annotation_tuple=("cell_type", "neuron"))
@@ -434,31 +425,16 @@ class InSituExperiment:
 
     from ._deprecated import collect_anndatas, import_obs, plot_overview
 
-    def __init__(self, data_type: Literal["insitupy", "spatialdata"] = "insitupy"):
-        """
-        Initialize an InSituExperiment object.
-
-        Args:
-            data_type: The type of data to store. Either "insitupy" (default) or "spatialdata".
-                       Note: "spatialdata" mode is currently disabled and will be enabled in a future release.
-        """
-        # Check if spatialdata mode is requested but disabled
-        if data_type == "spatialdata" and not _SPATIALDATA_MODE_ENABLED:
-            raise NotImplementedError(
-                "SpatialData mode is currently disabled and under development. "
-                "It will be enabled in a future release. "
-                "Please use data_type='insitupy' for now."
-            )
-
+    def __init__(self):
+        """Initialize an InSituExperiment object."""
         self._metadata = pd.DataFrame(columns=['uid'])
-        self._data = []  # Can hold either InSituData or StructuredSpatialData
+        self._data = []
         self._path = None
         self._colors: dict[str, dict[str, dict[str, str]]] = {}  # {cells_layer: {obs_col: {category: hex}}}
         self._filters = {}
         self._composites: dict = {}
         self._applied_filters: list[str] = []
         self._parent_indices: list[int] | None = None
-        self._data_type = data_type
 
     def _modality_counts(self):
         """Return (n_total, [(name, count), ...]) for modalities present in at least one dataset."""
@@ -481,9 +457,8 @@ class InSituExperiment:
     def __repr__(self):
         n_samples = len(self._metadata)
         object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
-        mode_str = f" ({tf.Bold}{self._data_type}{tf.ResetAll} mode)"
 
-        header = f"{tf.Bold}{object_name}{tf.ResetAll}{mode_str}\n"
+        header = f"{tf.Bold}{object_name}{tf.ResetAll}\n"
         header += f"{tf.Bold}Path:{tf.ResetAll}\t\t{self._path}"
         if self.applied_filters:
             header += f"\n{tf.Bold}Applied filters:{tf.ResetAll} {' -> '.join(self.applied_filters)}"
@@ -551,7 +526,7 @@ class InSituExperiment:
         object_name = "InSituExperimentView" if self.is_view else "InSituExperiment"
 
         parts = [
-            f"<b>{object_name}</b> <i>({self._data_type} mode)</i><br>",
+            f"<b>{object_name}</b><br>",
             f"<b>Path:</b> {self._path}<br>",
         ]
         if self.applied_filters:
@@ -651,14 +626,14 @@ class InSituExperiment:
             if not key.index.equals(self._metadata.index):
                 key = key.reset_index(drop=True)
             selected_indices = list(self._metadata.index[key])
-            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment = subset_cls()
             new_experiment._data = [select_data(d) for d, k in zip(self._data, key) if k]
             new_experiment._metadata = self._metadata[key].reset_index(drop=True)
 
         # Handle slices, list of ints, ndarray, or Series of ints
         else:
             selected_indices = list(self._metadata.iloc[key].index)
-            new_experiment = subset_cls(data_type=self._data_type)
+            new_experiment = subset_cls()
             new_experiment._data = [select_data(self._data[i]) for i in self._metadata.iloc[key].index]
             new_experiment._metadata = self._metadata.iloc[key].reset_index(drop=True)
 
@@ -737,11 +712,6 @@ class InSituExperiment:
         return len(self._data)
 
     @property
-    def data_type(self):
-        """The type of data stored in this experiment ('insitupy' or 'spatialdata')."""
-        return self._data_type
-
-    @property
     def cells(self):
         """
         Displays a summary of :attr:`~insitupy._core.data.InSituData.cells` for all datasets.
@@ -817,7 +787,7 @@ class InSituExperiment:
     @property
     def data(self):
         """
-        List of datasets as :class:`~insitupy._core.data.InSituData` or StructuredSpatialData objects.
+        List of datasets as :class:`~insitupy._core.data.InSituData` objects.
 
         Returns:
             list: A list of data objects.
@@ -940,13 +910,6 @@ class InSituExperiment:
             ValueError: If the mode is invalid.
             AssertionError: If the loaded dataset is not an InSituData object.
         """
-        # Check if we're in spatialdata mode
-        if self._data_type == "spatialdata":
-            raise ValueError(
-                "Cannot add individual datasets in SpatialData mode. "
-                "Use InSituExperiment.read_spatialdata() to load SpatialData experiments."
-            )
-
         # Check if the dataset is of the correct type
         try:
             data = Path(data)
@@ -1390,8 +1353,6 @@ class InSituExperiment:
         Returns:
             DGE results object
         """
-        self._check_mode_compatibility("dge")
-
         from insitupy.tools.dge import dge
 
         # get data and extract information about experiment
@@ -1455,7 +1416,6 @@ class InSituExperiment:
         Returns:
             int: The total number of cells.
         """
-        self._check_mode_compatibility("get_n_cells")
 
         n_cells = 0
         for _, d in self.iterdata():
@@ -1760,7 +1720,6 @@ class InSituExperiment:
         Returns:
             InSituExperiment: Returns self to allow method chaining.
         """
-        self._check_mode_compatibility("import_from_anndata")
 
         # Validate inputs
         if obs_columns_to_transfer is None and obsm_keys_to_transfer is None:
@@ -1825,7 +1784,6 @@ class InSituExperiment:
             ValueError: If no table has been built yet, or if both ``obs_columns``
                 and ``obsm_keys`` are None.
         """
-        self._check_mode_compatibility("import_from_table")
 
         if obs_columns is None and obsm_keys is None:
             raise ValueError(
@@ -2140,7 +2098,6 @@ class InSituExperiment:
         Returns:
             AnnData: A concatenated AnnData object.
         """
-        self._check_mode_compatibility("to_anndata")
         return self._concatenate_samples(
             cells_layer=cells_layer,
             label_col=label_col,
@@ -2635,7 +2592,6 @@ class InSituExperiment:
                 arguments.
             FileExistsError: If a table already exists and ``overwrite=False``.
         """
-        self._check_mode_compatibility("build_table")
 
         if self.path is None:
             raise ValueError(
@@ -2698,7 +2654,12 @@ class InSituExperiment:
         staging_path = output_path.parent / (output_path.name + ".__ispy_tmp__")
         check_overwrite_and_remove_if_true(staging_path, overwrite=True)
 
-        build_params = {"label_col": label_col, "method": method, "cells_layer": cells_layer}
+        build_params = {
+            "label_col": label_col,
+            "method": method,
+            "cells_layer": cells_layer,
+            "make_obs_names_unique": make_obs_names_unique,
+        }
 
         if method == "in_memory":
             # Always store the union (outer) so views can recover subset-shared genes.
@@ -2810,7 +2771,6 @@ class InSituExperiment:
         Args:
             skip (Optional[str], optional): A modality to skip during loading. Defaults to None.
         """
-        self._check_mode_compatibility("load_all")
 
         for xd in tqdm(self._data):
             for f in LOAD_FUNCS:
@@ -2823,13 +2783,11 @@ class InSituExperiment:
 
     def load_annotations(self):
         """Load annotations for all datasets."""
-        self._check_mode_compatibility("load_annotations")
         for xd in tqdm(self._data):
             xd.load_annotations()
 
     def load_cells(self):
         """Load cells for all datasets."""
-        self._check_mode_compatibility("load_cells")
         for xd in tqdm(self._data):
             xd.load_cells()
 
@@ -2839,7 +2797,6 @@ class InSituExperiment:
                     verbose: bool = False
                     ):
         """Load images for all datasets."""
-        self._check_mode_compatibility("load_images")
 
         for xd in tqdm(self._data):
             xd.load_images(
@@ -2850,7 +2807,6 @@ class InSituExperiment:
 
     def load_regions(self):
         """Load regions for all datasets."""
-        self._check_mode_compatibility("load_regions")
         for xd in tqdm(self._data):
             xd.load_regions()
 
@@ -2858,7 +2814,6 @@ class InSituExperiment:
                         transcript_filename: str = "transcripts.parquet"
                         ):
         """Load transcripts for all datasets."""
-        self._check_mode_compatibility("load_transcripts")
         for xd in tqdm(self._data):
             xd.load_transcripts()
 
@@ -2880,7 +2835,6 @@ class InSituExperiment:
         **kwargs
         ):
         """Create a plot with embeddings of all datasets as subplots."""
-        self._check_mode_compatibility("plot_embedding")
 
         from insitupy.plotting.save import save_and_show_figure
 
@@ -2994,7 +2948,6 @@ class InSituExperiment:
 
     def remove_history(self):
         """Remove history from all datasets."""
-        self._check_mode_compatibility("remove_history")
         for xd in tqdm(self._data):
             xd.remove_history(verbose=False)
 
@@ -3019,7 +2972,6 @@ class InSituExperiment:
         Raises:
             ValueError: If no experiment save path is set.
         """
-        self._check_mode_compatibility("reload")
 
         if self.path is None:
             raise ValueError(
@@ -3122,7 +3074,6 @@ class InSituExperiment:
             ValueError: If any dataset has no save path set and has loaded
                 modalities, because unloading would make that data unrecoverable.
         """
-        self._check_mode_compatibility("unload")
 
         target = set(convert_to_list(modalities)) if modalities is not None else set(MODALITIES)
         missing = [
@@ -3332,7 +3283,6 @@ class InSituExperiment:
                 regardless of individual failures; experiment-level files (metadata, colors,
                 filters) are written only when all datasets succeed.
         """
-        self._check_mode_compatibility("save")
 
         if self.is_view:
             if collect_warnings_mode:
@@ -3673,7 +3623,6 @@ class InSituExperiment:
         Raises:
             ValueError: If no experiment save path is available or dataset paths are inconsistent.
         """
-        self._check_mode_compatibility("save_images")
 
         dataset_verbose = kwargs.pop("verbose", False)
 
@@ -3724,7 +3673,6 @@ class InSituExperiment:
             ValueError: If no experiment save path is available or dataset
                 paths are inconsistent.
         """
-        self._check_mode_compatibility("save_geometries")
 
         dataset_verbose = verbose
 
@@ -3775,7 +3723,6 @@ class InSituExperiment:
             ValueError: If no experiment save path is available or dataset
                 paths are inconsistent.
         """
-        self._check_mode_compatibility("save_cells")
 
         dataset_verbose = verbose
 
@@ -3835,7 +3782,6 @@ class InSituExperiment:
                 use.  Defaults to False.
             **kwargs: Additional keyword arguments passed to dataset.saveas().
         """
-        self._check_mode_compatibility("saveas")
 
         path = Path(path)
         staging = path.parent / (path.name + ".__ispy_tmp__")
@@ -3986,7 +3932,7 @@ class InSituExperiment:
         # Pre-flight: harmonize categorical colors the user never touched, across all
         # samples, so the viewer shows consistent colors without a manual sync_colors()
         # call. Never let a color-sync problem prevent the viewer from opening.
-        if auto_sync_colors and self._data_type == "insitupy":
+        if auto_sync_colors:
             try:
                 celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
                 cat_keys = list(celldata.table.obs.select_dtypes("category").columns)
@@ -4006,20 +3952,7 @@ class InSituExperiment:
         for meta, data in self.iterdata():
             repr_string += f"{meta.name}: {tf.Bold+tf.Red}{meta[uid_column]}{tf.ResetAll}\n"
 
-            if self._data_type == "insitupy":
-                repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
-            else:
-                # For spatialdata mode, get modality directly
-                if modality == "cells":
-                    repr_string += f"{tf.SPACER}   " + data._cells.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
-                elif modality == "images":
-                    repr_string += f"{tf.SPACER}   " + data._images.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
-                elif modality == "transcripts":
-                    repr_string += f"{tf.SPACER}   " + str(data._transcripts) + "\n"
-                elif modality == "annotations":
-                    repr_string += f"{tf.SPACER}   " + data._annotations.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
-                elif modality == "regions":
-                    repr_string += f"{tf.SPACER}   " + data._regions.__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
+            repr_string += f"{tf.SPACER}   " + data.get_modality(modality).__repr__().replace("\n", f"\n{tf.SPACER}   ") + "\n"
 
         logger.info(repr_string)
 
@@ -4041,8 +3974,12 @@ class InSituExperiment:
             overwrite (bool, optional): Whether to overwrite existing color
                 dictionaries. Defaults to False.
             verbose (bool, optional): Whether to print status messages. Defaults to True.
+
+        Note:
+            See `InSituExperimentView`'s class docstring for a caveat about calling
+            this on a view: colors sync correctly for that call, but the assignment
+            does not persist to the parent experiment.
         """
-        self._check_mode_compatibility("sync_colors")
 
         # Make sure obs_cols is a list
         keys = convert_to_list(keys)
@@ -4170,14 +4107,6 @@ class InSituExperiment:
         if mode == "move" and path is None:
             raise ValueError("path must be provided when mode='move'.")
 
-        # Check that all objects have the same data type
-        data_types = [obj._data_type for obj in objs]
-        if len(set(data_types)) > 1:
-            raise ValueError(
-                f"Cannot concatenate InSituExperiment objects with different data types: {set(data_types)}"
-            )
-        data_type = data_types[0]
-
         # --- mode="move" precondition checks ---
         if mode == "move":
             for obj in objs:
@@ -4220,12 +4149,11 @@ class InSituExperiment:
                 objs=objs,
                 keys=list(keys),
                 new_col_name=new_col_name,
-                data_type=data_type,
                 path=path,
             )
 
         # --- mode="copy" (original behaviour + colors merge) ---
-        new_experiment = cls(data_type=data_type)
+        new_experiment = cls()
 
         new_data = []
         new_metadata = []
@@ -4252,10 +4180,7 @@ class InSituExperiment:
         # Filters are intentionally dropped: masks are sized to individual
         # experiment metadata and cannot be meaningfully merged.
         new_experiment._path = None
-
-        # check if observation names are unique (only for insitupy mode)
-        if data_type == "insitupy":
-            new_experiment._check_obs_uniqueness()
+        new_experiment._check_obs_uniqueness()
 
         return new_experiment
 
@@ -4265,7 +4190,6 @@ class InSituExperiment:
         objs: list,
         keys: list,
         new_col_name,
-        data_type: str,
         path: Path,
     ) -> "InSituExperiment":
         """Back-end for ``concat(..., mode='move')``.
@@ -4276,7 +4200,7 @@ class InSituExperiment:
         Subset experiments (``obj._path is None``) are supported: their datasets
         are moved normally but the original experiment root is not removed.
         """
-        new_experiment = cls(data_type=data_type)
+        new_experiment = cls()
         new_metadata: list = []
         merged_colors: dict = {}
         global_idx = 0
@@ -4356,8 +4280,7 @@ class InSituExperiment:
             shutil.rmtree(str(obj._path))
             obj._path = None
 
-        if data_type == "insitupy":
-            new_experiment._check_obs_uniqueness()
+        new_experiment._check_obs_uniqueness()
 
         return new_experiment
 
@@ -4403,7 +4326,7 @@ class InSituExperiment:
         current_path = Path.cwd()
 
         # Initialize a new InSituExperiment object
-        experiment = cls(data_type="insitupy")
+        experiment = cls()
 
         # Create a warning collector if collect_warnings_mode is enabled
         warning_collector = WarningCollector() if collect_warnings_mode else None
@@ -4522,7 +4445,7 @@ class InSituExperiment:
                 data.materialize(layers=["transcripts"], verbose=True)
 
         # Initialize a new InSituExperiment object
-        experiment = cls(data_type="insitupy")
+        experiment = cls()
 
         try:
             for n in tqdm(sorted(region_df["name"].tolist()), desc="Iterating regions"):
@@ -4560,259 +4483,21 @@ class InSituExperiment:
     @classmethod
     def read(cls,
              path: str | os.PathLike | Path,
-               mode: Literal["insitupy", "spatialdata"] = "insitupy",
-               filter_key: str | None = None) -> "InSituExperiment":
+             filter_key: str | None = None) -> "InSituExperiment":
         """
         Read an InSituExperiment object from a specified folder.
 
+        To read an InSituPy-dialect SpatialData zarr store instead, use
+        :func:`insitupy.spatialdata.read_spatialdata`.
+
         Args:
-            path: Path to the experiment directory or SpatialData zarr store
-            mode: Read mode - either "insitupy" (default) or "spatialdata"
-                  Note: "spatialdata" mode is currently disabled and will be enabled in a future release.
+            path: Path to the experiment directory.
+            filter_key: Optional filter to apply after loading.
 
         Returns:
-            InSituExperiment object in the specified mode
+            InSituExperiment object.
         """
-        if mode == "spatialdata":
-            if not _SPATIALDATA_MODE_ENABLED:
-                raise NotImplementedError(
-                    "SpatialData mode is currently disabled and under development. "
-                    "It will be enabled in a future release. "
-                    "Please use mode='insitupy' for now."
-                )
-            return cls._read_spatialdata(path)
-        elif mode == "insitupy":
-            return cls._read_insitupy(path, filter_key=filter_key)
-        else:
-            raise ValueError(f"Unknown mode: {mode}. Use 'insitupy' or 'spatialdata'")
-
-    # ==================== SPATIALDATA MODE METHODS ====================
-
-    @classmethod
-    def _read_spatialdata(cls, path: str | os.PathLike | Path) -> "InSituExperiment":
-        """
-        Read an InSituExperiment from a SpatialData zarr store.
-
-        This method reads a SpatialData zarr directory and creates an InSituExperiment
-        containing StructuredSpatialData objects. It handles both single-sample and
-        multi-sample SpatialData stores.
-
-        Args:
-            path: Path to the SpatialData .zarr directory
-
-        Returns:
-            InSituExperiment in SpatialData mode
-
-        Raises:
-            ImportError: If spatialdata is not installed
-            FileNotFoundError: If the path does not exist
-        """
-        # Import for SpatialData mode
-        try:
-            import spatialdata
-
-        except ImportError:
-            raise ImportError(
-                "This function requires the spatialdata-wrapper package. "
-                "Install it with: pip install insitupy[spatialdata]"
-            )
-        else:
-            from spatialdata_wrapper._io import silent_read_zarr as _silent_read_zarr
-
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"SpatialData path not found: {path}")
-
-        # Initialize experiment in spatialdata mode
-        experiment = cls(data_type="spatialdata")
-        experiment._path = path
-
-        # Read the SpatialData zarr store
-        logger.info(f"Reading SpatialData from {path}...")
-        # sdata = read_zarr(path)
-        sdata = _silent_read_zarr(path)
-
-        # Extract samples from the SpatialData object
-        samples = cls._extract_samples_from_spatialdata(sdata)
-
-        logger.info(f"Found {len(samples)} sample(s)")
-
-        # Create StructuredSpatialData for each sample
-        for sample_id, sample_elements in tqdm(samples.items(), desc="Loading samples"):
-            # Import from external package
-            from spatialdata_wrapper import StructuredSpatialData
-
-            struct_data = StructuredSpatialData()
-            struct_data._path = path
-
-            # Populate the StructuredSpatialData from elements
-            cls._populate_structured_data(struct_data, sample_elements, sample_id)
-
-            # Add to experiment
-            experiment._data.append(struct_data)
-
-            # Create metadata entry
-            metadata_entry = {
-                'uid': sample_id if sample_id != 'single' else str(uuid4()).split("-")[0],
-            }
-            experiment._metadata = pd.concat([
-                experiment._metadata,
-                pd.DataFrame([metadata_entry])
-            ], ignore_index=True)
-
-        # Try to load colors if they exist
-        colors_path = path / "colors.json"
-        if colors_path.exists():
-            try:
-                with open(colors_path) as f:
-                    raw_colors = json.load(f)
-                experiment._colors = experiment._normalize_colors_store(
-                    raw_colors, experiment._default_color_layer()
-                )
-            except Exception as e:
-                logger.warning(f"Could not load colors.json: {e}")
-
-        return experiment
-
-    @staticmethod
-    def _extract_samples_from_spatialdata(sdata) -> dict[str, dict]:
-        """
-        Group SpatialData elements by sample ID.
-
-        Elements with keys like 'sample.<id>..MODALITY.name' are grouped by sample_id.
-        Elements without sample prefix are treated as a single sample.
-
-        Args:
-            sdata: SpatialData object
-
-        Returns:
-            Dictionary mapping sample_id to dictionary of elements
-        """
-        samples = defaultdict(dict)
-        has_multi_sample = False
-
-        for elem_type, key, elem in sdata.gen_elements():
-            if key.startswith(SAMPLE_STR):
-                # Multi-sample format: 'sample.<id>..MODALITY...'
-                parts = key.split('.')
-                sample_id = parts[1]  # Extract sample ID
-                samples[sample_id][key] = (elem_type, elem)
-                has_multi_sample = True
-            else:
-                # Single-sample format or element without sample prefix
-                samples['single'][key] = (elem_type, elem)
-
-        # If we have multi-sample data, remove the 'single' key
-        if has_multi_sample and 'single' in samples:
-            if len(samples['single']) > 0:
-                logger.warning(
-                    "Found both multi-sample (with 'sample.' prefix) and single-sample elements. "
-                    "Single-sample elements will be ignored."
-                )
-            del samples['single']
-
-        return dict(samples)
-
-    @staticmethod
-    def _populate_structured_data(struct_data, sample_elements: dict, sample_id: str):
-        """
-        Populate a StructuredSpatialData object from a dictionary of elements.
-
-        Args:
-            struct_data: StructuredSpatialData object to populate
-            sample_elements: Dictionary mapping element keys to (elem_type, elem) tuples
-            sample_id: ID of the sample (used for filtering)
-        """
-        for key, (elem_type, elem) in sample_elements.items():
-            # Parse the key to determine where to place the element
-            # Remove sample prefix if present
-            if key.startswith(SAMPLE_STR):
-                # Format: 'sample.<id>..MODALITY.locators...'
-                parts = key.split('.')
-                # Remove 'sample', '<id>', and empty string
-                parts = [p for p in parts[3:] if p]
-            else:
-                # Format: 'MODALITY.locators...'
-                parts = key.split('.')
-
-            if len(parts) == 0:
-                logger.warning(f"Could not parse key: {key}")
-                continue
-
-            modality = parts[0]
-
-            # Route to appropriate structure based on modality
-            if modality == "IMAGES":
-                if len(parts) >= 2:
-                    image_name = parts[1]
-                    # Get transformation for pixel size
-                    try:
-                        from spatialdata.transformations import get_transformation
-                        scale_obj = get_transformation(elem)
-                        struct_data._images.add_image(image_name, elem, scale_obj=scale_obj)
-                    except Exception as e:
-                        logger.warning(f"Could not add image {image_name}: {e}")
-
-            elif modality == "CELLS":
-                if len(parts) >= 2:
-                    cell_key = parts[1]
-
-                    # Initialize CellData if not exists
-                    if cell_key not in struct_data._cells._layers:
-                        from spatialdata_wrapper import StructuredCellData
-                        struct_data._cells[cell_key] = StructuredCellData()
-
-                    if len(parts) >= 3:
-                        if parts[2] == "table":
-                            struct_data._cells[cell_key].table = elem
-                        elif parts[2] == "boundaries" and len(parts) >= 4:
-                            boundary_name = parts[3]
-                            struct_data._cells[cell_key].boundaries[boundary_name] = elem
-                        elif parts[2] in ["circles", "circles_sized"]:
-                            # Skip circles representations (derived from table)
-                            pass
-
-            elif modality == "TRANSCRIPTS":
-                struct_data._transcripts = elem
-
-            elif modality == "ANNOTATIONS":
-                if len(parts) >= 2:
-                    annotation_name = parts[1]
-                    struct_data._annotations[annotation_name] = elem
-
-            elif modality == "REGIONS":
-                if len(parts) >= 2:
-                    region_name = parts[1]
-                    struct_data._regions[region_name] = elem
-
-            else:
-                logger.warning(f"Unknown modality in key: {key}")
-
-    @staticmethod
-    def _get_loaded_modalities_spatialdata(data) -> list[str]:
-        """
-        Get list of loaded modalities from a StructuredSpatialData object.
-
-        Args:
-            data: StructuredSpatialData object
-
-        Returns:
-            List of modality names that have data
-        """
-        loaded = []
-
-        if not data._images.is_empty:
-            loaded.append("images")
-        if not data._cells.is_empty:
-            loaded.append("cells")
-        if data._transcripts is not None:
-            loaded.append("transcripts")
-        if not data._annotations.is_empty:
-            loaded.append("annotations")
-        if not data._regions.is_empty:
-            loaded.append("regions")
-
-        return loaded
+        return cls._read_insitupy(path, filter_key=filter_key)
 
     @classmethod
     def _read_insitupy(cls, path: str | os.PathLike | Path,
@@ -4881,7 +4566,7 @@ class InSituExperiment:
             data.append(dataset)
 
         # Create a new InSituExperiment object
-        experiment = cls(data_type="insitupy")
+        experiment = cls()
         experiment._metadata = metadata
         experiment._data = data
         experiment._path = path
@@ -5001,7 +4686,6 @@ class InSituExperiment:
         category absent from it gets a deterministic palette color in ``.uns``
         only — the stored intent (``self._colors``) keeps just what was assigned.
         """
-        self._check_mode_compatibility("colors")
         layer_name = self._resolve_color_layer(cells_layer)
         color_dict = dict(color_dict)
         self._colors.setdefault(layer_name, {})[obs_col] = color_dict
@@ -5021,16 +4705,6 @@ class InSituExperiment:
                 for i, c in enumerate(cats)
             ]
 
-    def _check_mode_compatibility(self, method_name: str):
-        """
-        Check if the current mode is compatible with a method.
-        Raises NotImplementedError for spatialdata mode (for now).
-        """
-        if self._data_type == "spatialdata":
-            raise NotImplementedError(
-                f"Method '{method_name}' is not yet implemented for SpatialData mode. "
-                f"This will be added in a future update."
-            )
     def _check_obs_uniqueness(
         self,
         cells_layer: str | None = None
@@ -5276,6 +4950,19 @@ class InSituExperimentView(InSituExperiment):
     ``import_from_table``, ``calculate_metrics``, ``save_cells`` — propagate to
     the parent. This is deliberate (a view is a lightweight filter, not a copy);
     use ``view.saveas(path)`` to materialise an independent copy.
+
+    Note on ``sync_colors`` specifically: the per-sample ``.uns[f"{key}_colors"]``
+    write-through described above does propagate to the parent (samples are shared).
+    The experiment-level "intent" record - ``self._colors``, exposed via ``.colors`` -
+    is deep-copied at view-creation time and is not shared afterward. Colors synced
+    through a view remain visible on that same view instance (so a single
+    ``pl.spatial(view, ...)`` or ``pl.cellular_composition(view, ...)`` call is
+    self-consistent), but they are not written back to the parent's ``._colors`` and
+    are lost once the view is discarded. Re-syncing the same key later - on the parent,
+    or on a different view with a different sample subset - can pick a different
+    automatic color assignment if the set of categories present differs between
+    subsets. Call ``sync_colors()`` on the parent experiment first, before creating
+    views, if consistent colors across multiple views/plots matter.
     """
 
     @property
@@ -5348,7 +5035,7 @@ class InSituExperimentView(InSituExperiment):
         Returns:
             InSituExperiment: A deep copy of this view's content.
         """
-        new = InSituExperiment(data_type=self._data_type)
+        new = InSituExperiment()
         new._data = [deepcopy(d) for d in self._data]
         new._metadata = self._metadata.reset_index(drop=True).copy()
         new._colors = deepcopy(self._colors)
@@ -5647,7 +5334,7 @@ class InSituExperimentView(InSituExperiment):
                 "view.copy().saveas(path, free_after_save=True)."
             )
 
-        materialised = InSituExperiment(data_type=self._data_type)
+        materialised = InSituExperiment()
         materialised._data = list(self._data)
         materialised._metadata = self._metadata.reset_index(drop=True).copy()
         materialised._colors = deepcopy(self._colors)

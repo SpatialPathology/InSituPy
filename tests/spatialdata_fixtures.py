@@ -58,12 +58,25 @@ def make_insitudata(
     with_nucleus_boundaries=False,
     with_second_cell_layer=False,
     with_image=False,
+    contiguous_seg_mask_value=True,
+    with_multinucleated_cells=False,
 ):
     """Minimal InSituData with an expression table and spatial coordinates.
 
     Opt-in flags add the richer modalities (boundaries, a second cell layer,
     an image) needed by the full multi-sample fixture without forcing every
     lightweight caller to pay for them.
+
+    ``contiguous_seg_mask_value=False`` permutes ``seg_mask_value`` relative to
+    obs order (only meaningful with ``with_boundaries=True``) - the real-data
+    case (Xenium mask ids are not guaranteed 1-based/contiguous), as opposed to
+    every other fixture's identity-order default.
+
+    ``with_multinucleated_cells=True`` (requires ``with_boundaries=True`` and
+    ``n_cells >= 3``) builds a real, non-1:1 ``nucleus_to_cell_map``: the first
+    cell gets 2 nuclei, the second gets 1, the rest get 0 - exercising both
+    "multiple nuclei per cell" and "no nuclei" in one fixture. Implies nucleus
+    boundaries are present regardless of ``with_nucleus_boundaries``.
     """
     rng = np.random.default_rng(seed)
     if gene_names is None:
@@ -81,12 +94,36 @@ def make_insitudata(
     if with_boundaries:
         cell_names = np.array(table.obs_names)
         seg_mask_value = np.arange(1, n_cells + 1)
-        boundaries = BoundariesData(cell_names=cell_names, seg_mask_value=seg_mask_value)
+        if not contiguous_seg_mask_value:
+            seg_mask_value = rng.permutation(seg_mask_value)
+
+        nucleus_to_cell_map = None
+        nucleus_count = None
+        if with_multinucleated_cells:
+            nucleus_to_cell_map = {0: 0, 1: 0, 2: 1}
+            nucleus_count = np.zeros(n_cells, dtype=int)
+            nucleus_count[0] = 2
+            nucleus_count[1] = 1
+
+        boundaries = BoundariesData(
+            cell_names=cell_names,
+            seg_mask_value=seg_mask_value,
+            nucleus_to_cell_map=nucleus_to_cell_map,
+            nucleus_count=nucleus_count,
+        )
         mask = np.zeros((n_cells, n_cells), dtype=np.uint32)
         for i, value in enumerate(seg_mask_value):
             mask[i, i] = value
+
         nuc_mask = None
-        if with_nucleus_boundaries:
+        if with_multinucleated_cells:
+            nuc_mask = np.zeros((n_cells, n_cells), dtype=np.uint32)
+            # nucleus labels 1, 2, 3 (1-indexed) at distinct positions, matching
+            # nucleus_to_cell_map's keys 0, 1, 2.
+            nuc_mask[0, 1] = 1
+            nuc_mask[0, 2] = 2
+            nuc_mask[1, 1] = 3
+        elif with_nucleus_boundaries:
             nuc_mask = np.zeros((n_cells, n_cells), dtype=np.uint32)
             for i, value in enumerate(seg_mask_value):
                 nuc_mask[i, i] = value

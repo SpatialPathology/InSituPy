@@ -6,23 +6,37 @@ else:
     pass
 
 import logging
+import os
 from collections import defaultdict
 from numbers import Number
+from pathlib import Path
 from typing import Union
 
 import numpy as np
+import pandas as pd
+from anndata import AnnData
 
-from insitupy._constants import MODALITIES, SPATIALDATA_DIALECT_VERSION
+from insitupy._constants import (
+    MODALITIES,
+    SPATIALDATA_DERIVED_MODALITIES,
+    SPATIALDATA_DIALECT_VERSION,
+)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy.containers import CellData, SpatialUnitsData
+from insitupy.experiment.data import InSituExperiment, TableAccessor
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata,
+    _build_insitudata_from_elements,
     _create_boundaries_from_spatialdata,
+    _generate_spatialdata_key,
+    _group_elements_by_sample,
     _merge_dicts_with_warning,
     _transform_annotations_for_spatialdata,
     _transform_cell_boundaries_for_spatialdata,
+    _transform_concat_tables_for_spatialdata,
     _transform_images_for_spatialdata,
+    _transform_nucleus_map_for_spatialdata,
     _transform_regions_for_spatialdata,
     _transform_table_for_spatialdata,
     _transform_transcripts_for_spatialdata,
@@ -30,6 +44,7 @@ from insitupy.spatialdata._convert import (
     _validate_boundaries_data_format,
     _validate_image_data_format,
 )
+from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +137,7 @@ def convert_to_spatialdata_dict(
     data: Union[InSituData, "InSituExperiment"], # type: ignore
     n_pyramids: int = 5,
     include_transcripts: bool = True,
+    include_concat_tables: bool = True,
     ):
 
     """
@@ -135,6 +151,10 @@ def convert_to_spatialdata_dict(
         n_pyramids: Number of resolution pyramid levels to generate for image elements.
         include_transcripts: If False, skip transcript export entirely. Transcript export is
             the dominant cost for large experiments; set to False to omit it.
+        include_concat_tables: If False, skip exporting InSituExperiment.build_table()'s
+            concatenated union table(s) even if built. Ignored for a bare InSituData (which has
+            no build_table()). Defaults to True: any layer with a built table is exported as a
+            TABLES.<layer> element - export is opt-in by virtue of having called build_table().
 
     Raises:
         ImportError: If the spatialdata framework is not installed.
@@ -165,13 +185,20 @@ def convert_to_spatialdata_dict(
         regions = _transform_regions_for_spatialdata(d, sample_id=sample_id)
         images = _transform_images_for_spatialdata(d, n_pyramids=n_pyramids, sample_id=sample_id)
         labels = _transform_cell_boundaries_for_spatialdata(d, sample_id=sample_id)
+        nucleus_maps = _transform_nucleus_map_for_spatialdata(d, sample_id=sample_id)
         md = _merge_dicts_with_warning(
             transcripts, tables, cell_shapes, units_tables, units_shapes,
-            annotations, regions, images, labels
+            annotations, regions, images, labels, nucleus_maps
             )
 
         # collect resulting dictionary
         merged_dict = _merge_dicts_with_warning(merged_dict, md)
+
+    if is_experiment and include_concat_tables:
+        concat_tables = _transform_concat_tables_for_spatialdata(
+            data, exported_keys=set(merged_dict.keys())
+        )
+        merged_dict = _merge_dicts_with_warning(merged_dict, concat_tables)
 
     return merged_dict
 
@@ -179,6 +206,7 @@ def convert_to_spatialdata(
     data: Union[InSituData, "InSituExperiment"], # type: ignore
     n_pyramids: int = 5,
     include_transcripts: bool = True,
+    include_concat_tables: bool = True,
     ):
 
     """
@@ -200,6 +228,9 @@ def convert_to_spatialdata(
         include_transcripts (bool, optional): If False, skip transcript export
             entirely. Transcript export is the dominant cost for large experiments;
             set to False to omit it. Defaults to True.
+        include_concat_tables (bool, optional): If False, skip exporting
+            ``InSituExperiment.build_table()``'s concatenated union table(s) even if built.
+            Ignored for a bare ``InSituData``. Defaults to True.
 
     Returns:
         SpatialData: A SpatialData object whose elements are keyed as follows
@@ -210,11 +241,17 @@ def convert_to_spatialdata(
             - **images**: one entry per image channel (e.g. ``'nuclei'``, ``'morphology_focus'``).
             - **labels**: cell boundary label images (e.g. ``'cell_boundaries'``).
             - **shapes**: cell circle shapes, spatial units polygons, and annotation/region shapes.
-            - **tables**: cell expression table(s) and spatial units table(s).
+            - **tables**: cell expression table(s), spatial units table(s), - when a cell
+              layer's boundaries carry a populated ``nucleus_to_cell_map`` (multinucleated-cell
+              support) - a small ``CELLS.<key>.nucleus_map`` table linking nucleus labels to
+              parent cells, and - for an ``InSituExperiment`` with a built table - a
+              ``TABLES.<layer>`` element holding ``build_table()``'s concatenated union table.
             - **points**: transcript coordinates (if available and ``include_transcripts=True``).
 
             The store also carries a versioned dialect descriptor at
-            ``sdata.attrs["insitupy_spatialdata_dialect"]``.
+            ``sdata.attrs["insitupy_spatialdata_dialect"]``, including ``uid``/``slide_id``/
+            ``sample_id`` identity for each sample (or flat ``slide_id``/``sample_id`` for a
+            bare ``InSituData``).
 
     Raises:
         ImportError: If the ``spatialdata`` package is not installed.
@@ -223,15 +260,26 @@ def convert_to_spatialdata(
         data,
         n_pyramids=n_pyramids,
         include_transcripts=include_transcripts,
+        include_concat_tables=include_concat_tables,
         )
 
     dialect_attrs = {
         "insitupy_spatialdata_dialect": {
             "version": SPATIALDATA_DIALECT_VERSION,
-            "modalities": list(MODALITIES),
+            "modalities": [*MODALITIES, *SPATIALDATA_DERIVED_MODALITIES],
             "sample_prefix_pattern": "SAMPLE.<uid>..",
         }
     }
+
+    if _is_experiment(data):
+        dialect_attrs["insitupy_spatialdata_dialect"]["samples"] = {
+            meta["uid"]: {"slide_id": d.slide_id, "sample_id": d.sample_id}
+            for meta, d in data.iterdata()
+        }
+    else:
+        dialect_attrs["insitupy_spatialdata_dialect"]["slide_id"] = data.slide_id
+        dialect_attrs["insitupy_spatialdata_dialect"]["sample_id"] = data.sample_id
+
     sdata = SpatialData.init_from_elements(sd_dict, attrs=dialect_attrs)
 
     # Check and fix case-insensitive conflicts
@@ -239,7 +287,7 @@ def convert_to_spatialdata(
 
     return sdata
 
-def convert_from_spatialdata(
+def _convert_from_spatialdata_manual(
     sdata: SpatialData,
     # Image parameters
     image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None = None,
@@ -266,7 +314,19 @@ def convert_from_spatialdata(
     verbose: bool = True
 ) -> InSituData:
     """
-    Convert a SpatialData object to an InSituData object.
+    Convert a SpatialData object to an InSituData object using caller-supplied keys.
+
+    Low-level, manual-parameter primitive for SpatialData objects that carry no
+    InSituPy dialect descriptor (foreign / labels-native stores, e.g.
+    ``spatialdata-io`` output). Not part of the public API (not exported from
+    ``insitupy.spatialdata``) - InSituPy's own dialect round trip uses the
+    dialect-driven :func:`convert_from_spatialdata` instead, which needs none
+    of these keys. This function is the enabling groundwork WP4 hardens for
+    general foreign-store import (fixing, among other things, the
+    ``units_key``/``table_key`` mixup below - not fixed here, since it is
+    structurally impossible in the dialect-driven path and this function is
+    being handed to WP4 regardless; see
+    ``.log/reports/260711/spatialdata-work-packages/report-wp4-labels-native-import.md``).
 
     Args:
         sdata: SpatialData object to convert.
@@ -401,3 +461,183 @@ def convert_from_spatialdata(
         logger.warning(f"Transcripts key '{transcripts_key}' not found in SpatialData")
 
     return data
+
+
+def convert_from_spatialdata(
+    sdata: SpatialData,
+    verbose: bool = True,
+) -> InSituData | InSituExperiment:
+    """
+    Convert an InSituPy-dialect SpatialData object back into an InSituData or InSituExperiment.
+
+    A true inverse of :func:`convert_to_spatialdata`: the dialect and every
+    modality-naming detail (pixel sizes, RGB-ness, per-cell-layer boundaries,
+    per-unit-layer tables, ...) are auto-detected from the store itself and
+    ``sdata.attrs["insitupy_spatialdata_dialect"]`` - no caller-supplied keys
+    or pixel sizes are needed. Returns a bare ``InSituData`` for a
+    single-sample store (no ``SAMPLE.<uid>..`` prefix in any element key), or
+    an ``InSituExperiment`` of ``InSituData`` objects for a multi-sample store.
+
+    The returned object has no backing project directory - call ``.saveas(path)``
+    to persist it as a ``.insitupy`` project before ``.save()`` can be used.
+
+    Args:
+        sdata: A SpatialData object written by :func:`convert_to_spatialdata`.
+        verbose: If True, log progress for each modality.
+
+    Returns:
+        InSituData or InSituExperiment: The reconstructed object(s).
+
+    Raises:
+        ValueError: If ``sdata.attrs`` carries no InSituPy dialect descriptor
+            (i.e. this is a foreign/labels-native store InSituPy did not
+            write - see ``insitupy.spatialdata._convert._convert_from_spatialdata_manual``,
+            the low-level primitive WP4 is hardening for that case) or if the
+            descriptor's version is not one this InSituPy version supports.
+    """
+    dialect = sdata.attrs.get("insitupy_spatialdata_dialect")
+    if dialect is None:
+        raise ValueError(
+            "sdata was not written by insitupy.spatialdata.convert_to_spatialdata "
+            "(no 'insitupy_spatialdata_dialect' key in sdata.attrs). Reading a "
+            "foreign/labels-native SpatialData store is not supported by this "
+            "function; see insitupy.spatialdata._convert._convert_from_spatialdata_manual "
+            "(WP4, in progress)."
+        )
+
+    version = dialect.get("version")
+    if version != SPATIALDATA_DIALECT_VERSION:
+        raise ValueError(
+            f"Unsupported insitupy_spatialdata_dialect version {version!r}; "
+            f"this InSituPy version reads dialect version {SPATIALDATA_DIALECT_VERSION} only."
+        )
+
+    grouped = _group_elements_by_sample(sdata)
+
+    if len(grouped) == 1 and None in grouped:
+        return _build_insitudata_from_elements(
+            grouped[None],
+            slide_id=dialect.get("slide_id"),
+            sample_id=dialect.get("sample_id"),
+            method_params=dict(sdata.attrs),
+            verbose=verbose,
+        )
+
+    sample_meta = dialect.get("samples", {})
+    data, uids, slide_ids, sample_ids = [], [], [], []
+    for uid, elements in grouped.items():
+        if uid is None:
+            # Global (non-per-sample) elements, e.g. TABLES.<layer> - not a sample. Reading
+            # a concatenated table back requires convert_table_from_spatialdata(sdata, layer).
+            logger.debug(
+                "Skipping %d global (non-per-sample) element(s) while reconstructing "
+                "per-sample InSituData objects: %s", len(elements), sorted(elements),
+            )
+            continue
+        meta = sample_meta.get(uid, {})
+        xd = _build_insitudata_from_elements(
+            elements,
+            slide_id=meta.get("slide_id"),
+            sample_id=meta.get("sample_id"),
+            method_params=dict(sdata.attrs),
+            verbose=verbose,
+        )
+        xd._uid = uid
+        data.append(xd)
+        uids.append(uid)
+        slide_ids.append(meta.get("slide_id"))
+        sample_ids.append(meta.get("sample_id"))
+
+    experiment = InSituExperiment()
+    experiment._metadata = pd.DataFrame({
+        "uid": uids,
+        "slide_id": slide_ids,
+        "sample_id": sample_ids,
+    })
+    experiment._data = data
+    return experiment
+
+
+def read_spatialdata(
+    path: str | os.PathLike | Path,
+    verbose: bool = True,
+) -> InSituData | InSituExperiment:
+    """
+    Read an InSituPy-dialect SpatialData zarr store into an InSituData or InSituExperiment.
+
+    Thin convenience wrapper around ``spatialdata.read_zarr`` +
+    :func:`convert_from_spatialdata`. Matches the ``insitupy.io`` reader
+    convention (``read_xenium``, ``read_visium``, ...) rather than
+    auto-detecting the on-disk format inside ``InSituData.read()`` /
+    ``InSituExperiment.read()``.
+
+    Args:
+        path: Path to a SpatialData ``.zarr`` store written by
+            :func:`convert_to_spatialdata`.
+        verbose: If True, log progress for each modality.
+
+    Returns:
+        InSituData or InSituExperiment: The reconstructed object(s), with no
+        backing project directory - call ``.saveas(path)`` to persist as a
+        ``.insitupy`` project before ``.save()`` can be used.
+    """
+    import spatialdata
+
+    sdata = spatialdata.read_zarr(path)
+    return convert_from_spatialdata(sdata, verbose=verbose)
+
+
+def convert_table_from_spatialdata(
+    sdata: SpatialData,
+    cells_layer: str,
+    covered_labels: list[str] | str | None = None,
+) -> AnnData:
+    """
+    Reconstruct the ``.table``-equivalent AnnData for *cells_layer* from a ``TABLES.<layer>`` element.
+
+    Applies the same inner-over-covered reconstruction that
+    :class:`~insitupy.experiment.data.TableAccessor` /
+    :class:`~insitupy.experiment.data.ViewTableAccessor` use for a disk-built table
+    (:meth:`TableAccessor._reconstruct`, unmodified), sourced from the SpatialData element
+    instead of a local zarr store.
+
+    Args:
+        sdata: A SpatialData object written by :func:`convert_to_spatialdata` with
+            ``include_concat_tables=True`` (the default) and a built table for *cells_layer*.
+        cells_layer: Cell layer whose concatenated table to reconstruct (e.g. ``"main"``).
+        covered_labels: If ``None`` (default), reconstructs the full-experiment table
+            (equivalent to ``exp.table[cells_layer]``) - the inner gene set over every sample
+            the table was built from. If a subset of labels (e.g. sample uids) is given,
+            reconstructs the inner-over-that-subset, row-filtered table (equivalent to
+            ``view.table[cells_layer]``).
+
+    Returns:
+        AnnData: The reconstructed inner-over-covered table.
+
+    Raises:
+        KeyError: If no ``TABLES.<cells_layer>`` element exists in *sdata*.
+    """
+    key = _generate_spatialdata_key(sample_id=None, modality="tables", locator=cells_layer)
+    if key not in sdata.tables:
+        raise KeyError(
+            f"No concatenated table found for cells_layer='{cells_layer}' "
+            f"(looked for '{key}')."
+        )
+    full = sdata.tables[key]
+    labels = np.array([str(label) for label in full.uns["_insitupy_presence_labels"]])
+    presence = np.asarray(full.uns["_insitupy_gene_presence"], dtype=bool)
+    label_col = full.uns.get("_insitupy_build_params", {}).get("label_col", "uid")
+
+    if covered_labels is None:
+        covered_labels, row_filter = labels, False
+    else:
+        covered_labels, row_filter = convert_to_list(covered_labels), True
+
+    return TableAccessor._reconstruct(
+        full,
+        covered_labels=covered_labels,
+        labels=labels,
+        presence=presence,
+        label_col=label_col,
+        row_filter=row_filter,
+    )

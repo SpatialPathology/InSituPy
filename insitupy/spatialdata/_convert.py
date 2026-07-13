@@ -15,11 +15,14 @@ else:
     from spatialdata.transformations.transformations import Scale
 
 import logging
+from collections import defaultdict
 from numbers import Number
 from typing import Literal
 
+import anndata
 import dask.dataframe as dd
 import numpy as np
+import pandas as pd
 from anndata import AnnData
 from xarray import DataArray
 
@@ -28,9 +31,11 @@ from insitupy._constants import (
     DEFAULT_CHUNK_SIZE_Y,
     MODALITIES,
     SAMPLE_STR,
+    SPATIALDATA_DERIVED_MODALITIES,
 )
 from insitupy._core.data import InSituData
-from insitupy.containers import BoundariesData
+from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
+from insitupy.experiment.data import InSituExperiment
 from insitupy.images.axes import ImageAxes
 from insitupy.utils.utils import convert_to_list
 
@@ -43,8 +48,11 @@ def _generate_spatialdata_key(
     locator: str | tuple | list | None
     ):
     # from spatialdata._core.validation import check_valid_name
-    if modality.lower() not in MODALITIES:
-        raise ValueError(f"Modality '{modality}' not recognized. Choose from {MODALITIES}.")
+    if modality.lower() not in MODALITIES and modality.lower() not in SPATIALDATA_DERIVED_MODALITIES:
+        raise ValueError(
+            f"Modality '{modality}' not recognized. "
+            f"Choose from {MODALITIES + SPATIALDATA_DERIVED_MODALITIES}."
+        )
 
     if modality == "transcripts":
         if locator is not None:
@@ -83,11 +91,50 @@ def _generate_spatialdata_key(
     return key
 
 
+def _parse_dialect_key(key: str) -> tuple[str | None, str, list[str]]:
+    """Parse a dialect element key into ``(sample_uid, modality, locator_parts)``.
+
+    The precise inverse of :func:`_generate_spatialdata_key`. ``sample_uid`` is
+    ``None`` when the key carries no ``SAMPLE.<uid>..`` prefix (a bare
+    ``InSituData`` export). ``modality`` is upper-case, matching how
+    :func:`_generate_spatialdata_key` emits it.
+    """
+    parts = key.split(".")
+    if key.startswith(f"{SAMPLE_STR}."):
+        sample_uid = parts[1]
+        # parts[2] is the empty string produced by the prefix's trailing ".."
+        rest = parts[3:]
+    else:
+        sample_uid = None
+        rest = parts
+
+    modality = rest[0]
+    locator_parts = rest[1:]
+    return sample_uid, modality, locator_parts
+
+
+def _group_elements_by_sample(sdata: SpatialData) -> dict[str | None, dict[str, tuple[str, object]]]:
+    """Group SpatialData elements by sample uid, per the ``SAMPLE.<uid>..`` dialect prefix.
+
+    Returns a dict mapping sample uid (or a single ``None`` key when the store
+    carries no ``SAMPLE.`` prefix at all - a bare ``InSituData`` export) to a
+    dict of ``{element_key: (elem_type, elem)}`` for that sample's elements,
+    with keys stripped of the ``SAMPLE.<uid>..`` prefix.
+    """
+    samples: dict[str | None, dict[str, tuple[str, object]]] = defaultdict(dict)
+    for elem_type, key, elem in sdata.gen_elements():
+        sample_uid, modality, locator_parts = _parse_dialect_key(key)
+        stripped_key = ".".join([modality, *locator_parts]) if locator_parts else modality
+        samples[sample_uid][stripped_key] = (elem_type, elem)
+    return dict(samples)
+
+
 def _transform_anndata_for_spatialdata(
     adata: AnnData,
     #cells_as_circles: bool = True
     cells_key: str,
-    cell_area_key: str | None = "cell_area"
+    cell_area_key: str | None = "cell_area",
+    seg_mask_value: np.ndarray | None = None
     ):
     """Convert an AnnData table to spatialdata-compatible format with circle shapes.
 
@@ -101,6 +148,11 @@ def _transform_anndata_for_spatialdata(
         cell_area_key: Column in ``adata.obs`` containing cell areas in
             squared pixels.  Used to compute per-cell circle radii.  Pass
             ``None`` to skip sized circles.
+        seg_mask_value: Optional per-cell segmentation mask values, in the same
+            row order as ``adata.obs_names``. When given, stored under the
+            reserved ``_insitupy_seg_mask_value`` obs column so a reader can
+            recover which raster pixel value corresponds to which cell name
+            without assuming a contiguous 1..N mapping.
 
     Returns:
         A tuple ``(adata, circles_sized, circles)`` where *circles_sized* is
@@ -120,6 +172,9 @@ def _transform_anndata_for_spatialdata(
     adata.obs[region_str] = adata.obs[region_str].astype("category")
     attrs["region_key"] = region_str
     adata.uns["spatialdata_attrs"] = attrs
+
+    if seg_mask_value is not None:
+        adata.obs["_insitupy_seg_mask_value"] = seg_mask_value
 
     if cell_area_key is not None:
         try:
@@ -289,7 +344,8 @@ def _transform_table_for_spatialdata(
     #if xd.cells is not None and xd.cells.table is not None:
     if xd.cells is not None:
         for cell_key in xd.cells.keys():
-            if xd.cells[cell_key].table is not None:
+            celldata = xd.cells[cell_key]
+            if celldata.table is not None:
                 tables_key = _generate_spatialdata_key(
                     sample_id=sample_id,
                     modality="cells",
@@ -302,9 +358,14 @@ def _transform_table_for_spatialdata(
                     locator=[cell_key, "circles"]
                 )
 
+                seg_mask_value = None
+                if celldata.boundaries is not None:
+                    seg_mask_value = celldata.boundaries.seg_mask_value.compute()
+
                 adata, circles_sized, circles = _transform_anndata_for_spatialdata(
-                    xd.cells[cell_key].table,
-                    cells_key=circles_dict_key
+                    celldata.table,
+                    cells_key=circles_dict_key,
+                    seg_mask_value=seg_mask_value
                     )
 
                 # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
@@ -322,6 +383,71 @@ def _transform_table_for_spatialdata(
                     cell_shapes[circles_sized_dict_key] = circles_sized
 
     return tables, cell_shapes
+
+
+def _transform_nucleus_map_for_spatialdata(
+    xd: InSituData,
+    sample_id: str | None = None
+    ):
+    """Convert per-cell layer nucleus-to-cell mappings into small SpatialData tables.
+
+    For each cell layer whose boundaries carry a populated
+    ``nucleus_to_cell_map`` (multinucleated-cell support, Xenium v2.0+),
+    builds a dedicated table - one row per nucleus, independent of and much
+    smaller than the main cells table - annotating the layer's ``nuclei``
+    :class:`~spatialdata.models.Labels2DModel` raster via SpatialData's own
+    ``region``/``instance_key`` mechanism. This keeps the mapping entirely
+    out of the main cells table's ``obs``. ``nucleus_count`` is not exported;
+    it is derivable on read via a simple group-by on this table.
+
+    Args:
+        xd: Source :class:`InSituData` object.
+        sample_id: Optional prefix for SpatialData element keys.
+
+    Returns:
+        A dict mapping SpatialData element keys to parsed TableModel objects,
+        or an empty dict if no cell layer has a populated ``nucleus_to_cell_map``.
+    """
+    tables = {}
+    if xd.cells is not None:
+        for cell_key in xd.cells.keys():
+            celldata = xd.cells[cell_key]
+            if celldata.boundaries is None:
+                continue
+
+            mapping = celldata.boundaries.nucleus_to_cell_map
+            if mapping is None:
+                continue
+
+            cell_names = celldata.table.obs_names
+            nucleus_map_obs = pd.DataFrame({
+                "nucleus_label": [k + 1 for k in mapping.keys()],
+                "cell_id": [cell_names[v] for v in mapping.values()],
+            })
+
+            nuclei_labels_key = _generate_spatialdata_key(
+                sample_id=sample_id,
+                modality="cells",
+                locator=[cell_key, "boundaries", "nuclei"]
+            )
+
+            nucleus_map_adata = AnnData(X=np.empty((len(nucleus_map_obs), 0)), obs=nucleus_map_obs)
+            nucleus_map_adata.obs["region"] = nuclei_labels_key
+            nucleus_map_adata.obs["region"] = nucleus_map_adata.obs["region"].astype("category")
+            nucleus_map_adata.uns["spatialdata_attrs"] = {
+                "region": nuclei_labels_key,
+                "region_key": "region",
+                "instance_key": "nucleus_label",
+            }
+
+            dict_key = _generate_spatialdata_key(
+                sample_id=sample_id,
+                modality="cells",
+                locator=[cell_key, "nucleus_map"]
+            )
+            tables[dict_key] = TableModel.parse(nucleus_map_adata)
+
+    return tables
 
 
 def _transform_units_for_spatialdata(
@@ -373,6 +499,150 @@ def _transform_units_for_spatialdata(
                 tables[table_dict_key] = TableModel.parse(adata)
                 unit_shapes[shapes_key] = ShapesModel.parse(sud.shapes)
     return tables, unit_shapes
+
+
+def _transform_concat_tables_for_spatialdata(
+    experiment: "InSituExperiment",
+    exported_keys: set,
+    ):
+    """Serialize each built ``build_table()`` union table as a ``TABLES.<layer>`` element.
+
+    Only cell layers with an on-disk built table (``experiment.table.keys()``) are considered -
+    this is what makes the concatenated element "opt-in": it is exported iff ``build_table()``
+    was called for that layer. Each row is linked back to its origin sample's real
+    ``CELLS.<layer>.circles`` instance via a per-row ``region``/``cell_id`` (instance_key) pair
+    reconstructed from the table's own ``label_col`` obs column and the recorded
+    ``make_obs_names_unique`` build parameter - not just a plausible-looking region list. See
+    ``insitupy/spatialdata/DIALECT.md`` for the full element spec.
+
+    Args:
+        experiment: Source InSituExperiment object.
+        exported_keys: Element keys already produced for per-sample modalities earlier in this
+            export - used to confirm every referenced per-sample circles element actually exists
+            in the store before referencing it in ``region``.
+
+    Returns:
+        A dict mapping SpatialData element keys (e.g. ``"TABLES.main"``) to parsed TableModel
+        objects. A layer is skipped (with a warning) if its on-disk table carries no
+        gene-presence record (a pre-format-version table), or if any covered sample's circles
+        element is missing from *exported_keys* (a table built from a different set of samples
+        than the current export) - the region list must reference only elements that actually
+        exist, so a partially-resolvable layer is omitted rather than partially exported.
+    """
+    tables = {}
+    for cells_layer in experiment.table.keys():
+        table_path = experiment._get_table_path(cells_layer)
+        if table_path is None or not table_path.exists():
+            logger.warning(
+                f"Table path for cells layer '{cells_layer}' not found; skipping its "
+                "concatenated-table SpatialData export."
+            )
+            continue
+
+        adata = anndata.read_zarr(table_path)
+
+        if "_insitupy_presence_labels" not in adata.uns or "_insitupy_gene_presence" not in adata.uns:
+            logger.warning(
+                f"Concatenated table for cells layer '{cells_layer}' has no gene-presence "
+                "record (a pre-format-version table?) - skipping its SpatialData export."
+            )
+            continue
+
+        build_params = dict(adata.uns.get("_insitupy_build_params", {}))
+        label_col = build_params.get("label_col", "uid")
+        make_obs_names_unique = build_params.get("make_obs_names_unique", True)
+
+        # Restrict to only the samples `experiment` currently represents. A no-op for a
+        # full InSituExperiment whose metadata already covers every built sample; for an
+        # InSituExperimentView, narrows the raw union table down to just the view's own
+        # samples. Row-only - gene/var columns and the presence matrix in `.uns` are left
+        # untouched, preserving the existing "export the raw union, reconstruct genes on
+        # read" contract for both cases. Must happen before `presence_labels` is derived,
+        # so an out-of-scope sample's label never reaches `label_to_circles_key` below and
+        # can never be spuriously flagged "unresolved" against this export's `exported_keys`.
+        if label_col in adata.obs.columns and label_col in experiment._metadata.columns:
+            covered_ids = set(str(v) for v in experiment._metadata[label_col])
+            row_mask = adata.obs[label_col].astype(str).isin(covered_ids)
+            if not row_mask.all():
+                adata = adata[row_mask.values].copy()
+
+        if adata.n_obs == 0:
+            logger.warning(
+                f"No samples in this export are covered by the concatenated table "
+                f"for cells layer '{cells_layer}'; skipping its SpatialData export."
+            )
+            continue
+
+        if label_col in adata.obs.columns:
+            presence_labels = sorted(set(adata.obs[label_col].astype(str)))
+        else:
+            presence_labels = [str(label) for label in adata.uns["_insitupy_presence_labels"]]
+
+        if label_col == "uid":
+            label_to_uid = {label: label for label in presence_labels}
+        elif label_col in experiment._metadata.columns:
+            label_to_uid = {
+                str(row[label_col]): row["uid"]
+                for _, row in experiment._metadata.iterrows()
+            }
+        else:
+            label_to_uid = {}
+
+        label_to_circles_key = {}
+        unresolved = []
+        for label in presence_labels:
+            uid = label_to_uid.get(label)
+            circles_key = None
+            if uid is not None:
+                circles_key = _generate_spatialdata_key(
+                    sample_id=uid,
+                    modality="cells",
+                    locator=[cells_layer, "circles"],
+                )
+            if circles_key is None or circles_key not in exported_keys:
+                unresolved.append(label)
+                continue
+            label_to_circles_key[label] = circles_key
+
+        if unresolved:
+            logger.warning(
+                f"Concatenated table for cells layer '{cells_layer}': could not resolve a "
+                f"valid, exported circles element for label(s) {unresolved} - skipping this "
+                "layer's SpatialData export (likely a table built from a different set of "
+                "samples than the current export)."
+            )
+            continue
+
+        obs_label = adata.obs[label_col].astype(str)
+        row_region = obs_label.map(label_to_circles_key)
+
+        if make_obs_names_unique:
+            obs_names = adata.obs_names.astype(str)
+            suffixes = "-" + obs_label
+            orig_names = [
+                name[: -len(suffix)] if name.endswith(suffix) else name
+                for name, suffix in zip(obs_names, suffixes, strict=True)
+            ]
+        else:
+            orig_names = list(adata.obs_names.astype(str))
+
+        adata.obs["cell_id"] = orig_names
+        region_list = sorted(set(row_region))
+        adata.obs["region"] = pd.Categorical(row_region, categories=region_list)
+        adata.uns["spatialdata_attrs"] = {
+            "region": region_list,
+            "region_key": "region",
+            "instance_key": "cell_id",
+        }
+
+        key = _generate_spatialdata_key(
+            sample_id=None,
+            modality="tables",
+            locator=cells_layer,
+        )
+        tables[key] = TableModel.parse(adata)
+
+    return tables
 
 
 def _transform_cell_boundaries_for_spatialdata(
@@ -513,61 +783,327 @@ def _merge_dicts_with_warning(*dicts):
     return merged
 
 
-def _extract_pixel_size_from_spatialdata(
-    sdata: SpatialData,
-    # pixel_size: Optional[float],
-    element_to_extract_from: str,
-    coordinate_system: str | None = None,
-    verbose: bool = True
-) -> float | None:
-    """Extract pixel size from SpatialData or use provided value."""
+def _extract_pixel_size_from_element(
+    elem,
+    coordinate_system: str = "global",
+    verbose: bool = True,
+    ) -> float:
+    """Extract the pixel size (µm/pixel) from an already-fetched SpatialData element's transform.
 
-    # if pixel_size is not None:
-    #     return pixel_size
-    if element_to_extract_from is None:
-        raise ValueError("Element to extract pixel size from must be specified.")
+    InSituPy's own writer always uses a single ``"global"`` coordinate system
+    with a ``Scale`` (or, for untransformed elements, an ``Identity``)
+    transformation, so this is unambiguous for InSituPy-dialect stores.
 
-    # Try to extract from specified element
-    if element_to_extract_from in sdata:
-        try:
-            transform = get_transformation(
-                element=sdata[element_to_extract_from],
-                to_coordinate_system=coordinate_system
+    Args:
+        elem: An already-fetched SpatialData element (e.g. ``sdata[key]``).
+        coordinate_system: Coordinate system to resolve the transform in.
+        verbose: If True, log the extracted value.
+
+    Returns:
+        The pixel size in micrometers per pixel.
+
+    Raises:
+        ValueError: If the element's transformation is neither ``Scale`` nor
+            ``Identity``.
+    """
+    transform = get_transformation(element=elem, to_coordinate_system=coordinate_system)
+
+    if isinstance(transform, Scale):
+        # transform.axes is not guaranteed to be ("x", "y") in that order or
+        # length - verified empirically that after a disk write/read round
+        # trip, spatialdata rewrites the Scale to cover every array dim
+        # (e.g. ("c", "y", "x")), so scale[0] can silently become the channel
+        # axis's 1.0 instead of the pixel size. Look up "x" explicitly
+        # (pixel size is always isotropic in this dialect, so "x" and "y"
+        # give the same value).
+        axis_index = transform.axes.index("x") if "x" in transform.axes else 0
+        pixel_size = transform.scale[axis_index].item()
+    elif isinstance(transform, Identity):
+        pixel_size = 1.0
+    else:
+        raise ValueError(f"Transformation type '{type(transform)}' not supported for pixel size extraction.")
+
+    if verbose:
+        logger.info(f"Extracted pixel size {pixel_size}")
+    return pixel_size
+
+
+def _get_base_resolution_array(elem):
+    """Return the base-resolution DataArray from a possibly-multiscale SpatialData element.
+
+    A pyramidal (multiscale) ``Image2DModel``/``Labels2DModel`` element (the
+    default for InSituPy's own writer) loads as a ``DataTree`` whose own
+    ``.dims``/``.data``/``.coords`` are empty; the actual array lives at
+    ``elem.scale0["image"]``. A non-pyramidal element loads as a plain
+    DataArray already - verified empirically against ``spatialdata==0.8.0``
+    for both Image2DModel and Labels2DModel. Mirrors the same
+    try/except pattern already used by ``_add_images_to_insitudata``.
+    """
+    try:
+        return elem.scale0["image"]
+    except AttributeError:
+        return elem
+
+
+def _is_rgb_element(elem) -> bool:
+    """Detect whether a parsed Image2DModel element is RGB via its own ``c`` coordinate.
+
+    Verified empirically against ``spatialdata==0.8.0``:
+    ``Image2DModel.parse(..., rgb=True)`` produces a ``c`` coordinate with
+    string labels ``['r', 'g', 'b']``; non-RGB images get an integer/positional
+    ``c`` coordinate.
+    """
+    base = _get_base_resolution_array(elem)
+    c_coord = base.coords.get("c")
+    if c_coord is None:
+        return False
+    try:
+        return list(c_coord.values) == ["r", "g", "b"]
+    except Exception:
+        return False
+
+
+def _build_images_into_insitudata(
+    data: InSituData,
+    images_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct ``IMAGES.<name>`` elements into an :class:`InSituData`, in place.
+
+    Auto-detects pixel size and RGB-ness from each element itself, so no
+    caller-supplied image naming/pixel-size arguments are needed.
+    """
+    for name, (_elem_type, elem) in images_elements.items():
+        pixel_size = _extract_pixel_size_from_element(elem, verbose=verbose)
+        is_rgb = _is_rgb_element(elem)
+
+        base = _get_base_resolution_array(elem)
+        axes_str = "".join(base.dims).upper()
+        img_data = base.data
+
+        if is_rgb:
+            axes_str = axes_str.replace("C", "S")
+        elif img_data.shape[0] == 1:
+            # The writer always synthesizes a length-1 channel axis for non-RGB
+            # images (c_dim = axes_config.C if axes_config.C is not None else 1) -
+            # undo it here to match the original array shape.
+            img_data = img_data.squeeze(0)
+            axes_str = axes_str[1:]
+
+        data.images.add_image(
+            image=img_data,
+            channel_names=name,
+            axes=axes_str,
+            pixel_size=pixel_size,
+            overwrite=False,
+            verbose=verbose,
+        )
+
+
+def _build_cells_into_insitudata(
+    data: InSituData,
+    cells_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct ``CELLS.<key>.*`` elements (table, boundaries, nucleus map) into an :class:`InSituData`.
+
+    ``circles``/``circles_sized`` elements are ignored on read - the table's
+    own ``obsm["spatial"]``/``.X`` are trusted directly since they were
+    already synced pre-export; the circles are exported only for external
+    SpatialData-based viewers.
+    """
+    by_cell_key: dict[str, dict[str, tuple[str, object]]] = defaultdict(dict)
+    for locator_str, entry in cells_elements.items():
+        cell_key, _, rest = locator_str.partition(".")
+        by_cell_key[cell_key][rest] = entry
+
+    for i, (cell_key, parts) in enumerate(by_cell_key.items()):
+        table_entry = parts.get("table")
+        if table_entry is None:
+            continue
+        _, table = table_entry
+        cell_names = table.obs_names
+
+        boundaries = None
+        cell_boundary_entry = parts.get("boundaries.cells")
+        if cell_boundary_entry is not None:
+            _, cell_label_elem = cell_boundary_entry
+
+            if "_insitupy_seg_mask_value" in table.obs.columns:
+                seg_mask_value = table.obs["_insitupy_seg_mask_value"].to_numpy()
+            else:
+                seg_mask_value = np.arange(1, len(cell_names) + 1)
+                logger.warning(
+                    f"Cell layer '{cell_key}' has boundaries but no "
+                    "'_insitupy_seg_mask_value' column in its table (a "
+                    "pre-dialect-v2 store?) - falling back to an assumed "
+                    "1..N mapping between obs order and mask value."
                 )
 
-            if isinstance(transform, Scale):
-                ps = 1 / transform.scale[0].item()
-            elif isinstance(transform, Identity):
-                ps = 1.0
-            else:
-                raise ValueError(f"Transformation type '{type(transform)}' not supported for pixel size extraction.")
+            nucleus_to_cell_map = None
+            nucleus_count = None
+            nucleus_map_entry = parts.get("nucleus_map")
+            if nucleus_map_entry is not None:
+                _, nmap = nucleus_map_entry
+                cell_index = {n: idx for idx, n in enumerate(cell_names)}
+                nucleus_to_cell_map = {
+                    int(row.nucleus_label) - 1: cell_index[row.cell_id]
+                    for row in nmap.obs.itertuples()
+                }
+                nucleus_count = (
+                    nmap.obs["cell_id"].value_counts()
+                    .reindex(cell_names, fill_value=0).to_numpy()
+                )
 
-            if verbose:
-                logger.info(f"Extracted pixel size {ps} from '{element_to_extract_from}'")
-            return ps
+            boundaries = BoundariesData(
+                cell_names=cell_names,
+                seg_mask_value=seg_mask_value,
+                nucleus_to_cell_map=nucleus_to_cell_map,
+                nucleus_count=nucleus_count,
+            )
 
-        except Exception as e:
-            if verbose:
-                logger.warning(f"Could not extract pixel size from '{element_to_extract_from}': {e}")
+            pixel_size = _extract_pixel_size_from_element(cell_label_elem, verbose=verbose)
+            nuclei_boundary_entry = parts.get("boundaries.nuclei")
+            nuclei_data = None
+            if nuclei_boundary_entry is not None:
+                _, nuclei_label_elem = nuclei_boundary_entry
+                nuclei_data = _get_base_resolution_array(nuclei_label_elem).data
 
-    else:
-        raise ValueError(f"Element '{element_to_extract_from}' not found in SpatialData for pixel size extraction")
+            boundaries.add_boundaries(
+                cell_boundaries=_get_base_resolution_array(cell_label_elem).data,
+                nuclei_boundaries=nuclei_data,
+                pixel_size=pixel_size,
+            )
 
-    # # Try to extract from any available element
-    # for elem_type, key, elem in sdata.gen_elements():
-    # # for key in sdata.keys():
-    #     try:
-    #         transform = get_transformation(sdata[key])
-    #         ps = 1 / transform.scale[0].item()
-    #         if verbose:
-    #             print(f"Extracted pixel size {ps} from '{key}'", flush=True)
-    #         return ps
-    #     except:
-    #         continue
+        # Drop writer-injected bookkeeping columns/uns before handing the table
+        # back to the user - they were never part of the original in-memory table.
+        table = table.copy()
+        for col in ("cell_id", "region", "_insitupy_seg_mask_value"):
+            if col in table.obs.columns:
+                del table.obs[col]
+        table.uns.pop("spatialdata_attrs", None)
 
-    # if verbose:
-    #     print("Warning: Could not extract pixel size from any element", flush=True)
-    # return None
+        cd = CellData(table=table, boundaries=boundaries)
+        data.cells.add_celldata(cd=cd, key=cell_key, is_main=(i == 0))
+
+
+def _build_units_into_insitudata(
+    data: InSituData,
+    units_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct ``UNITS.<key>.*`` elements - each unit key's own table + shapes."""
+    by_unit_key: dict[str, dict[str, tuple[str, object]]] = defaultdict(dict)
+    for locator_str, entry in units_elements.items():
+        unit_key, _, rest = locator_str.partition(".")
+        by_unit_key[unit_key][rest] = entry
+
+    for unit_key, parts in by_unit_key.items():
+        table_entry = parts.get("table")
+        shapes_entry = parts.get("shapes")
+        if table_entry is None or shapes_entry is None:
+            continue
+        _, table = table_entry
+        _, shapes = shapes_entry
+
+        table = table.copy()
+        for col in ("unit_id", "region"):
+            if col in table.obs.columns:
+                del table.obs[col]
+        table.uns.pop("spatialdata_attrs", None)
+
+        su = SpatialUnitsData(shapes=shapes, data=table, unit_type=unit_key)
+        data.add_units(su, key=unit_key)
+
+
+def _build_transcripts_into_insitudata(
+    data: InSituData,
+    transcripts_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct the (at most one) ``TRANSCRIPTS`` element into an :class:`InSituData`."""
+    if not transcripts_elements:
+        return
+    _, transcripts_df = next(iter(transcripts_elements.values()))
+
+    rename_map = {}
+    if "x" in transcripts_df.columns:
+        rename_map["x"] = "x_location"
+    if "y" in transcripts_df.columns:
+        rename_map["y"] = "y_location"
+    if "z" in transcripts_df.columns:
+        rename_map["z"] = "z_location"
+    if rename_map:
+        transcripts_df = transcripts_df.rename(columns=rename_map)
+
+    transcripts_df["feature_name"] = transcripts_df["feature_name"].astype(str)
+    data.transcripts = transcripts_df
+
+
+def _build_annotations_into_insitudata(
+    data: InSituData,
+    annotations_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct ``ANNOTATIONS.<key>`` elements into an :class:`InSituData`."""
+    for key, (_elem_type, elem) in annotations_elements.items():
+        data.annotations.add_data(data=elem, key=key, scale_factor=1.0, verbose=verbose)
+
+
+def _build_regions_into_insitudata(
+    data: InSituData,
+    regions_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct ``REGIONS.<key>`` elements into an :class:`InSituData`."""
+    for key, (_elem_type, elem) in regions_elements.items():
+        data.regions.add_data(data=elem, key=key, scale_factor=1.0, verbose=verbose)
+
+
+def _build_insitudata_from_elements(
+    elements: dict[str, tuple[str, object]],
+    slide_id: str | None = None,
+    sample_id: str | None = None,
+    method_params: dict | None = None,
+    verbose: bool = True,
+    ) -> InSituData:
+    """Reconstruct a single :class:`InSituData` from one sample's grouped SpatialData elements.
+
+    Args:
+        elements: Maps dialect-stripped element keys (no ``SAMPLE.<uid>..``
+            prefix) to ``(elem_type, elem)`` tuples, as returned per-sample by
+            :func:`_group_elements_by_sample`.
+        slide_id: Slide identifier to set on the reconstructed object, if known.
+        sample_id: Sample identifier to set on the reconstructed object, if known.
+        method_params: Forwarded to :class:`InSituData`'s ``method_params``.
+        verbose: If True, log progress for each modality.
+
+    Returns:
+        A fully populated, in-memory :class:`InSituData` with no backing
+        project directory (``.saveas()`` is required before it can be saved).
+    """
+    data = InSituData(
+        path=None,
+        slide_id=slide_id,
+        sample_id=sample_id,
+        method_name="",
+        method_params=method_params or {},
+    )
+
+    by_modality: dict[str, dict[str, tuple[str, object]]] = defaultdict(dict)
+    for key, entry in elements.items():
+        _, modality, locator_parts = _parse_dialect_key(key)
+        locator_str = ".".join(locator_parts) if locator_parts else ""
+        by_modality[modality][locator_str] = entry
+
+    _build_images_into_insitudata(data, by_modality.get("IMAGES", {}), verbose=verbose)
+    _build_cells_into_insitudata(data, by_modality.get("CELLS", {}), verbose=verbose)
+    _build_units_into_insitudata(data, by_modality.get("UNITS", {}), verbose=verbose)
+    _build_transcripts_into_insitudata(data, by_modality.get("TRANSCRIPTS", {}), verbose=verbose)
+    _build_annotations_into_insitudata(data, by_modality.get("ANNOTATIONS", {}), verbose=verbose)
+    _build_regions_into_insitudata(data, by_modality.get("REGIONS", {}), verbose=verbose)
+
+    return data
 
 
 def _add_images_to_insitudata(

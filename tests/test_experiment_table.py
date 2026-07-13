@@ -676,6 +676,12 @@ class TestBuildTableMultiLayer:
         assert not (tmp_path / "tables" / "proseg.json").exists()
         assert exp._read_build_params("main")["cells_layer"] == "main"
         assert exp._read_build_params("proseg")["cells_layer"] == "proseg"
+        assert exp._read_build_params("main")["make_obs_names_unique"] is True
+
+    def test_build_params_records_make_obs_names_unique_false(self, tmp_path):
+        exp = _make_multilayer_experiment(tmp_path)
+        exp.build_table(cells_layer="main", make_obs_names_unique=False)
+        assert exp._read_build_params("main")["make_obs_names_unique"] is False
 
     def test_overwrite_one_layer_leaves_other(self, tmp_path):
         exp = _make_multilayer_experiment(tmp_path)

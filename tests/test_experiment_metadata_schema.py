@@ -86,7 +86,7 @@ def _make_experiment_on_disk(tmp_path):
 
 def _make_view(exp, mask):
     """Helper: build an InSituExperimentView from a boolean mask."""
-    view = InSituExperimentView(data_type=exp._data_type)
+    view = InSituExperimentView()
     view._metadata = exp._metadata[mask].reset_index(drop=True)
     view._path = exp._path
     view._colors = {}

@@ -94,6 +94,46 @@ class TestUnitsExport:
         assert shapes.geometry.iloc[0].area == pytest.approx(su.shapes.geometry.iloc[0].area)
 
 
+# ── seg_mask_value obs column (WP2) ────────────────────────────────────────────
+
+class TestSegMaskValueColumn:
+    def test_column_present_and_correct_when_boundaries_exist(self):
+        xd = make_insitudata(n_cells=4, with_boundaries=True, contiguous_seg_mask_value=False)
+        sdata = convert_to_spatialdata(xd)
+
+        table = sdata.tables["CELLS.main.table"]
+        assert "_insitupy_seg_mask_value" in table.obs.columns
+        expected = xd.cells["main"].boundaries.seg_mask_value.compute()
+        assert list(table.obs["_insitupy_seg_mask_value"]) == list(expected)
+
+    def test_column_absent_without_boundaries(self):
+        xd = make_insitudata(n_cells=4)
+        sdata = convert_to_spatialdata(xd)
+
+        table = sdata.tables["CELLS.main.table"]
+        assert "_insitupy_seg_mask_value" not in table.obs.columns
+
+
+# ── Nucleus-to-cell mapping export (WP2) ───────────────────────────────────────
+
+class TestNucleusMapExport:
+    def test_nucleus_map_present_for_multinucleated_cells(self):
+        xd = make_insitudata(n_cells=4, with_boundaries=True, with_multinucleated_cells=True)
+        sdata = convert_to_spatialdata(xd)
+
+        assert "CELLS.main.nucleus_map" in sdata.tables
+        nmap = sdata.tables["CELLS.main.nucleus_map"]
+        assert nmap.n_obs == 3  # 3 nuclei total (2 on cell 0, 1 on cell 1)
+        assert set(nmap.obs.columns) >= {"nucleus_label", "cell_id"}
+        assert sorted(nmap.obs["nucleus_label"].astype(int)) == [1, 2, 3]
+
+    def test_nucleus_map_absent_for_ordinary_boundaries(self):
+        xd = make_insitudata(n_cells=4, with_boundaries=True)
+        sdata = convert_to_spatialdata(xd)
+
+        assert "CELLS.main.nucleus_map" not in sdata.tables
+
+
 # ── Cell-only segmentation export regression ────────────────────────────────────
 
 class TestCellOnlySegmentationExport:
@@ -189,6 +229,22 @@ class TestDialectAttrs:
         descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
         assert descriptor["version"] == SPATIALDATA_DIALECT_VERSION
 
+    def test_bare_insitudata_gets_flat_slide_and_sample_id(self):
+        xd = make_insitudata(n_cells=2, sample_id="s1")
+        sdata = convert_to_spatialdata(xd)
+        descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
+        assert descriptor["slide_id"] == xd.slide_id
+        assert descriptor["sample_id"] == xd.sample_id
+
+    def test_experiment_gets_samples_keyed_by_uid(self):
+        exp = make_experiment(n_samples=2)
+        sdata = convert_to_spatialdata(exp)
+        descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
+
+        samples = descriptor["samples"]
+        for uid, xd in ((meta["uid"], d) for meta, d in exp.iterdata()):
+            assert samples[uid] == {"slide_id": xd.slide_id, "sample_id": xd.sample_id}
+
 
 # ── Real disk round trip (WP5: nothing previously called sdata.write()) ───────
 
@@ -241,3 +297,33 @@ class TestExportRoundTripsThroughDisk:
         shapes = sdata2.shapes["UNITS.niche.shapes"]
         assert len(shapes) == 3
         assert shapes.geometry.iloc[0].area == pytest.approx(su.shapes.geometry.iloc[0].area)
+
+
+# ── InSituExperimentView accepted by convert_to_spatialdata ────────────────────
+
+class TestExportSampleSubsetView:
+    """The flagship case that motivated widening `_is_experiment()`: exporting a
+    sample subset (e.g. for faster manual testing) via plain subscripting, which
+    always returns an InSituExperimentView. Before the fix, `_is_experiment()`
+    used an exact-class check and raised ValueError for any view.
+    """
+
+    def test_convert_to_spatialdata_accepts_a_view(self):
+        exp = make_experiment(n_samples=3)
+        view = exp[:2]
+
+        sdata = convert_to_spatialdata(view)  # must not raise
+
+        for i in range(2):
+            prefix = f"SAMPLE.sample_{i}.."
+            assert f"{prefix}CELLS.main.table" in sdata.tables
+        assert "SAMPLE.sample_2..CELLS.main.table" not in sdata.tables
+
+    def test_view_export_scoped_to_selected_samples_in_dialect_attrs(self):
+        exp = make_experiment(n_samples=3)
+        view = exp[:2]
+
+        sdata = convert_to_spatialdata(view)
+
+        samples = sdata.attrs["insitupy_spatialdata_dialect"]["samples"]
+        assert set(samples) == {"sample_0", "sample_1"}

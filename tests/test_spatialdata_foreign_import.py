@@ -2,7 +2,9 @@
 
 Uses `make_foreign_labels_native_sdata` - a hand-built SpatialData object with no
 InSituPy dialect descriptor, mimicking spatialdata-io Xenium output. Skipped until
-WP4 fixes the documented `convert_from_spatialdata` defects. See
+WP4 fixes the documented `_convert_from_spatialdata_manual` defects (the low-level,
+manual-parameter primitive WP2 factored out of the dialect-driven
+`convert_from_spatialdata`). See
 .log/reports/260711/spatialdata-work-packages/report-wp4-labels-native-import.md.
 
 Each test wires in the foreign-store fixture; the skip reason and docstring
@@ -25,7 +27,7 @@ class TestSegMaskValueTakenFromInstanceKey:
     def test_seg_mask_value_taken_from_instance_key(self):
         """Target assertion once WP4 lands::
 
-            data = convert_from_spatialdata(
+            data = _convert_from_spatialdata_manual(
                 sdata, cells_key="cell_labels", table_key="table",
                 cell_boundaries_data=("cell_labels", 1.0),
             )
@@ -45,7 +47,7 @@ class TestCellOnlySegmentationImportsWithoutNucleus:
     def test_cell_only_segmentation_imports_without_nucleus(self):
         """Target assertion once WP4 lands::
 
-            data = convert_from_spatialdata(
+            data = _convert_from_spatialdata_manual(
                 sdata, cells_key="cell_labels", table_key="table",
                 cell_boundaries_data=("cell_labels", 1.0), nucleus_boundaries_data=None,
             )  # must not raise
@@ -63,7 +65,7 @@ class TestIdentityTransformImageImports:
     def test_identity_transform_image_imports(self):
         """Target assertion once WP4 lands::
 
-            data = convert_from_spatialdata(sdata, image_data=("morphology", 1.0), ...)
+            data = _convert_from_spatialdata_manual(sdata, image_data=("morphology", 1.0), ...)
             assert data.images["morphology"] is not None
             assert data.images.metadata["morphology"]["pixel_size"] == 1.0
         """
@@ -96,7 +98,7 @@ class TestShortDocumentedCallProducesValidInsitudata:
         """Target assertion once WP4 lands (exact call shape TBD by WP4's own
         planning; sketched here per its report's ergonomics goal)::
 
-            data = convert_from_spatialdata(sdata)  # minimal args, dialect-less store
+            data = _convert_from_spatialdata_manual(sdata)  # minimal args, dialect-less store
             assert isinstance(data, InSituData)
             assert data.cells["main"].is_synced
         """
