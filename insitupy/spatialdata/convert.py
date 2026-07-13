@@ -28,8 +28,11 @@ from insitupy.experiment.data import InSituExperiment, TableAccessor
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata,
     _build_insitudata_from_elements,
+    _centroids_from_labels,
     _create_boundaries_from_spatialdata,
+    _extract_pixel_size_from_element,
     _generate_spatialdata_key,
+    _get_base_resolution_array,
     _group_elements_by_sample,
     _merge_dicts_with_warning,
     _transform_annotations_for_spatialdata,
@@ -287,7 +290,7 @@ def convert_to_spatialdata(
 
     return sdata
 
-def _convert_from_spatialdata_manual(
+def convert_from_foreign_spatialdata(
     sdata: SpatialData,
     # Image parameters
     image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None = None,
@@ -311,22 +314,25 @@ def _convert_from_spatialdata_manual(
 
     # Other parameters
     spatial_key: str = "spatial",
+    coordinate_system: str | None = None,
     verbose: bool = True
 ) -> InSituData:
     """
-    Convert a SpatialData object to an InSituData object using caller-supplied keys.
+    Convert a foreign / labels-native SpatialData object into an InSituData.
 
-    Low-level, manual-parameter primitive for SpatialData objects that carry no
-    InSituPy dialect descriptor (foreign / labels-native stores, e.g.
-    ``spatialdata-io`` output). Not part of the public API (not exported from
-    ``insitupy.spatialdata``) - InSituPy's own dialect round trip uses the
-    dialect-driven :func:`convert_from_spatialdata` instead, which needs none
-    of these keys. This function is the enabling groundwork WP4 hardens for
-    general foreign-store import (fixing, among other things, the
-    ``units_key``/``table_key`` mixup below - not fixed here, since it is
-    structurally impossible in the dialect-driven path and this function is
-    being handed to WP4 regardless; see
-    ``.log/reports/260711/spatialdata-work-packages/report-wp4-labels-native-import.md``).
+    For SpatialData objects that carry no InSituPy dialect descriptor - e.g.
+    ``spatialdata_io.xenium()`` output, or any other labels-native store following
+    the standard SpatialData ``TableModel`` annotation contract
+    (``region``/``region_key``/``instance_key`` in ``table.uns["spatialdata_attrs"]``).
+    InSituPy's own dialect round trip uses the dialect-driven
+    :func:`convert_from_spatialdata` instead.
+
+    Segmentation identity (``seg_mask_value``) and, when no shapes/circles element
+    is available, cell centroids are derived from the table's own real data rather
+    than fabricated. ``cells_key``/``cell_boundaries_data`` are auto-detected from
+    the table's declared ``region`` when not given explicitly - for a plain
+    labels-native store, ``convert_from_foreign_spatialdata(sdata)`` with no other
+    arguments is enough. Explicit arguments always override auto-detection.
 
     Args:
         sdata: SpatialData object to convert.
@@ -336,21 +342,32 @@ def _convert_from_spatialdata_manual(
             - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
             The optional is_rgb flag (default: False) indicates if the image should be treated as RGB.
         table_key: Key for the cell expression table in SpatialData.
-        cells_key: Key for cell shapes in SpatialData.
+        cells_key: Key for cell shapes in SpatialData. Auto-detected from the
+            table's ``region`` when omitted and ``region`` refers to a shapes element.
         units_key: Key for spatial units in SpatialData.
         unit_type: Type of spatial unit.
-        cell_boundaries_data: Tuple of (label_key, pixel_size) for cell segmentation masks.
-        nucleus_boundaries_data: Tuple of (label_key, pixel_size) for nucleus segmentation masks.
+        cell_boundaries_data: Tuple of (label_key, pixel_size) for cell segmentation
+            masks. Auto-detected (key and pixel size) from the table's ``region``
+            when omitted and ``region`` refers to a labels element.
+        nucleus_boundaries_data: Tuple of (label_key, pixel_size) for nucleus
+            segmentation masks. No standard SpatialData annotation identifies a
+            "nucleus region", so this is never auto-detected - pass it explicitly
+            if available.
         transcripts_key: Key for transcript points in SpatialData.
         slide_id: Identifier for the slide.
         sample_id: Identifier for the sample.
         metadata: Additional metadata dictionary.
         method_name: Name of the spatial method (e.g., "Xenium").
         spatial_key: Key for spatial coordinates in obsm.
+        coordinate_system: Coordinate system to resolve pixel sizes in, for any
+            auto-detected boundaries. Defaults to ``'global'`` when present in
+            ``sdata.coordinate_systems`` (virtually always true), else falls back
+            to ``units_key``/``cells_key``/the table's ``region``, in that order.
         verbose: Whether to print status messages.
 
     Returns:
-        InSituData: Converted InSituData object.
+        InSituData: Converted InSituData object, with no backing project directory
+        (call ``.saveas(path)`` before ``.save()`` can be used).
     """
 
     # Initialize InSituData
@@ -363,27 +380,7 @@ def _convert_from_spatialdata_manual(
         method_params=sdata.attrs,
     )
 
-    if 'global' in sdata.coordinate_systems:
-        logger.info("Using 'global' coordinate system for pixel size extraction.")
-        cs = 'global'
-    elif units_key in sdata.coordinate_systems:
-        logger.info(f"Using '{units_key}' coordinate system for pixel size extraction.")
-        cs = units_key
-    elif cells_key in sdata.coordinate_systems:
-        logger.info(f"Using '{cells_key}' coordinate system for pixel size extraction.")
-        cs = cells_key
-    else:
-        raise ValueError("Cannot determine coordinate system for pixel size extraction.")
-
-    # pixel_size = _extract_pixel_size_from_spatialdata(
-    #     sdata=sdata,
-    #     # pixel_size,
-    #     element_to_extract_from=element_to_extract_from,
-    #     coordinate_system=cs,
-    #     verbose=verbose
-    #     )
-
-    # LOAD IMAGES
+    # LOAD IMAGES (caller-supplied pixel size / RGB-ness - unchanged contract)
     if image_data:
         # Validate image_data format
         _validate_image_data_format(image_data)
@@ -392,39 +389,109 @@ def _convert_from_spatialdata_manual(
             logger.info("Adding images...")
         _add_images_to_insitudata(data, sdata, image_data, verbose)
 
-    if cells_key:
-        # Validate boundaries data formats
+    # LOAD CELLS (table + boundaries) - gated on the table actually being present,
+    # not on a shapes key: a labels-native store may have no shapes element at all.
+    if table_key and table_key in sdata:
+        if verbose:
+            logger.info("Adding cell data...")
+        table = sdata[table_key]
+
+        spatialdata_attrs = table.uns.get("spatialdata_attrs", {}) or {}
+        region = spatialdata_attrs.get("region")
+        region_key = spatialdata_attrs.get("region_key")
+        instance_key = spatialdata_attrs.get("instance_key")
+
+        if isinstance(region, (list, tuple)):
+            if len(region) != 1:
+                raise ValueError(
+                    f"Table '{table_key}' annotates {len(region)} regions ({list(region)!r}) - "
+                    "multi-region tables are not supported by the foreign-store importer."
+                )
+            region = region[0]
+
+        if region is not None and region_key is not None and region_key in table.obs.columns:
+            unexpected = set(table.obs[region_key].unique()) - {region}
+            if unexpected:
+                raise ValueError(
+                    f"Table '{table_key}' region_key column '{region_key}' contains values other "
+                    f"than the declared region {region!r}: {sorted(map(str, unexpected))} - "
+                    "multi-region tables are not supported by the foreign-store importer."
+                )
+
+        cell_names = np.array(table.obs_names)
+
+        # Real segmentation identity: prefer the table's own instance_key column
+        # over fabricating a 1..N mapping (only a last resort for stores that don't
+        # follow the standard SpatialData table-annotation contract at all).
+        if instance_key is not None and instance_key in table.obs.columns:
+            seg_mask_value = table.obs[instance_key].to_numpy()
+        else:
+            logger.warning(
+                "No usable 'instance_key' found in the table's spatialdata_attrs - "
+                "falling back to an assumed 1..N mapping between obs order and mask value. "
+                "This is very likely wrong for a real segmentation mask."
+            )
+            seg_mask_value = np.arange(1, len(cell_names) + 1)
+
+        # Auto-detect cells_key / cell_boundaries_data from the table's own region
+        # when the caller didn't supply either explicitly. Explicit args always win.
+        if cells_key is None and cell_boundaries_data is None and region is not None:
+            if region in sdata.shapes:
+                cells_key = region
+            elif region in sdata.labels:
+                if coordinate_system is not None:
+                    cs = coordinate_system
+                elif 'global' in sdata.coordinate_systems:
+                    cs = 'global'
+                elif units_key is not None and units_key in sdata.coordinate_systems:
+                    cs = units_key
+                elif region in sdata.coordinate_systems:
+                    cs = region
+                else:
+                    raise ValueError("Cannot determine coordinate system for pixel size extraction.")
+
+                pixel_size = _extract_pixel_size_from_element(sdata[region], coordinate_system=cs, verbose=verbose)
+                cell_boundaries_data = (region, pixel_size)
+
+        # Validate boundaries data formats (whatever the final values are, explicit or auto-detected)
         _validate_boundaries_data_format(cell_boundaries_data, param_name="cell_boundaries_data")
         _validate_boundaries_data_format(nucleus_boundaries_data, param_name="nucleus_boundaries_data")
 
-        # LOAD CELLS (table + boundaries)
-        if table_key is not None:
-            if table_key in sdata:
-                if verbose:
-                    logger.info("Adding cell data...")
-            table = sdata[table_key]
-            cell_names = np.array(table.obs_names)
-
+        # Spatial coordinates
+        if cells_key and cells_key in sdata:
             if spatial_key in table.obsm:
                 logger.warning(f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using centroids from `'{cells_key}'`.")
-
             table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
-
-            # Prepare boundaries if keys provided
-            boundaries = None
-            if cell_boundaries_data or nucleus_boundaries_data:
-                boundaries = _create_boundaries_from_spatialdata(
-                    sdata,
-                    cell_names,
-                    cell_boundaries_data,
-                    nucleus_boundaries_data,
-                    # pixel_size
+        elif cell_boundaries_data is not None:
+            if spatial_key in table.obsm:
+                logger.warning(
+                    f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using "
+                    f"centroids derived from '{cell_boundaries_data[0]}'."
                 )
+            label_key, label_pixel_size = cell_boundaries_data
+            label_array = _get_base_resolution_array(sdata[label_key]).data
+            table.obsm[spatial_key] = _centroids_from_labels(label_array, seg_mask_value, label_pixel_size)
+        elif spatial_key not in table.obsm:
+            raise ValueError(
+                f"No shapes element ('cells_key') or labels element ('cell_boundaries_data') "
+                f"available to derive obsm['{spatial_key}'] from, and none is already present."
+            )
 
-            cd = CellData(table=table, boundaries=boundaries)
-            data.cells.add_celldata(cd=cd, key="main", is_main=True)
-        elif verbose:
-            logger.warning(f"Table key '{table_key}' not found in SpatialData")
+        # Prepare boundaries if keys resolved (explicit or auto-detected)
+        boundaries = None
+        if cell_boundaries_data or nucleus_boundaries_data:
+            boundaries = _create_boundaries_from_spatialdata(
+                sdata,
+                cell_names,
+                seg_mask_value,
+                cell_boundaries_data,
+                nucleus_boundaries_data,
+            )
+
+        cd = CellData(table=table, boundaries=boundaries)
+        data.cells.add_celldata(cd=cd, key="main", is_main=True)
+    elif verbose and table_key:
+        logger.warning(f"Table key '{table_key}' not found in SpatialData")
 
     if units_key:
         data.add_units(
@@ -432,7 +499,6 @@ def _convert_from_spatialdata_manual(
                 shapes=sdata.shapes[units_key],
                 data=sdata[table_key],
                 unit_type=unit_type if unit_type is not None else "unit",
-                # pixel_size=pixel_size
                 )
             )
 
@@ -491,9 +557,8 @@ def convert_from_spatialdata(
     Raises:
         ValueError: If ``sdata.attrs`` carries no InSituPy dialect descriptor
             (i.e. this is a foreign/labels-native store InSituPy did not
-            write - see ``insitupy.spatialdata._convert._convert_from_spatialdata_manual``,
-            the low-level primitive WP4 is hardening for that case) or if the
-            descriptor's version is not one this InSituPy version supports.
+            write - see :func:`insitupy.spatialdata.convert_from_foreign_spatialdata`)
+            or if the descriptor's version is not one this InSituPy version supports.
     """
     dialect = sdata.attrs.get("insitupy_spatialdata_dialect")
     if dialect is None:
@@ -501,8 +566,8 @@ def convert_from_spatialdata(
             "sdata was not written by insitupy.spatialdata.convert_to_spatialdata "
             "(no 'insitupy_spatialdata_dialect' key in sdata.attrs). Reading a "
             "foreign/labels-native SpatialData store is not supported by this "
-            "function; see insitupy.spatialdata._convert._convert_from_spatialdata_manual "
-            "(WP4, in progress)."
+            "function; see insitupy.spatialdata.convert_from_foreign_spatialdata "
+            "instead."
         )
 
     version = dialect.get("version")

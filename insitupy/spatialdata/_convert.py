@@ -24,6 +24,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from skimage.measure import regionprops_table
 from xarray import DataArray
 
 from insitupy._constants import (
@@ -1143,10 +1144,7 @@ def _add_images_to_insitudata(
                 logger.warning(f"Image key '{key}' not found in SpatialData")
             continue
         img_data = sdata[key]
-        try:
-            data_array = img_data.scale0['image']
-        except AttributeError:
-            data_array = img_data
+        data_array = _get_base_resolution_array(img_data)
 
         # get information about axis configuration
         axes_str = "".join(data_array.dims).upper()
@@ -1180,19 +1178,23 @@ def _add_images_to_insitudata(
 def _create_boundaries_from_spatialdata(
     sdata: SpatialData,
     cell_names: np.ndarray,
+    seg_mask_value: np.ndarray,
     cell_boundaries_data: tuple[str, Number] | None = None, # tuple as (cell_boundaries_key, pixel_size)
     nucleus_boundaries_data: tuple[str, Number] | None = None, # tuple as (nucleus_boundaries_key, pixel_size)
     ) -> BoundariesData:
-    """Create BoundariesData from SpatialData labels."""
+    """Create BoundariesData from SpatialData labels.
 
-    if cell_boundaries_data[1] != nucleus_boundaries_data[1]:
-        raise ValueError("Pixel sizes for cell boundaries and nucleus boundaries must be the same.")
-    else:
-        pixel_size = cell_boundaries_data[1]
-
-    # Generate seg_mask_value
-    logger.warning("For the segmentation mask values of the boundaries, it is assumed that the order of the cells matches the ascending values of the segmentation mask.")
-    seg_mask_value = np.array(range(1, len(cell_names) + 1))
+    Cell and nucleus boundaries are independently optional and may carry
+    independent pixel sizes (a foreign store's cell/nucleus label rasters
+    are not guaranteed to share a resolution, unlike InSituPy's own
+    exporter). ``seg_mask_value`` is supplied by the caller - this function
+    does not fabricate it.
+    """
+    if nucleus_boundaries_data is not None and cell_boundaries_data is None:
+        raise ValueError(
+            "cell_boundaries_data must be provided when nucleus_boundaries_data is given "
+            "without cell boundaries - nucleus-only masks are not supported."
+        )
 
     boundaries = BoundariesData(
         cell_names=cell_names,
@@ -1201,24 +1203,87 @@ def _create_boundaries_from_spatialdata(
 
     # Add cell boundaries if provided
     cell_bounds = None
-    cell_boundaries_key = cell_boundaries_data[0]
-    if cell_boundaries_key and cell_boundaries_key in sdata:
-        cell_bounds = sdata[cell_boundaries_key].scale0['image'].data
+    cell_pixel_size = None
+    if cell_boundaries_data is not None:
+        cell_boundaries_key, cell_pixel_size = cell_boundaries_data
+        if cell_boundaries_key and cell_boundaries_key in sdata:
+            cell_bounds = _get_base_resolution_array(sdata[cell_boundaries_key]).data
 
     # Add nucleus boundaries if provided
     nuc_bounds = None
-    nucleus_boundaries_key = nucleus_boundaries_data[0]
-    if nucleus_boundaries_key and nucleus_boundaries_key in sdata:
-        nuc_bounds = sdata[nucleus_boundaries_key].scale0['image'].data
+    nucleus_pixel_size = None
+    if nucleus_boundaries_data is not None:
+        nucleus_boundaries_key, nucleus_pixel_size = nucleus_boundaries_data
+        if nucleus_boundaries_key and nucleus_boundaries_key in sdata:
+            nuc_bounds = _get_base_resolution_array(sdata[nucleus_boundaries_key]).data
 
     if cell_bounds is not None or nuc_bounds is not None:
+        if cell_bounds is None:
+            raise ValueError(
+                "cell_boundaries_data resolved to no array in sdata - cannot add "
+                "nucleus-only boundaries."
+            )
         boundaries.add_boundaries(
             cell_boundaries=cell_bounds,
+            pixel_size=cell_pixel_size,
             nuclei_boundaries=nuc_bounds,
-            pixel_size=pixel_size
+            nucleus_pixel_size=nucleus_pixel_size,
         )
 
     return boundaries
+
+
+def _centroids_from_labels(
+    label_array,
+    seg_mask_value: np.ndarray,
+    pixel_size: Number,
+    ) -> np.ndarray:
+    """Derive (x, y) centroids for each mask id from a label raster.
+
+    Used when no shapes/circles element is available to source centroids
+    from (a fully labels-native foreign store). Materializes the label
+    array into memory once (unavoidable without precomputed centroids -
+    bounded by the same array already being loaded for ``BoundariesData``
+    regardless) and runs :func:`skimage.measure.regionprops_table` over it.
+
+    Args:
+        label_array: 2-D label mask (dask or numpy array).
+        seg_mask_value: Ordered array of mask ids to return centroids for,
+            in the order they should appear in the output (typically
+            matching ``table.obs`` order).
+        pixel_size: Isotropic pixel size (µm/pixel) to scale pixel-space
+            centroids into physical coordinates. Only ``Scale``/``Identity``
+            transforms are supported anywhere in this importer, so no
+            affine/rotation handling is attempted here either.
+
+    Returns:
+        Array of shape ``(len(seg_mask_value), 2)`` with ``(x, y)`` centroids.
+
+    Raises:
+        ValueError: If any value in ``seg_mask_value`` has no matching
+            region in the label mask.
+    """
+    mask = np.asarray(label_array.compute() if hasattr(label_array, "compute") else label_array)
+
+    props = regionprops_table(mask, properties=("label", "centroid"))
+    # regionprops_table's centroid-0/centroid-1 are (row, col) = (y, x).
+    # Cast label keys to plain int - seg_mask_value and the mask's own label
+    # dtype are not guaranteed to be the same numpy integer type.
+    by_label = {
+        int(label): (x, y)
+        for label, x, y in zip(props["label"], props["centroid-1"], props["centroid-0"], strict=True)
+    }
+
+    missing = [v for v in seg_mask_value if int(v) not in by_label]
+    if missing:
+        raise ValueError(
+            f"seg_mask_value contains {len(missing)} value(s) with no matching region in the "
+            f"label mask (e.g. {missing[:5]}) - mask and table disagree on segmentation identity."
+        )
+
+    centroids = np.array([by_label[int(v)] for v in seg_mask_value], dtype=float)
+    centroids *= pixel_size
+    return centroids
 
 def _validate_image_data_format(
     image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None

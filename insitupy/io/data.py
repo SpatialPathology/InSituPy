@@ -136,7 +136,7 @@ def read_xenium(
     if backend == "spatialdata":
         from spatialdata_io import xenium
 
-        from insitupy.spatialdata.convert import convert_from_spatialdata
+        from insitupy.spatialdata.convert import convert_from_foreign_spatialdata
 
         if dataset_name is not None or sample_name is not None:
             warnings.warn(
@@ -147,7 +147,7 @@ def read_xenium(
         if verbose:
             logger.info("Reading Xenium data with spatialdata-io backend...")
         sdata = xenium(path)
-        data = convert_from_spatialdata(
+        data = convert_from_foreign_spatialdata(
             sdata=sdata,
             image_data={
                 "nuclei": ("morphology_focus", pixel_size),

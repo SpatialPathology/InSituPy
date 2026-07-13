@@ -18,7 +18,7 @@ pytest.importorskip("spatialdata")
 
 from spatialdata import SpatialData  # noqa: E402
 from spatialdata.models import Image2DModel, Labels2DModel, TableModel  # noqa: E402
-from spatialdata.transformations import Identity  # noqa: E402
+from spatialdata.transformations import Identity, Scale  # noqa: E402
 from xarray import DataArray  # noqa: E402
 
 from insitupy._core.data import InSituData  # noqa: E402
@@ -225,7 +225,9 @@ def make_experiment(n_samples=2, n_cells=6):
 # ── Foreign, labels-native SpatialData (WP4) ────────────────────────────────
 
 
-def make_foreign_labels_native_sdata(with_nucleus=True, contiguous_ids=False, n_cells=6, seed=0):
+def make_foreign_labels_native_sdata(
+    with_nucleus=True, contiguous_ids=False, n_cells=6, seed=0, nucleus_pixel_size=None,
+):
     """A hand-built, labels-native SpatialData object with no InSituPy dialect.
 
     Mimics the shape of ``spatialdata-io`` Xenium output: Identity-transformed,
@@ -233,6 +235,11 @@ def make_foreign_labels_native_sdata(with_nucleus=True, contiguous_ids=False, n_
     ``instance_key`` column drives the real segmentation identity - deliberately
     non-contiguous / non-1-based unless ``contiguous_ids=True``. Carries no
     ``sdata.attrs["insitupy_spatialdata_dialect"]`` key.
+
+    ``nucleus_pixel_size``, when given, gives the nucleus label element its own
+    ``Scale`` transform (pixel size in µm/pixel) instead of ``Identity`` (pixel
+    size 1.0) - independent-resolution cell/nucleus masks, the real-data case a
+    foreign store is not guaranteed to avoid. Requires ``with_nucleus=True``.
     """
     rng = np.random.default_rng(seed)
     size = n_cells * 4
@@ -266,8 +273,12 @@ def make_foreign_labels_native_sdata(with_nucleus=True, contiguous_ids=False, n_
         for i, value in enumerate(instance_ids):
             nucleus_mask[i * 4 + 1, i * 4 + 1] = value
         nucleus_mask_arr = DataArray(nucleus_mask, dims=("y", "x"))
+        if nucleus_pixel_size is not None:
+            nucleus_transform = Scale([nucleus_pixel_size, nucleus_pixel_size], axes=("x", "y"))
+        else:
+            nucleus_transform = Identity()
         labels["nucleus_labels"] = Labels2DModel.parse(
-            nucleus_mask_arr, transformations={"global": Identity()},
+            nucleus_mask_arr, transformations={"global": nucleus_transform},
         )
 
     obs = pd.DataFrame({

@@ -79,3 +79,28 @@ class TestSaveWithoutNucleusMetadata:
         store = zarr.open(path, mode="r")
         assert "nucleus_to_cell_map" not in store
         assert "nucleus_count" not in store
+
+
+class TestIndependentCellNucleusPixelSize:
+    """WP4: add_boundaries(nucleus_pixel_size=...) - cell and nucleus masks from a
+    foreign store are not guaranteed to share a resolution, unlike InSituPy's own
+    exporter (which always calls add_boundaries with one shared pixel_size)."""
+
+    def test_nucleus_pixel_size_defaults_to_cell_pixel_size(self):
+        boundaries = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+        mask = np.array([[0, 1], [2, 0]], dtype=np.uint32)
+        boundaries.add_boundaries(cell_boundaries=mask, nuclei_boundaries=mask, pixel_size=0.5)
+
+        assert boundaries.metadata["cells"]["pixel_size"] == 0.5
+        assert boundaries.metadata["nuclei"]["pixel_size"] == 0.5
+
+    def test_independent_nucleus_pixel_size_is_stored_separately(self):
+        boundaries = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+        mask = np.array([[0, 1], [2, 0]], dtype=np.uint32)
+        boundaries.add_boundaries(
+            cell_boundaries=mask, nuclei_boundaries=mask,
+            pixel_size=1.0, nucleus_pixel_size=0.25,
+        )
+
+        assert boundaries.metadata["cells"]["pixel_size"] == 1.0
+        assert boundaries.metadata["nuclei"]["pixel_size"] == 0.25

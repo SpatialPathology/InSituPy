@@ -268,6 +268,7 @@ class BoundariesData(DeepCopyMixin):
                        cell_boundaries: da.core.Array | np.ndarray,
                        pixel_size: Number, # required for boundaries that are saved as masks
                        nuclei_boundaries: da.core.Array | np.ndarray | None = None,
+                       nucleus_pixel_size: Number | None = None,
                        overwrite: bool = False
                        ):
         """Add cell and optionally nuclei boundary masks to the object.
@@ -279,11 +280,17 @@ class BoundariesData(DeepCopyMixin):
             cell_boundaries: 2-D segmentation mask array where each cell
                 is identified by its segmentation mask value. Can be a
                 numpy or dask array.
-            pixel_size: Spatial size of one pixel in micrometers. Stored
-                in the metadata and used when saving or cropping.
+            pixel_size: Spatial size of one pixel in micrometers for
+                ``cell_boundaries``. Stored in the metadata and used when
+                saving or cropping.
             nuclei_boundaries: Optional 2-D segmentation mask for nuclei,
                 following the same convention as ``cell_boundaries``.  If
                 None, no nuclei boundaries are stored.
+            nucleus_pixel_size: Spatial size of one pixel in micrometers
+                for ``nuclei_boundaries``, when it differs from
+                ``pixel_size`` (e.g. a foreign store with independently
+                resolved cell/nucleus label rasters). Defaults to
+                ``pixel_size`` when not given.
             overwrite: If True, replace existing boundary entries. Raises
                 ``KeyError`` when boundaries already exist and
                 ``overwrite`` is False.
@@ -297,6 +304,9 @@ class BoundariesData(DeepCopyMixin):
         """
         if cell_boundaries is None:
             raise ValueError("cell_boundaries cannot be None.")
+
+        if nucleus_pixel_size is None:
+            nucleus_pixel_size = pixel_size
 
         # make sure the boundaries are a dask array
         if isinstance(cell_boundaries, np.ndarray):
@@ -312,16 +322,16 @@ class BoundariesData(DeepCopyMixin):
             raise TypeError("nuclei_boundaries must be a dask/numpy array, a list, or None")
 
         data = {
-            "cells": cell_boundaries,
-            "nuclei": nuclei_boundaries
+            "cells": (cell_boundaries, pixel_size),
+            "nuclei": (nuclei_boundaries, nucleus_pixel_size),
         }
 
-        for l, img in data.items():
+        for l, (img, ps) in data.items():
             if l not in self._metadata or overwrite:
                 # add to object
                 self._data[l] = img
                 self._metadata[l] = {}
-                self._metadata[l]["pixel_size"] = pixel_size
+                self._metadata[l]["pixel_size"] = ps
             else:
                 raise KeyError(f"Label '{l}' exists already in BoundariesData object. To overwrite, set 'overwrite' argument to True.")
 
