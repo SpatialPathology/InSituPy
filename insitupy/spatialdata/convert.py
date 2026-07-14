@@ -298,6 +298,7 @@ def convert_from_foreign_spatialdata(
     table_key: str = 'table',
     # Cell parameters
     cells_key: str | None = None,
+    build_cells: bool = True,
     # Spatial units parameters
     units_key: str | None = None,
     unit_type: str | None = None,
@@ -344,6 +345,9 @@ def convert_from_foreign_spatialdata(
         table_key: Key for the cell expression table in SpatialData.
         cells_key: Key for cell shapes in SpatialData. Auto-detected from the
             table's ``region`` when omitted and ``region`` refers to a shapes element.
+        build_cells: Whether to build a ``.cells`` layer from ``table_key`` when a
+            table is present. Set to ``False`` for spot/bin stores (e.g. Visium)
+            whose table belongs to ``.units``, not ``.cells``.
         units_key: Key for spatial units in SpatialData.
         unit_type: Type of spatial unit.
         cell_boundaries_data: Tuple of (label_key, pixel_size) for cell segmentation
@@ -391,7 +395,7 @@ def convert_from_foreign_spatialdata(
 
     # LOAD CELLS (table + boundaries) - gated on the table actually being present,
     # not on a shapes key: a labels-native store may have no shapes element at all.
-    if table_key and table_key in sdata:
+    if build_cells and table_key and table_key in sdata:
         if verbose:
             logger.info("Adding cell data...")
         table = sdata[table_key]
@@ -490,7 +494,7 @@ def convert_from_foreign_spatialdata(
 
         cd = CellData(table=table, boundaries=boundaries)
         data.cells.add_celldata(cd=cd, key="main", is_main=True)
-    elif verbose and table_key:
+    elif verbose and table_key and table_key not in sdata:
         logger.warning(f"Table key '{table_key}' not found in SpatialData")
 
     if units_key:

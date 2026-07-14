@@ -15,7 +15,7 @@ from anndata import AnnData
 pytest.importorskip("spatialdata")
 
 from spatialdata import SpatialData  # noqa: E402
-from spatialdata.models import Labels2DModel, TableModel  # noqa: E402
+from spatialdata.models import Image2DModel, Labels2DModel, TableModel  # noqa: E402
 from spatialdata.transformations import Identity, Scale  # noqa: E402
 from xarray import DataArray  # noqa: E402
 
@@ -99,6 +99,27 @@ class TestSingleScaleImageImports:
         img = data.images["morphology"]
         arr = img[0] if isinstance(img, list) else img
         assert arr.shape == (n_cells * 4, n_cells * 4)
+
+
+class TestRGBFlagPreservedOnImport:
+    def test_rgb_flag_preserved_on_import(self):
+        """Regression: `is_rgb` was computed in `_add_images_to_insitudata`
+        but never forwarded to `add_image`, so a channel-first (3, H, W)
+        RGB array fell back to shape-based auto-detection - which inspects
+        the width, not the channel count, and mis-classifies RGB images as
+        non-RGB multi-channel images."""
+        rgb_arr = DataArray(
+            np.zeros((3, 8, 8), dtype=np.uint8), dims=("c", "y", "x"),
+        )
+        sdata = SpatialData(
+            images={"img": Image2DModel.parse(rgb_arr, transformations={"global": Identity()})}
+        )
+
+        data = convert_from_foreign_spatialdata(
+            sdata, image_data={"img": ("img", 1.0, True)}, table_key=None,
+        )
+
+        assert data.images.metadata["img"]["rgb"] is True
 
 
 class TestShortDocumentedCallProducesValidInsitudata:

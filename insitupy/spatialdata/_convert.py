@@ -1170,6 +1170,7 @@ def _add_images_to_insitudata(
             channel_names=channel_names,
             axes=axes_str,
             pixel_size=pixel_size,
+            is_rgb=is_rgb,
             overwrite=False,
             verbose=verbose
         )

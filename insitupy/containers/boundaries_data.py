@@ -476,11 +476,11 @@ class BoundariesData(DeepCopyMixin):
                         for i, b in enumerate(bound_data):
                             comp = f"masks/{n}/{i}"
                             b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                            b.to_zarr(dirstore, component=comp)
+                            _write_dask_array_to_zarr(dirstore, comp, b)
                     else:
                         # Apply chunking for non-pyramid data (YX axes)
                         bound_data = bound_data.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                        bound_data.to_zarr(dirstore, component=f"masks/{n}")
+                        _write_dask_array_to_zarr(dirstore, f"masks/{n}", bound_data)
 
                     # add boundaries metadata to zarr.zip
                     store = zarr.open(dirstore, mode="a")

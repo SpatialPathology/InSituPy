@@ -317,7 +317,7 @@ def read_visium(
 
     from spatialdata_io import visium
 
-    from insitupy.spatialdata.convert import convert_from_spatialdata
+    from insitupy.spatialdata.convert import convert_from_foreign_spatialdata
 
     path = Path(path)
 
@@ -361,22 +361,21 @@ def read_visium(
             sdata[dataset_id]['radius'] = sdata[dataset_id]['radius'] * fullres_pixel_size
 
     # Convert to InSituData format
-    data = convert_from_spatialdata(
+    data = convert_from_foreign_spatialdata(
         sdata=sdata,
         image_data={
             "hires": (f"{dataset_id}_hires_image", hires_pixel_size, True),
-            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True)
+            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True),
         },
+        table_key="table",
+        build_cells=False,          # units-only: spots go to .units, not .cells
         units_key=dataset_id,
         unit_type="visium",
-        cells_key=None,  # No cells available in Visium data
-        table_key="table",
-        cell_boundaries_data=None,  # Visium uses spots, not boundaries
-        nucleus_boundaries_data=None,
-        transcripts_key=None,  # Visium doesn't have single-molecule transcripts
+        transcripts_key=None,       # Visium has no single-molecule transcripts
         slide_id=dataset_name,
         sample_id=sample_name,
         method_name="visium",
+        verbose=verbose,
     )
 
     return data
