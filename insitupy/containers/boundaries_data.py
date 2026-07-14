@@ -405,7 +405,7 @@ class BoundariesData(DeepCopyMixin):
                 logger.warning(f"Boundaries element `{n}` was no Dataframe. Skipped.")
 
     def save(self,
-             path : str | os.PathLike | Path = "boundaries.zarr.zip",
+             path : str | os.PathLike | Path = "boundaries.zarr",
              save_as_pyramid: bool = True,
              max_resolution: Number | None = None,
              verbose: bool = False
@@ -414,11 +414,10 @@ class BoundariesData(DeepCopyMixin):
 
         Writes cell and nuclei masks, cell names, segmentation mask
         values, and (when available) nucleus-to-cell mapping and nucleus
-        counts into a zarr or zarr.zip archive.
+        counts into a zarr archive.
 
         Args:
-            path: Output file path. Must end with ``.zarr`` or
-                ``.zarr.zip``.
+            path: Output file path. Must end with ``.zarr``.
             save_as_pyramid: If True, store boundary masks as a
                 multi-resolution image pyramid.
             max_resolution: Maximum spatial resolution in micrometers per
@@ -429,20 +428,18 @@ class BoundariesData(DeepCopyMixin):
 
         Raises:
             InvalidFileTypeError: If ``path`` does not end with
-                ``.zarr`` or ``.zarr.zip``.
+                ``.zarr``.
         """
 
         path = Path(path)
         suffix = path.name.split(".", maxsplit=1)[-1]
 
-        if suffix not in ["zarr", "zarr.zip"]:
-            raise InvalidFileTypeError(allowed_types=[".zarr", ".zarr.zip"], received_type=suffix)
-
-        zipped = suffix == "zarr.zip"
+        if suffix != "zarr":
+            raise InvalidFileTypeError(allowed_types=[".zarr"], received_type=suffix)
 
         # Use ExitStack to handle context manager differences between Zarr v2 and v3
         with ExitStack() as stack:
-            dirstore = _get_zarr_store(path, mode="w", zipped=zipped)
+            dirstore = _get_zarr_store(path, mode="w")
 
             # In Zarr v2, stores are context managers and need to be entered
             if not ZARR_V3:

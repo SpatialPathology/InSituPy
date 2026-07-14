@@ -3338,7 +3338,7 @@ class InSituExperiment:
             if Path(xd._path) not in _newly_assigned:
                 xd.save(verbose=verbose, **kwargs)
             else:
-                saveas_keys = {"zarr_zipped", "images_as_zarr",
+                saveas_keys = {"images_as_zarr",
                                "images_max_resolution", "debug", "zip_output"}
                 saveas_kwargs = {k: v for k, v in kwargs.items() if k in saveas_keys}
                 xd.saveas(xd._path, verbose=False, **saveas_kwargs)

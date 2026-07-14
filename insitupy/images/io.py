@@ -423,19 +423,18 @@ def write_zarr(
     overwrite: bool = False,
     verbose: bool = False,
 ):
-    """Write image data to a Zarr or Zarr.zip store.
+    """Write image data to a Zarr store.
 
     Saves an image (or existing pyramid) together with OME metadata as a
-    ``.zarr`` directory or ``.zarr.zip`` archive.  When ``save_pyramid=True``
-    and a non-pyramidal array is provided, a six-level pyramid is created
-    automatically.  Compatible with Zarr v2 and v3.
+    ``.zarr`` directory.  When ``save_pyramid=True`` and a non-pyramidal
+    array is provided, a six-level pyramid is created automatically.
+    Compatible with Zarr v2 and v3.
 
     Args:
         image: Input image as a :class:`dask.array.Array`,
             :class:`numpy.ndarray`, or a :class:`list` of arrays representing
             an existing pyramid (index 0 = full resolution).
-        file: Output path.  The extension controls the format:
-            ``.zarr`` for a directory store, ``.zarr.zip`` for a zip store.
+        file: Output path for the ``.zarr`` directory store.
         img_metadata: Metadata dict to store in the Zarr root attributes
             (e.g. ``{"OME": ..., "axes": "YXS", "pixel_size": 0.2125}``).
         axes: Axis string describing the image dimensions, e.g. ``"YX"``
@@ -459,11 +458,6 @@ def write_zarr(
     # Raise early if file exists and overwrite is not allowed
     if file.exists() and not overwrite:
         raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
-
-    suffix = file.name.split(".", 1)[-1]
-
-    # check if the suffix contains zip
-    zipped = "zip" in suffix
 
     # Write to a staging path; commit to final path only after a successful write
     tmp_file = file.parent / (file.name + ".__ispy_tmp__")
@@ -490,7 +484,7 @@ def write_zarr(
 
     # Use ExitStack to handle context manager differences between Zarr v2 and v3
     with ExitStack() as stack:
-        dirstore = _get_zarr_store(tmp_file, mode="w", zipped=zipped)
+        dirstore = _get_zarr_store(tmp_file, mode="w")
 
         # In Zarr v2, stores are context managers and need to be entered
         if not ZARR_V3:

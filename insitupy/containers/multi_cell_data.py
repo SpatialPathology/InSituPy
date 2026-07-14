@@ -425,7 +425,6 @@ class MultiCellData(DeepCopyMixin):
 
     def save(self,
              path: str | os.PathLike | Path,
-             zipped: bool = False,
              overwrite: bool = False,
              max_resolution_boundaries: Number | None = None
              ):
@@ -437,8 +436,6 @@ class MultiCellData(DeepCopyMixin):
 
         Args:
             path: Output directory path.
-            zipped: If True, save boundary zarr stores as ``.zarr.zip``
-                archives.  Defaults to False.
             overwrite: If True, remove an existing directory at *path*
                 before saving.  Defaults to False.
             max_resolution_boundaries: Maximum spatial resolution for
@@ -456,7 +453,6 @@ class MultiCellData(DeepCopyMixin):
             save_path = path / key
             self._layers[key].save(
                 path=save_path,
-                zipped=zipped,
                 max_resolution_boundaries=max_resolution_boundaries,
                 overwrite=overwrite)
 

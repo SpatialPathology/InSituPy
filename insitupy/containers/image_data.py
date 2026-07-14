@@ -517,7 +517,6 @@ class ImageData(DeepCopyMixin):
              path: str | os.PathLike | Path,
              keys_to_save: str | None = None,
              as_zarr: bool = True,
-             zipped: bool = False,
              save_pyramid: bool = True,
              compression: Literal['jpeg', 'LZW', 'jpeg2000', 'ZLIB', None] = 'ZLIB',
              return_savepaths: bool = False,
@@ -533,7 +532,6 @@ class ImageData(DeepCopyMixin):
             path (Union[str, os.PathLike, Path]): The directory where images will be saved.
             keys_to_save (Optional[str]): Specific keys of images to save. If None, all images are saved.
             as_zarr (bool): If True, save images in Zarr format. Otherwise, save as OME-TIFF.
-            zipped (bool): If True and saving as Zarr, compress the Zarr files into zip archives.
             save_pyramid (bool): If True, save image pyramids (only applicable for Zarr format).
             compression (Literal['jpeg', 'LZW', 'jpeg2000', 'ZLIB', None]): Compression method for OME-TIFF files.
             return_savepaths (bool): If True, return the paths of the saved files.
@@ -597,10 +595,7 @@ class ImageData(DeepCopyMixin):
 
                 if as_zarr:
                     # generate filename
-                    if zipped:
-                        filename = name + ".zarr.zip"
-                    else:
-                        filename = name + ".zarr"
+                    filename = name + ".zarr"
 
                     # write to zarr
                     img_path = path / filename

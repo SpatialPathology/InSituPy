@@ -164,9 +164,9 @@ class InSituData:
             Loads transcript data.
         read(path):
             Reads an InSituData object from a specified folder.
-        saveas(path, overwrite, zip_output, images_as_zarr, zarr_zipped, images_max_resolution, verbose):
+        saveas(path, overwrite, zip_output, images_as_zarr, images_max_resolution, verbose):
             Saves the InSituData object to a specified path.
-        save(path, zarr_zipped, verbose, keep_history):
+        save(path, verbose, keep_history):
             Saves the InSituData object to its current path or a specified path.
         save_colorlegends(savepath, from_canvas, max_per_col):
             Saves color legends from the viewer.
@@ -1708,7 +1708,6 @@ class InSituData:
             overwrite: bool = False,
             zip_output: bool = False,
             images_as_zarr: bool = True,
-            zarr_zipped: bool = False,
             images_max_resolution: Number | None = None, # in µm per pixel
             debug: bool = False,
             verbose: bool = True
@@ -1726,7 +1725,6 @@ class InSituData:
                 ``.zip`` archive and delete the uncompressed directory.
             images_as_zarr: If True, save images in zarr format.  If False,
                 images are saved as TIFF files.
-            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
             images_max_resolution: Maximum spatial resolution for saved images,
                 in micrometers per pixel.  Images with finer resolution are
                 downsampled.  If None, images are saved at their original
@@ -1770,7 +1768,6 @@ class InSituData:
                     path=path,
                     metadata=self._metadata,
                     images_as_zarr=images_as_zarr,
-                    zipped=zarr_zipped,
                     max_resolution=images_max_resolution,
                     debug=debug,
                     verbose=False
@@ -1783,7 +1780,6 @@ class InSituData:
                     cells=cells,
                     path=path,
                     metadata=self._metadata,
-                    zipped=zarr_zipped,
                     max_resolution_boundaries=images_max_resolution
                 )
 
@@ -1861,7 +1857,6 @@ class InSituData:
 
     def save(self,
              path: str | os.PathLike | Path | None = None,
-             zarr_zipped: bool = False,
              verbose: bool = True,
              keep_history: bool = False,
              sync_images: bool = False,
@@ -1880,7 +1875,6 @@ class InSituData:
             path: Destination directory.  If None, saves to the original project
                 path. Raises ``RuntimeError`` when no project is linked and
                 ``path`` is None.
-            zarr_zipped: If True, write zarr stores as ``.zarr.zip`` archives.
             verbose: If True, log progress messages.
             keep_history: If True, retain the undo-history snapshots that are
                 normally cleaned up after saving.
@@ -1927,7 +1921,6 @@ class InSituData:
                 current_uid = self._metadata["uids"][-1]
                 if current_uid == project_uid:
                     self._update_to_existing_project(path=path,
-                                                     zarr_zipped=zarr_zipped,
                                                      verbose=verbose,
                                                      sync_images=sync_images,
                                                      images_only=images_only,
@@ -2048,7 +2041,6 @@ class InSituData:
     def save_cells(
         self,
         path: str | os.PathLike | Path | None = None,
-        zarr_zipped: bool = False,
         verbose: bool = False,
     ) -> None:
         """Save only cell data (expression table and boundaries) for this object.
@@ -2061,8 +2053,6 @@ class InSituData:
             path: Destination directory.  If ``None``, saves to the original
                 project path.  Raises :exc:`RuntimeError` when no project is
                 linked and ``path`` is ``None``.
-            zarr_zipped: If ``True``, write zarr stores as ``.zarr.zip``
-                archives.
             verbose: If ``True``, log progress messages.
 
         Raises:
@@ -2089,7 +2079,6 @@ class InSituData:
                 cells=self._cells,
                 path=path,
                 metadata=self._metadata,
-                zipped=zarr_zipped,
                 overwrite=True,
             )
 
@@ -2620,7 +2609,6 @@ class InSituData:
     def _update_to_existing_project(
         self,
         path: str | os.PathLike | Path | None,
-        zarr_zipped: bool = False,
         verbose: bool = True,
         sync_images: bool = False,
         images_only: bool = False,
@@ -2645,7 +2633,6 @@ class InSituData:
             savepaths = self._images.save(
                 path=img_path,
                 as_zarr=True,
-                zipped=zarr_zipped,
                 return_savepaths=True,
                 overwrite=overwrite_images,
                 verbose=verbose
@@ -2668,7 +2655,6 @@ class InSituData:
                     cells=cells,
                     path=path,
                     metadata=self._metadata,
-                    zipped=zarr_zipped,
                     overwrite=True
                 )
 

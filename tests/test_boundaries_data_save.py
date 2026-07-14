@@ -8,6 +8,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
+from insitupy._exceptions import InvalidFileTypeError
 from insitupy.containers.boundaries_data import BoundariesData
 
 
@@ -130,3 +131,16 @@ class TestIndependentCellNucleusPixelSize:
 
         assert boundaries.metadata["cells"]["pixel_size"] == 1.0
         assert boundaries.metadata["nuclei"]["pixel_size"] == 0.25
+
+
+class TestSaveRejectsZarrZip:
+    """The per-store `.zarr.zip` write path has been removed (never worked on
+    zarr 3.2.1). `.save()` must now reject it cleanly instead of crashing
+    mid-write with zipfile.BadZipFile."""
+
+    def test_zarr_zip_path_raises_invalid_file_type_error(self, tmp_path):
+        boundaries = _create_boundaries()
+        path = tmp_path / "boundaries.zarr.zip"
+
+        with pytest.raises(InvalidFileTypeError):
+            boundaries.save(path=path, save_as_pyramid=False)

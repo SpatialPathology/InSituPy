@@ -390,7 +390,6 @@ def _save_images(imagedata: ImageData,
                  path: str | os.PathLike,
                  metadata: dict | None = None,
                  images_as_zarr: bool = True,
-                 zipped: bool = False,
                  max_resolution: Number | None = None, # in µm per pixel,
                  debug: bool = False,
                  verbose: bool = False
@@ -400,7 +399,6 @@ def _save_images(imagedata: ImageData,
     savepaths = imagedata.save(
         path=img_path,
         as_zarr=images_as_zarr,
-        zipped=zipped,
         return_savepaths=True,
         max_resolution=max_resolution,
         debug=debug,
@@ -418,7 +416,6 @@ def _save_images(imagedata: ImageData,
 def _save_cells(cells: MultiCellData,
                 path,
                 metadata,
-                zipped=False,
                 max_resolution_boundaries: Number | None = None, # in µm per pixel
                 overwrite=False
                 ):
@@ -429,7 +426,6 @@ def _save_cells(cells: MultiCellData,
     # save cells to path and write info to metadata
     cells.save(
         path=cells_path,
-        zipped=zipped,
         max_resolution_boundaries=max_resolution_boundaries,
         overwrite=overwrite
         )

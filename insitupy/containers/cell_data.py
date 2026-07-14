@@ -314,7 +314,6 @@ class CellData(DeepCopyMixin):
 
     def save(self,
              path: str | os.PathLike | Path,
-             zipped: bool = False,
              max_resolution_boundaries: Number | None = None,
              overwrite: bool = False
              ):
@@ -326,8 +325,6 @@ class CellData(DeepCopyMixin):
 
         Args:
             path: Directory to save into. Created if it does not exist.
-            zipped: If True, save boundaries as ``boundaries.zarr.zip``
-                instead of ``boundaries.zarr``.
             max_resolution_boundaries: Maximum spatial resolution for
                 saved boundaries in micrometers per pixel.  Boundaries
                 with finer resolution are downsampled.  If None, boundaries
@@ -351,10 +348,7 @@ class CellData(DeepCopyMixin):
         # save boundaries
         if self._boundaries is not None:
             boundaries = self._boundaries
-            if zipped:
-                bound_file = path / "boundaries.zarr.zip"
-            else:
-                bound_file = path / "boundaries.zarr"
+            bound_file = path / "boundaries.zarr"
 
             # save boundaries
             boundaries.save(bound_file, save_as_pyramid=True, max_resolution=max_resolution_boundaries)
