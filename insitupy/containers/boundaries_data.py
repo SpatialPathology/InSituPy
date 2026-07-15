@@ -443,7 +443,6 @@ class BoundariesData(DeepCopyMixin):
 
     def save(self,
              path : str | os.PathLike | Path = "boundaries.zarr",
-             save_as_pyramid: bool = True,
              max_resolution: Number | None = None,
              verbose: bool = False
              ):
@@ -455,8 +454,6 @@ class BoundariesData(DeepCopyMixin):
 
         Args:
             path: Output file path. Must end with ``.zarr``.
-            save_as_pyramid: If True, store boundary masks as a
-                multi-resolution image pyramid.
             max_resolution: Maximum spatial resolution in micrometers per
                 pixel.  Masks with finer resolution are downsampled
                 before saving.  If None, masks are saved at their
@@ -496,25 +493,14 @@ class BoundariesData(DeepCopyMixin):
                         bound_data = da.from_array(bound_data) # convert to dask array
                         meta['pixel_size'] = max_resolution # update metadata
 
-                    # check data
-                    if isinstance(bound_data, list):
-                        if not save_as_pyramid:
-                            bound_data = bound_data[0]
-                    else:
-                        if save_as_pyramid:
-                            # create pyramid
-                            bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
+                    # boundary masks are always stored as a multi-resolution pyramid
+                    if not isinstance(bound_data, list):
+                        bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
 
-
-                    if isinstance(bound_data, list):
-                        for i, b in enumerate(bound_data):
-                            comp = f"masks/{n}/{i}"
-                            b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                            _write_dask_array_to_zarr(dirstore, comp, b)
-                    else:
-                        # Apply chunking for non-pyramid data (YX axes)
-                        bound_data = bound_data.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                        _write_dask_array_to_zarr(dirstore, f"masks/{n}", bound_data)
+                    for i, b in enumerate(bound_data):
+                        comp = f"masks/{n}/{i}"
+                        b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
+                        _write_dask_array_to_zarr(dirstore, comp, b)
 
                     # add boundaries metadata to zarr.zip
                     store = zarr.open(dirstore, mode="a")

@@ -351,7 +351,7 @@ class CellData(DeepCopyMixin):
             bound_file = path / "boundaries.zarr"
 
             # save boundaries
-            boundaries.save(bound_file, save_as_pyramid=True, max_resolution=max_resolution_boundaries)
+            boundaries.save(bound_file, max_resolution=max_resolution_boundaries)
 
             # add entry for boundaries to metadata
             celldata_metadata["boundaries"] = Path(relpath(bound_file, path)).as_posix()
