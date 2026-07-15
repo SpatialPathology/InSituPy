@@ -305,7 +305,7 @@ if WITH_NAPARI:
             mask_pyramid = mask
 
         # Get label IDs and cell names
-        label_ids = boundaries.seg_mask_value.compute()
+        label_ids = boundaries.label_ids_for(mask_key)
         cell_names_boundary = boundaries.cell_names.compute()
         # Preserve categorical order before _as_positional_array drops the dtype.
         # adata.obs[key] arrives as a Categorical Series whose .cat.categories
@@ -576,7 +576,7 @@ if WITH_NAPARI:
                             mask_pyramid = mask
 
                         # Create properties DataFrame with label IDs as index
-                        label_ids = viewer_config.boundaries.seg_mask_value.compute()
+                        label_ids = viewer_config.boundaries.label_ids_for(key)
                         cell_names = viewer_config.boundaries.cell_names.compute()
 
                         if key not in {"cells", "nuclei"}:

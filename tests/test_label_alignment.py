@@ -8,6 +8,7 @@ must be matched to table rows by cell name, not by positional index.
 import numpy as np
 import pytest
 
+from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.interactive._label_alignment import (
     compute_label_cell_indices,
     map_boundary_to_adata_positions,
@@ -139,6 +140,60 @@ def test_mismatched_lengths_raise_in_positional_branch():
             nucleus_to_cell_map=None,
             mask_key="cells",
         )
+
+
+def _make_multinucleated_boundaries():
+    """3 cells, 5 nuclei; nuclei 1&2 -> c1, nucleus 3 -> c2, nuclei 4&5 -> c3."""
+    boundaries = BoundariesData(
+        cell_names=["c1", "c2", "c3"],
+        seg_mask_value=[10, 20, 30],
+        nucleus_to_cell_map={0: 0, 1: 0, 2: 1, 3: 2, 4: 2},
+    )
+    cell_mask = np.array([[0, 10, 20], [30, 20, 10]], dtype=np.uint32)
+    nuclei_mask = np.array([[0, 1, 3], [5, 4, 2]], dtype=np.uint32)
+    boundaries.add_boundaries(cell_boundaries=cell_mask, nuclei_boundaries=nuclei_mask, pixel_size=1)
+    return boundaries
+
+
+def test_label_ids_for_nuclei_resolves_multinucleated_cells_through_the_real_caller():
+    """Regression: the viewer used to pass seg_mask_value (cell labels) as label_ids
+    for the nuclei layer, which only accidentally worked for a contiguous 1:1
+    label space. label_ids_for("nuclei") must supply the actual nucleus raster
+    labels so a real multinucleated dataset colors correctly."""
+    boundaries = _make_multinucleated_boundaries()
+    obs_names = ["c1", "c2", "c3"]
+
+    assert list(boundaries.label_ids_for("cells")) == [10, 20, 30]
+
+    nuclei_label_ids = boundaries.label_ids_for("nuclei")
+    assert list(nuclei_label_ids) == [1, 2, 3, 4, 5]  # map keys (0-4) + 1
+
+    cell_names_boundary = boundaries.cell_names.compute()
+    boundary_indices, adata_indices = compute_label_cell_indices(
+        label_ids=nuclei_label_ids,
+        cell_names_boundary=cell_names_boundary,
+        obs_names=obs_names,
+        nucleus_to_cell_map=boundaries.nucleus_to_cell_map,
+        mask_key="nuclei",
+    )
+
+    # nucleus labels 1,2 -> c1 (row 0); label 3 -> c2 (row 1); labels 4,5 -> c3 (row 2)
+    assert boundary_indices == [0, 0, 1, 2, 2]
+    assert adata_indices == [0, 0, 1, 2, 2]
+
+
+def test_label_ids_for_falls_back_to_seg_mask_value_without_map():
+    """1:1 fallback: with no nucleus_to_cell_map, nuclei labels are seg_mask_value,
+    same as cells - no spurious None/unmapped entries."""
+    boundaries = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+    mask = np.array([[0, 1], [2, 0]], dtype=np.uint32)
+    boundaries.add_boundaries(cell_boundaries=mask, nuclei_boundaries=mask, pixel_size=1)
+
+    cells_ids = boundaries.label_ids_for("cells")
+    nuclei_ids = boundaries.label_ids_for("nuclei")
+
+    np.testing.assert_array_equal(cells_ids, np.array([1, 2], dtype=np.uint32))
+    np.testing.assert_array_equal(nuclei_ids, cells_ids)
 
 
 def test_duplicate_obs_names_warns_and_uses_last_occurrence():

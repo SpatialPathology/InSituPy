@@ -202,6 +202,15 @@ def _read_boundaries_from_celldata_zarr(
         nucleus_count=nucleus_count
     )
 
+    if not boundaries.nucleus_map_is_consistent(len(np.asarray(cell_names))):
+        warnings.warn(
+            "Saved nucleus_to_cell_map / nucleus_count is inconsistent with the cell table "
+            "(likely filtered by an older InSituPy that did not maintain it). Dropping it; "
+            "nuclei will be treated as 1:1 with cells. Re-read from raw data to restore "
+            "multinucleated-cell mapping.", stacklevel=2)
+        boundaries._nucleus_to_cell_map = None
+        boundaries._nucleus_count = None
+
     # retrieve the boundaries data
     bound_data = {}
     meta = {}

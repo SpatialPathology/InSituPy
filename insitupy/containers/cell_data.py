@@ -430,6 +430,41 @@ class CellData(DeepCopyMixin):
             boundaries._seg_mask_value = da.from_array(np.array(ds_aligned_to_table.values, dtype=np.uint32))
             boundaries._cell_names = da.from_array(np.array(ds_aligned_to_table.index, dtype=str))
 
+            # keep nucleus_to_cell_map/nucleus_count aligned to the new cell_names order
+            old_cell_names = ds.index.to_numpy().astype(str)  # pre-sync boundary/cell order
+            new_cell_names = ds_aligned_to_table.index.to_numpy().astype(str)  # new table order
+            n_old = len(old_cell_names)
+            name_to_new_row = {name: i for i, name in enumerate(new_cell_names)}
+
+            # nucleus_to_cell_map: value = boundary row index into cell_names
+            nmap = boundaries._nucleus_to_cell_map
+            if nmap is not None:
+                if not all(0 <= int(v) < n_old for v in nmap.values()):
+                    warnings.warn(
+                        "nucleus_to_cell_map is inconsistent with the cell table "
+                        f"(values outside [0, {n_old})); dropping it. Re-read from raw data to "
+                        "restore multinucleated-cell mapping.", stacklevel=2)
+                    boundaries._nucleus_to_cell_map = None
+                else:
+                    remapped = {}
+                    for nuc_idx, old_row in nmap.items():
+                        new_row = name_to_new_row.get(old_cell_names[int(old_row)])
+                        if new_row is not None:  # parent cell survived the filter
+                            remapped[int(nuc_idx)] = new_row
+                    boundaries._nucleus_to_cell_map = remapped or None
+
+            # nucleus_count: per-cell, aligned to cell order
+            ncount = boundaries._nucleus_count
+            if ncount is not None:
+                ncount = np.asarray(ncount)
+                if len(ncount) != n_old:
+                    warnings.warn("nucleus_count length does not match the cell table; dropping it.",
+                                  stacklevel=2)
+                    boundaries._nucleus_count = None
+                else:
+                    boundaries._nucleus_count = (
+                        pd.Series(ncount, index=old_cell_names).reindex(new_cell_names).to_numpy())
+
             # find the seg_mask_values which are not anymore present
             seg_mask_values_not_in_table = ds[~ds.index.isin(table_cell_ids)].values
             n_removed_boundaries = int(np.sum(~ds.index.isin(table_cell_ids)))

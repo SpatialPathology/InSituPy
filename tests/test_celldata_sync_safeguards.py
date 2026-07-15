@@ -62,6 +62,21 @@ def _to_numpy(arr):
     return arr.compute() if hasattr(arr, "compute") else np.asarray(arr)
 
 
+def _create_sparse_boundaries(nucleus_to_cell_map=None, nucleus_count=None):
+    """Boundaries with non-contiguous seg_mask_value, mimicking a real (filtered) Xenium
+    read where cell labels no longer coincide numerically with their row position."""
+    boundaries = BoundariesData(
+        cell_names=["c1", "c2", "c3"],
+        seg_mask_value=[2, 5, 9],
+        nucleus_to_cell_map=nucleus_to_cell_map,
+        nucleus_count=nucleus_count,
+    )
+    mask = np.array([[0, 2], [5, 9]], dtype=np.uint32)
+    nuclei = np.array([[0, 1], [2, 3]], dtype=np.uint32)
+    boundaries.add_boundaries(cell_boundaries=mask, nuclei_boundaries=nuclei, pixel_size=1)
+    return boundaries
+
+
 def test_sync_rejects_duplicate_obs_names():
     boundaries = _create_boundaries()
     table = _create_table(["c1", "c1", "c2"])
@@ -203,6 +218,58 @@ def test_viewer_preflight_warns_without_syncing_unsynced_cells():
     assert data.cells.is_synced is False
     assert list(data.cells.table.obs_names) == ["c3", "c2", "c1"]
     assert list(data.cells.boundaries.cell_names.compute()) == ["c1", "c2", "c3"]
+
+
+def test_sync_remaps_nucleus_to_cell_map_after_sparse_filter():
+    # nucleus 0,1 -> c1 (row 0, multinucleated); nucleus 2 -> c2 (row 1); nucleus 3 -> c3 (row 2)
+    nucleus_to_cell_map = {0: 0, 1: 0, 2: 1, 3: 2}
+    boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    # filter out the middle cell (c2)
+    filtered = celldata[[True, False, True]]
+
+    new_cell_names = list(filtered.boundaries.cell_names.compute())
+    assert new_cell_names == ["c1", "c3"]
+
+    new_map = filtered.boundaries.nucleus_to_cell_map
+    n_new = len(new_cell_names)
+
+    # every surviving map value is a valid row index into the new table
+    assert all(0 <= v < n_new for v in new_map.values())
+    # the nucleus that belonged to the removed cell (c2) is gone
+    assert 2 not in new_map
+    # surviving nuclei still resolve, by name, to the same cell they did before the filter
+    assert new_cell_names[new_map[0]] == "c1"
+    assert new_cell_names[new_map[1]] == "c1"
+    assert new_cell_names[new_map[3]] == "c3"
+
+
+def test_sync_reindexes_nucleus_count_after_sparse_filter():
+    nucleus_count = np.array([2, 1, 1])
+    boundaries = _create_sparse_boundaries(nucleus_count=nucleus_count)
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    filtered = celldata[[True, False, True]]
+
+    assert len(filtered.boundaries.nucleus_count) == len(filtered.table)
+    assert list(filtered.boundaries.nucleus_count) == [2, 1]
+
+
+def test_sync_invalidates_unrepairable_nucleus_to_cell_map():
+    # value 5 does not index any of the 3 boundary rows even before filtering -
+    # the demo's stale-identity-map shape in miniature.
+    nucleus_to_cell_map = {0: 0, 1: 5}
+    boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    with pytest.warns(UserWarning, match="nucleus_to_cell_map is inconsistent"):
+        celldata.sync()
+
+    assert celldata.boundaries.nucleus_to_cell_map is None
 
 
 def test_crop_works_without_boundaries():

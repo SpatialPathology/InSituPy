@@ -53,9 +53,12 @@ class BoundariesData(DeepCopyMixin):
             cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.table` of `CellData`.
             seg_mask_value (Optional[Union[np.ndarray, List]]): Segmentation mask values. Required to have the same length as `cell_names`.
                 Specifies which values in the "cells" segmentation mask correspond to which cell name.
-            nucleus_to_cell_map (Optional[Dict[int, int]]): Mapping from nucleus index (0-indexed) to cell index (0-indexed).
+            nucleus_to_cell_map (Optional[Dict[int, int]]): Mapping from nucleus index (0-indexed) to the
+                parent cell's row index into `cell_names`/`seg_mask_value` (not a cell label/mask value).
                 For Xenium v2.0+ with multinucleated cells, this allows mapping each nucleus to its parent cell.
                 To look up a nucleus mask value N, use: `nucleus_to_cell_map[N - 1]` (since mask values are 1-indexed).
+                Row indices are only valid for the current `cell_names` order; `CellData.sync()` remaps them
+                whenever cells are filtered or reordered.
                 If None, assumes 1:1 mapping between nuclei and cells (Xenium v1.x behavior).
             nucleus_count (Optional[np.ndarray]): Array with the number of nuclei per cell.
                 Useful for identifying multinucleated cells. If None, not available.
@@ -143,13 +146,43 @@ class BoundariesData(DeepCopyMixin):
 
     @property
     def nucleus_to_cell_map(self):
-        """Mapping from nucleus label ID to cell index. None if not available (v1.x data)."""
+        """Mapping from nucleus index (0-based, i.e. nucleus raster label - 1) to the parent
+        cell's row index into `cell_names`/`seg_mask_value`. Row indices are only valid for
+        the current `cell_names` order; `CellData.sync()` keeps them aligned across
+        filtering/reordering. None if not available (v1.x data)."""
         return self._nucleus_to_cell_map
 
     @property
     def nucleus_count(self):
         """Array with number of nuclei per cell. None if not available."""
         return self._nucleus_count
+
+    def nucleus_map_is_consistent(self, n_cells: int | None = None) -> bool:
+        """True if nucleus_to_cell_map/nucleus_count are consistent with n_cells.
+
+        Cheap check: map values must be valid row indices [0, n_cells); nucleus_count
+        length must equal n_cells. Does not read the rasters.
+        """
+        if n_cells is None:
+            n_cells = len(self._cell_names)
+        if self._nucleus_to_cell_map is not None:
+            if not all(0 <= int(v) < n_cells for v in self._nucleus_to_cell_map.values()):
+                return False
+        if self._nucleus_count is not None and len(np.asarray(self._nucleus_count)) != n_cells:
+            return False
+        return True
+
+    def label_ids_for(self, mask_key: str) -> np.ndarray:
+        """Label ids present in the raster for `mask_key`.
+
+        cells -> seg_mask_value. nuclei -> nucleus raster labels (map keys + 1) when a
+        consistent map exists, else seg_mask_value (v1.x 1:1 fallback).
+        """
+        smv = self._seg_mask_value.compute()
+        if (mask_key == "nuclei" and self._nucleus_to_cell_map is not None
+                and self.nucleus_map_is_consistent(len(smv))):
+            return np.array(sorted(self._nucleus_to_cell_map.keys()), dtype=np.uint32) + 1
+        return smv
 
     @property
     def is_empty(self):

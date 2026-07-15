@@ -15,6 +15,7 @@ else:
     from spatialdata.transformations.transformations import Scale
 
 import logging
+import warnings
 from collections import defaultdict
 from numbers import Number
 from typing import Literal
@@ -426,12 +427,20 @@ def _transform_nucleus_map_for_spatialdata(
             cell_names = celldata.table.obs_names
             n_cells = len(cell_names)
             nucleus_labels, cell_ids = [], []
+            n_skipped = 0
             for nucleus_idx, cell_idx in mapping.items():
                 if not is_valid_boundary_index(cell_idx, n_cells):
                     # orphan nucleus (no assigned cell) or a stale map entry
+                    n_skipped += 1
                     continue
                 nucleus_labels.append(nucleus_idx + 1)
                 cell_ids.append(cell_names[cell_idx])
+
+            if n_skipped > 0:
+                warnings.warn(
+                    f"Skipped {n_skipped} nucleus_to_cell_map entr{'y' if n_skipped == 1 else 'ies'} "
+                    f"for cell layer '{cell_key}' with an out-of-range cell index (orphan nucleus, or "
+                    "a stale map from before CellData.sync()).", stacklevel=2)
 
             if not nucleus_labels:
                 continue

@@ -4,12 +4,15 @@ to_zarr(..., zarr_array_kwargs=...) API-incompatibility fix.
 See .log/reports/260710/boundaries-zarr-save-fix/report-boundaries-zarr-save-fix.md
 """
 
+import warnings
+
 import dask.array as da
 import numpy as np
 import pytest
 
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.containers.boundaries_data import BoundariesData
+from insitupy.containers.io import _read_boundaries_from_celldata_zarr
 
 
 def _create_boundaries(cell_names=("c1", "c2", "c3"), seg_mask_value=(1, 2, 3),
@@ -131,6 +134,51 @@ class TestIndependentCellNucleusPixelSize:
 
         assert boundaries.metadata["cells"]["pixel_size"] == 1.0
         assert boundaries.metadata["nuclei"]["pixel_size"] == 0.25
+
+
+class TestLoadInvalidatesInconsistentNucleusMap:
+    """Regression coverage for the shipped demo: an older InSituPy filtered cells
+    without maintaining nucleus_to_cell_map, leaving a saved map/count sized for the
+    pre-filter cell count. The load path must detect and drop it (with a warning)
+    rather than propagate a silently wrong mapping."""
+
+    def test_load_drops_inconsistent_map_and_count(self, tmp_path):
+        # 3 cells on disk, but the saved map/count are sized for an original
+        # (pre-filter) cell count of 5 - the demo's stale identity-map shape.
+        boundaries = _create_boundaries(
+            nucleus_to_cell_map={0: 0, 1: 1, 2: 2, 3: 3, 4: 4},
+            nucleus_count=np.array([1, 1, 1, 1, 1], dtype=np.int64),
+        )
+
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path, save_as_pyramid=True)
+
+        with pytest.warns(UserWarning, match="inconsistent with the cell table"):
+            loaded = _read_boundaries_from_celldata_zarr(path)
+
+        assert loaded.nucleus_to_cell_map is None
+        assert loaded.nucleus_count is None
+        # the rest of the object survives intact
+        assert list(loaded.cell_names.compute()) == ["c1", "c2", "c3"]
+        np.testing.assert_array_equal(
+            loaded.seg_mask_value.compute(), np.array([1, 2, 3], dtype=np.uint32)
+        )
+
+    def test_load_keeps_consistent_map_and_count(self, tmp_path):
+        boundaries = _create_boundaries(
+            nucleus_to_cell_map={0: 0, 1: 0, 2: 1},
+            nucleus_count=np.array([2, 1, 0], dtype=np.int64),
+        )
+
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path, save_as_pyramid=True)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loaded = _read_boundaries_from_celldata_zarr(path)
+
+        assert loaded.nucleus_to_cell_map == {0: 0, 1: 0, 2: 1}
+        np.testing.assert_array_equal(loaded.nucleus_count, np.array([2, 1, 0], dtype=np.int64))
 
 
 class TestSaveRejectsZarrZip:
