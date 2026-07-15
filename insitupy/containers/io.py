@@ -12,6 +12,8 @@ from warnings import warn
 import dask.array as da
 import dask.dataframe as dd
 import numpy as np
+import pandas as pd
+import pyarrow as pa
 import scanpy as sc
 import toml
 import zarr
@@ -34,6 +36,14 @@ from insitupy.utils.utils import (
     convert_int_to_xenium_hex,
     glob_visible,
 )
+
+# Categorical transcript columns (e.g. feature_name) are written with a uniformly
+# wide dictionary index so that independently-written parquet partitions - each
+# with its own locally-inferred int8/int16 index - all convert against one schema.
+# Value type is string: every categorical transcript column produced today is
+# name-like. An int/float-categorical column would need its value type derived
+# from the column instead (none exist today).
+_CATEGORICAL_PARQUET_DTYPE = pa.dictionary(pa.int32(), pa.string())
 
 
 def _read_baysor_cells(
@@ -451,12 +461,27 @@ def _save_transcripts(transcripts, path, metadata):
 
     # save transcripts as parquet and modify metadata
     if isinstance(transcripts, dd.DataFrame):
+        # Any categorical column read back from a partitioned parquet store (e.g.
+        # a SpatialData Points element) has its dictionary index width inferred
+        # independently per partition (int8 for <=127 local categories, int16
+        # otherwise, ...). to_parquet() infers its target schema from a single
+        # partition, so a differently-sized partition later on fails to convert.
+        # Forcing a wide-enough dictionary index here avoids the mismatch without
+        # requiring a full-data pass to unify categories across partitions.
+        schema = "infer"
+        cat_cols = [
+            col for col, dt in transcripts.dtypes.items()
+            if isinstance(dt, pd.CategoricalDtype)
+        ]
+        if cat_cols:
+            schema = {col: _CATEGORICAL_PARQUET_DTYPE for col in cat_cols}
+
         # Use the synchronous scheduler so dask reads and writes one partition
         # at a time. The default threaded scheduler reads N partitions
         # concurrently (N ≈ CPU cores), multiplying peak RAM by N. For large
         # transcript datasets this causes OOM even on systems with adequate
         # total RAM due to concurrent allocation pressure.
-        transcripts.to_parquet(trans_file, compute_kwargs={"scheduler": "synchronous"})
+        transcripts.to_parquet(trans_file, schema=schema, compute_kwargs={"scheduler": "synchronous"})
     else:
         transcripts.to_parquet(trans_file)
 

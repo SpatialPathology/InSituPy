@@ -133,6 +133,22 @@ class TestNucleusMapExport:
 
         assert "CELLS.main.nucleus_map" not in sdata.tables
 
+    def test_orphan_nucleus_excluded_instead_of_raising(self):
+        """Real failure-mode test: Xenium marks a nucleus with no assigned cell
+        using a cell_index past the valid range (see the IndexError this used
+        to raise, insitupy/spatialdata/_convert.py). Such entries must be
+        skipped on export rather than crash or produce a bogus cell_id."""
+        xd = make_insitudata(n_cells=4, with_boundaries=True, with_multinucleated_cells=True)
+        boundaries = xd.cells["main"].boundaries
+        n_cells = len(xd.cells["main"].table)
+        boundaries._nucleus_to_cell_map[3] = n_cells  # orphan: one past the valid range
+
+        sdata = convert_to_spatialdata(xd)  # must not raise IndexError
+
+        nmap = sdata.tables["CELLS.main.nucleus_map"]
+        assert nmap.n_obs == 3  # the 3 valid nuclei only; the orphan is dropped
+        assert 4 not in nmap.obs["nucleus_label"].astype(int).to_numpy()
+
 
 # ── Cell-only segmentation export regression ────────────────────────────────────
 

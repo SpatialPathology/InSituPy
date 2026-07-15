@@ -2,6 +2,8 @@ import warnings
 
 import numpy as np
 
+from insitupy.utils.utils import is_valid_boundary_index
+
 
 def map_boundary_to_adata_positions(obs_names, cell_names_boundary):
     """Boundary-index -> adata-position, matched by cell name.
@@ -43,7 +45,7 @@ def compute_label_cell_indices(label_ids, cell_names_boundary, obs_names,
         boundary_indices = list(range(n_boundary))
 
     def _to_adata(b):
-        if b is None or not (0 <= b < n_boundary):
+        if not is_valid_boundary_index(b, n_boundary):
             return None
         return boundary_to_adata[b]
 

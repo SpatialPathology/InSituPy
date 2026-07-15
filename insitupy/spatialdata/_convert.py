@@ -38,7 +38,7 @@ from insitupy._core.data import InSituData
 from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.images.axes import ImageAxes
-from insitupy.utils.utils import convert_to_list
+from insitupy.utils.utils import convert_to_list, is_valid_boundary_index
 
 logger = logging.getLogger(__name__)
 
@@ -394,12 +394,15 @@ def _transform_nucleus_map_for_spatialdata(
 
     For each cell layer whose boundaries carry a populated
     ``nucleus_to_cell_map`` (multinucleated-cell support, Xenium v2.0+),
-    builds a dedicated table - one row per nucleus, independent of and much
-    smaller than the main cells table - annotating the layer's ``nuclei``
-    :class:`~spatialdata.models.Labels2DModel` raster via SpatialData's own
-    ``region``/``instance_key`` mechanism. This keeps the mapping entirely
-    out of the main cells table's ``obs``. ``nucleus_count`` is not exported;
-    it is derivable on read via a simple group-by on this table.
+    builds a dedicated table - one row per mapped nucleus, independent of and
+    much smaller than the main cells table - annotating the layer's
+    ``nuclei`` :class:`~spatialdata.models.Labels2DModel` raster via
+    SpatialData's own ``region``/``instance_key`` mechanism. This keeps the
+    mapping entirely out of the main cells table's ``obs``. ``nucleus_count``
+    is not exported; it is derivable on read via a simple group-by on this
+    table. Nuclei with no valid cell assignment (orphan nuclei, or a stale
+    map entry after boundaries were filtered without a ``.sync()``) are
+    skipped rather than exported with a bogus ``cell_id``.
 
     Args:
         xd: Source :class:`InSituData` object.
@@ -421,9 +424,21 @@ def _transform_nucleus_map_for_spatialdata(
                 continue
 
             cell_names = celldata.table.obs_names
+            n_cells = len(cell_names)
+            nucleus_labels, cell_ids = [], []
+            for nucleus_idx, cell_idx in mapping.items():
+                if not is_valid_boundary_index(cell_idx, n_cells):
+                    # orphan nucleus (no assigned cell) or a stale map entry
+                    continue
+                nucleus_labels.append(nucleus_idx + 1)
+                cell_ids.append(cell_names[cell_idx])
+
+            if not nucleus_labels:
+                continue
+
             nucleus_map_obs = pd.DataFrame({
-                "nucleus_label": [k + 1 for k in mapping.keys()],
-                "cell_id": [cell_names[v] for v in mapping.values()],
+                "nucleus_label": nucleus_labels,
+                "cell_id": cell_ids,
             })
 
             nuclei_labels_key = _generate_spatialdata_key(
@@ -1017,16 +1032,16 @@ def _build_units_into_insitudata(
         data.add_units(su, key=unit_key)
 
 
-def _build_transcripts_into_insitudata(
-    data: InSituData,
-    transcripts_elements: dict[str, tuple[str, object]],
-    verbose: bool = True,
-    ) -> None:
-    """Reconstruct the (at most one) ``TRANSCRIPTS`` element into an :class:`InSituData`."""
-    if not transcripts_elements:
-        return
-    _, transcripts_df = next(iter(transcripts_elements.values()))
+def _assign_sdata_transcripts(data: InSituData, transcripts_df) -> None:
+    """Rename a SpatialData transcripts frame's x/y/z coordinate columns to
+    InSituPy's ``*_location`` names and assign it to ``data.transcripts``.
 
+    Shared by both SpatialData importers (the dialect reader and the foreign
+    reader). The dtype is left untouched on purpose: a categorical
+    ``feature_name`` (as produced by the exporter) is preserved, and the
+    serialization-time dictionary-width normalization is handled at the write
+    boundary (``_save_transcripts``), not here.
+    """
     rename_map = {}
     if "x" in transcripts_df.columns:
         rename_map["x"] = "x_location"
@@ -1036,9 +1051,19 @@ def _build_transcripts_into_insitudata(
         rename_map["z"] = "z_location"
     if rename_map:
         transcripts_df = transcripts_df.rename(columns=rename_map)
-
-    transcripts_df["feature_name"] = transcripts_df["feature_name"].astype(str)
     data.transcripts = transcripts_df
+
+
+def _build_transcripts_into_insitudata(
+    data: InSituData,
+    transcripts_elements: dict[str, tuple[str, object]],
+    verbose: bool = True,
+    ) -> None:
+    """Reconstruct the (at most one) ``TRANSCRIPTS`` element into an :class:`InSituData`."""
+    if not transcripts_elements:
+        return
+    _, transcripts_df = next(iter(transcripts_elements.values()))
+    _assign_sdata_transcripts(data, transcripts_df)
 
 
 def _build_annotations_into_insitudata(
@@ -1110,35 +1135,37 @@ def _build_insitudata_from_elements(
 def _add_images_to_insitudata(
     data: InSituData,
     sdata: SpatialData,
-    image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]],
-    # pixel_size: Optional[float],
+    images: dict[str, dict],
     verbose: bool
 ):
-    """Add images to InSituData.
+    """Add images to InSituData from keyed image specs.
 
     Args:
         data: InSituData object to add images to.
         sdata: SpatialData object containing the images.
-        image_data: Image data in one of the supported formats:
-            - Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
-            - List of tuples: [(image_key, pixel_size), ...] or [(image_key, pixel_size, is_rgb), ...]
-            - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
-            The optional is_rgb flag (default: False) indicates if the image is RGB.
+        images: {name: spec}, where spec is a dict with keys:
+            - key (str, required): SpatialData image element key.
+            - pixel_size (Number, required): microns/pixel.
+            - is_rgb (bool, optional, default False): forwarded to ``add_image``.
         verbose: Whether to print status messages.
     """
 
-    # Normalize to dict format
-    if isinstance(image_data, tuple):
-        image_dict = {image_data[0]: image_data}
-    elif isinstance(image_data, list):
-        image_dict = {t[0]: t for t in image_data}
-    else:
-        image_dict = image_data
+    for name, spec in images.items():
+        _validate_foreign_spec(
+            spec, name, "images",
+            required=("key", "pixel_size"),
+            allowed=("key", "pixel_size", "is_rgb"),
+        )
+        key = spec["key"]
+        pixel_size = spec["pixel_size"]
+        is_rgb = spec.get("is_rgb", False)
+        if not isinstance(key, str):
+            raise TypeError(f"images spec for '{name}': 'key' must be a string, got {type(key)}.")
+        if not isinstance(pixel_size, Number):
+            raise TypeError(f"images spec for '{name}': 'pixel_size' must be a number, got {type(pixel_size)}.")
+        if not isinstance(is_rgb, bool):
+            raise TypeError(f"images spec for '{name}': 'is_rgb' must be a boolean, got {type(is_rgb)}.")
 
-    for name, image_tuple in image_dict.items():
-        key = image_tuple[0]
-        pixel_size = image_tuple[1]
-        is_rgb = image_tuple[2] if len(image_tuple) > 2 else False
         if key not in sdata:
             if verbose:
                 logger.warning(f"Image key '{key}' not found in SpatialData")
@@ -1286,56 +1313,45 @@ def _centroids_from_labels(
     centroids *= pixel_size
     return centroids
 
-def _validate_image_data_format(
-    image_data: tuple[str, Number] | tuple[str, Number, bool] | list[tuple[str, Number] | tuple[str, Number, bool]] | dict[str, tuple[str, Number] | tuple[str, Number, bool]] | None
+def _validate_foreign_spec(
+    spec: dict,
+    layer_name: str,
+    modality: str,
+    required: tuple[str, ...],
+    allowed: tuple[str, ...],
 ) -> None:
     """
-    Validate the format of image_data parameter.
+    Validate a single keyed-dict spec entry for ``convert_from_foreign_spatialdata``.
 
     Args:
-        image_data: Image data in one of the supported formats:
-            - Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
-            - List of tuples: [(image_key, pixel_size), ...] or [(image_key, pixel_size, is_rgb), ...]
-            - Dictionary: {name: (image_key, pixel_size), ...} or {name: (image_key, pixel_size, is_rgb), ...}
+        spec: The spec dict for one layer/image name.
+        layer_name: The dict key (layer/image name) this spec belongs to - used
+            in error messages.
+        modality: One of "images", "cells", "units" - used in error messages.
+        required: Required spec keys.
+        allowed: All allowed spec keys (superset of ``required``).
 
     Raises:
-        ValueError: If the format structure is invalid.
-        TypeError: If element types are incorrect.
+        TypeError: If spec is not a dict.
+        ValueError: If a required key is missing or an unknown key is present.
     """
-    if image_data is None:
-        return
-
-    def _validate_tuple(t, context=""):
-        """Validate a single image tuple."""
-        if len(t) not in (2, 3):
-            raise ValueError(f"{context}tuple must have 2 or 3 elements (image_key, pixel_size[, is_rgb]), got {len(t)}")
-        if not isinstance(t[0], str):
-            raise TypeError(f"{context}image_key must be a string, got {type(t[0])}")
-        if not isinstance(t[1], Number):
-            raise TypeError(f"{context}pixel_size must be a number, got {type(t[1])}")
-        if len(t) == 3 and not isinstance(t[2], bool):
-            raise TypeError(f"{context}is_rgb must be a boolean, got {type(t[2])}")
-
-    if isinstance(image_data, tuple):
-        # Single tuple: (image_key, pixel_size) or (image_key, pixel_size, is_rgb)
-        _validate_tuple(image_data, "image_data ")
-    elif isinstance(image_data, list):
-        # List of tuples
-        for i, item in enumerate(image_data):
-            if not isinstance(item, tuple):
-                raise ValueError(f"image_data list must contain tuples, got {type(item)} at index {i}")
-            _validate_tuple(item, f"image_data[{i}] ")
-    elif isinstance(image_data, dict):
-        # Dictionary: {name: (image_key, pixel_size[, is_rgb])}
-        for name, value in image_data.items():
-            if not isinstance(value, tuple):
-                raise ValueError(f"image_data['{name}'] must be a tuple, got {type(value)}")
-            _validate_tuple(value, f"image_data['{name}'] ")
-    else:
+    if not isinstance(spec, dict):
         raise TypeError(
-            f"image_data must be a tuple, list of tuples, or dict, got {type(image_data)}. "
-            f"Expected format: (image_key, pixel_size[, is_rgb]), [(image_key, pixel_size[, is_rgb]), ...], "
-            f"or {{name: (image_key, pixel_size[, is_rgb]), ...}}"
+            f"{modality} spec for '{layer_name}' must be a dict, got {type(spec)}."
+        )
+
+    missing = [k for k in required if k not in spec]
+    if missing:
+        raise ValueError(
+            f"{modality} spec for '{layer_name}' is missing required key(s): {missing}. "
+            f"Allowed keys: {list(allowed)}"
+        )
+
+    unknown = [k for k in spec if k not in allowed]
+    if unknown:
+        raise ValueError(
+            f"{modality} spec for '{layer_name}' has unknown key(s): {unknown}. "
+            f"Allowed keys: {list(allowed)}"
         )
 
 def _validate_boundaries_data_format(

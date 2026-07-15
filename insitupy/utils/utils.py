@@ -89,6 +89,16 @@ def convert_to_list(elem):
     '''
     return [elem] if (isinstance(elem, str) or isinstance(elem, os.PathLike) or isinstance(elem, int)) else list(elem)
 
+def is_valid_boundary_index(index: int | None, n_boundary: int) -> bool:
+    """True if `index` is a real position into a boundary-cell array of length `n_boundary`.
+
+    Values from `BoundariesData.nucleus_to_cell_map` can be invalid for two reasons:
+    Xenium marks nuclei with no assigned cell using an out-of-range sentinel, and a map
+    can go stale after boundaries are filtered without a following `.sync()`. Callers
+    should treat both cases as "unmapped" rather than indexing with them.
+    """
+    return index is not None and 0 <= index < n_boundary
+
 def nested_dict_numpy_to_list(dictionary):
     """Recursively convert all NumPy arrays in a nested dict to plain Python lists.
 

@@ -149,15 +149,17 @@ def read_xenium(
         sdata = xenium(path)
         data = convert_from_foreign_spatialdata(
             sdata=sdata,
-            image_data={
-                "nuclei": ("morphology_focus", pixel_size),
-                "mip": ("morphology_mip", pixel_size)
+            images={
+                "nuclei": {"key": "morphology_focus", "pixel_size": pixel_size},
+                "mip":    {"key": "morphology_mip",   "pixel_size": pixel_size},
             },
-            cells_key="cell_circles",
-            table_key="table",
-            cell_boundaries_data=("cell_labels", pixel_size),
-            nucleus_boundaries_data=("nucleus_labels", pixel_size),
-            transcripts_key="transcripts",
+            cells={"main": {
+                "table_key": "table",
+                "cells_key": "cell_circles",
+                "cell_boundaries_data": ("cell_labels", pixel_size),
+                "nucleus_boundaries_data": ("nucleus_labels", pixel_size),
+            }},
+            transcripts="transcripts",
             slide_id=dataset_name,
             sample_id=sample_name,
             method_name="Xenium"
@@ -363,15 +365,12 @@ def read_visium(
     # Convert to InSituData format
     data = convert_from_foreign_spatialdata(
         sdata=sdata,
-        image_data={
-            "hires": (f"{dataset_id}_hires_image", hires_pixel_size, True),
-            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True),
+        images={
+            "hires":  {"key": f"{dataset_id}_hires_image",  "pixel_size": hires_pixel_size,  "is_rgb": True},
+            "lowres": {"key": f"{dataset_id}_lowres_image", "pixel_size": lowres_pixel_size, "is_rgb": True},
         },
-        table_key="table",
-        build_cells=False,          # units-only: spots go to .units, not .cells
-        units_key=dataset_id,
-        unit_type="visium",
-        transcripts_key=None,       # Visium has no single-molecule transcripts
+        units={"visium": {"table_key": "table", "units_key": dataset_id, "unit_type": "visium"}},
+        transcripts=None,           # Visium has no single-molecule transcripts
         slide_id=dataset_name,
         sample_id=sample_name,
         method_name="visium",

@@ -58,6 +58,7 @@ if WITH_NAPARI:
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
     from insitupy.utils._helpers import _get_expression_values
+    from insitupy.utils.utils import is_valid_boundary_index
 
     from ._layers import (
         _add_geometries_as_layer,
@@ -176,7 +177,7 @@ if WITH_NAPARI:
 
         names = [
             cell_names_boundary[b]
-            if b is not None and 0 <= b < len(cell_names_boundary)
+            if is_valid_boundary_index(b, len(cell_names_boundary))
             else "unmapped"
             for b in boundary_indices
         ]

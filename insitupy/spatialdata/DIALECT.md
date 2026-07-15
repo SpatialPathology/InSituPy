@@ -122,6 +122,12 @@ deriving on read avoids storing a second, possibly-inconsistent field. Absent en
 ordinary (non-multinucleated) case - `nucleus_to_cell_map`/`nucleus_count` reconstruct as `None`,
 matching `BoundariesData`'s own "not available, assume 1:1" semantics.
 
+Not every nucleus mask necessarily gets a row: Xenium marks nuclei that were never assigned to a
+cell (orphan nuclei) with an out-of-range `cell_index`, and a map can go stale after boundaries
+are filtered without a following `.sync()`. Both are excluded from the exported table rather than
+resolved to a bogus `cell_id` (see `insitupy.utils.utils.is_valid_boundary_index`, the shared
+predicate also used by the napari label-alignment path).
+
 ### `TABLES.<layer>`
 
 `InSituExperiment.build_table()` writes an on-disk, per-cells-layer concatenated union `AnnData`
@@ -231,3 +237,21 @@ them. Pre-converting the column to a **known** categorical
 **8.41 s** (~2.25x faster) - this optimization is applied unconditionally for dask-backed
 transcript tables. For experiments where even this is too slow, pass
 `include_transcripts=False` to `convert_to_spatialdata()` to skip transcript export entirely.
+
+## Transcript `feature_name` dtype invariant
+
+`InSituData.transcripts["feature_name"]` is a **known categorical** on export (see
+"Transcript export cost" above). The invariant and who enforces it:
+
+- **Export** pre-computes known categories (`.cat.as_known()`) for `PointsModel.parse` speed.
+- **Write** (`insitupy/containers/io.py::_save_transcripts`) forces a uniform `int32`
+  dictionary index across partitions for every categorical column, so a partitioned store
+  whose partitions carry independently-sized dictionary indices still serializes against one
+  schema.
+- **Importers** (the dialect reader and `convert_from_foreign_spatialdata`) must never cast
+  the column to `str` - doing so discards the categorical dtype and makes the lazy transcript
+  viewer's `.unique()` O(rows) instead of O(#categories).
+
+The raw Xenium reader (`read_xenium`) leaves `feature_name` as `string[pyarrow]`; that is
+intentional and needs no normalization (its `.unique()` is already cheap - measured 539 genes
+in 0.38 s on a real bundle).

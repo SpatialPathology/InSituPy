@@ -10,8 +10,6 @@ import numpy as np
 import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 
-from ..utils.utils import convert_to_list
-
 logger = logging.getLogger(__name__)
 
 # force geopandas to use shapely. Default in future versions of geopandas.
@@ -134,6 +132,17 @@ def read_qupath_geojson(file: str | os.PathLike | Path) -> pd.DataFrame:
     # Return the transformed DataFrame
     return dataframe
 
+def _to_json_native(entry):
+    """Coerce numpy arrays/scalars (and nested lists/tuples of them) to JSON-native
+    Python types so pyogrio serializes them as real JSON, not a repr string."""
+    if isinstance(entry, np.ndarray):
+        return entry.tolist()
+    if isinstance(entry, (list, tuple)):
+        return [_to_json_native(x) for x in entry]
+    if isinstance(entry, np.generic):
+        return entry.item()
+    return entry
+
 def write_qupath_geojson(dataframe: GeoDataFrame,
                          file: str | os.PathLike | Path
                          ):
@@ -159,15 +168,7 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
             classification_dict = {}
 
             for column in existing_columns_to_move:
-                entry = row[column]
-
-                # convert numpy arrays to lists
-                if isinstance(entry, np.ndarray):
-                    entry = convert_to_list(entry)
-                elif isinstance(entry, tuple):
-                    entry = convert_to_list(entry)
-
-                classification_dict[column] = entry
+                classification_dict[column] = _to_json_native(row[column])
             # Append the dictionary to the list
             classification_list.append(classification_dict)
 
