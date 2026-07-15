@@ -181,12 +181,29 @@ def _read_boundaries_from_celldata_zarr(
         seg_mask_value = None
 
     # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+)
-    # Stored as a 2D array with columns [nucleus_index, cell_index]
     try:
-        nucleus_map_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
-        nucleus_to_cell_map = {int(row[0]): int(row[1]) for row in nucleus_map_arr}
+        # current format (0.12.0b7+): two parallel arrays [nucleus_index] / [cell_name]
+        nuc_idx_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map/nucleus_index").compute()
+        cell_name_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map/cell_name").compute()
+        nucleus_to_cell_map = {int(i): str(n) for i, n in zip(nuc_idx_arr, cell_name_arr)}
     except (ArrayNotFoundError, TypeError):
-        nucleus_to_cell_map = None  # Not available in older datasets
+        try:
+            # legacy (pre-0.12.0b7) position-based format: flat [[nucleus_idx, row_position], ...]
+            legacy_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
+            n_cells = len(np.asarray(cell_names))
+            if not all(0 <= int(row[1]) < n_cells for row in legacy_arr):
+                warnings.warn(
+                    "Saved nucleus_to_cell_map uses the legacy position-based format and is "
+                    "inconsistent with the cell table (likely filtered by an older InSituPy "
+                    "that did not maintain it). Dropping it; nuclei will be treated as 1:1 "
+                    "with cells. Re-read from raw data to restore multinucleated-cell mapping.",
+                    stacklevel=2)
+                nucleus_to_cell_map = None
+            else:
+                names = np.asarray(cell_names).astype(str)
+                nucleus_to_cell_map = {int(row[0]): str(names[int(row[1])]) for row in legacy_arr}
+        except (ArrayNotFoundError, TypeError):
+            nucleus_to_cell_map = None  # Not available in older datasets
 
     # Read nucleus_count (number of nuclei per cell)
     try:
@@ -202,7 +219,7 @@ def _read_boundaries_from_celldata_zarr(
         nucleus_count=nucleus_count
     )
 
-    if not boundaries.nucleus_map_is_consistent(len(np.asarray(cell_names))):
+    if not boundaries.nucleus_map_is_consistent(np.asarray(cell_names)):
         warnings.warn(
             "Saved nucleus_to_cell_map / nucleus_count is inconsistent with the cell table "
             "(likely filtered by an older InSituPy that did not maintain it). Dropping it; "

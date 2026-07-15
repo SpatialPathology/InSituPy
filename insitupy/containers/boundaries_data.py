@@ -53,12 +53,13 @@ class BoundariesData(DeepCopyMixin):
             cell_names (Union[np.ndarray, List]): Cell names which need to correspond to `.obs_names` in the `.table` of `CellData`.
             seg_mask_value (Optional[Union[np.ndarray, List]]): Segmentation mask values. Required to have the same length as `cell_names`.
                 Specifies which values in the "cells" segmentation mask correspond to which cell name.
-            nucleus_to_cell_map (Optional[Dict[int, int]]): Mapping from nucleus index (0-indexed) to the
-                parent cell's row index into `cell_names`/`seg_mask_value` (not a cell label/mask value).
+            nucleus_to_cell_map (Optional[Dict[int, str]]): Mapping from nucleus index (0-indexed) to the
+                parent cell's name (matching `cell_names`/`table.obs_names`), not a row position or mask value.
                 For Xenium v2.0+ with multinucleated cells, this allows mapping each nucleus to its parent cell.
                 To look up a nucleus mask value N, use: `nucleus_to_cell_map[N - 1]` (since mask values are 1-indexed).
-                Row indices are only valid for the current `cell_names` order; `CellData.sync()` remaps them
-                whenever cells are filtered or reordered.
+                A name-based value survives filtering/reordering by construction; `CellData.sync()` drops entries
+                whose cell name is no longer present rather than remapping positions. Older on-disk stores using
+                the pre-0.12.0b7 position-based format are transparently converted to this representation on load.
                 If None, assumes 1:1 mapping between nuclei and cells (Xenium v1.x behavior).
             nucleus_count (Optional[np.ndarray]): Array with the number of nuclei per cell.
                 Useful for identifying multinucleated cells. If None, not available.
@@ -147,9 +148,10 @@ class BoundariesData(DeepCopyMixin):
     @property
     def nucleus_to_cell_map(self):
         """Mapping from nucleus index (0-based, i.e. nucleus raster label - 1) to the parent
-        cell's row index into `cell_names`/`seg_mask_value`. Row indices are only valid for
-        the current `cell_names` order; `CellData.sync()` keeps them aligned across
-        filtering/reordering. None if not available (v1.x data)."""
+        cell's name (matching `cell_names`/`table.obs_names`). A name-based value survives
+        filtering/reordering by construction; `CellData.sync()` drops entries whose cell name
+        is no longer present. Older on-disk stores using the pre-0.12.0b7 position-based format
+        are transparently converted on load. None if not available (v1.x data)."""
         return self._nucleus_to_cell_map
 
     @property
@@ -157,18 +159,20 @@ class BoundariesData(DeepCopyMixin):
         """Array with number of nuclei per cell. None if not available."""
         return self._nucleus_count
 
-    def nucleus_map_is_consistent(self, n_cells: int | None = None) -> bool:
-        """True if nucleus_to_cell_map/nucleus_count are consistent with n_cells.
+    def nucleus_map_is_consistent(self, cell_names: np.ndarray | None = None) -> bool:
+        """True if nucleus_to_cell_map/nucleus_count are consistent with cell_names.
 
-        Cheap check: map values must be valid row indices [0, n_cells); nucleus_count
-        length must equal n_cells. Does not read the rasters.
+        Cheap check: map values must be names present in cell_names; nucleus_count
+        length must equal len(cell_names). Does not read the rasters.
         """
-        if n_cells is None:
-            n_cells = len(self._cell_names)
+        if cell_names is None:
+            cell_names = self._cell_names.compute()
+        cell_names = np.asarray(cell_names)
         if self._nucleus_to_cell_map is not None:
-            if not all(0 <= int(v) < n_cells for v in self._nucleus_to_cell_map.values()):
+            name_set = set(cell_names.astype(str))
+            if not all(v in name_set for v in self._nucleus_to_cell_map.values()):
                 return False
-        if self._nucleus_count is not None and len(np.asarray(self._nucleus_count)) != n_cells:
+        if self._nucleus_count is not None and len(np.asarray(self._nucleus_count)) != len(cell_names):
             return False
         return True
 
@@ -180,7 +184,7 @@ class BoundariesData(DeepCopyMixin):
         """
         smv = self._seg_mask_value.compute()
         if (mask_key == "nuclei" and self._nucleus_to_cell_map is not None
-                and self.nucleus_map_is_consistent(len(smv))):
+                and self.nucleus_map_is_consistent()):
             return np.array(sorted(self._nucleus_to_cell_map.keys()), dtype=np.uint32) + 1
         return smv
 
@@ -524,9 +528,11 @@ class BoundariesData(DeepCopyMixin):
 
             # Save nucleus_to_cell_map if available (for multinucleated cell support)
             if self._nucleus_to_cell_map is not None:
-                # Store as 2D array with columns [nucleus_index, cell_index]
-                nucleus_map_arr = np.array([[k, v] for k, v in self._nucleus_to_cell_map.items()], dtype=np.int64)
-                _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map", da.from_array(nucleus_map_arr))
+                # Store as two parallel 1-D arrays: nucleus index (int) and parent cell name (str)
+                nuc_indices = np.array(list(self._nucleus_to_cell_map.keys()), dtype=np.int64)
+                cell_name_values = np.array(list(self._nucleus_to_cell_map.values()), dtype=str)
+                _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map/nucleus_index", da.from_array(nuc_indices))
+                _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map/cell_name", da.from_array(cell_name_values))
 
             # Save nucleus_count if available
             if self._nucleus_count is not None:

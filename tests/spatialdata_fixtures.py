@@ -100,7 +100,7 @@ def make_insitudata(
         nucleus_to_cell_map = None
         nucleus_count = None
         if with_multinucleated_cells:
-            nucleus_to_cell_map = {0: 0, 1: 0, 2: 1}
+            nucleus_to_cell_map = {0: cell_names[0], 1: cell_names[0], 2: cell_names[1]}
             nucleus_count = np.zeros(n_cells, dtype=int)
             nucleus_count[0] = 2
             nucleus_count[1] = 1

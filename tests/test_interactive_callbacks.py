@@ -136,7 +136,7 @@ def test_build_labels_properties_keeps_all_columns_aligned_for_cells():
 
 def test_build_labels_properties_handles_unmapped_or_out_of_bounds_nuclei():
     viewer_config = SimpleNamespace(
-        boundaries=SimpleNamespace(nucleus_to_cell_map={0: 0, 1: 5}),
+        boundaries=SimpleNamespace(nucleus_to_cell_map={0: "cell_a", 1: "ghost"}),
         adata=SimpleNamespace(
             obs=pd.DataFrame({"cell_area": [4.0]}),
             obs_names=pd.Index(["cell_a"]),

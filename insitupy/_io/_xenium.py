@@ -36,20 +36,19 @@ def _read_nucleus_to_cell_map_from_store(
     Returns
     -------
     dict
-        Mapping from nucleus index (0-indexed) to cell index (0-indexed).
+        Mapping from nucleus index (0-indexed) to the parent cell's name.
         For v2.0+ data with multinucleated cells, reads from polygon_sets.
-        For v1.x data, creates 1:1 mapping.
+        For v1.x data, creates a 1:1 mapping.
     """
     try:
         nucleus_cell_index = da.from_zarr(store, component="polygon_sets/0/cell_index").compute()
-        # v2.0+: nucleus_cell_index[i] gives the cell index for nucleus polygon i
-        # To look up a mask value N, use: nucleus_to_cell_map[N - 1]
+        # v2.0+: nucleus_cell_index[i] gives the cell row position for nucleus polygon i
         nucleus_to_cell_map = {
-            i: int(nucleus_cell_index[i]) for i in range(len(nucleus_cell_index))
+            i: str(cell_names[int(nucleus_cell_index[i])]) for i in range(len(nucleus_cell_index))
         }
     except (ArrayNotFoundError, TypeError):
         # v1.x fallback: assume 1:1 mapping (nucleus index = cell index)
-        nucleus_to_cell_map = {i: i for i in range(len(cell_names))}
+        nucleus_to_cell_map = {i: str(cell_names[i]) for i in range(len(cell_names))}
 
     return nucleus_to_cell_map
 

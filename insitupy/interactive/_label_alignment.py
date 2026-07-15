@@ -34,7 +34,11 @@ def compute_label_cell_indices(label_ids, cell_names_boundary, obs_names,
     boundary_to_adata = map_boundary_to_adata_positions(obs_names, cell_names_boundary)
     n_boundary = len(boundary_to_adata)
     if mask_key == "nuclei" and nucleus_to_cell_map is not None:
-        boundary_indices = [nucleus_to_cell_map.get(int(lid) - 1, None) for lid in label_ids]
+        name_to_boundary_pos = {str(n): i for i, n in enumerate(np.asarray(cell_names_boundary))}
+        boundary_indices = [
+            name_to_boundary_pos.get(nucleus_to_cell_map.get(int(lid) - 1), None)
+            for lid in label_ids
+        ]
     else:
         if len(label_ids) != n_boundary:
             raise ValueError(

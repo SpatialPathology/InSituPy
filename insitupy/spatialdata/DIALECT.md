@@ -122,11 +122,15 @@ deriving on read avoids storing a second, possibly-inconsistent field. Absent en
 ordinary (non-multinucleated) case - `nucleus_to_cell_map`/`nucleus_count` reconstruct as `None`,
 matching `BoundariesData`'s own "not available, assume 1:1" semantics.
 
-Not every nucleus mask necessarily gets a row: Xenium marks nuclei that were never assigned to a
-cell (orphan nuclei) with an out-of-range `cell_index`, and a map can go stale after boundaries
-are filtered without a following `.sync()`. Both are excluded from the exported table rather than
-resolved to a bogus `cell_id` (see `insitupy.utils.utils.is_valid_boundary_index`, the shared
-predicate also used by the napari label-alignment path).
+Not every nucleus mask necessarily gets a row: `BoundariesData.nucleus_to_cell_map` values are
+cell names, and an orphan nucleus (never assigned to a cell by Xenium) or a stale map entry
+(boundaries filtered without a following `.sync()`) can reference a name that is no longer
+present in `cell_names`/`table.obs_names`. Both are excluded from the exported table via a
+membership check against the current cell names, rather than resolved to a bogus `cell_id`. This
+is a different check from `insitupy.utils.utils.is_valid_boundary_index`, which validates
+boundary *row positions* (still used by the napari label-alignment path,
+`insitupy/interactive/_label_alignment.py`), since the exported table's `cell_id` values are
+never row positions to begin with.
 
 ### `TABLES.<layer>`
 

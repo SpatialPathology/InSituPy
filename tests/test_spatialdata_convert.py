@@ -140,8 +140,7 @@ class TestNucleusMapExport:
         skipped on export rather than crash or produce a bogus cell_id."""
         xd = make_insitudata(n_cells=4, with_boundaries=True, with_multinucleated_cells=True)
         boundaries = xd.cells["main"].boundaries
-        n_cells = len(xd.cells["main"].table)
-        boundaries._nucleus_to_cell_map[3] = n_cells  # orphan: one past the valid range
+        boundaries._nucleus_to_cell_map[3] = "orphan-nonexistent-cell"  # no such cell name
 
         sdata = convert_to_spatialdata(xd)  # must not raise IndexError
 

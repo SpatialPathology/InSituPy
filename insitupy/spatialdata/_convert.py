@@ -39,7 +39,7 @@ from insitupy._core.data import InSituData
 from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.images.axes import ImageAxes
-from insitupy.utils.utils import convert_to_list, is_valid_boundary_index
+from insitupy.utils.utils import convert_to_list
 
 logger = logging.getLogger(__name__)
 
@@ -425,22 +425,22 @@ def _transform_nucleus_map_for_spatialdata(
                 continue
 
             cell_names = celldata.table.obs_names
-            n_cells = len(cell_names)
+            cell_names_set = set(cell_names)
             nucleus_labels, cell_ids = [], []
             n_skipped = 0
-            for nucleus_idx, cell_idx in mapping.items():
-                if not is_valid_boundary_index(cell_idx, n_cells):
+            for nucleus_idx, cell_name in mapping.items():
+                if cell_name not in cell_names_set:
                     # orphan nucleus (no assigned cell) or a stale map entry
                     n_skipped += 1
                     continue
                 nucleus_labels.append(nucleus_idx + 1)
-                cell_ids.append(cell_names[cell_idx])
+                cell_ids.append(cell_name)
 
             if n_skipped > 0:
                 warnings.warn(
                     f"Skipped {n_skipped} nucleus_to_cell_map entr{'y' if n_skipped == 1 else 'ies'} "
-                    f"for cell layer '{cell_key}' with an out-of-range cell index (orphan nucleus, or "
-                    "a stale map from before CellData.sync()).", stacklevel=2)
+                    f"for cell layer '{cell_key}' referencing an unknown cell name (orphan nucleus, "
+                    "or a stale map from before CellData.sync()).", stacklevel=2)
 
             if not nucleus_labels:
                 continue
@@ -970,9 +970,8 @@ def _build_cells_into_insitudata(
             nucleus_map_entry = parts.get("nucleus_map")
             if nucleus_map_entry is not None:
                 _, nmap = nucleus_map_entry
-                cell_index = {n: idx for idx, n in enumerate(cell_names)}
                 nucleus_to_cell_map = {
-                    int(row.nucleus_label) - 1: cell_index[row.cell_id]
+                    int(row.nucleus_label) - 1: str(row.cell_id)
                     for row in nmap.obs.itertuples()
                 }
                 nucleus_count = (

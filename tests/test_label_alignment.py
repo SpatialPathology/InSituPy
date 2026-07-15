@@ -64,8 +64,8 @@ def test_nuclei_branch_maps_through_nucleus_to_cell_map():
     obs_names = ["C", "A"]
     cell_names_boundary = ["A", "B", "C", "D"]
     label_ids = np.array([1, 2])  # nucleus label ids (1-based)
-    # nucleus label_id - 1 -> boundary index
-    nucleus_to_cell_map = {0: 2, 1: 0}  # nucleus 1 -> boundary idx 2 ("C"), nucleus 2 -> boundary idx 0 ("A")
+    # nucleus label_id - 1 -> parent cell name
+    nucleus_to_cell_map = {0: "C", 1: "A"}  # nucleus 1 -> cell "C", nucleus 2 -> cell "A"
 
     boundary_indices, adata_indices = compute_label_cell_indices(
         label_ids=label_ids,
@@ -109,13 +109,13 @@ def test_nuclei_branch_without_nucleus_to_cell_map_falls_back_to_position():
 
 
 def test_stale_nucleus_to_cell_map_out_of_range_maps_to_none():
-    """A stale nucleus_to_cell_map entry pointing past the current boundary
-    array (e.g. after a sync() that dropped boundary rows without updating the
-    map) resolves to None instead of raising an IndexError."""
+    """A stale nucleus_to_cell_map entry referencing a cell name no longer present
+    in the current boundaries (e.g. after a sync() that dropped boundary rows
+    without updating the map) resolves to None instead of raising an error."""
     obs_names = ["A", "B"]
     cell_names_boundary = ["A", "B"]
     label_ids = np.array([1, 2])
-    nucleus_to_cell_map = {0: 0, 1: 5}  # position 5 no longer exists
+    nucleus_to_cell_map = {0: "A", 1: "Z"}  # "Z" no longer exists
 
     boundary_indices, adata_indices = compute_label_cell_indices(
         label_ids=label_ids,
@@ -125,7 +125,7 @@ def test_stale_nucleus_to_cell_map_out_of_range_maps_to_none():
         mask_key="nuclei",
     )
 
-    assert boundary_indices == [0, 5]
+    assert boundary_indices == [0, None]
     assert adata_indices == [0, None]
 
 
@@ -147,7 +147,7 @@ def _make_multinucleated_boundaries():
     boundaries = BoundariesData(
         cell_names=["c1", "c2", "c3"],
         seg_mask_value=[10, 20, 30],
-        nucleus_to_cell_map={0: 0, 1: 0, 2: 1, 3: 2, 4: 2},
+        nucleus_to_cell_map={0: "c1", 1: "c1", 2: "c2", 3: "c3", 4: "c3"},
     )
     cell_mask = np.array([[0, 10, 20], [30, 20, 10]], dtype=np.uint32)
     nuclei_mask = np.array([[0, 1, 3], [5, 4, 2]], dtype=np.uint32)

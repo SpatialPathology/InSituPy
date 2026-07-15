@@ -221,8 +221,8 @@ def test_viewer_preflight_warns_without_syncing_unsynced_cells():
 
 
 def test_sync_remaps_nucleus_to_cell_map_after_sparse_filter():
-    # nucleus 0,1 -> c1 (row 0, multinucleated); nucleus 2 -> c2 (row 1); nucleus 3 -> c3 (row 2)
-    nucleus_to_cell_map = {0: 0, 1: 0, 2: 1, 3: 2}
+    # nucleus 0,1 -> c1 (multinucleated); nucleus 2 -> c2; nucleus 3 -> c3
+    nucleus_to_cell_map = {0: "c1", 1: "c1", 2: "c2", 3: "c3"}
     boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
     table = _create_table(["c1", "c2", "c3"])
     celldata = CellData(table=table, boundaries=boundaries)
@@ -234,16 +234,12 @@ def test_sync_remaps_nucleus_to_cell_map_after_sparse_filter():
     assert new_cell_names == ["c1", "c3"]
 
     new_map = filtered.boundaries.nucleus_to_cell_map
-    n_new = len(new_cell_names)
 
-    # every surviving map value is a valid row index into the new table
-    assert all(0 <= v < n_new for v in new_map.values())
-    # the nucleus that belonged to the removed cell (c2) is gone
-    assert 2 not in new_map
-    # surviving nuclei still resolve, by name, to the same cell they did before the filter
-    assert new_cell_names[new_map[0]] == "c1"
-    assert new_cell_names[new_map[1]] == "c1"
-    assert new_cell_names[new_map[3]] == "c3"
+    # values are unchanged (names, not positions) - only the entry referencing the
+    # removed cell (c2) is gone; no arithmetic remap needed.
+    assert new_map == {0: "c1", 1: "c1", 3: "c3"}
+    # every surviving map value is still a real cell name
+    assert all(v in new_cell_names for v in new_map.values())
 
 
 def test_sync_reindexes_nucleus_count_after_sparse_filter():
@@ -259,14 +255,14 @@ def test_sync_reindexes_nucleus_count_after_sparse_filter():
 
 
 def test_sync_invalidates_unrepairable_nucleus_to_cell_map():
-    # value 5 does not index any of the 3 boundary rows even before filtering -
-    # the demo's stale-identity-map shape in miniature.
-    nucleus_to_cell_map = {0: 0, 1: 5}
+    # "ghost" was never a valid cell name, even before filtering - genuine
+    # corruption, not a name dropped by legitimate filtering.
+    nucleus_to_cell_map = {0: "c1", 1: "ghost"}
     boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
     table = _create_table(["c1", "c2", "c3"])
     celldata = CellData(table=table, boundaries=boundaries)
 
-    with pytest.warns(UserWarning, match="nucleus_to_cell_map is inconsistent"):
+    with pytest.warns(UserWarning, match="referencing a cell name not present"):
         celldata.sync()
 
     assert celldata.boundaries.nucleus_to_cell_map is None
