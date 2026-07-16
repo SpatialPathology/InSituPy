@@ -166,6 +166,7 @@ docs/source/generated/
 !.claude/commands/
 !.claude/settings.json
 !.claude/setup-notes.md
+!.claude/skills/
 
 # MCP client config — machine-specific (local exe path or uvx opt-in); see
 # tools/mcp_server/README.md for how to create your own.
