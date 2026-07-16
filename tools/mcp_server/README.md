@@ -100,11 +100,11 @@ The server should start. Press Ctrl+C to stop.
 }
 ```
 
-On Windows, replace with `.venv\Scripts\insitupy-mcp.exe`.
+On Windows, replace with `.venv\\Scripts\\insitupy-mcp.exe`.
 
 ### Using Claude Code in this repository
 
-Claude Code auto-loads an `.mcp.json` file at the repo root. If you don't have one yet, create it with one of the two JSON blocks above:
+Claude Code auto-loads an `.mcp.json` file at the repo root. If you don't have one yet, create it with one of the two JSON blocks above (depending on Mac or Windows):
 
 - **`uvx` zero-install** — simplest, no local env needed, but always runs the last version published to PyPI, not your local edits.
 - **Local development setup** — use this if you want the server to reflect your own uncommitted source changes; point `command` at your own `.venv\Scripts\insitupy-mcp.exe` (Windows) or `.venv/bin/insitupy-mcp` (macOS/Linux) as shown above.
