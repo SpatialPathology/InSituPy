@@ -104,6 +104,34 @@ class TestToAnnDataUnchanged:
         with pytest.raises(ValueError, match="not found in metadata"):
             exp.to_anndata(label_col="nonexistent_col")
 
+    def test_x_preserved(self, tmp_path):
+        """Regression for the anndata 0.13 layers[None] bug: to_anndata() must not
+        silently return a table with X destroyed. See
+        .log/reports/260717/anndata-013-layers-fix/report-anndata-013-layers-fix.md.
+        """
+        n_samples, n_cells, n_genes = 2, 10, 5
+        exp = _make_experiment_with_path(
+            tmp_path, n_samples=n_samples, n_cells=n_cells, n_genes=n_genes
+        )
+        adata = exp.to_anndata()
+
+        assert adata.X is not None
+        assert adata.X.shape == (n_samples * n_cells, n_genes)
+
+        gene_names = [f"gene_{j}" for j in range(n_genes)]
+        expected = pd.concat(
+            [
+                pd.DataFrame(
+                    np.random.default_rng(i).integers(0, 20, size=(n_cells, n_genes)).astype(float),
+                    columns=gene_names,
+                )
+                for i in range(n_samples)
+            ],
+            ignore_index=True,
+        )
+        actual = pd.DataFrame(np.asarray(adata.X), columns=adata.var_names)[gene_names]
+        pd.testing.assert_frame_equal(actual, expected)
+
 
 class TestImportFromAnnDataUnchanged:
     def test_roundtrip_obs_column(self, tmp_path):
@@ -1038,11 +1066,13 @@ class TestPresenceReconstruction:
         exp.build_table()
 
         full_tbl = exp.table["main"]
+        assert full_tbl.X is not None, "X missing from base table"
         X_full = np.asarray(full_tbl.X)
         assert not np.isnan(X_full).any(), "NaN in base table"
 
         view = exp._subset([0, 1], as_view=True)
         view_tbl = view.table["main"]
+        assert view_tbl.X is not None, "X missing from view table"
         X_view = np.asarray(view_tbl.X)
         assert not np.isnan(X_view).any(), "NaN in view table"
 

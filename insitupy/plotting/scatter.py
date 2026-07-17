@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from insitupy._constants import with_insitupy_style
+from insitupy.utils._adata import _layer_names
 from insitupy.utils._colors import _warn_na_cells_hidden
 
 
@@ -98,7 +99,7 @@ def _get_color_values(
             if layer not in adata.layers:
                 raise KeyError(
                     f"Layer '{layer}' not found in adata.layers. "
-                    f"Available layers: {list(adata.layers)}"
+                    f"Available layers: {_layer_names(adata)}"
                 )
             expr = adata[:, key].layers[layer]
         else:
@@ -904,7 +905,7 @@ def embedding(
     if layer is not None and layer not in adata.layers:
         raise KeyError(
             f"Layer '{layer}' not found in adata.layers. "
-            f"Available layers: {list(adata.layers)}"
+            f"Available layers: {_layer_names(adata)}"
         )
 
     coords = adata.obsm[basis]

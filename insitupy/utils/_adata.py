@@ -104,6 +104,18 @@ def _extract_groups(
         return
 
 
+def _layer_names(adata: anndata.AnnData) -> list:
+    """
+    Return the keys of `adata.layers`, excluding the `None` key.
+
+    anndata >=0.13 stores `X` internally as `adata.layers[None]` (`X` remains a normal
+    attribute; `None` is just an alias key layered on top of it). Enumerating and deleting
+    `adata.layers` keys without filtering out `None` therefore silently destroys `X`. On
+    anndata <0.13 there is no `None` key, so this filter is a no-op - do not "simplify" it away.
+    """
+    return [key for key in adata.layers.keys() if key is not None]
+
+
 def _select_anndata_elements(
     adata,
     obs_keys=None,
@@ -209,17 +221,17 @@ def _select_anndata_elements(
 
     # .layers
     if layer_keys is None:
-        keys_to_remove = list(adata.layers.keys())
+        keys_to_remove = _layer_names(adata)
         for key in keys_to_remove:
             del adata.layers[key]
     elif layer_keys == 'all':
         pass  # Keep all keys
     else:
         layer_keys = convert_to_list(layer_keys)
-        missing_keys = [key for key in layer_keys if key not in adata.layers.keys()]
+        missing_keys = [key for key in layer_keys if key not in _layer_names(adata)]
         if missing_keys:
             logger.warning(f"Keys not found in adata.layers: {missing_keys}")
-        keys_to_remove = set(adata.layers.keys()) - set(layer_keys)
+        keys_to_remove = set(_layer_names(adata)) - set(layer_keys)
         for key in keys_to_remove:
             del adata.layers[key]
 

@@ -67,6 +67,8 @@ class TestTableReconstructedFromStoreEqualsOriginal:
         reconstructed = convert_table_from_spatialdata(sdata2, "main")
         assert reconstructed.obs_names.equals(original.obs_names)
         assert reconstructed.var_names.equals(original.var_names)
+        assert reconstructed.X is not None
+        assert original.X is not None
         np.testing.assert_allclose(np.asarray(reconstructed.X), np.asarray(original.X))
 
 
@@ -83,6 +85,8 @@ class TestTableReconstructedForSampleSubsetView:
         sdata2 = roundtrip_through_zarr(sdata, tmp_path, name="concat.zarr")
         reconstructed = convert_table_from_spatialdata(sdata2, "main", covered_labels=["sample_0"])
         assert reconstructed.var_names.equals(expected.var_names)
+        assert reconstructed.X is not None
+        assert expected.X is not None
         np.testing.assert_allclose(np.asarray(reconstructed.X), np.asarray(expected.X))
 
 

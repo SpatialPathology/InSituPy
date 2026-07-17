@@ -57,6 +57,7 @@ if WITH_NAPARI:
     )
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
     from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
+    from insitupy.utils._adata import _layer_names
     from insitupy.utils._helpers import _get_expression_values
     from insitupy.utils.utils import is_valid_boundary_index
 
@@ -530,7 +531,7 @@ if WITH_NAPARI:
         # else:
         if viewer_config.has_cells:
             data_names = data.cells.keys()
-            layer_names = ["main"] + list(data.cells.table.layers)
+            layer_names = ["main"] + _layer_names(data.cells.table)
 
             @magicgui(
                 call_button=False,
