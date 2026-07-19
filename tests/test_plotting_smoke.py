@@ -108,6 +108,227 @@ def test_spatial_smoke_calls_subplot_pipeline(monkeypatch):
     assert calls == {"setup": 1, "plot": 1, "save": 1}
 
 
+def test_dataconfig_filter_mode_defaults_to_none():
+    """Regression for a trailing-comma typo (`filter_mode: FilterMode | None = None,`)
+    that silently made the dataclass default a 1-tuple `(None,)` instead of `None`.
+    """
+    data_config = spatial_module.DataConfig()
+    assert data_config.filter_mode is None
+    assert data_config.filter_tuple is None
+
+
+def test_spatial_plot_config_and_data_config_not_clobbered(monkeypatch):
+    """A caller-provided plot_config/data_config's own field values must survive
+    when the caller doesn't also touch the matching top-level kwarg - regression for
+    the update_values() unconditional-override bug (fixed via _explicit_overrides()).
+    Explicit top-level kwargs must still win when actually passed.
+    """
+    captured = {}
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    def _fake_plot_to_subplots(
+        data, keys, cells_layer, fig, axs,
+        plot_config, layout_config, data_config, color_config,
+    ):
+        captured["plot_config"] = plot_config
+        captured["data_config"] = data_config
+
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", _fake_plot_to_subplots)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    custom_plot = spatial_module.PlotConfig(spot_size=99, alpha=0.3)
+    custom_data = spatial_module.DataConfig(region_tuple=("r", "name"))
+
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"],
+        plot_config=custom_plot, data_config=custom_data, show=False,
+    )
+    assert captured["plot_config"].spot_size == 99
+    assert captured["plot_config"].alpha == 0.3
+    assert captured["data_config"].region_tuple == ("r", "name")
+
+    # explicit top-level kwargs still win when actually passed
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"],
+        plot_config=spatial_module.PlotConfig(spot_size=99), spot_size=7, show=False,
+    )
+    assert captured["plot_config"].spot_size == 7
+
+    plt.close("all")
+
+
+def test_spatial_figsize_subplot_width_height_passthrough(monkeypatch):
+    """subplot_width/subplot_height/figsize must reach LayoutConfig.figsize via the
+    real calc_subplot_params(), mirroring the top-level params already on
+    pl.embedding(). Also guards against re-introducing the known update_values()
+    clobber bug: a caller-provided layout_config's own fields must survive when
+    the new top-level shortcuts are left at their None default.
+    """
+    captured = []
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        captured.append(layout_config)
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    # subplot_width/subplot_height reach LayoutConfig and drive the computed figsize
+    spatial_module.spatial(
+        data=object(), keys=["gene_a", "gene_b"], max_cols=2,
+        subplot_width=10, subplot_height=3, show=False,
+    )
+    assert captured[0].subplot_width == 10
+    assert captured[0].subplot_height == 3
+    assert captured[0].figsize == (10 * captured[0].n_cols, 3 * captured[0].n_rows)
+
+    # explicit figsize overrides the per-panel computation entirely
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"], figsize=(20.0, 15.0), show=False,
+    )
+    assert captured[1].figsize == (20.0, 15.0)
+
+    # a caller-provided layout_config's own subplot_width/height must survive when
+    # the top-level shortcuts aren't touched
+    custom_layout = spatial_module.LayoutConfig(subplot_width=12, subplot_height=9)
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"], layout_config=custom_layout, show=False,
+    )
+    assert captured[2].subplot_width == 12
+    assert captured[2].subplot_height == 9
+
+    plt.close("all")
+
+
+def test_spatial_figsize_with_subplot_width_warns_and_wins(monkeypatch):
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    with pytest.warns(UserWarning, match="figsize sets the total figure size"):
+        spatial_module.spatial(
+            data=object(), keys=["gene_a"],
+            figsize=(20.0, 15.0), subplot_width=10, show=False,
+        )
+    plt.close("all")
+
+
+def test_spatial_default_valued_kwarg_overrides_caller_config(monkeypatch):
+    """A top-level kwarg passed at its own default value must still override a
+    caller-provided config - regression for the `_explicit_overrides` heuristic
+    that used to conflate "not passed" with "passed == default" and silently
+    dropped alpha=1.0 / spot_size=10 / max_cols=4.
+    """
+    captured = {}
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        captured["layout_config"] = layout_config
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    def _fake_plot_to_subplots(
+        data, keys, cells_layer, fig, axs,
+        plot_config, layout_config, data_config, color_config,
+    ):
+        captured["plot_config"] = plot_config
+
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", _fake_plot_to_subplots)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"], alpha=1.0, spot_size=10,
+        plot_config=spatial_module.PlotConfig(alpha=0.3, spot_size=99),
+        show=False,
+    )
+    assert captured["plot_config"].alpha == 1.0
+    assert captured["plot_config"].spot_size == 10
+
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"], max_cols=4,
+        layout_config=spatial_module.LayoutConfig(max_cols=2),
+        show=False,
+    )
+    assert captured["layout_config"].max_cols == 4
+
+    plt.close("all")
+
+
+def test_spatial_ndarray_xlim_does_not_raise(monkeypatch):
+    """xlim passed as a bare numpy array must not raise - regression for
+    `_explicit_overrides`'s old `value != default` comparison, which produced an
+    elementwise array and raised "ambiguous truth value" for ndarray inputs.
+    """
+    captured = {}
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    def _fake_plot_to_subplots(
+        data, keys, cells_layer, fig, axs,
+        plot_config, layout_config, data_config, color_config,
+    ):
+        captured["plot_config"] = plot_config
+
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", _fake_plot_to_subplots)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    spatial_module.spatial(
+        data=object(), keys=["gene_a"], xlim=np.array([0, 100]), show=False,
+    )
+    assert np.array_equal(captured["plot_config"].xlim, np.array([0, 100]))
+
+    plt.close("all")
+
+
+def test_spatial_figsize_from_caller_layout_config_warns_with_subplot_width(monkeypatch):
+    """The figsize/subplot precedence warning must also fire when the effective
+    figsize comes from a caller-provided layout_config, not just a top-level
+    figsize kwarg - regression for the warning only checking the top-level param.
+    """
+    monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: False)
+    monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", lambda *a, **k: None)
+
+    def _fake_setup_subplots(layout_config, verbose=False):
+        fig, ax = plt.subplots(1, 1, figsize=(1, 1))
+        return fig, np.array([ax])
+
+    monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
+    monkeypatch.setattr(spatial_module, "_plot_to_subplots", lambda *a, **k: None)
+    monkeypatch.setattr(spatial_module, "save_and_show_figure", lambda *a, **k: None)
+
+    with pytest.warns(UserWarning, match="figsize sets the total figure size"):
+        spatial_module.spatial(
+            data=object(), keys=["gene_a"],
+            layout_config=spatial_module.LayoutConfig(figsize=(30, 20)),
+            subplot_width=10, show=False,
+        )
+    plt.close("all")
+
+
 def test_spatial_reused_layout_config_not_mutated_across_calls(monkeypatch):
     """Reusing one ``layout_config`` across spatial() calls must not leak a stale
     figsize. Regression for oversized markers / wrong figure size when plotting a

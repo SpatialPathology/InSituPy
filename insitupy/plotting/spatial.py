@@ -90,7 +90,7 @@ class DataConfig(_UpdatablePlottingConfig):
     image_key: str | None = None
 
     # filters
-    filter_mode: FilterMode | None = None,
+    filter_mode: FilterMode | None = None
     filter_tuple: tuple | None = None
 
 @dataclass
@@ -263,32 +263,60 @@ class LayoutConfig(_UpdatablePlottingConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
+class _Unset:
+    """Sentinel marking a ``spatial()`` argument the caller did not pass.
+
+    Lets ``_explicit_overrides`` tell "argument omitted" apart from "argument
+    passed a value that happens to equal a config default", so an explicitly
+    passed top-level kwarg always overrides a caller-provided config.
+    """
+    __slots__ = ()
+
+    def __repr__(self):
+        return "UNSET"
+
+_UNSET = _Unset()
+
+def _explicit_overrides(**kwargs) -> dict:
+    """Keep only kwargs the caller explicitly passed at the top level.
+
+    A value equal to the ``_UNSET`` sentinel means the corresponding ``spatial()``
+    argument was omitted, so it is dropped and the caller-provided
+    plot_config/layout_config/data_config keeps its own value for that field.
+    Any other value - including one equal to a config default, or a numpy array -
+    is forwarded to ``update_values()``.
+    """
+    return {name: value for name, value in kwargs.items() if value is not _UNSET}
+
 @with_insitupy_style
 def spatial(
     data: InSituData | InSituExperiment,
     keys: str | list[str],
     cells_layer: str | None = None,
-    layer: str | None = None,
+    layer: str | None = _UNSET,
 
     # data attribute keys
-    region_tuple: tuple[str, str] | None = None,
-    annotation_tuple: tuple[str, str | list[str] | None] | None = None,
+    region_tuple: tuple[str, str] | None = _UNSET,
+    annotation_tuple: tuple[str, str | list[str] | None] | None = _UNSET,
     annotations_key: tuple[str, str | list[str] | None] | None = None,
-    image_key: str | None = None,
+    image_key: str | None = _UNSET,
 
     # filters
-    filter_mode: FilterMode | None = None,
-    filter_tuple: tuple | None = None,
+    filter_mode: FilterMode | None = _UNSET,
+    filter_tuple: tuple | None = _UNSET,
 
     # plotting configs
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
-    spot_size: float = 10,
-    alpha: float = 1.0,
-    nan_color: str | None = None,
+    xlim: tuple[float, float] | None = _UNSET,
+    ylim: tuple[float, float] | None = _UNSET,
+    spot_size: float = _UNSET,
+    alpha: float = _UNSET,
+    nan_color: str | None = _UNSET,
 
     # layout configs
-    max_cols: int | None = 4,
+    max_cols: int | None = _UNSET,
+    figsize: tuple[float, float] | None = _UNSET,
+    subplot_width: float | None = _UNSET,
+    subplot_height: float | None = _UNSET,
 
     # save configs
     savepath: str | None = None,
@@ -330,15 +358,46 @@ def spatial(
         ylim (tuple of float, optional): Y-axis limits.
         spot_size (float): Marker size for cells. Default is 10.
         alpha (float): Transparency for plotted markers. Default is 1.0.
+        nan_color (str, optional): Color for cells with missing values (NaN) in
+            categorical columns. If None (default), NaN cells are excluded from the
+            plot. Has no effect on continuous columns.
         max_cols (int, optional): Maximum number of subplot columns. Default is 4.
+        figsize (tuple[float, float], optional): Overall figure size (width, height) in
+            inches. Overrides ``subplot_width``/``subplot_height`` when provided. Default
+            None (derived from ``subplot_width``/``subplot_height``).
+        subplot_width (float, optional): Width of each individual subplot panel in inches.
+            Used to derive the total figure width when ``figsize`` is None. Default None
+            (falls back to 6).
+        subplot_height (float, optional): Height of each individual subplot panel in
+            inches. Used to derive the total figure height when ``figsize`` is None.
+            Default None (falls back to 6).
         savepath (str, optional): Path to save the figure (if None, figure is not saved).
         save_only (bool): If True, save figure without displaying. Default is False.
         dpi_save (int): Resolution in DPI for saving the figure. Default is 300.
         show (bool): Whether to display the plot. Default is True.
-        plot_config (PlotConfig, optional): Plot configuration object (overrides defaults if provided).
-        layout_config (LayoutConfig, optional): Layout configuration object (overrides defaults if provided).
-        data_config (DataConfig, optional): Data configuration object (overrides defaults if provided).
+        plot_config (PlotConfig, optional): Plot appearance/rendering configuration
+            (cmap, palette, spot_type, crange, ...) for options with no dedicated
+            top-level kwarg. Fields it shares with a top-level kwarg above (xlim, ylim,
+            spot_size, alpha, nan_color) are preserved unless that kwarg is also passed
+            explicitly - see the precedence note below.
+        layout_config (LayoutConfig, optional): Figure/subplot layout configuration
+            (header, wspace, hspace, dpi_display, ...) for options with no dedicated
+            top-level kwarg. Fields it shares with a top-level kwarg above (max_cols,
+            figsize, subplot_width, subplot_height) follow the same precedence note.
+        data_config (DataConfig, optional): Data-extraction configuration (raw,
+            obsm_key, name_column, ...) for options with no dedicated top-level kwarg.
+            Fields it shares with a top-level kwarg above (layer, region_tuple,
+            annotation_tuple, image_key, filter_mode, filter_tuple) follow the same
+            precedence note.
         verbose (bool): If True, print progress messages. Default is False.
+
+    Note:
+        Precedence between a shared top-level kwarg and a caller-provided
+        ``plot_config``/``layout_config``/``data_config`` object: the top-level kwarg
+        wins whenever it is explicitly passed - even when the value it is given
+        equals a config default; otherwise the config object's value is left
+        untouched. E.g. ``spatial(data, keys, plot_config=PlotConfig(spot_size=20))``
+        keeps ``spot_size=20``; adding ``spot_size=8`` at the top level overrides it to 8.
 
     Returns:
         None: Displays and/or saves the generated spatial plot(s).
@@ -357,7 +416,7 @@ def spatial(
         warnings.warn(
             "'annotations_key' is deprecated, use 'annotation_tuple' instead.",
             DeprecationWarning,
-            stacklevel=2,
+            stacklevel=3,  # spatial is wrapped by @with_insitupy_style
         )
         annotation_tuple = annotations_key
 
@@ -374,20 +433,42 @@ def spatial(
     layout_config = LayoutConfig() if layout_config is None else copy.copy(layout_config)
     data_config = DataConfig() if data_config is None else copy.copy(data_config)
 
-    # update some values depending on function arguments
-    data_config.update_values(
+    # Update config objects with function arguments - only kwargs the caller
+    # explicitly passed (i.e. not left at the `_UNSET` sentinel) are forwarded, so a
+    # caller-provided plot_config/layout_config/data_config is not silently clobbered
+    # by defaults for fields the caller never touched at the top level.
+    data_config.update_values(**_explicit_overrides(
         layer=layer,
-        region_tuple=region_tuple, annotations_key=annotation_tuple, image_key=image_key,
-        filter_mode=filter_mode, filter_tuple=filter_tuple
-        )
-    plot_config.update_values(
+        region_tuple=region_tuple,
+        annotations_key=annotation_tuple,
+        image_key=image_key,
+        filter_mode=filter_mode,
+        filter_tuple=filter_tuple,
+    ))
+    plot_config.update_values(**_explicit_overrides(
         xlim=xlim, ylim=ylim,
         spot_size=spot_size, alpha=alpha,
-        nan_color=nan_color
-    )
-    layout_config.update_values(
-        max_cols=max_cols
-    )
+        nan_color=nan_color,
+    ))
+    layout_config.update_values(**_explicit_overrides(
+        max_cols=max_cols,
+        figsize=figsize,
+        subplot_width=subplot_width,
+        subplot_height=subplot_height,
+    ))
+
+    # figsize wins over subplot_width/height inside calc_subplot_params, so warn when
+    # the caller asked for a per-panel size that an effective figsize - top-level OR
+    # from a caller-provided layout_config - will silently override. Must run BEFORE
+    # calc_subplot_params, which fills layout_config.figsize with a *computed* size.
+    if layout_config.figsize is not None and (
+        subplot_width is not _UNSET or subplot_height is not _UNSET
+    ):
+        warnings.warn(
+            "subplot_width/subplot_height are ignored when figsize is provided; "
+            "figsize sets the total figure size and takes precedence.",
+            UserWarning, stacklevel=3,
+        )
 
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
