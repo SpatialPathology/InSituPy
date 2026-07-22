@@ -1,3 +1,4 @@
 {
-  "model": "sonnet"
+  "model": "sonnet",
+  "includeCoAuthoredBy": false
 }

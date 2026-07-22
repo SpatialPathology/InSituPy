@@ -108,6 +108,8 @@ We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https:/
 
 Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues), submit a pull request or contact us via our [zulip chat](https://insitupy.zulipchat.com).
 
+Before opening a pull request, please read the [Contributing Guide](CONTRIBUTING.md) and, if you used an AI assistant, the [AI Policy](AI_POLICY.md).
+
 ## Citation
 
 If you use `InSituPy` in your work, please cite the [preprint](https://www.biorxiv.org/content/10.1101/2025.03.07.641860v1) as follows:
