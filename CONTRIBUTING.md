@@ -47,6 +47,7 @@ ruff check path/to/changed_file.py
 ```
 
 Notes:
+
 - **Lint the files you touched, and don't introduce new violations.** The codebase currently
   carries pre-existing ruff findings that are being cleaned up separately, so a repo-wide
   `ruff check` is not yet clean - don't be alarmed by unrelated findings, just keep your own
@@ -67,6 +68,31 @@ Using an AI assistant is encouraged, but it comes with responsibilities. **Pleas
   review command usable from a fresh clone across common AI coding agents) to standardize this.
 - To help your assistant write correct InSituPy code, point it at the InSituPy **skill** (easiest)
   or the **MCP server** (power users). See the [README](README.md#ai-assistant-integration-mcp-server).
+
+### In-repo AI dev-workflow
+
+This repo ships an AI-assistant workflow so any contributor can use it on a fresh clone. The one
+required piece is a pre-PR review; the pitfalls knowledge is shared as a portable skill.
+
+- **Review before every PR (required by [AI_POLICY.md](AI_POLICY.md)).** Run the review over your
+  changes and paste the summary it prints into your PR.
+    - **Claude Code:** `/review` (`.claude/commands/review.md`).
+    - **Cursor:** `/review` (`.cursor/commands/review.md`; Cursor >= 1.6).
+    - **Codex:** the `insitupy-review` skill (`.codex/skills/insitupy-review/`; invoke it
+      explicitly).
+  All three are self-contained and need no setup.
+- **InSituPy pitfalls skill** - catches non-obvious API traps. Auto-loads as a skill in Claude
+  Code (`.claude/skills/insitupy/`), Cursor (`.cursor/skills/insitupy/`; Cursor >= 2.4), and Codex
+  (`.codex/skills/insitupy/`). On any agent, the review workflow also reads the underlying file
+  (`.claude/skills/insitupy/references/conventions_and_pitfalls.md`) directly, so the checklist
+  still applies even without skill support.
+- **`/plan` and `/implement`** are Claude Code-only, maintainer-oriented, and optional; they are
+  not mirrored to other agents.
+- **Single source of truth.** The review workflow and the pitfalls skill are authored once under
+  `.claude/` and rendered into the Cursor/Codex directories by `tools/sync_commands.py`. If you
+  change either, re-run `python tools/sync_commands.py` and commit the regenerated files.
+- If the `insitupy` MCP server is available, the review prefers its live tools; otherwise it
+  verifies against the checked-out source.
 
 ## Pull request checklist
 

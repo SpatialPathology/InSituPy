@@ -39,10 +39,16 @@ file searching.
    tests that stub the unit under test; for trivial state/glue changes, verify manually and note
    it in the log.
 5. **Escalate when genuinely stuck:** for a hard design / security / correctness question, ask
-   the user whether to invoke `@opus-consultant` (structured Opus Report contract). For a
-   lightweight stall, the native `/advisor` toggle is the lower-friction option.
-6. **Log the work** to `.log/log.md` (append via Edit, newest first) per the global CLAUDE.md
-   format, and update `.log/backlog.md` if a tracked item was completed.
+   the user whether to invoke a senior-advisor agent if one is configured (e.g. the maintainer's
+   `@opus-consultant`, a structured Opus Report contract); otherwise surface the question to a
+   human. For a lightweight stall, the native `/advisor` toggle is the lower-friction option.
+6. **Log the work.** Check whether `.log/log.md` and `.log/backlog.md` already exist at the repo
+   root.
+   - If they exist, append an entry to `.log/log.md` (via Edit, newest first) per the global
+     CLAUDE.md format, and update `.log/backlog.md` if a tracked item was completed.
+   - If they don't exist, don't create them silently. Ask the user whether to set up this
+     session-log/backlog structure (briefly: a running dev journal at `.log/log.md` and a todo
+     list at `.log/backlog.md`); if they decline, skip logging entirely.
 
 ## Delegation note
 

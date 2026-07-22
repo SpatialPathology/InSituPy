@@ -2,6 +2,7 @@
 name: insitupy
 description: Non-obvious API conventions and pitfalls for the InSituPy spatial transcriptomics package (this repo) - things the codebase's own MCP server, docstrings, and signatures don't say outright. Use whenever writing, reviewing, or debugging code that imports insitupy, or modifies the insitupy package source itself.
 ---
+<!-- AUTO-GENERATED from .claude/skills/insitupy/SKILL.md by tools/sync_commands.py - do not edit here; edit the canonical file and re-run the sync. -->
 
 # InSituPy
 

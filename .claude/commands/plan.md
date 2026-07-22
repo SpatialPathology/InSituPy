@@ -24,11 +24,16 @@ $ARGUMENTS
    targeted tests that will need to run (per project convention; tests run from the
    environment where InSituPy is installed).
 3. **Surface hard design / architecture / security questions** to the user and ask whether to
-   invoke `@opus-consultant` — do not escalate automatically.
-4. **Write the report** to
-   `.log/reports/YYMMDD/<short-task-title>/report-<short-task-title>.md`
-   (date prefix via `printf '%(%y%m%d)T\n' -1`, or read `currentDate` from context). Use the
-   Write tool to create directories.
+   consult a senior-advisor agent if one is configured (e.g. the maintainer's
+   `@opus-consultant`); otherwise surface the question to a human. Do not escalate automatically.
+4. **Write the report.** Check whether `.log/` already exists at the repo root.
+   - If it exists, write to `.log/reports/YYMMDD/<short-task-title>/report-<short-task-title>.md`
+     (date prefix via `printf '%(%y%m%d)T\n' -1`, or read `currentDate` from context). Use the
+     Write tool to create subdirectories as needed.
+   - If it does **not** exist, don't create it silently. Ask the user whether to set it up,
+     showing the path it would create (`.log/reports/YYMMDD/<short-task-title>/report-....md`);
+     if they decline, write the report to a location they specify instead (or keep it in the
+     conversation if there is none).
 
 ## Report contents (must be self-contained)
 
