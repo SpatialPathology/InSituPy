@@ -79,11 +79,14 @@ required piece is a pre-PR review; the pitfalls knowledge is shared as a portabl
     - **Claude Code:** `/review` (`.claude/commands/review.md`).
     - **Cursor:** `/review` (`.cursor/commands/review.md`; Cursor >= 1.6).
     - **Codex:** the `insitupy-review` skill (`.codex/skills/insitupy-review/`; invoke it
-      explicitly).
-  All three are self-contained and need no setup.
-- **InSituPy pitfalls skill** - catches non-obvious API traps. Auto-loads as a skill in Claude
+      explicitly). The Codex path is not yet verified end-to-end - feedback is welcome.
+  All three ship with the clone and need no separate install (your agent must support the
+  relevant command or skill mechanism).
+- **InSituPy pitfalls skill** - catches non-obvious API traps. It is provided as a skill in Claude
   Code (`.claude/skills/insitupy/`), Cursor (`.cursor/skills/insitupy/`; Cursor >= 2.4), and Codex
-  (`.codex/skills/insitupy/`). On any agent, the review workflow also reads the underlying file
+  (`.codex/skills/insitupy/`). Skill auto-loading has only been partially tested (mainly in Claude
+  Code); the Cursor and Codex paths are best-effort and feedback is welcome. On any agent, the
+  review workflow also reads the underlying file
   (`.claude/skills/insitupy/references/conventions_and_pitfalls.md`) directly, so the checklist
   still applies even without skill support.
 - **`/plan` and `/implement`** are Claude Code-only, maintainer-oriented, and optional; they are

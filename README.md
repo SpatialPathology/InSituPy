@@ -30,9 +30,9 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
 
 ### AI Assistant Integration (MCP Server)
 
-InSituPy ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Supported clients include **Claude Desktop**, **Claude Code**, **Cursor**, **Windsurf**, **Continue.dev**, and **Cline**.
+InSituPy ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Because it is a standard MCP server (stdio), it works with any MCP-compatible client, such as **Claude Desktop**, **Claude Code**, **Cursor**, **Codex**, **Windsurf**, **Continue.dev**, or **Cline**. Setup has mainly been exercised with Claude Desktop and Claude Code; if you use it with another client, feedback is welcome.
 
-The easiest way to activate the server in **Claude Desktop** is to add the following to your `claude_desktop_config.json` — no separate installation or repository clone required:
+The easiest way to activate the server in **Claude Desktop** is to add the following to your `claude_desktop_config.json` - no separate installation or repository clone required:
 
 ```json
 {
@@ -47,7 +47,7 @@ The easiest way to activate the server in **Claude Desktop** is to add the follo
 
 `uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
 
-See **[MCP_TUTORIAL.md](MCP_TUTORIAL.md)** for step-by-step setup instructions for all supported clients.
+See **[MCP_TUTORIAL.md](MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
 
 ### Documentation
 

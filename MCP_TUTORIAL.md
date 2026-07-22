@@ -65,6 +65,34 @@ No reinstall required after switching branches, the editable install picks up th
 
 Required for config/venv changes to take effect.
 
+## Codex CLI
+
+Codex reads MCP config from `~/.codex/config.toml` and supports stdio servers - the same two setups as above, only the config file and format differ (TOML instead of the JSON shown for Claude Desktop). This Codex configuration follows Codex's documented MCP setup but has not yet been tested end-to-end with InSituPy - feedback is welcome.
+
+**uvx (published package).** Add the server from the terminal:
+
+```bash
+codex mcp add insitupy -- uvx --python 3.13 --from insitupy-spatial[mcp] insitupy-mcp
+```
+
+or write the equivalent block to `~/.codex/config.toml` directly:
+
+```toml
+[mcp_servers.insitupy]
+command = "uvx"
+args = ["--python", "3.13", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+```
+
+**.venv (local dev).** Create the virtual environment as in **Option B** above, then point Codex at its executable:
+
+```toml
+[mcp_servers.insitupy]
+command = "C:\\Users\\<user>\\Github\\insitupy\\.venv\\Scripts\\insitupy-mcp.exe"
+args = []
+```
+
+Start a new Codex session for changes to take effect. The full-install requirement and stable-path note below apply here too.
+
 ## Notes
 
 - Full package install is required, not just MCP deps. Server tools (`get_docstring`, `get_function_source`, `list_classes`, etc.) introspect the actual `insitupy` package at runtime.

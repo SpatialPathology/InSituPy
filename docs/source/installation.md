@@ -23,7 +23,7 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
 
 This base installation includes napari and related visualization dependencies.
 
-InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows will be only partially supported in the future.
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
 
 ### Optional: Install with SpatialData support (`spatialdata>=0.7.2`)
 
