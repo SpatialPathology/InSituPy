@@ -108,9 +108,11 @@ required piece is a pre-PR review; the pitfalls knowledge is shared as a portabl
 1. Branch from the appropriate base branch and keep changes focused.
 2. Tests pass (`pytest`), and `ruff check` / `ruff format` on the files you changed report no
    new issues.
-3. Add or update tests for the behavior you changed.
-4. If you used AI, follow [AI_POLICY.md](AI_POLICY.md) and include the AI-review summary.
-5. Describe **what** changed and **why** in the PR description.
+3. If you changed any dependency in `pyproject.toml`, run `poetry lock` and commit the updated
+   `poetry.lock` in the same commit - CI checks that the two stay in sync.
+4. Add or update tests for the behavior you changed.
+5. If you used AI, follow [AI_POLICY.md](AI_POLICY.md) and include the AI-review summary.
+6. Describe **what** changed and **why** in the PR description.
 
 ## License
 

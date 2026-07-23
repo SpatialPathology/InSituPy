@@ -56,6 +56,25 @@ over this summary if they ever conflict.
   asked or when a change is broad enough to warrant it.
 - **Linting:** ruff is configured in `pyproject.toml` (rule sets `E,W,F,I,UP,B,NPY`).
 
+## Dependency changes
+
+`poetry.lock` is committed and gated in CI: `.github/workflows/lockfile-check.yml` runs
+`poetry check --lock --strict` on every PR and on pushes to `main`/`release/**`, and `release.yml`
+runs the same check before building. A stale lock fails the build.
+
+- **Any edit to a dependency declaration in `pyproject.toml`** - adding or removing a package,
+  moving a version bound, adding a security pin, touching `[project.optional-dependencies]` - must
+  be followed by `poetry lock`, with the regenerated `poetry.lock` committed **in the same commit**.
+- **A version-only bump** (the `version = "..."` field) does *not* need a re-lock. The lock's
+  content hash covers dependency declarations only.
+- Use plain `poetry lock`. On poetry 2.x this already keeps existing locked versions wherever they
+  still satisfy the constraints; the old `--no-update` flag was **removed** in 2.x and now errors
+  out. `--regenerate` forces a full re-resolve from scratch and is not what you want here.
+- The toolchain is pinned to **poetry 2.4.1** in both workflows. Use the same version locally so the
+  committed lock matches what CI validates.
+- A `poetry lock` diff can be much larger than the packages you touched. That means the lock was
+  already stale for other constraints - expected, not resolver misbehaviour.
+
 ## Platform notes
 
 InSituPy is developed across Windows, macOS, and Linux — keep shell commands portable. On
