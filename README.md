@@ -11,7 +11,7 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 ## Latest changes
 
-> **Pre-release available: [0.12.0b4](https://github.com/SpatialPathology/InSituPy/releases/tag/0.12.0b4)**
+> **Pre-release available: [0.12.0b6](https://github.com/SpatialPathology/InSituPy/releases/tag/0.12.0b6)**
 > Try it with `pip install insitupy-spatial==0.12.0b4`.
 > Highlights: filter layers for `InSituExperiment`, cross-sample table workflow (`build_table`), embedding `highlight`/`dim`, QC redesign, and major save-pipeline hardening.
 
