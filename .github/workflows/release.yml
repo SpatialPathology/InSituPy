@@ -32,7 +32,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install Poetry
-        run: pip install poetry
+        run: pip install "poetry==2.4.1"
+
+      - name: Check poetry.lock is in sync with pyproject.toml
+        run: poetry check --lock --strict
 
       - name: Install tagged package for skill-reference introspection
         run: pip install ".[mcp,spatialdata]"
