@@ -34,11 +34,29 @@ jobs:
       - name: Install Poetry
         run: pip install poetry
 
+      - name: Install tagged package for skill-reference introspection
+        run: pip install ".[mcp,spatialdata]"
+
+      - name: Regenerate skill reference + llms.txt
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tools/generate_skill_reference.py
+
+      - name: Symbol drift gate
+        run: python tools/generate_skill_reference.py --check-symbols
+
       - name: Build package
         run: poetry build
 
       - name: Publish to PyPI
         run: poetry publish --username __token__ --password ${{ secrets.PYPI_TOKEN }}
+
+      - name: Build skill ZIP asset
+        run: |
+          mkdir -p dist "$RUNNER_TEMP/skill-zip/insitupy"
+          cp -r insitupy/_ai/skill/. "$RUNNER_TEMP/skill-zip/insitupy/"
+          (cd "$RUNNER_TEMP/skill-zip" && zip -r "$GITHUB_WORKSPACE/dist/insitupy-skill-${{ github.ref_name }}.zip" insitupy)
+        shell: bash
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

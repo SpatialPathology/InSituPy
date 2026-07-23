@@ -14,6 +14,11 @@ and /implement stay Claude-only. Each agent gets its correct current mechanism:
 Run `python tools/sync_commands.py` after editing either canonical source and commit the
 regenerated output. `--check` verifies the mirrors are current and flags orphans (for a future
 pre-commit/CI hook); `--dry-run` previews without writing.
+
+NOTE: .claude/skills/insitupy/references/conventions_and_pitfalls.md has a second consumer -
+tools/generate_skill_reference.py copies it into the user-facing insitupy skill
+(insitupy/_ai/skill/reference/conventions_and_pitfalls.md). Edit the canonical file here, not
+either generated copy.
 """
 
 from __future__ import annotations

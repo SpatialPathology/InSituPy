@@ -1,0 +1,1 @@
+"""InSituPy AI-assistant assets."""
