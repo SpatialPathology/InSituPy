@@ -69,6 +69,7 @@ mcp = ["mcp[cli]>=1.0.0"]
 
 [project.scripts]
 insitupy-mcp = "mcp_server:main"
+insitupy = "insitupy._ai.cli:main"
 
 [tool.poetry]
 packages =[

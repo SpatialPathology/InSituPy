@@ -66,8 +66,9 @@ Using an AI assistant is encouraged, but it comes with responsibilities. **Pleas
 - Before opening a PR, run an AI-assisted review over your changes and **paste a short summary of
   what it found into the PR**. The project provides a `/review` workflow (a self-contained InSituPy
   review command usable from a fresh clone across common AI coding agents) to standardize this.
-- To help your assistant write correct InSituPy code, point it at the InSituPy **skill** (easiest)
-  or the **MCP server** (power users). See the [README](README.md#ai-assistant-integration-mcp-server).
+- To help your assistant write correct InSituPy code, point it at the InSituPy **skill**
+  (easiest - `insitupy install-skill` after `pip install insitupy-spatial`) or the **MCP server**
+  (power users). See the [README](README.md#ai-assistant-integration-skill).
 
 ### In-repo AI dev-workflow
 
@@ -96,6 +97,11 @@ required piece is a pre-PR review; the pitfalls knowledge is shared as a portabl
   change either, re-run `python tools/sync_commands.py` and commit the regenerated files.
 - If the `insitupy` MCP server is available, the review prefers its live tools; otherwise it
   verifies against the checked-out source.
+- **Maintainers only - bumping the version:** after updating the version, run
+  `python tools/generate_skill_reference.py` and commit the refreshed
+  `insitupy/_ai/skill/reference/*.md`, `SKILL.md` version stamp, and `llms.txt`, so the committed
+  tree (and anything installed via `insitupy install-skill` from a source checkout) doesn't lag
+  the release. `release.yml` regenerates the same files on tag as a belt-and-suspenders step.
 
 ## Pull request checklist
 

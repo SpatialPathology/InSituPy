@@ -28,9 +28,38 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
 </p>
 
 
+### AI Assistant Integration (Skill)
+
+**Easiest option:** install the InSituPy skill. It teaches any AI assistant - a coding agent or
+plain web chat - the data model, the typical read -> preprocess -> tools -> plot -> save
+workflow, and where to look for detailed API references, so it writes correct InSituPy code
+without guessing from memory. No server, no setup beyond installing the package.
+
+- **Code agents** (Claude Code, Codex, Cursor, ...): after `pip install insitupy-spatial`, run
+
+  ```bash
+  insitupy install-skill
+  ```
+
+  This copies the skill to `./.agents/skills/insitupy/` by default; pass `--target
+  {claude,codex,cursor}` or `--path DIR` to install elsewhere, and `--force` to upgrade an
+  existing copy.
+- **Plain web chat** (ChatGPT, Claude.ai, no skill loader): either paste the contents of the
+  repo-root [`llms.txt`](llms.txt) (or its raw URL) into the chat/project knowledge, or upload
+  the `insitupy-skill-<version>.zip` asset attached to the
+  [latest release](https://github.com/SpatialPathology/InSituPy/releases/latest).
+
+The skill is versioned and self-upgrading: if it's missing something you expect, check your
+installed `insitupy.__version__` against the skill's stamped version and re-run `insitupy
+install-skill --force` (or re-fetch the ZIP/`llms.txt`) if it's out of date.
+
+If the `insitupy` MCP server (below) is also available in your session, an agent following the
+skill will prefer its live tools automatically - the skill is a fallback, not a competing source.
+
 ### AI Assistant Integration (MCP Server)
 
-InSituPy ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Because it is a standard MCP server (stdio), it works with any MCP-compatible client, such as **Claude Desktop**, **Claude Code**, **Cursor**, **Codex**, **Windsurf**, **Continue.dev**, or **Cline**. Setup has mainly been exercised with Claude Desktop and Claude Code; if you use it with another client, feedback is welcome.
+For power users who want live, always-current introspection (not just a static reference),
+InSituPy also ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Because it is a standard MCP server (stdio), it works with any MCP-compatible client, such as **Claude Desktop**, **Claude Code**, **Cursor**, **Codex**, **Windsurf**, **Continue.dev**, or **Cline**. Setup has mainly been exercised with Claude Desktop and Claude Code; if you use it with another client, feedback is welcome.
 
 The easiest way to activate the server in **Claude Desktop** is to add the following to your `claude_desktop_config.json` - no separate installation or repository clone required:
 
