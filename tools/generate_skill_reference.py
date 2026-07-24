@@ -16,11 +16,13 @@ The generated pitfalls copy (``reference/conventions_and_pitfalls.md``) is sourc
 that ``tools/sync_commands.py`` copies into ``.cursor/`` and ``.codex/``. Edit the canonical
 file, not this generator's output.
 
+The stamped version comes from ``pyproject.toml``, the declared single source of truth - not from
+``insitupy.__version__``. See ``resolve_version`` for why that distinction is load-bearing.
+
 Usage:
     python tools/generate_skill_reference.py                     # regenerate + stamp version
     python tools/generate_skill_reference.py --check              # verify no drift; exit 1 on drift
     python tools/generate_skill_reference.py --check-symbols       # verify curated symbols resolve
-    python tools/generate_skill_reference.py --allow-unknown-version   # dev convenience
 """
 
 from __future__ import annotations
@@ -29,9 +31,11 @@ import argparse
 import re
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 SKILL_DIR = REPO_ROOT / "insitupy" / "_ai" / "skill"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 REFERENCE_DIR = SKILL_DIR / "reference"
@@ -248,12 +252,29 @@ def build_targets(version: str) -> dict[Path, str]:
     return targets
 
 
-def resolve_version(allow_unknown: bool) -> str:
-    version = insitupy.__version__
-    if version == "unknown" and not allow_unknown:
-        raise SystemExit(
-            "insitupy.__version__ is 'unknown' (package not installed / source-only). "
-            "Install it first, or pass --allow-unknown-version for a dev-only run."
+def resolve_version() -> str:
+    """Read the version to stamp from pyproject.toml, the declared single source of truth.
+
+    Deliberately NOT ``insitupy.__version__``: that resolves through ``importlib.metadata``,
+    which an editable install writes once at install time and never refreshes. Immediately after
+    a version bump the installed metadata still reports the *previous* version, so stamping from
+    it would silently label the skill with the wrong release - and ``--check`` normalizes the
+    version stamp before comparing, so nothing downstream would catch it. Reading pyproject.toml
+    removes the failure mode instead of relying on the maintainer remembering to reinstall.
+
+    A mismatch is still worth reporting, because a stale install also means ``--check-symbols``
+    would introspect old code.
+    """
+    with PYPROJECT.open("rb") as handle:
+        version = tomllib.load(handle)["project"]["version"]
+
+    installed = insitupy.__version__
+    if installed != version:
+        print(
+            f"NOTE: pyproject.toml declares {version}, but the installed insitupy-spatial "
+            f"reports {installed}. Stamping {version}. The installed package is stale - re-run "
+            "`pip install -e . --no-deps` if you also need --check-symbols to see current code.",
+            file=sys.stderr,
         )
     return version
 
@@ -324,18 +345,12 @@ def main() -> int:
         help="Verify every curated load-bearing symbol resolves in the live package; "
         "exit non-zero if any is missing. No writes.",
     )
-    parser.add_argument(
-        "--allow-unknown-version",
-        action="store_true",
-        help="Allow running against a source checkout where insitupy.__version__ is 'unknown' "
-        "(dev convenience). Never use for a real release.",
-    )
     args = parser.parse_args()
 
     if args.check_symbols:
         return check_symbols()
 
-    version = resolve_version(args.allow_unknown_version)
+    version = resolve_version()
 
     if args.check:
         return check_drift(version)
