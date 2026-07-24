@@ -1,5 +1,5 @@
 ---
-name: insitupy
+name: insitupy-api
 description: >-
   Write correct analysis code with InSituPy (insitupy-spatial), the Python framework for
   histology-guided, multi-sample single-cell spatial transcriptomics (10x Xenium, Visium, ...).
@@ -41,9 +41,10 @@ python -c "import insitupy; print(insitupy.__version__)"
 
 ## This skill is versioned - suspect a stale skill before concluding an API doesn't exist
 
-This skill documents insitupy-spatial **v{version}** (see the frontmatter). Whenever a
-function, argument, or class the user asks about is **not** in this reference, **suspect a
-stale skill before concluding it does not exist.** Check the installed version:
+This skill documents the insitupy-spatial version stamped in its own frontmatter (the
+`version:` field above). Whenever a function, argument, or class the user asks about is **not**
+in this reference, **suspect a stale skill before concluding it does not exist.** Check the
+installed version:
 
 ```bash
 python -c "import insitupy; print(insitupy.__version__)"
@@ -131,5 +132,5 @@ Read only what the current task needs:
 
 Read `reference/conventions_and_pitfalls.md` first - it catalogs non-obvious behavior that
 isn't visible from a single docstring or signature in isolation (naming collisions between
-similarly-named parameters, silent no-ops, mutual-exclusivity constraints between arguments,
-and areas of the codebase under active churn).
+similarly-named parameters, silent no-ops, and mutual-exclusivity constraints between
+arguments).

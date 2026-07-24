@@ -27,10 +27,15 @@ shape - confirm it against the live tools or the source.
 - List the changed files first. If the diff is empty, say so and stop.
 
 ## 2. Load the InSituPy pitfalls checklist
-Read `.claude/skills/insitupy/references/conventions_and_pitfalls.md` (committed; on every clone)
-and check the diff against **every** item - these are non-obvious behaviours no signature or
-docstring reveals. Highest-value checks (the file is authoritative and may have grown; use it, not
-this excerpt, as the full list):
+Read both committed checklists (present on every clone):
+- `.claude/skills/insitupy-pitfalls/reference/conventions_and_pitfalls.md` - API traps that apply
+  to any caller of insitupy.
+- `.claude/skills/insitupy-pitfalls/reference/contributing_to_insitupy.md` - conventions for
+  changing the package source itself (dispatch pattern, defining modules, churn areas, tests).
+
+Check the diff against **every** item - these are non-obvious behaviours no signature or
+docstring reveals. Highest-value checks (the files are authoritative and may have grown; use them,
+not this excerpt, as the full list):
 - `inplace=False` is the house convention - a mutating call whose return value is ignored is a bug.
 - `cells_layer` (which segmentation layer) vs `layer` (an `AnnData.layers` key) - easy to swap.
 - `filter_cells` / `filter_genes` take **exactly one** criterion per call (raise otherwise).

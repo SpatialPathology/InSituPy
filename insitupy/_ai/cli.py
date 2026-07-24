@@ -25,10 +25,10 @@ _VERSION_RE = re.compile(r'^version:\s*"([^"]*)"', re.MULTILINE)
 # no-flag default per the plan; project-local targets are relative to the current working
 # directory, resolved at use time (not import time) so tests can control it via monkeypatching.
 _TARGET_SUBPATHS: dict[str, tuple[str, Path]] = {
-    "agents": ("cwd", Path(".agents/skills/insitupy")),
-    "claude": ("home", Path(".claude/skills/insitupy")),
-    "codex": ("home", Path(".codex/skills/insitupy")),
-    "cursor": ("cwd", Path(".cursor/skills/insitupy")),
+    "agents": ("cwd", Path(".agents/skills/insitupy-api")),
+    "claude": ("home", Path(".claude/skills/insitupy-api")),
+    "codex": ("home", Path(".codex/skills/insitupy-api")),
+    "cursor": ("cwd", Path(".cursor/skills/insitupy-api")),
 }
 
 
@@ -53,7 +53,7 @@ def _bundled_skill_resource():
 
 def _resolve_destination(target: str, path: str | None) -> Path:
     if path is not None:
-        return Path(path).expanduser().resolve() / "insitupy"
+        return Path(path).expanduser().resolve() / "insitupy-api"
     root, subpath = _TARGET_SUBPATHS[target]
     base = Path.home() if root == "home" else Path.cwd()
     return (base / subpath).resolve()
@@ -90,7 +90,7 @@ def cmd_install_skill(args: argparse.Namespace) -> int:
         shutil.copytree(bundled_path, destination, dirs_exist_ok=True)
 
     action = "Upgraded" if existing_version is not None else "Installed"
-    print(f"{action} insitupy skill v{bundled_version} to {destination}")
+    print(f"{action} insitupy-api v{bundled_version} to {destination}")
     print("Upgrade later with: pip install -U insitupy-spatial && insitupy install-skill --force")
     return 0
 
@@ -103,18 +103,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     install = subparsers.add_parser(
         "install-skill",
-        help="Copy the bundled insitupy skill into an AI agent's skills directory.",
+        help="Copy the bundled insitupy-api skill into an AI agent's skills directory.",
     )
     install.add_argument(
         "--target",
         choices=sorted(_TARGET_SUBPATHS),
         default="agents",
-        help="Named destination (default: agents -> ./.agents/skills/insitupy/).",
+        help="Named destination (default: agents -> ./.agents/skills/insitupy-api/).",
     )
     install.add_argument(
         "--path",
         default=None,
-        help="Explicit destination directory; the skill is copied into <PATH>/insitupy/.",
+        help="Explicit destination directory; the skill is copied into <PATH>/insitupy-api/.",
     )
     install.add_argument("--force", action="store_true", help="Overwrite an already-installed skill.")
     install.set_defaults(func=cmd_install_skill)

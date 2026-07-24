@@ -168,6 +168,13 @@ docs/source/generated/
 !.claude/setup-notes.md
 !.claude/skills/
 
+# `insitupy install-skill` resolves the `agents` (default) and `cursor` targets against the
+# current working directory. Running it inside this clone would otherwise drop an untracked
+# copy of the shipped user skill into the repo - for `cursor`, right next to the committed
+# pitfalls skill. The `claude` and `codex` targets write to $HOME and need no entry here.
+.agents/
+.cursor/skills/insitupy-api/
+
 # MCP client config — machine-specific (local exe path or uvx opt-in); see
 # tools/mcp_server/README.md for how to create your own.
 .mcp.json

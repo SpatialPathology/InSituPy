@@ -56,9 +56,9 @@ jobs:
 
       - name: Build skill ZIP asset
         run: |
-          mkdir -p dist "$RUNNER_TEMP/skill-zip/insitupy"
-          cp -r insitupy/_ai/skill/. "$RUNNER_TEMP/skill-zip/insitupy/"
-          (cd "$RUNNER_TEMP/skill-zip" && zip -r "$GITHUB_WORKSPACE/dist/insitupy-skill-${{ github.ref_name }}.zip" insitupy)
+          mkdir -p dist "$RUNNER_TEMP/skill-zip/insitupy-api"
+          cp -r insitupy/_ai/skill/. "$RUNNER_TEMP/skill-zip/insitupy-api/"
+          (cd "$RUNNER_TEMP/skill-zip" && zip -r "$GITHUB_WORKSPACE/dist/insitupy-api-${{ github.ref_name }}.zip" insitupy-api)
         shell: bash
 
       - name: Create GitHub Release

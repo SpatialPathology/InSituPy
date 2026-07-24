@@ -12,7 +12,7 @@ imports insitupy) - acceptable because this script runs only in CI-on-tag and th
 version-bump workflow, never on a user's machine.
 
 The generated pitfalls copy (``reference/conventions_and_pitfalls.md``) is sourced from
-``.claude/skills/insitupy/references/conventions_and_pitfalls.md`` - the same canonical file
+``.claude/skills/insitupy-pitfalls/reference/conventions_and_pitfalls.md`` - the same canonical file
 that ``tools/sync_commands.py`` copies into ``.cursor/`` and ``.codex/``. Edit the canonical
 file, not this generator's output.
 
@@ -36,8 +36,8 @@ SKILL_DIR = REPO_ROOT / "insitupy" / "_ai" / "skill"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 REFERENCE_DIR = SKILL_DIR / "reference"
 LLMS_TXT = REPO_ROOT / "llms.txt"
-PITFALLS_SOURCE = REPO_ROOT / ".claude" / "skills" / "insitupy" / "references" / "conventions_and_pitfalls.md"
-PITFALLS_SOURCE_REL = ".claude/skills/insitupy/references/conventions_and_pitfalls.md"
+PITFALLS_SOURCE = REPO_ROOT / ".claude" / "skills" / "insitupy-pitfalls" / "reference" / "conventions_and_pitfalls.md"
+PITFALLS_SOURCE_REL = ".claude/skills/insitupy-pitfalls/reference/conventions_and_pitfalls.md"
 
 # So `import mcp_server` works from a bare source checkout too, not only an installed env.
 sys.path.insert(0, str(REPO_ROOT / "tools"))

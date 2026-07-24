@@ -28,7 +28,7 @@ submit and be able to explain and maintain it. "The AI wrote it" is never an exp
 
 ## Writing InSituPy code with AI
 
-Point your assistant at the InSituPy **skill** (easiest, no setup) or the **MCP server** (for
+Point your assistant at the **`insitupy-api` skill** (easiest, no setup) or the **MCP server** (for
 power users) so it stays current with the real API - see [CONTRIBUTING](CONTRIBUTING.md) and the
 [README](README.md). Guessing at the API from memory is the most common source of broken AI output.
 

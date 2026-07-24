@@ -1,24 +1,26 @@
 """Render the canonical Claude review command + InSituPy pitfalls skill into Cursor/Codex.
 
 Single source of truth lives under .claude/:
-- .claude/commands/review.md  - the /review workflow
-- .claude/skills/insitupy/     - the pitfalls skill (SKILL.md + references/)
+- .claude/commands/review.md       - the /review workflow
+- .claude/skills/insitupy-pitfalls/ - the pitfalls skill (SKILL.md + references/)
 
 Only the mandated /review workflow and the pitfalls knowledge are shared cross-agent; /plan
 and /implement stay Claude-only. Each agent gets its correct current mechanism:
 - Cursor: /review as a native command (.cursor/commands/review.md); pitfalls as a skill
-  (.cursor/skills/insitupy/).
+  (.cursor/skills/insitupy-pitfalls/).
 - Codex: no repo-scoped commands (custom prompts are deprecated), so /review is a skill
-  (.codex/skills/insitupy-review/); pitfalls as a skill (.codex/skills/insitupy/).
+  (.codex/skills/insitupy-review/); pitfalls as a skill (.codex/skills/insitupy-pitfalls/).
 
 Run `python tools/sync_commands.py` after editing either canonical source and commit the
 regenerated output. `--check` verifies the mirrors are current and flags orphans (for a future
 pre-commit/CI hook); `--dry-run` previews without writing.
 
-NOTE: .claude/skills/insitupy/references/conventions_and_pitfalls.md has a second consumer -
-tools/generate_skill_reference.py copies it into the user-facing insitupy skill
+NOTE: .claude/skills/insitupy-pitfalls/reference/conventions_and_pitfalls.md has a second consumer -
+tools/generate_skill_reference.py copies it into the user-facing insitupy-api skill
 (insitupy/_ai/skill/reference/conventions_and_pitfalls.md). Edit the canonical file here, not
-either generated copy.
+either generated copy. Its sibling reference/contributing_to_insitupy.md is deliberately NOT
+copied there: it is repo-only material (test paths, git commands, MCP tool names) that would be
+meaningless in a skill shipped to end users.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Canonical sources (authored once under .claude/).
 REVIEW_COMMAND = REPO_ROOT / ".claude" / "commands" / "review.md"
-PITFALLS_SKILL_DIR = REPO_ROOT / ".claude" / "skills" / "insitupy"
+PITFALLS_SKILL_DIR = REPO_ROOT / ".claude" / "skills" / "insitupy-pitfalls"
 
 # Target roots. These are script-managed: the orphan scan walks them and removes any
 # banner-carrying file this script no longer produces. Codex reads project skills from
@@ -46,7 +48,11 @@ BANNER_MARKER = "AUTO-GENERATED from"
 
 # The pitfalls skill is a small fixed file set - copy these explicitly rather than walking
 # an arbitrary tree.
-PITFALLS_FILES = ("SKILL.md", "references/conventions_and_pitfalls.md")
+PITFALLS_FILES = (
+    "SKILL.md",
+    "reference/conventions_and_pitfalls.md",
+    "reference/contributing_to_insitupy.md",
+)
 
 
 def banner(source_rel: str) -> str:
@@ -142,8 +148,8 @@ def render_pitfalls_copies() -> dict[Path, str]:
     for skills_root in (CURSOR_SKILLS_DIR, CODEX_SKILLS_DIR):
         for rel in PITFALLS_FILES:
             source_file = PITFALLS_SKILL_DIR / Path(rel)
-            source_rel = f".claude/skills/insitupy/{rel}"
-            targets[skills_root / "insitupy" / Path(rel)] = copy_with_banner(
+            source_rel = f".claude/skills/insitupy-pitfalls/{rel}"
+            targets[skills_root / "insitupy-pitfalls" / Path(rel)] = copy_with_banner(
                 source_file, source_rel
             )
     return targets

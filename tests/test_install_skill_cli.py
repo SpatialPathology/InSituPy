@@ -15,7 +15,7 @@ def test_install_skill_writes_to_explicit_path_and_reports_it(tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert exit_code == 0
-    destination = tmp_path / "insitupy"
+    destination = tmp_path / "insitupy-api"
     assert (destination / "SKILL.md").exists()
     assert (destination / "reference").is_dir()
     assert str(destination) in out
@@ -27,7 +27,7 @@ def test_install_skill_refuses_without_force_then_overwrites_with_force(tmp_path
         pytest.skip(f"bundled skill not present at {bundled} in this install")
 
     assert cli.main(["install-skill", "--path", str(tmp_path)]) == 0
-    installed_md = tmp_path / "insitupy" / "SKILL.md"
+    installed_md = tmp_path / "insitupy-api" / "SKILL.md"
     original_content = installed_md.read_text(encoding="utf-8")
 
     # Tamper with the installed copy so an overwrite is observable.

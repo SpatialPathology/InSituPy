@@ -1,8 +1,8 @@
 ---
-name: insitupy
+name: insitupy-pitfalls
 description: Non-obvious API conventions and pitfalls for the InSituPy spatial transcriptomics package (this repo) - things the codebase's own MCP server, docstrings, and signatures don't say outright. Use whenever writing, reviewing, or debugging code that imports insitupy, or modifies the insitupy package source itself.
 ---
-<!-- AUTO-GENERATED from .claude/skills/insitupy/SKILL.md by tools/sync_commands.py - do not edit here; edit the canonical file and re-run the sync. -->
+<!-- AUTO-GENERATED from .claude/skills/insitupy-pitfalls/SKILL.md by tools/sync_commands.py - do not edit here; edit the canonical file and re-run the sync. -->
 
 # InSituPy
 
@@ -21,8 +21,13 @@ the `insitupy` MCP server is not available in your agent, the pitfalls file belo
 self-contained; verify live API shapes against the installed package or the checked-out source
 instead.
 
-What this skill adds on top: `references/conventions_and_pitfalls.md` catalogs non-obvious
-behavior that isn't visible from a single docstring or signature in isolation - naming
-collisions between similarly-named parameters, silent no-ops, mutual-exclusivity constraints
-between arguments, and areas of the codebase under active churn. Read it before writing or
-reviewing non-trivial code against this package.
+What this skill adds on top, split by audience:
+
+- `reference/conventions_and_pitfalls.md` - API traps that apply to anyone *calling* insitupy:
+  naming collisions between similarly-named parameters, silent no-ops, and mutual-exclusivity
+  constraints between arguments. Read it before writing or reviewing non-trivial code against
+  this package. This file is also shipped to end users inside the `insitupy-api` skill, so keep
+  it free of repo-only material (test paths, `git` commands, MCP tool names).
+- `reference/contributing_to_insitupy.md` - conventions for *modifying the package source*: the
+  `pp`/`tl` dispatch pattern, locating a name's defining module, areas under active churn, and
+  using the test suite as usage examples. Repo-only; never shipped.
