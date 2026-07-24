@@ -43,6 +43,14 @@ This set of tutorials introduces the analysis of multiple samples using **InSitu
 
     Two-step QC workflow: compute per-cell metrics with ``pp.calculate_qc_metrics``, summarize per dataset with ``exp.qc_summary()``, visualize distributions, compute MAD thresholds, and tag low-quality samples as filters.
 
+.. card:: Metadata-based sample filtering (`.filters`)
+    :link: InSituPy_filter_workflow
+    :link-type: doc
+
+    Define named, persistent filters from metadata columns via ``exp.filters``, compare them as a
+    summary table, and materialize a subset as either a lightweight view or an independent copy.
+    Note that this workflow is currently experimental.
+
 .. card:: Cross-sample concatenated table (`.table`)
     :link: InSituPy_table_workflow
     :link-type: doc
@@ -66,6 +74,7 @@ InSituPy_Pseudobulk
 InSituPy_extract_individual_images
 InSituPy_Anndata_workflow
 InSituPy_qc_workflow
+InSituPy_filter_workflow
 InSituPy_table_workflow
 InSituPy_Vannan_paper_import
 ```

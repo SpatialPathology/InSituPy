@@ -58,6 +58,13 @@ To help you get started with **InSituPy**, you can find a collection of differen
 
     Notebooks including analyses shown in the manuscript.
 
+.. card:: Benchmarkings
+    :link: 06_benchmarkings/index
+    :link-type: doc
+    :link-alt: Benchmarking notebooks
+
+    Performance measurements and comparisons against alternative readers - useful when deciding how to read large datasets or quantify signal on very large images.
+
 ```
 
 
@@ -72,4 +79,5 @@ To help you get started with **InSituPy**, you can find a collection of differen
 07_spatialdata/index.md
 04_plotting/index.md
 05_publication/index.md
+06_benchmarkings/index.md
 ```

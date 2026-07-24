@@ -4299,11 +4299,13 @@ class InSituExperiment:
                 directly. Must contain a ``'directory'`` column with the path to each dataset.
                 When passing a DataFrame the index is ignored.
             mode (Literal["insitupy", "xenium", "auto"]): The mode to use for loading the datasets.
+
                 - "auto": Automatically detect the format of each directory by looking for ``.ispy``
                   (InSituPy project) or ``experiment.xenium`` (Xenium output bundle). Raises a
                   ``ValueError`` if neither marker file is found. Defaults to ``"auto"``.
                 - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
                 - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
+
             collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
                 This keeps the progress bar clean while still showing important warnings. Defaults to True.
         """

@@ -42,6 +42,7 @@ def read_qupath_project(
     Notes:
         Each sample folder within the project directory is expected to follow the structure
         described in `read_qupath`, including:
+
             - `annotation.geojson`
             - `measurements.tsv`
             - `cells.geojson`

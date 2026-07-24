@@ -80,6 +80,13 @@ source_suffix = {
     ".md": "myst-nb"
 }
 
+# Internal notebooks that are kept in the repo but deliberately not published. Without this they
+# are still built into unreachable HTML and each one emits a `toc.not_included` warning.
+exclude_patterns = [
+    "tutorials/01_demo_analysis/dev/**",
+    "tutorials/pancreas/**",
+]
+
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
     'sphinx': ('https://www.sphinx-doc.org/en/master/', None),

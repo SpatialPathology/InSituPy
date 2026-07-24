@@ -35,7 +35,6 @@ Individual submodules can then be imported like this:
 Read a saved `InSituData` object with:
 
 ```{eval-rst}
-.. module:: insitupy._core
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -59,7 +58,6 @@ Read a saved `InSituData` object with:
 Read a saved `InSituExperiment` project with:
 
 ```{eval-rst}
-.. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -71,7 +69,6 @@ Read a saved `InSituExperiment` project with:
 To generate a new `InSituExperiment` object, either from a configurations file or from histological regions, following functions are available:
 
 ```{eval-rst}
-.. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -84,7 +81,6 @@ To generate a new `InSituExperiment` object, either from a configurations file o
 To concatenate multiple `InSituExperiment` objects:
 
 ```{eval-rst}
-.. module:: insitupy.experiment
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -185,7 +181,6 @@ Data classes are used to store the different modalities.
 ### Spatial units data
 
 ```{eval-rst}
-.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -198,7 +193,6 @@ Data classes are used to store the different modalities.
 ### Image data
 
 ```{eval-rst}
-.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -210,7 +204,6 @@ Data classes are used to store the different modalities.
 ### Geometric data
 
 ```{eval-rst}
-.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -224,7 +217,6 @@ Data classes are used to store the different modalities.
 The different data classes can be read using following functions:
 
 ```{eval-rst}
-.. module:: insitupy.containers
 .. currentmodule:: insitupy
 
 .. autosummary::
@@ -255,7 +247,6 @@ To read an individual dataset on can use following functions:
 To read multiple datasets exported from QuPath into an `InSituExperiment` object, following functions can be used:
 
 ```{eval-rst}
-.. module:: insitupy.io
 .. currentmodule:: insitupy
 
 .. autosummary::
