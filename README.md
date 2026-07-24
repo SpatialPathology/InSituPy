@@ -30,7 +30,9 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
 
 <!-- ai-integration-start -->
 
-### Which integration should I use?
+### AI Assistent Integration
+
+#### Which integration should I use?
 
 InSituPy ships two complementary integrations: a **skill** (a static reference any assistant can
 load, versioned per release) and an **MCP server** (live introspection against the installed
@@ -64,7 +66,7 @@ flowchart LR
     R3 -.->|skill defers to MCP| R1
 ```
 
-### AI Assistant Integration (Skill)
+#### Skill
 
 **Easiest option:** install the InSituPy skill (`insitupy-api`). It teaches any AI assistant - a coding agent or
 plain web chat - the data model, the typical read -> preprocess -> tools -> plot -> save
@@ -93,7 +95,7 @@ install-skill --force` (or re-fetch the ZIP/`llms.txt`) if it's out of date.
 If the `insitupy` MCP server (below) is also available in your session, an agent following the
 skill will prefer its live tools automatically - the skill is a fallback, not a competing source.
 
-### AI Assistant Integration (MCP Server)
+#### MCP Server
 
 For power users who want live, always-current introspection (not just a static reference),
 InSituPy also ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Because it is a standard MCP server (stdio), it works with any MCP-compatible client, such as **Claude Desktop**, **Claude Code**, **Cursor**, **Codex**, **Windsurf**, **Continue.dev**, or **Cline**. Setup has mainly been exercised with Claude Desktop and Claude Code; if you use it with another client, feedback is welcome.
