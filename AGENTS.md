@@ -12,7 +12,7 @@ source and never go stale. See `tools/mcp_server/README.md` for setup.
 
 ## Writing InSituPy analysis code
 
-Use the bundled **insitupy skill** - it teaches the data model, the read -> preprocess -> tools
+Use the bundled **`insitupy-api` skill** - it teaches the data model, the read -> preprocess -> tools
 -> plot -> save workflow arc, and links to full API references:
 
 - Already in this clone: `insitupy/_ai/skill/` (point a skill-aware agent at it directly).
@@ -27,11 +27,15 @@ install-skill --force` (or re-fetch `llms.txt` / the skill ZIP) if it's out of d
 
 ## Modifying the InSituPy package source
 
-Use the contributor **pitfalls skill** at `.claude/skills/insitupy/` (mirrored to
-`.cursor/skills/insitupy/` and `.codex/skills/insitupy/`) - it catalogs non-obvious API
-conventions and traps not visible from a single docstring or signature. The canonical file is
-`.claude/skills/insitupy/references/conventions_and_pitfalls.md`; edit it there, not in a
-mirrored copy (`tools/sync_commands.py` regenerates the others).
+Use the contributor **pitfalls skill** at `.claude/skills/insitupy-pitfalls/` (mirrored to
+`.cursor/skills/insitupy-pitfalls/` and `.codex/skills/insitupy-pitfalls/`) - it catalogs
+non-obvious API conventions and traps not visible from a single docstring or signature. Two
+canonical files, both under `.claude/skills/insitupy-pitfalls/reference/`:
+`conventions_and_pitfalls.md` (API traps for any caller; **also copied into the shipped
+`insitupy-api` skill**, so keep it free of repo-only material) and `contributing_to_insitupy.md`
+(source-modification conventions; repo-only, never shipped). Edit them there, not in a mirrored
+copy (`tools/sync_commands.py` regenerates the others). `CONTRIBUTING.md` ("Which files are
+canonical, and which are generated") has a diagram of the whole pipeline.
 
 Before opening a PR: read `AI_POLICY.md`, then run the review workflow and paste its summary
 into the PR (see `CONTRIBUTING.md` - `/review` in Claude Code and Cursor, the

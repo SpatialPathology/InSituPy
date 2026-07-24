@@ -68,6 +68,7 @@ Contributions are welcome! If you find any issues or have suggestions for new fe
 :glob:
 
 installation.md
+ai_integration.md
 tutorials/*
 api.md
 ```

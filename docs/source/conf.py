@@ -32,7 +32,8 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinx.ext.mathjax",
     "sphinx_design", # can be used for things such as cards
-    "myst_nb"
+    "myst_nb",
+    "sphinxcontrib.mermaid",
 ]
 
 
@@ -57,6 +58,16 @@ myst_enable_extensions = [
 ]
 
 myst_url_schemes = ("http", "https", "mailto")
+
+# Render GitHub-flavored ```mermaid fences as mermaid directives. Without this, MyST treats them
+# as plain code blocks and the diagrams silently degrade to grey text boxes here while still
+# rendering fine on GitHub - so one fence can be the single source for both surfaces.
+myst_fence_as_directive = ["mermaid"]
+
+# Pin the mermaid runtime. sphinxcontrib-mermaid loads it from a CDN at page-view time and
+# defaults to whatever version the installed extension ships with; since docs/requirements.txt
+# pins nothing, that would let the renderer change under us between builds. Bump deliberately.
+mermaid_version = "11.12.1"
 nb_output_stderr = "remove"
 nb_execution_mode = "off"
 nb_merge_streams = True

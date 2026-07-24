@@ -28,9 +28,45 @@ A key feature of InSituPy is its hierarchical data structure, centered around th
 </p>
 
 
+<!-- ai-integration-start -->
+
+### Which integration should I use?
+
+InSituPy ships two complementary integrations: a **skill** (a static reference any assistant can
+load, versioned per release) and an **MCP server** (live introspection against the installed
+source). Pick by how you work - they cooperate rather than compete.
+
+```mermaid
+flowchart LR
+    Q{"How are you working?"}
+
+    A["Code agent<br>Claude Code, Codex, Cursor, ..."]
+    B["Plain web chat<br>ChatGPT, Claude.ai"]
+    C["Want always-current<br>API introspection"]
+
+    A1["pip install insitupy-spatial<br>then: insitupy install-skill"]
+    B1["upload the release ZIP<br>or paste llms.txt"]
+    C1["add the MCP server<br>uvx insitupy-mcp"]
+
+    R1["insitupy-api skill<br>in your agent's skills dir"]
+    R2["insitupy-api skill<br>loaded into the chat"]
+    R3["live tools that<br>never go stale"]
+
+    Q --> A
+    Q --> B
+    Q --> C
+    A --> A1
+    A1 --> R1
+    B --> B1
+    B1 --> R2
+    C --> C1
+    C1 --> R3
+    R3 -.->|skill defers to MCP| R1
+```
+
 ### AI Assistant Integration (Skill)
 
-**Easiest option:** install the InSituPy skill. It teaches any AI assistant - a coding agent or
+**Easiest option:** install the InSituPy skill (`insitupy-api`). It teaches any AI assistant - a coding agent or
 plain web chat - the data model, the typical read -> preprocess -> tools -> plot -> save
 workflow, and where to look for detailed API references, so it writes correct InSituPy code
 without guessing from memory. No server, no setup beyond installing the package.
@@ -41,12 +77,13 @@ without guessing from memory. No server, no setup beyond installing the package.
   insitupy install-skill
   ```
 
-  This copies the skill to `./.agents/skills/insitupy/` by default; pass `--target
+  This copies the skill to `./.agents/skills/insitupy-api/` by default; pass `--target
   {claude,codex,cursor}` or `--path DIR` to install elsewhere, and `--force` to upgrade an
   existing copy.
 - **Plain web chat** (ChatGPT, Claude.ai, no skill loader): either paste the contents of the
-  repo-root [`llms.txt`](llms.txt) (or its raw URL) into the chat/project knowledge, or upload
-  the `insitupy-skill-<version>.zip` asset attached to the
+  repo-root [`llms.txt`](https://github.com/SpatialPathology/InSituPy/blob/main/llms.txt) (or its
+  raw URL) into the chat/project knowledge, or upload
+  the `insitupy-api-<version>.zip` asset attached to the
   [latest release](https://github.com/SpatialPathology/InSituPy/releases/latest).
 
 The skill is versioned and self-upgrading: if it's missing something you expect, check your
@@ -76,7 +113,9 @@ The easiest way to activate the server in **Claude Desktop** is to add the follo
 
 `uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
 
-See **[MCP_TUTORIAL.md](MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
+See **[MCP_TUTORIAL.md](https://github.com/SpatialPathology/InSituPy/blob/main/MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
+
+<!-- ai-integration-end -->
 
 ### Documentation
 
