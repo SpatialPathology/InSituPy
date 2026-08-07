@@ -912,6 +912,21 @@ def embedding(
     if coords.shape[1] < 2:
         raise ValueError(f"'{basis}' must have at least 2 dimensions")
 
+    # Drop cells with non-finite embedding coordinates. These are unplottable and
+    # otherwise propagate NaN/Inf into the datashader/matplotlib axis-limit
+    # computation, raising "Axis limits cannot be NaN or Inf". Subsetting adata (a
+    # cheap view, only when needed) keeps coords and later _get_color_values() calls
+    # aligned across every render path.
+    finite_mask = np.isfinite(np.asarray(coords[:, :2])).all(axis=1)
+    if not finite_mask.all():
+        warnings.warn(
+            f"{int((~finite_mask).sum())} cell(s) have non-finite coordinates in "
+            f"'{basis}' and are hidden.",
+            UserWarning, stacklevel=2,
+        )
+        adata = adata[finite_mask]
+        coords = adata.obsm[basis]
+
     # Normalize keys to list
     if keys is None:
         keys = [None]
