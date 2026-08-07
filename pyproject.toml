@@ -1,6 +1,6 @@
 [project]
 name = "insitupy-spatial"
-version = "0.12.0b7"
+version = "0.12.0b8"
 description = "Package introducing the InSituPy framework to analyze single-cell spatial transcriptomics data."
 license = "BSD-3-Clause"
 authors = [
