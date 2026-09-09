@@ -42,13 +42,13 @@ file searching.
    the user whether to invoke a senior-advisor agent if one is configured (e.g. the maintainer's
    `@opus-consultant`, a structured Opus Report contract); otherwise surface the question to a
    human. For a lightweight stall, the native `/advisor` toggle is the lower-friction option.
-6. **Log the work.** Check whether `.log/log.md` and `.log/backlog.md` already exist at the repo
-   root.
+6. **Log the work.** Check whether `.log/log.md` and `planning/backlog.md` already exist at the
+   repo root.
    - If they exist, append an entry to `.log/log.md` (via Edit, newest first) per the global
-     CLAUDE.md format, and update `.log/backlog.md` if a tracked item was completed.
+     CLAUDE.md format, and update `planning/backlog.md` if a tracked item was completed.
    - If they don't exist, don't create them silently. Ask the user whether to set up this
      session-log/backlog structure (briefly: a running dev journal at `.log/log.md` and a todo
-     list at `.log/backlog.md`); if they decline, skip logging entirely.
+     list at `planning/backlog.md`); if they decline, skip logging entirely.
 
 ## Delegation note
 

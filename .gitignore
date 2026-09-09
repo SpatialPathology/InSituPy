@@ -138,6 +138,9 @@ dmypy.json
 # Session logs and backlog (private, synced via Nextcloud symlink)
 .log/
 
+# Visible planning notes (private, synced via Nextcloud symlink) - see .claude/setup-notes.md
+planning/
+
 # Coala
 *.orig
 

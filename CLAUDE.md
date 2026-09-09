@@ -107,13 +107,15 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
 - Reports → `.log/reports/YYMMDD/<short-task-title>/report-<short-task-title>.md`
 - Session log → `.log/log.md` (append via Edit, **never** overwrite) after any task that
   changed files
-- Backlog → `.log/backlog.md`
+- Backlog → `planning/backlog.md`
 
-### `.log/` is not tracked by git — symlink required on each machine
+### `.log/` and `planning/` are not tracked by git — links required on each machine
 
-`.log/` is excluded from version control and backed up via a private cloud-synced folder.
-On a fresh clone, recreate `.log/` as a symlink to that folder. See `.claude/setup-notes.md`
-for instructions.
+`.log/` and `planning/` are excluded from version control and backed up via a private
+cloud-synced folder. On a fresh clone, recreate both as a symlink or junction to that folder.
+`planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools that
+skip dot-folders can index `planning/backlog.md`. See `.claude/setup-notes.md` for
+instructions.
 
 ## Coding workflow
 
