@@ -156,6 +156,23 @@ class TestIndependentCellNucleusPixelSize:
         assert boundaries.metadata["cells"]["pixel_size"] == 1.0
         assert boundaries.metadata["nuclei"]["pixel_size"] == 0.25
 
+    def test_independent_nucleus_pixel_size_survives_save_and_load(self, tmp_path):
+        # M1b: the reader used to take a single pixel size for all layers, so the nucleus
+        # raster came back at the cell resolution. Each layer must round-trip its own.
+        boundaries = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+        mask = np.array([[0, 1], [2, 0]], dtype=np.uint32)
+        boundaries.add_boundaries(
+            cell_boundaries=mask, nuclei_boundaries=mask,
+            pixel_size=1.0, nucleus_pixel_size=0.25,
+        )
+
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path)
+
+        loaded = _read_boundaries_from_celldata_zarr(path)
+        assert loaded.metadata["cells"]["pixel_size"] == 1.0
+        assert loaded.metadata["nuclei"]["pixel_size"] == 0.25
+
 
 class TestLoadInvalidatesInconsistentNucleusMap:
     """Regression coverage for the shipped demo: an older InSituPy filtered cells
@@ -265,3 +282,81 @@ class TestMaskRoundtripThroughReader:
         loaded = _read_boundaries_from_celldata_zarr(path)
         # level 0 of the pyramid is the full-resolution mask
         np.testing.assert_array_equal(loaded["cells"][0].compute(), mask)
+
+
+class TestCappedSaveDoesNotMutateMetadata:
+    """C1: save(max_resolution=...) must downsample only the on-disk copy, never the
+    in-memory object. Mutating self._metadata made every later geometric computation wrong
+    by the scale factor, and made a second capped save write a store whose raster and
+    declared pixel size disagreed."""
+
+    def test_capped_save_leaves_metadata_and_raster_and_is_idempotent(self, tmp_path):
+        import zarr
+
+        mask = np.zeros((8, 8), dtype=np.uint32)
+        mask[:4, :4] = 1
+        mask[4:, 4:] = 2
+        bd = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+        bd.add_boundaries(cell_boundaries=mask, nuclei_boundaries=None, pixel_size=0.5)
+
+        path1 = tmp_path / "b1.zarr"
+        bd.save(path=path1, max_resolution=1.0)
+
+        # in-memory pixel size and raster are untouched by the capped save
+        assert bd.metadata["cells"]["pixel_size"] == 0.5
+        assert bd["cells"].shape == (8, 8)
+
+        # on-disk level 0 is the downsampled raster, tagged with the capped pixel size
+        level0 = da.from_zarr(path1, component="masks/cells/0").compute()
+        assert level0.shape == (4, 4)
+        store1 = zarr.open(path1, mode="r")
+        assert store1["masks/cells"].attrs["pixel_size"] == 1.0
+
+        # a second capped save recomputes the same scale factor from the unchanged 0.5:
+        # identical level-0 shape and identical attrs (saving is idempotent)
+        path2 = tmp_path / "b2.zarr"
+        bd.save(path=path2, max_resolution=1.0)
+        level0_b = da.from_zarr(path2, component="masks/cells/0").compute()
+        store2 = zarr.open(path2, mode="r")
+        assert level0_b.shape == level0.shape
+        assert dict(store2["masks/cells"].attrs) == dict(store1["masks/cells"].attrs)
+
+
+class TestEmptyNucleusMapRoundtrip:
+    """M5/3c: an empty nucleus map ({} — "known, and no nucleus survives") must stay
+    distinct from None ("unknown, assume v1.x 1:1") across a save/load, so it is not
+    silently reinterpreted as a 1:1 mapping."""
+
+    def test_empty_map_roundtrips_as_empty_dict_not_none(self, tmp_path):
+        boundaries = _create_boundaries(nucleus_to_cell_map={})
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path)
+
+        loaded = _read_boundaries_from_celldata_zarr(path)
+        assert loaded.nucleus_to_cell_map is not None
+        assert loaded.nucleus_to_cell_map == {}
+
+    def test_none_map_roundtrips_as_none(self, tmp_path):
+        boundaries = _create_boundaries(nucleus_to_cell_map=None)
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path)
+
+        loaded = _read_boundaries_from_celldata_zarr(path)
+        assert loaded.nucleus_to_cell_map is None
+
+
+class TestZeroLengthArrayWrite:
+    """The chunk clamp in _zarr_compat lets zero-length arrays be written (zarr rejects a
+    zero-length chunk edge). This covers the pre-existing crash where a zero-cell
+    BoundariesData (reachable via CellData boolean subsetting) could not be saved."""
+
+    def test_zero_cell_boundaries_saves_and_reads_back_empty(self, tmp_path):
+        boundaries = BoundariesData(cell_names=[], seg_mask_value=[])
+        path = tmp_path / "boundaries.zarr"
+
+        # must not raise "integer chunk edge length must be >= 1, got 0"
+        boundaries.save(path=path)
+
+        loaded = _read_boundaries_from_celldata_zarr(path)
+        assert list(loaded.cell_names.compute()) == []
+        assert list(loaded.seg_mask_value.compute()) == []

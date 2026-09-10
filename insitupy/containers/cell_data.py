@@ -447,10 +447,16 @@ class CellData(DeepCopyMixin):
                         "the map. Re-read from raw data to restore multinucleated-cell mapping.",
                         stacklevel=2)
                     boundaries._nucleus_to_cell_map = None
+                    # drop the count too: keeping it would let the object claim
+                    # multinucleation while falling back to the 1:1 rule (matches the loader,
+                    # containers/io.py, which drops both together on an inconsistent map)
+                    boundaries._nucleus_count = None
                 else:
                     new_name_set = set(new_cell_names)
                     remapped = {k: v for k, v in nmap.items() if v in new_name_set}
-                    boundaries._nucleus_to_cell_map = remapped or None
+                    # keep {} ("known, and no nucleus survives") distinct from None
+                    # ("unknown, assume v1.x 1:1"); do not collapse an empty map to None
+                    boundaries._nucleus_to_cell_map = remapped
 
             # nucleus_count: per-cell, aligned to cell order
             ncount = boundaries._nucleus_count
@@ -470,31 +476,36 @@ class CellData(DeepCopyMixin):
             was_reordered = not overlapping_table_ids.equals(boundary_overlap_ids)
             changed = any([n_removed_table > 0, n_removed_boundaries > 0, was_reordered])
 
-            # extract boundaries
-            cell_bounds = boundaries["cells"]
-            nuc_bounds = boundaries["nuclei"]
+            # rewriting the rasters is only needed when cells were actually removed; a no-op
+            # or reorder-only sync changes no pixels, so skip the full-raster pass (which would
+            # otherwise grow the dask graph on every call). The is_empty guard also lets a
+            # mask-less BoundariesData sync without a KeyError on the "cells" lookup.
+            if not boundaries.is_empty and len(seg_mask_values_not_in_table) > 0:
+                # extract boundaries
+                cell_bounds = boundaries["cells"]
+                nuc_bounds = boundaries["nuclei"]
 
-            if isinstance(cell_bounds, list):
-                if nuc_bounds is not None:
-                    if not isinstance(nuc_bounds, list):
-                        raise TypeError("Cellular boundaries are a image pyramid but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
-                for i, cell_bound in enumerate(cell_bounds):
-                    removed_cells_mask = da.isin(cell_bound, seg_mask_values_not_in_table)
-                    cell_bound[removed_cells_mask] = 0 # set all removed cells 0
+                if isinstance(cell_bounds, list):
                     if nuc_bounds is not None:
-                        nuc_bounds[i][removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
-            elif isinstance(cell_bounds, da.core.Array):
-                if nuc_bounds is not None:
-                    if not isinstance(nuc_bounds, da.core.Array):
-                        raise TypeError("Cellular boundaries are a dask array but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
-                # set all non existent cell ids to zero
-                removed_cells_mask = da.isin(cell_bounds, seg_mask_values_not_in_table)
-                cell_bounds[removed_cells_mask] = 0 # set all removed cells 0
+                        if not isinstance(nuc_bounds, list):
+                            raise TypeError("Cellular boundaries are a image pyramid but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
+                    for i, cell_bound in enumerate(cell_bounds):
+                        removed_cells_mask = da.isin(cell_bound, seg_mask_values_not_in_table)
+                        cell_bound[removed_cells_mask] = 0 # set all removed cells 0
+                        if nuc_bounds is not None:
+                            nuc_bounds[i][removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
+                elif isinstance(cell_bounds, da.core.Array):
+                    if nuc_bounds is not None:
+                        if not isinstance(nuc_bounds, da.core.Array):
+                            raise TypeError("Cellular boundaries are a dask array but nuclear boundaries are not. Both need to be of the same type for the synchronization to work.")
+                    # set all non existent cell ids to zero
+                    removed_cells_mask = da.isin(cell_bounds, seg_mask_values_not_in_table)
+                    cell_bounds[removed_cells_mask] = 0 # set all removed cells 0
 
-                if nuc_bounds is not None:
-                    nuc_bounds[removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
-            else:
-                logger.warning(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
+                    if nuc_bounds is not None:
+                        nuc_bounds[removed_cells_mask] = 0 # set all nuclei belong to the removed cells 0
+                else:
+                    logger.warning(f"Unknown data type for cellular boundaries: {type(cell_bounds)}. Need to be either a dask array or a list of dask arrays. Skipped synchronization of cell ids.")
 
             summary = {
                 "had_boundaries": True,

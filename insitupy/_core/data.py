@@ -2110,7 +2110,10 @@ class InSituData:
                 uses the default (main) layer. Defaults to ``None``.
             cells_compartment: Whether to use whole-cell or nucleus masks for
                 quantification. One of ``"cells"`` or ``"nuclei"``.
-                Defaults to ``"cells"``.
+                Defaults to ``"cells"``. When a compartment has several instances
+                per cell (e.g. a multinucleated cell), the statistic is computed over
+                the union of that cell's instance pixels; a cell with no instance in
+                that compartment gets ``NaN``.
             method: Aggregation method applied within each mask.
                 One of ``"mean"`` or ``"median"``. Defaults to ``"median"``.
             downsample_factor: Optional integer factor by which to downsample
@@ -2150,6 +2153,12 @@ class InSituData:
         if not isinstance(mask_pyramid, list):
             mask_pyramid = [mask_pyramid]
         mask = mask_pyramid[0]
+
+        # Nucleus (and any future compartment) rasters carry their own label space.
+        # Translate to cell labels first so the seg_mask_value -> cell_names mapping
+        # below is correct, and so several instances of one cell are quantified as one
+        # region. A no-op for "cells" and for nuclei with no consistent nucleus map.
+        mask = cellsdata.boundaries.as_cell_labeled_mask(cells_compartment, mask)
 
         # --- select the image pyramid level whose pixel size is closest to the mask ---
         level_pixel_sizes = [img_pixel_size * (2 ** i) for i in range(len(img_pyramid))]

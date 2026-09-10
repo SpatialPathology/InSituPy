@@ -180,6 +180,17 @@ def _read_boundaries_from_celldata_zarr(
         warn("No `seg_mask_value` component found in boundaries zarr storage. This can lead to problems when syncing `.boundaries` and `.table`.")
         seg_mask_value = None
 
+    # Read the empty-map marker up front: it distinguishes a known-but-empty map ({}) from
+    # None ("unknown, assume v1.x 1:1"). Absent on stores written before this attribute
+    # existed, where it defaults to False and the old behaviour is preserved.
+    with ExitStack() as marker_stack:
+        marker_store = _get_zarr_store(bound_path, mode="r", zipped=(suffix == "zarr.zip"))
+        # In Zarr v2, stores are context managers and need to be entered
+        if not ZARR_V3:
+            marker_store = marker_stack.enter_context(marker_store)
+        root_attrs = dict(zarr.open_group(store=marker_store, mode="r").attrs)
+    has_map = bool(root_attrs.get("insitupy_has_nucleus_map", False))
+
     # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+)
     try:
         # current format (0.12.0b7+): two parallel arrays [nucleus_index] / [cell_name]
@@ -203,7 +214,9 @@ def _read_boundaries_from_celldata_zarr(
                 names = np.asarray(cell_names).astype(str)
                 nucleus_to_cell_map = {int(row[0]): str(names[int(row[1])]) for row in legacy_arr}
         except (ArrayNotFoundError, TypeError):
-            nucleus_to_cell_map = None  # Not available in older datasets
+            # no map arrays on disk: {} when the writer marked a known-empty map,
+            # else None (unknown -> assume v1.x 1:1, the older-dataset behaviour)
+            nucleus_to_cell_map = {} if has_map else None
 
     # Read nucleus_count (number of nuclei per cell)
     try:
@@ -267,12 +280,21 @@ def _read_boundaries_from_celldata_zarr(
     cell_boundaries = bound_data.get("cells")
     nuclei_boundaries = bound_data.get("nuclei")
 
-    # add boundaries
-    boundaries.add_boundaries(
-        cell_boundaries=cell_boundaries,
-        nuclei_boundaries=nuclei_boundaries,
-        pixel_size=meta[list(meta.keys())[0]]["pixel_size"]
-    )
+    # add boundaries, reading each layer's own pixel size (they can differ: a foreign store
+    # may resolve the cell and nucleus rasters independently)
+    if cell_boundaries is not None:
+        boundaries.add_boundaries(
+            cell_boundaries=cell_boundaries,
+            nuclei_boundaries=nuclei_boundaries,
+            pixel_size=meta["cells"]["pixel_size"],
+            nucleus_pixel_size=meta["nuclei"]["pixel_size"] if "nuclei" in meta else None,
+        )
+    elif nuclei_boundaries is not None:
+        raise ValueError(
+            f"Boundaries store at {bound_path} contains a 'nuclei' mask but no 'cells' mask. "
+            "Nucleus-only boundaries are not supported."
+        )
+    # no masks on disk: leave `boundaries` mask-less (BoundariesData.is_empty)
 
     return boundaries
 

@@ -37,6 +37,20 @@ logger = logging.getLogger(__name__)
 # TODO: Add BoundariesData.read() — loading is complex (zarr pyramids) and
 # currently handled through InSituData / CellData.read().
 
+
+def _relabel_with_lut(mask: da.core.Array, lut: np.ndarray) -> da.core.Array:
+    """Translate raster labels in `mask` through `lut` (index = old label -> new label).
+
+    Labels at or beyond ``len(lut)`` (an orphan instance past the end of the map) map to 0.
+    """
+    def _apply(block):
+        out = np.zeros(block.shape, dtype=lut.dtype)
+        valid = block < len(lut)
+        out[valid] = lut[block[valid]]
+        return out
+    return da.map_blocks(_apply, mask, dtype=lut.dtype)
+
+
 class BoundariesData(DeepCopyMixin):
     '''
     Object to read and load boundaries of cells and nuclei.
@@ -188,6 +202,35 @@ class BoundariesData(DeepCopyMixin):
                 and self.nucleus_map_is_consistent()):
             return np.array(sorted(self._nucleus_to_cell_map.keys()), dtype=np.uint32) + 1
         return smv
+
+    def label_lut(self, mask_key: str) -> np.ndarray | None:
+        """Lookup table from a layer's raster labels to the parent cell's ``seg_mask_value``.
+
+        Index the returned array with a raster label. Background (0) and any label with
+        no valid parent map to 0. Returns None when the layer's labels already *are*
+        ``seg_mask_value`` and no translation is needed: the "cells" layer, and "nuclei"
+        on v1.x data with no ``nucleus_to_cell_map``.
+        """
+        if mask_key != "nuclei":
+            return None
+        nmap = self._nucleus_to_cell_map
+        if nmap is None or not self.nucleus_map_is_consistent():
+            return None
+        smv = self._seg_mask_value.compute()
+        names = self._cell_names.compute().astype(str)
+        name_to_seg = dict(zip(names, smv))
+        lut = np.zeros((max(nmap) + 2) if nmap else 1, dtype=smv.dtype)
+        for nucleus_idx, cell_name in nmap.items():
+            lut[nucleus_idx + 1] = name_to_seg.get(str(cell_name), 0)
+        return lut
+
+    def as_cell_labeled_mask(self, mask_key: str, mask: da.core.Array) -> da.core.Array:
+        """Return `mask` with its labels translated to ``seg_mask_value``.
+
+        A no-op for layers whose labels already are ``seg_mask_value``.
+        """
+        lut = self.label_lut(mask_key)
+        return mask if lut is None else _relabel_with_lut(mask, lut)
 
     @property
     def is_empty(self):
@@ -487,12 +530,16 @@ class BoundariesData(DeepCopyMixin):
                 scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
 
                 if bound_data is not None:
+                    # attrs written to disk; self._metadata must stay untouched so the
+                    # in-memory pixel size keeps describing the in-memory raster (a capped
+                    # save downsamples only the on-disk copy, never the in-memory object)
+                    meta_out = dict(meta)
                     if scale_factor is not None:
                         if isinstance(bound_data, list):
                             bound_data = bound_data[0]
                         bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
                         bound_data = da.from_array(bound_data) # convert to dask array
-                        meta['pixel_size'] = max_resolution # update metadata
+                        meta_out['pixel_size'] = max_resolution # update on-disk metadata only
 
                     # boundary masks are always stored as a multi-resolution pyramid
                     if not isinstance(bound_data, list):
@@ -505,7 +552,7 @@ class BoundariesData(DeepCopyMixin):
 
                     # add boundaries metadata to zarr.zip
                     store = zarr.open(dirstore, mode="a")
-                    store[f"masks/{n}"].attrs.put(meta)
+                    store[f"masks/{n}"].attrs.put(meta_out)
 
             # save cell names
             _write_dask_array_to_zarr(dirstore, "cell_names", self.cell_names)
@@ -520,6 +567,12 @@ class BoundariesData(DeepCopyMixin):
                 cell_name_values = np.array(list(self._nucleus_to_cell_map.values()), dtype=str)
                 _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map/nucleus_index", da.from_array(nuc_indices))
                 _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map/cell_name", da.from_array(cell_name_values))
+
+            # Record whether a nucleus map is present at all, so an empty map ({} — "known,
+            # and no nucleus survives") is distinguishable on load from None ("unknown, assume
+            # v1.x 1:1"). Old stores lack this attribute and correctly read back as None.
+            root = zarr.open(dirstore, mode="a")
+            root.attrs["insitupy_has_nucleus_map"] = self._nucleus_to_cell_map is not None
 
             # Save nucleus_count if available
             if self._nucleus_count is not None:

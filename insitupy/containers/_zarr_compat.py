@@ -52,7 +52,10 @@ def _write_dask_array_to_zarr(store, name: str, arr) -> None:
     into the given array. That branch is unchanged since 2024, so it is
     stable across dask versions before, during, and after the broken window.
     """
-    chunks = tuple(c[0] for c in arr.chunks)
+    # clamp each chunk edge to >= 1: zarr rejects a zero-length chunk edge, so a
+    # zero-length array (an empty nucleus_to_cell_map, or a zero-cell CellData)
+    # would otherwise raise "integer chunk edge length must be >= 1, got 0".
+    chunks = tuple(max(1, c[0]) for c in arr.chunks)
     if ZARR_V3:
         z = zarr.create_array(
             store=store,

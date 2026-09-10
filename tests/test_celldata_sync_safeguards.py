@@ -258,7 +258,9 @@ def test_sync_invalidates_unrepairable_nucleus_to_cell_map():
     # "ghost" was never a valid cell name, even before filtering - genuine
     # corruption, not a name dropped by legitimate filtering.
     nucleus_to_cell_map = {0: "c1", 1: "ghost"}
-    boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
+    nucleus_count = np.array([2, 1, 1])
+    boundaries = _create_sparse_boundaries(
+        nucleus_to_cell_map=nucleus_to_cell_map, nucleus_count=nucleus_count)
     table = _create_table(["c1", "c2", "c3"])
     celldata = CellData(table=table, boundaries=boundaries)
 
@@ -266,6 +268,9 @@ def test_sync_invalidates_unrepairable_nucleus_to_cell_map():
         celldata.sync()
 
     assert celldata.boundaries.nucleus_to_cell_map is None
+    # the count must be dropped together with the map: keeping it would let the object
+    # claim multinucleation while silently falling back to the 1:1 rule
+    assert celldata.boundaries.nucleus_count is None
 
 
 def test_crop_works_without_boundaries():
@@ -278,3 +283,69 @@ def test_crop_works_without_boundaries():
     assert cropped.boundaries is None
     assert list(cropped.table.obs_names) == ["c2", "c3"]
     assert np.allclose(cropped.table.obsm["spatial"], np.array([[1.0, 1.0], [3.0, 3.0]]))
+
+
+def test_sync_empty_nucleus_map_stays_empty_dict_not_none():
+    # M5: filtering away every nucleated cell must leave a *known-empty* map ({}), not None.
+    # Only c1 is nucleated; removing it must not turn the dataset into "assume v1.x 1:1".
+    nucleus_to_cell_map = {0: "c1", 1: "c1"}
+    boundaries = _create_sparse_boundaries(nucleus_to_cell_map=nucleus_to_cell_map)
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    filtered = celldata[[False, True, True]]  # drop the only nucleated cell (c1)
+
+    assert filtered.boundaries.nucleus_to_cell_map is not None
+    assert filtered.boundaries.nucleus_to_cell_map == {}
+    # label_ids_for("nuclei") is empty, not the surviving cell labels
+    assert list(filtered.boundaries.label_ids_for("nuclei")) == []
+
+
+def test_noop_sync_does_not_grow_or_rename_raster_graph():
+    # M2: a no-op (or reorder-only) sync must not append a full-raster pass to the dask graph.
+    boundaries = _create_boundaries()
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    cells0 = celldata.boundaries["cells"]
+    name0 = cells0.name
+    graph0 = len(dict(cells0.__dask_graph__()))
+
+    for _ in range(5):
+        celldata.sync()
+
+    cells_after = celldata.boundaries["cells"]
+    assert cells_after.name == name0
+    assert len(dict(cells_after.__dask_graph__())) == graph0
+
+    # a real removal *does* rewrite the raster: the name changes once
+    celldata._table = celldata._table[[True, True, False], :].copy()
+    celldata.sync()
+    name1 = celldata.boundaries["cells"].name
+    assert name1 != name0
+
+    # and a subsequent no-op sync leaves the (now rewritten) raster alone again
+    celldata.sync()
+    assert celldata.boundaries["cells"].name == name1
+
+    # the removed cell's label (seg value 3) is gone; the survivors are intact
+    final = celldata.boundaries["cells"].compute()
+    assert set(np.unique(final)) == {0, 1, 2}
+
+
+def test_maskless_boundaries_survive_sync_subsetting_and_table_setter():
+    # M6: a BoundariesData with no add_boundaries() call (is_empty) must not raise
+    # KeyError: 'cells' when sync() runs - directly, via subsetting, or via the table setter.
+    boundaries = BoundariesData(cell_names=["c1", "c2", "c3"], seg_mask_value=[1, 2, 3])
+    assert boundaries.is_empty
+    table = _create_table(["c1", "c2", "c3"])
+    celldata = CellData(table=table, boundaries=boundaries)
+
+    celldata.sync()  # must not raise
+
+    subset = celldata[[True, False, True]]
+    assert list(subset.boundaries.cell_names.compute()) == ["c1", "c3"]
+    assert subset.boundaries.is_empty
+
+    # the table setter routes through sync() as well
+    celldata.table = _create_table(["c1", "c2", "c3"])
