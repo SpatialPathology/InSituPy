@@ -82,6 +82,12 @@ class BoundariesData(DeepCopyMixin):
         For more details on how these values are saved in case of Xenium In Situ, see:
         https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/tutorials/outputs/xoa-output-zarr
         """
+        # guard None before the length comparison, otherwise len(None) raises a confusing
+        # TypeError instead of this clear message (io.py hands None here for old stores that
+        # lack a seg_mask_value array)
+        if seg_mask_value is None:
+            raise ValueError("Argument 'seg_mask_value' is None. This argument is required to be set.")
+
         if len(cell_names) != len(seg_mask_value):
             raise ValueError(f"cell_names ({len(cell_names)}) and seg_mask_value ({len(seg_mask_value)}) must have the same length.")
 
@@ -90,11 +96,7 @@ class BoundariesData(DeepCopyMixin):
         # store cell ids
         self._cell_names = da.from_array(np.array(cell_names, dtype=str))
 
-        self._seg_mask_value = seg_mask_value
-        if self._seg_mask_value is not None:
-            self._seg_mask_value = da.from_array(np.array(seg_mask_value, dtype=np.uint32))
-        else:
-            raise ValueError("Argument 'seg_mask_value' is None. This argument is required to be set.")
+        self._seg_mask_value = da.from_array(np.array(seg_mask_value, dtype=np.uint32))
 
         # Store nucleus-to-cell mapping for multinucleated cell support (Xenium v2.0+)
         self._nucleus_to_cell_map = nucleus_to_cell_map
@@ -401,6 +403,22 @@ class BoundariesData(DeepCopyMixin):
 
         if not (isinstance(nuclei_boundaries, da.core.Array) or isinstance(nuclei_boundaries, list) or nuclei_boundaries is None):
             raise TypeError("nuclei_boundaries must be a dask/numpy array, a list, or None")
+
+        # cell and nucleus rasters must share a pixel grid: sync() zeroes the nuclei raster with
+        # a boolean mask computed on the cell raster, which requires identical shapes. Reject a
+        # mismatch here with a clear message rather than letting it surface as a deep IndexError
+        # on the first filter/crop. A differing pixel_size on same-shape rasters is legal and
+        # must keep working, so key on shape, not pixel size.
+        if nuclei_boundaries is not None:
+            def _base_shape(b):
+                return b[0].shape if isinstance(b, list) else b.shape
+            if _base_shape(cell_boundaries) != _base_shape(nuclei_boundaries):
+                raise ValueError(
+                    "cell_boundaries and nuclei_boundaries must have the same pixel shape "
+                    f"(got {_base_shape(cell_boundaries)} and {_base_shape(nuclei_boundaries)}). "
+                    "Independently-resolved cell and nucleus rasters are not yet supported; "
+                    "resample them to a common grid before adding, or supply them at one pixel size."
+                )
 
         data = {
             "cells": (cell_boundaries, pixel_size),

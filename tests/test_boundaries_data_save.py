@@ -360,3 +360,42 @@ class TestZeroLengthArrayWrite:
         loaded = _read_boundaries_from_celldata_zarr(path)
         assert list(loaded.cell_names.compute()) == []
         assert list(loaded.seg_mask_value.compute()) == []
+
+
+class TestConstructionAndReadGuards:
+    """Group B slice: clear errors at the point of the mistake instead of a confusing
+    TypeError / IndexError / UnboundLocalError further downstream."""
+
+    def test_constructor_rejects_none_seg_mask_value_with_clear_error(self):
+        # m1: None must give the documented ValueError, not "TypeError: object of type
+        # 'NoneType' has no len()" from the length comparison running first
+        with pytest.raises(ValueError, match="is None"):
+            BoundariesData(cell_names=["c1", "c2"], seg_mask_value=None)
+
+    def test_add_boundaries_rejects_mismatched_cell_nucleus_shapes(self):
+        # M1a: mismatched cell/nucleus raster shapes crash sync()/filter with a deep IndexError;
+        # reject them at construction instead. (The same-shape, distinct-pixel-size case is
+        # accepted - covered by TestIndependentCellNucleusPixelSize.)
+        boundaries = BoundariesData(cell_names=["c1", "c2"], seg_mask_value=[1, 2])
+        cell_mask = np.array([[0, 1], [2, 0]], dtype=np.uint32)   # 2x2
+        nucleus_mask = np.zeros((4, 4), dtype=np.uint32)          # 4x4 - mismatched
+        with pytest.raises(ValueError, match="same pixel shape"):
+            boundaries.add_boundaries(
+                cell_boundaries=cell_mask, nuclei_boundaries=nucleus_mask, pixel_size=1.0
+            )
+
+    def test_read_boundaries_without_identity_arrays_raises_clear_error(self, tmp_path):
+        # m13: a store lacking BOTH cell_names and cell_id used to leave cell_names unbound and
+        # blow up later with UnboundLocalError; it must raise a clear error instead.
+        path = tmp_path / "boundaries.zarr"
+        with ExitStack() as stack:
+            dirstore = _get_zarr_store(path, mode="w")
+            if not ZARR_V3:
+                dirstore = stack.enter_context(dirstore)
+            # write an unrelated array so the store is a valid zarr group, but no identity axis
+            _write_dask_array_to_zarr(
+                dirstore, "seg_mask_value", da.from_array(np.array([1, 2], dtype=np.uint32))
+            )
+
+        with pytest.raises(ValueError, match="neither"):
+            _read_boundaries_from_celldata_zarr(path)

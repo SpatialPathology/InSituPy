@@ -170,8 +170,14 @@ def _read_boundaries_from_celldata_zarr(
             cell_ids = da.from_zarr(bound_path, component="cell_id").compute()
             cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
         except ArrayNotFoundError:
-            # if no cell_id is present, this means that the data is from a new InSituPy version which is good.
-            pass
+            # neither cell_names nor cell_id on disk: the store lacks an identity axis, so
+            # cell_names would be left unbound and blow up later with UnboundLocalError. Raise a
+            # clear, domain-specific error instead (the store is readable, just incomplete).
+            raise ValueError(
+                f"Boundaries store at {bound_path} has neither a 'cell_names' nor a "
+                "'cell_id' array; cannot determine cell identities. The store is likely "
+                "incomplete or was not written by InSituPy."
+            )
 
     try:
         # in older datasets sometimes seg_mask_value is missing
