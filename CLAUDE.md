@@ -41,8 +41,8 @@ over this summary if they ever conflict.
 ## Environment & commands
 
 - **Reading and planning need nothing installed.** The source tree is on disk and the
-  `insitupy` MCP server runs in its own environment, so code exploration and `/plan` work
-  without InSituPy installed in the active session environment.
+  `insitupy` MCP server runs in its own environment, so code exploration and any `/plan*`
+  command work without InSituPy installed in the active session environment.
 - **Running tests requires InSituPy installed** in the active environment — but do not install
   it yourself. Run `pytest` from that environment. If a test run fails because InSituPy isn't
   importable (`ModuleNotFoundError`), surface that to the user and ask them to install it
@@ -119,20 +119,33 @@ instructions.
 
 ## Coding workflow
 
-This project uses a two-command plan→implement workflow with per-phase model tiering. The
-report written by `/plan` is the durable handoff: implementation can follow immediately or in
-a later session with identical results, because all behavioral configuration lives here, in
-the agent files, and in the commands — not in the planning conversation.
+This project uses a plan→implement workflow with per-phase model tiering. The report written
+by a plan command is the durable handoff: implementation can follow immediately or in a later
+session with identical results, because all behavioral configuration lives here, in the agent
+files, and in the commands — not in the planning conversation.
 
-- **`/plan <goal>`** — pinned to Opus, read-only, ends by writing a self-contained report to
-  `.log/`. Makes no code edits.
+Three plan commands share one protocol (`.claude/plan-protocol.md`, pulled in via an `@`
+include) and differ only in which model they pin:
+
+- **`/plan-opus <goal>`** — pinned to Opus. Default choice for most planning work.
+- **`/plan-fable <goal>`** — pinned to Fable. Prefer for judgment-heavy architecture/design
+  reviews (weighing a structural redesign, finding gaps that weren't explicitly asked about)
+  rather than mechanical planning.
+- **`/plan <goal>`** — no model pin; runs on whatever model this session is currently using.
+  Deliberate escape hatch for planning on Sonnet (or any other model) when that makes sense for
+  a small/cheap task; prefer `/plan-opus` or `/plan-fable` when the plan should be guaranteed
+  stronger than Sonnet regardless of session state.
+
+All three are read-only and end by writing a self-contained report to `.log/`. Makes no code
+edits.
+
 - **`/implement @<report>`** — pinned to Sonnet, executes the report. The report is the only
   per-run input.
 
-The session model default is `opusplan` (set in `.claude/settings.json`): entering plan mode
-in a same-sitting run gives Opus for planning and drops to Sonnet for execution; a deferred
-implement-only run never enters plan mode and stays on Sonnet. The commands' own `model`
-frontmatter pins each phase explicitly regardless of the session default.
+`.claude/settings.json` pins the project's session default model to Sonnet, and a session-level
+`/model` override does not survive a restart — so `/plan` alone (unpinned) will usually run on
+Sonnet unless you've switched models first in this session. Each plan command's own `model`
+frontmatter pins its phase explicitly regardless of the session default.
 
 ### Agents and escalation
 

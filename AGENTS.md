@@ -41,5 +41,5 @@ Before opening a PR: read `AI_POLICY.md`, then run the review workflow and paste
 into the PR (see `CONTRIBUTING.md` - `/review` in Claude Code and Cursor, the
 `insitupy-review` skill in Codex).
 
-Maintainer-oriented `/plan` and `/implement` commands also exist (Claude Code only) - see
-`CONTRIBUTING.md`.
+Maintainer-oriented `/plan` (and its model-pinned variants `/plan-opus`/`/plan-fable`) and
+`/implement` commands also exist (Claude Code only) - see `CONTRIBUTING.md`.

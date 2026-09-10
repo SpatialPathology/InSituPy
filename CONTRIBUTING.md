@@ -91,8 +91,8 @@ required piece is a pre-PR review; the pitfalls knowledge is shared as a portabl
   (`.claude/skills/insitupy-pitfalls/reference/conventions_and_pitfalls.md` and
   `contributing_to_insitupy.md`) directly, so the checklist still applies even without skill
   support.
-- **`/plan` and `/implement`** are Claude Code-only, maintainer-oriented, and optional; they are
-  not mirrored to other agents.
+- **`/plan` (plus its model-pinned variants `/plan-opus`/`/plan-fable`) and `/implement`** are
+  Claude Code-only, maintainer-oriented, and optional; they are not mirrored to other agents.
 - **Single source of truth.** The review workflow and the pitfalls skill are authored once under
   `.claude/` and rendered into the Cursor/Codex directories by `tools/sync_commands.py`. If you
   change either, re-run `python tools/sync_commands.py` and commit the regenerated files.
