@@ -3164,6 +3164,12 @@ class InSituExperiment:
                 "Use confirm=False only after verifying the path is set."
             )
 
+        # new_data's _path was relabeled to the slot above for in-memory consistency, but the
+        # object does not lazily read from bad_path (its modalities are held independently).
+        # Clear the label across the write so InSituData.saveas's self-overwrite guard - which
+        # treats _path as the live backing store - does not misfire on this legitimate replace.
+        # saveas restores _path to bad_path after the write completes.
+        new_data._path = None
         new_data.saveas(bad_path, overwrite=True)
 
     def remove(self, idx: int | str, *, confirm: bool = True, delete_from_disk: bool = False) -> None:
