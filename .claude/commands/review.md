@@ -1,6 +1,7 @@
 ---
 description: Self-contained, InSituPy-specific severity-graded review of your working changes before a PR. Prints a PR-ready summary to paste into the pull request (required by AI_POLICY.md).
 argument-hint: "[base-ref] - optional; defaults to the branch's merge-base with the default branch"
+model: claude-opus-4-8
 allowed-tools: Read, Glob, Grep, Bash, PowerShell, mcp__insitupy__*
 ---
 
