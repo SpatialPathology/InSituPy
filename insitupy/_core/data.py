@@ -1736,6 +1736,21 @@ class InSituData:
         # check if the path already exists
         path = Path(path)
 
+        # Guard against destroying the project this object is still (lazily) reading from.
+        # saveas() deletes the target up front; if the target is (or contains, or lies inside)
+        # the current backing directory, lazy image/transcript reads would then read from a
+        # deleted directory and lose data silently. Use .save() to update a project in place.
+        if self._path is not None:
+            src = Path(self._path).resolve()
+            tgt = path.resolve()
+            if src.exists() and (tgt == src or tgt in src.parents or src in tgt.parents):
+                raise ValueError(
+                    f"Refusing to saveas() into {tgt}: this overlaps the directory this "
+                    f"InSituData is currently backed by ({src}) and would delete the data it "
+                    f"reads from. To update the existing project in place, use .save(). "
+                    f"To write a standalone copy, choose a path outside {src}."
+                )
+
         # check overwrite
         check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
 
