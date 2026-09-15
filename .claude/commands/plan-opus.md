@@ -1,7 +1,7 @@
 ---
 description: Plan a change with Opus (read-only) and write a self-contained implementation report to .log/.
 argument-hint: <goal or task description>
-model: opus
+model: claude-opus-4-8
 allowed-tools: Read, Glob, Grep, Write, WebSearch, WebFetch, PowerShell, mcp__insitupy__*
 ---
 
