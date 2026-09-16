@@ -17,7 +17,7 @@ from shapely.geometry import Point, Polygon
 pytest.importorskip("spatialdata")
 
 from spatialdata import SpatialData  # noqa: E402
-from spatialdata.models import Image2DModel, Labels2DModel, TableModel  # noqa: E402
+from spatialdata.models import Image2DModel, Labels2DModel, ShapesModel, TableModel  # noqa: E402
 from spatialdata.transformations import Identity, Scale  # noqa: E402
 from xarray import DataArray  # noqa: E402
 
@@ -227,6 +227,7 @@ def make_experiment(n_samples=2, n_cells=6):
 
 def make_foreign_labels_native_sdata(
     with_nucleus=True, contiguous_ids=False, n_cells=6, seed=0, nucleus_pixel_size=None,
+    with_nucleus_map=False, vendor_pixel_size=None, multichannel_morphology=False,
 ):
     """A hand-built, labels-native SpatialData object with no InSituPy dialect.
 
@@ -240,9 +241,34 @@ def make_foreign_labels_native_sdata(
     ``Scale`` transform (pixel size in µm/pixel) instead of ``Identity`` (pixel
     size 1.0) - independent-resolution cell/nucleus masks, the real-data case a
     foreign store is not guaranteed to avoid. Requires ``with_nucleus=True``.
+
+    ``with_nucleus_map=True`` (implies ``with_nucleus=True``) adds a
+    ``nucleus_boundaries`` shapes element - spatialdata-io's map source for
+    SD-B2: a GeoDataFrame indexed by nucleus label (the same 1-based mask
+    values used in the ``nucleus_labels`` raster) with a ``cell_id`` column
+    mapping each nucleus to a table row *shifted by one* relative to the
+    raster's own same-index/same-value coincidence - a non-identity structure
+    matching XOA v2-v4, which mis-parents every nucleus under the old 1:1
+    fallback.
+
+    ``vendor_pixel_size``, when given, adds the two things a real
+    ``spatialdata_io.xenium()`` store always carries and that the minimal /
+    auto-detect import path must handle correctly (SD-B1): a ``cell_circles``
+    shapes sibling with a ``Scale([1/vendor_pixel_size, 1/vendor_pixel_size])``
+    transform (so ``_resolve_foreign_pixel_size`` can recover it from a
+    sibling, spatialdata-io's own convention), and a micrometre-scale
+    ``obsm["spatial"]`` on the table (the vendor centroids the default import
+    path must keep rather than overwrite with label-derived pixel centroids).
+
+    ``multichannel_morphology=True`` adds a 4-channel ``morphology_focus``
+    image (``Identity`` transform, like the real raster) whose ``c``
+    coordinate carries real Xenium-style channel names, for SD-B11.
     """
     rng = np.random.default_rng(seed)
     size = n_cells * 4
+
+    if with_nucleus_map:
+        with_nucleus = True
 
     if contiguous_ids:
         instance_ids = np.arange(1, n_cells + 1)
@@ -257,6 +283,13 @@ def make_foreign_labels_native_sdata(
             morphology_arr, transformations={"global": Identity()},
         )
     }
+    if multichannel_morphology:
+        channel_names = ["DAPI", "ATP1A1/CD45/E-Cadherin", "18S", "AlphaSMA/Vimentin"]
+        morphology_focus_arr = np.zeros((len(channel_names), size, size), dtype=np.uint16)
+        images["morphology_focus"] = Image2DModel.parse(
+            morphology_focus_arr, dims=("c", "y", "x"), c_coords=channel_names,
+            transformations={"global": Identity()},
+        )
 
     cell_mask = np.zeros((size, size), dtype=np.uint32)
     for i, value in enumerate(instance_ids):
@@ -290,9 +323,40 @@ def make_foreign_labels_native_sdata(
         obs=obs,
         var=pd.DataFrame(index=[f"gene_{j}" for j in range(3)]),
     )
+
+    if vendor_pixel_size is not None:
+        # Row i's pixel centroid is (i*4, i*4) - see cell_mask above - regardless of the
+        # permuted instance_id value at that row; the vendor obsm is that same physical
+        # location, just expressed in micrometres instead of pixels.
+        pixel_centroids = np.array([[i * 4, i * 4] for i in range(n_cells)], dtype=float)
+        adata.obsm["spatial"] = pixel_centroids * vendor_pixel_size
+
     table = TableModel.parse(adata, region="cell_labels", region_key="region", instance_key="cell_id")
 
-    return SpatialData(images=images, labels=labels, tables={"table": table})
+    shapes = {}
+    if vendor_pixel_size is not None:
+        circles_gdf = gpd.GeoDataFrame({
+            "geometry": [Point(i * 4, i * 4).buffer(1.0) for i in range(n_cells)],
+        })
+        shapes["cell_circles"] = ShapesModel.parse(
+            circles_gdf,
+            transformations={"global": Scale([1 / vendor_pixel_size, 1 / vendor_pixel_size], axes=("x", "y"))},
+        )
+
+    if with_nucleus_map:
+        # AnnData assigns row-position string obs_names ("0", "1", ...) when obs carries no
+        # explicit index (verified empirically) - the shift-by-one map below targets those.
+        shifted_cell_ids = [str((i + 1) % n_cells) for i in range(n_cells)]
+        nucleus_boundaries_gdf = gpd.GeoDataFrame(
+            {
+                "cell_id": shifted_cell_ids,
+                "geometry": [Point(i * 4 + 1, i * 4 + 1).buffer(0.4) for i in range(n_cells)],
+            },
+            index=pd.Index(instance_ids, dtype=int),
+        )
+        shapes["nucleus_boundaries"] = ShapesModel.parse(nucleus_boundaries_gdf)
+
+    return SpatialData(images=images, labels=labels, shapes=shapes, tables={"table": table})
 
 
 # ── Round-trip harness ───────────────────────────────────────────────────────

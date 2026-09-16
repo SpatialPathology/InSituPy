@@ -15,6 +15,7 @@ else:
     from spatialdata.transformations.transformations import Scale
 
 import logging
+import re
 import warnings
 from collections import defaultdict
 from numbers import Number
@@ -1140,6 +1141,18 @@ def _build_insitudata_from_elements(
     return data
 
 
+def _sanitize_channel_name(name) -> str:
+    """Sanitize a channel name for use as an ``ImageData`` key (SD-B11).
+
+    ``ImageData.save`` writes each channel to ``<name>.zarr`` under the output
+    directory (``insitupy/containers/image_data.py``), so a literal path
+    separator in a real channel name (e.g. a Xenium morphology channel named
+    ``"ATP1A1/CD45/E-Cadherin"``) would otherwise be read as a subdirectory.
+    Replaces filesystem-unsafe characters with an underscore.
+    """
+    return re.sub(r'[\\/:*?"<>|]', "_", str(name))
+
+
 def _add_images_to_insitudata(
     data: InSituData,
     sdata: SpatialData,
@@ -1198,7 +1211,17 @@ def _add_images_to_insitudata(
 
         channel_names = name
         if not is_rgb and axes.C is not None and da_img.shape[axes.C] > 1:
-            channel_names = [f"{name}_{i}" for i in range(da_img.shape[axes.C])]
+            n_channels = da_img.shape[axes.C]
+            channel_names = None
+            if "c" in data_array.coords:
+                c_values = data_array.coords["c"].values
+                if len(c_values) == n_channels:
+                    channel_names = [_sanitize_channel_name(v) for v in c_values]
+            if channel_names is None:
+                # Fall back to numbered channels when no usable `c` coordinate is present
+                # (SD-B11: real channel names, e.g. "DAPI"/"ATP1A1/CD45/E-Cadherin", are
+                # preferred whenever the DataArray actually carries them).
+                channel_names = [f"{name}_{i}" for i in range(n_channels)]
 
         data.images.add_image(
             image=da_img,
@@ -1217,6 +1240,7 @@ def _create_boundaries_from_spatialdata(
     seg_mask_value: np.ndarray,
     cell_boundaries_data: tuple[str, Number] | None = None, # tuple as (cell_boundaries_key, pixel_size)
     nucleus_boundaries_data: tuple[str, Number] | None = None, # tuple as (nucleus_boundaries_key, pixel_size)
+    nucleus_to_cell_map: dict[int, str] | None = None,
     ) -> BoundariesData:
     """Create BoundariesData from SpatialData labels.
 
@@ -1225,6 +1249,10 @@ def _create_boundaries_from_spatialdata(
     are not guaranteed to share a resolution, unlike InSituPy's own
     exporter). ``seg_mask_value`` is supplied by the caller - this function
     does not fabricate it.
+
+    ``nucleus_to_cell_map`` (SD-B2), when given, is passed straight through
+    to the ``BoundariesData`` constructor so nuclei are parented to their
+    real parent cell instead of falling back to the 1:1 identity rule.
     """
     if nucleus_boundaries_data is not None and cell_boundaries_data is None:
         raise ValueError(
@@ -1234,7 +1262,8 @@ def _create_boundaries_from_spatialdata(
 
     boundaries = BoundariesData(
         cell_names=cell_names,
-        seg_mask_value=seg_mask_value
+        seg_mask_value=seg_mask_value,
+        nucleus_to_cell_map=nucleus_to_cell_map,
     )
 
     # Add cell boundaries if provided
