@@ -1467,6 +1467,81 @@ unicode = ["unicodedata2 (>=15.0.0) ; python_version <= \"3.11\""]
 woff = ["brotli (>=1.0.1) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=0.8.0) ; platform_python_implementation != \"CPython\"", "zopfli (>=0.1.4)"]
 
 [[package]]
+name = "formulaic"
+version = "1.0.2"
+description = "An implementation of Wilkinson formulas."
+optional = true
+python-versions = ">=3.7.2"
+groups = ["main"]
+markers = "python_version >= \"3.13\" and extra == \"pseudobulk\""
+files = [
+    {file = "formulaic-1.0.2-py3-none-any.whl", hash = "sha256:663328b038a0eb7644f59400615da7abf2672b0e11124b3bef3307afc441d97c"},
+    {file = "formulaic-1.0.2.tar.gz", hash = "sha256:6eb65bedd1903c5381d8f2ae7a55b6ba13cb77d57bbaf6e4278f3b2c38e3660e"},
+]
+
+[package.dependencies]
+interface-meta = ">=1.2.0"
+numpy = ">=1.16.5"
+pandas = ">=1.0"
+scipy = ">=1.6"
+typing-extensions = ">=4.2.0"
+wrapt = ">=1.0"
+
+[package.extras]
+arrow = ["pyarrow (>=1)"]
+calculus = ["sympy (>=1.3,!=1.10)"]
+
+[[package]]
+name = "formulaic"
+version = "1.2.2"
+description = "An implementation of Wilkinson formulas."
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "python_version < \"3.13\" and extra == \"pseudobulk\""
+files = [
+    {file = "formulaic-1.2.2-py3-none-any.whl", hash = "sha256:0f84ff49e3fc9dc0e68ab08a0a9427874021aa6c558e66b44dc634a35739b09b"},
+    {file = "formulaic-1.2.2.tar.gz", hash = "sha256:c99e8f11ff7d327eaecaf63855ca69b7fa0da100ad6c0041ef80912fbac667e6"},
+]
+
+[package.dependencies]
+interface-meta = ">=1.2.0"
+narwhals = ">=1.17"
+numpy = ">=1.20.0"
+pandas = ">=1.3"
+scipy = ">=1.6"
+typing-extensions = ">=4.2.0"
+wrapt = {version = ">=1.0", markers = "python_version < \"3.13\""}
+
+[package.extras]
+arrow = ["pyarrow (>=1)"]
+calculus = ["sympy (>=1.3,!=1.10)"]
+polars = ["polars (>=1)"]
+
+[[package]]
+name = "formulaic-contrasts"
+version = "1.0.0"
+description = "Build contrasts for models defined with formulaic"
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"pseudobulk\""
+files = [
+    {file = "formulaic_contrasts-1.0.0-py3-none-any.whl", hash = "sha256:e1220d315cf446bdec9385375ca4da43896e4ba68114ebea1b2a37efa5d097f5"},
+    {file = "formulaic_contrasts-1.0.0.tar.gz", hash = "sha256:0a575a810bf1fba28938259d86a3ae2ae90cb9826fca84b9409085170862f701"},
+]
+
+[package.dependencies]
+formulaic = "*"
+pandas = "*"
+session-info = "*"
+
+[package.extras]
+dev = ["pre-commit", "twine (>=4.0.2)"]
+doc = ["docutils (>=0.8,<0.18.dev0 || >=0.20.dev0)", "ipykernel", "ipython", "myst-nb (>=1.1)", "pandas", "setuptools", "sphinx (>=4)", "sphinx-autodoc-typehints", "sphinx-book-theme (>=1)", "sphinx-copybutton", "sphinx-tabs", "sphinxcontrib-bibtex (>=1)", "sphinxext-opengraph", "statsmodels"]
+test = ["coverage", "numpy", "pytest"]
+
+[[package]]
 name = "freetype-py"
 version = "2.4.0"
 description = "Freetype python bindings"
@@ -2043,6 +2118,19 @@ markers = "extra == \"dev\""
 files = [
     {file = "iniconfig-2.0.0-py3-none-any.whl", hash = "sha256:b6a85871a79d2e3b22d2d1b94ac2824226a63c6b741c88f7ae975f18b6778374"},
     {file = "iniconfig-2.0.0.tar.gz", hash = "sha256:2d91e135bf72d31a410b17c16da610a82cb55f6b0477d1a902134b24a455b8b3"},
+]
+
+[[package]]
+name = "interface-meta"
+version = "2.0.1"
+description = "`interface_meta` provides a convenient way to expose an extensible API with enforced method signatures and consistent documentation."
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"pseudobulk\""
+files = [
+    {file = "interface_meta-2.0.1-py3-none-any.whl", hash = "sha256:f38016bef9a4429b6d0792d809be7b65e9781820c674bf7f463999086b6e6323"},
+    {file = "interface_meta-2.0.1.tar.gz", hash = "sha256:902bd9a95a12f195f15753a1080075d4eca7a2cb934fac7ac03c9e362b50796a"},
 ]
 
 [[package]]
@@ -3398,7 +3486,7 @@ description = "Extremely lightweight compatibility layer between dataframe libra
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "extra == \"spatialdata\""
+markers = "(extra == \"spatialdata\" or extra == \"pseudobulk\") and (extra == \"spatialdata\" or python_version < \"3.13\")"
 files = [
     {file = "narwhals-2.23.0-py3-none-any.whl", hash = "sha256:769e7b9ab102c93d8fa019f6b4cd1a657909b04a20bf6210e5a35aae06814ae9"},
     {file = "narwhals-2.23.0.tar.gz", hash = "sha256:13e7ff5b4bb4a2f77b907c2e4d8a76e273dfc1323a3c997440a2f9fd26aed408"},
@@ -4737,6 +4825,32 @@ docs = ["mkdocs-material", "mkdocstrings[python]", "pydantic (==2.12.*)", "pytes
 test = ["coverage", "dask (==2025.11.0)", "pytest (<8.4)", "pytest-cov", "pytest-examples", "xarray (==2025.10.0)", "zarr (>=3.0.0)"]
 test-base = ["coverage", "dask (==2025.11.0)", "pytest (<8.4)", "pytest-cov", "pytest-examples", "xarray (==2025.10.0)"]
 zarr = ["zarr (>=3.0.0)"]
+
+[[package]]
+name = "pydeseq2"
+version = "0.5.2"
+description = "A python implementation of DESeq2."
+optional = true
+python-versions = ">=3.10.0"
+groups = ["main"]
+markers = "extra == \"pseudobulk\""
+files = [
+    {file = "pydeseq2-0.5.2-py3-none-any.whl", hash = "sha256:60014562d85f8c1c56cc7d169a4f0e29e9d615a863b93401add5fc30a61513d9"},
+    {file = "pydeseq2-0.5.2.tar.gz", hash = "sha256:9a124793f3155e40863f63cb92d73f815d01c6e0b3cc0d8e8730141c134c16f4"},
+]
+
+[package.dependencies]
+anndata = ">=0.11.0"
+formulaic = ">=1.0.2"
+formulaic-contrasts = ">=0.2.0"
+matplotlib = ">=3.6.2"
+numpy = ">=1.23.0"
+pandas = ">=1.4.0"
+scikit-learn = ">=1.1.0"
+scipy = ">=1.11.0"
+
+[package.extras]
+dev = ["coverage", "mypy", "numpydoc", "pandas-stubs", "pre-commit (>=2.13.0)", "pytest (>=6.2.4)"]
 
 [[package]]
 name = "pygments"
@@ -7393,9 +7507,10 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [extras]
 dev = ["pytest", "pytest-qt"]
 mcp = ["mcp"]
+pseudobulk = ["pydeseq2"]
 spatialdata = ["spatialdata", "spatialdata-io"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<4.0"
-content-hash = "67e49d1d5ca09471e72d7351b31eb2e8c9c8e5a3440b272c89703d4d6d5d082a"
+content-hash = "6c16c5acf8a0f5f0d81a5ea39b390d0693e4e1696e02006bc799cd3fc8ad850c"

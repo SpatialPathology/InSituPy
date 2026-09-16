@@ -16,7 +16,9 @@ def _obs_qc_plot(
     pdata,
     pdata_nb,
     celltype_col,
-    condition_str
+    condition_str,
+    min_cells,
+    min_counts
 ):
     if pdata_nb is not None:
         data_list = [pdata, pdata_nb]
@@ -35,8 +37,8 @@ def _obs_qc_plot(
             dc.pl.filter_samples(
                 adata=d,
                 groupby=g,
-                min_cells=10,
-                min_counts=1000,
+                min_cells=min_cells,
+                min_counts=min_counts,
                 ax=axs[r,c]
             )
 
@@ -47,23 +49,21 @@ def _obs_qc_plot(
 
 def _feature_qc_plot(
     pdata_ct,
-    condition_str
+    condition_str,
+    filter_by_expr_kwargs,
+    filter_by_prop_kwargs
 ):
     fig, axs = plt.subplots(1,2, figsize=(8*2, 6))
     dc.pl.filter_by_expr(
         adata=pdata_ct,
         group=condition_str,
-        min_count=10,
-        min_total_count=15,
-        large_n=10,
-        min_prop=0.7,
-        ax=axs[0]
+        ax=axs[0],
+        **filter_by_expr_kwargs
     )
     dc.pl.filter_by_prop(
         adata=pdata_ct,
-        min_prop=0.1,
-        min_smpls=2,
-        ax=axs[1]
+        ax=axs[1],
+        **filter_by_prop_kwargs
     )
     plt.show()
 
@@ -94,7 +94,7 @@ def _preprocess_psbulk_data(adata):
 
     return adata
 
-def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
+def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False, n_cpus: int = 8):
     """Run DESeq2 pseudobulk differential expression via pydeseq2.
 
     Builds a :class:`~pydeseq2.dds.DeseqDataSet`, runs the DESeq2 pipeline,
@@ -107,6 +107,7 @@ def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
             passed to :class:`~pydeseq2.ds.DeseqStats` as the contrast.
         return_params: If True, also return a dictionary of all estimated
             DESeq2 parameters (dispersions, LFCs, etc.).
+        n_cpus: Number of CPUs to use for DESeq2 inference. Defaults to 8.
 
     Returns:
         The :class:`~pydeseq2.ds.DeseqStats` result object, or a tuple
@@ -126,7 +127,7 @@ def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False):
 
     with suppress_output():
         # Build DESeq2 object
-        inference = DefaultInference(n_cpus=8)
+        inference = DefaultInference(n_cpus=n_cpus)
         dds = DeseqDataSet(
             adata=adata,
             design=f"~{dge_setup[0]}",
@@ -161,6 +162,8 @@ def _verbose_filter_samples(pdata, min_cells, min_counts, verbose: bool = True):
 def _verbose_filter_features(
     pdata: AnnData,
     condition_str: str,
+    filter_by_expr_kwargs: dict,
+    filter_by_prop_kwargs: dict,
     verbose: bool = True
     ):
     before = pdata.shape[1]
@@ -168,15 +171,11 @@ def _verbose_filter_features(
     dc.pp.filter_by_expr(
         adata=pdata,
         group=condition_str,
-        min_count=10,
-        min_total_count=15,
-        large_n=10,
-        min_prop=0.7,
+        **filter_by_expr_kwargs,
     )
     dc.pp.filter_by_prop(
         adata=pdata,
-        min_prop=0.1,
-        min_smpls=2,
+        **filter_by_prop_kwargs,
     )
     after = pdata.shape[1]
 
@@ -193,20 +192,34 @@ def pseudobulk_dge(
     plot_qc: bool = True,
     min_cells: int = 10,
     min_counts: int = 1000,
+    n_cpus: int = 8,
+    filter_by_expr_kwargs: dict | None = None,
+    filter_by_prop_kwargs: dict | None = None,
     verbose: bool = True
     ):
     """Perform pseudobulk differential gene expression analysis.
 
     Args:
         pdata: AnnData object containing pseudobulk data with observations and expression counts.
+            Not mutated - an internal copy is filtered.
         dge_setup: Tuple of (condition_column_name, target_condition, reference_condition)
             specifying the column name for conditions and the two conditions to compare.
         celltype_col: Column name in pdata.obs containing cell type annotations.
         celltype: Specific cell type to analyze.
-        pdata_nb: Optional AnnData object containing neighborhood data for comparison.
+        pdata_nb: Optional AnnData object containing neighborhood data for comparison. Not
+            mutated - an internal copy is filtered.
         plot_qc: Whether to generate QC plots for sample and feature filtering.
         min_cells: Minimum number of cells required per pseudobulk sample.
         min_counts: Minimum total counts required per pseudobulk sample.
+        n_cpus: Number of CPUs to use for DESeq2 inference. Defaults to 8.
+        filter_by_expr_kwargs: Extra keyword arguments for ``decoupler``'s
+            ``filter_by_expr`` (bulk-RNA-seq-tuned feature filter). Merged onto the
+            defaults ``{"min_count": 10, "min_total_count": 15, "large_n": 10,
+            "min_prop": 0.7}``; pass a dict to override individual keys. Defaults to None
+            (use the defaults unchanged).
+        filter_by_prop_kwargs: Extra keyword arguments for ``decoupler``'s
+            ``filter_by_prop``. Merged onto the defaults ``{"min_prop": 0.1,
+            "min_smpls": 2}``. Defaults to None (use the defaults unchanged).
         verbose: Whether to print filtering information.
 
     Returns:
@@ -231,13 +244,24 @@ def pseudobulk_dge(
         raise ValueError(f"Reference condition '{ref_cond}' not found in pdata.obs['{condition_col}']. "
                         f"Available: {list(available_conditions)}")
 
+    # Do not mutate the caller's pseudobulk objects: decoupler's filter_samples is in-place.
+    pdata = pdata.copy()
+    if pdata_nb is not None:
+        pdata_nb = pdata_nb.copy()
+
+    filter_by_expr_kwargs = {"min_count": 10, "min_total_count": 15, "large_n": 10,
+                              "min_prop": 0.7, **(filter_by_expr_kwargs or {})}
+    filter_by_prop_kwargs = {"min_prop": 0.1, "min_smpls": 2, **(filter_by_prop_kwargs or {})}
+
     if plot_qc:
         # plot QC
         logger.info("Sample filtering QC:")
         _obs_qc_plot(
             pdata=pdata, pdata_nb=pdata_nb,
             celltype_col=celltype_col,
-            condition_str=dge_setup[0]
+            condition_str=dge_setup[0],
+            min_cells=min_cells,
+            min_counts=min_counts
         )
 
     # do filtering of pseudobulk samples
@@ -255,11 +279,15 @@ def pseudobulk_dge(
     if plot_qc:
         # plot feature QC
         logger.info("Feature filtering QC:")
-        _feature_qc_plot(pdata_ct, condition_str=dge_setup[0])
+        _feature_qc_plot(pdata_ct, condition_str=dge_setup[0],
+                          filter_by_expr_kwargs=filter_by_expr_kwargs,
+                          filter_by_prop_kwargs=filter_by_prop_kwargs)
 
     _verbose_filter_features(
         pdata=pdata_ct,
         condition_str=dge_setup[0],
+        filter_by_expr_kwargs=filter_by_expr_kwargs,
+        filter_by_prop_kwargs=filter_by_prop_kwargs,
         verbose=verbose)
 
     if pdata_nb is not None:
@@ -287,24 +315,23 @@ def pseudobulk_dge(
 
 
     # run DESeq2 for conditions and return results
-    stat_res, params = _run_deseq2_pseudobulk(pdata_ct, dge_setup=dge_setup, return_params=True)
+    stat_res, params = _run_deseq2_pseudobulk(pdata_ct, dge_setup=dge_setup, return_params=True, n_cpus=n_cpus)
     results_df = stat_res.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
 
     if pdata_nb is not None:
         # run DESeq2 for neighborhood data and return results
-        stat_res_first = _run_deseq2_pseudobulk(pdata_first_condition, dge_setup=["obs_type", "cells", "neighbors"])
-        stat_res_second = _run_deseq2_pseudobulk(pdata_second_condition, dge_setup=["obs_type", "cells", "neighbors"])
+        stat_res_first = _run_deseq2_pseudobulk(pdata_first_condition, dge_setup=["obs_type", "cells", "neighbors"], n_cpus=n_cpus)
+        stat_res_second = _run_deseq2_pseudobulk(pdata_second_condition, dge_setup=["obs_type", "cells", "neighbors"], n_cpus=n_cpus)
         results_df_nb_first = stat_res_first.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
         results_df_nb_second = stat_res_second.results_df.rename({"log2FoldChange": "log2foldchange"}, axis=1)
 
     # collect the configurations
+    pseudobulk_params = {"min_cells": min_cells, "min_counts": min_counts}
+    pseudobulk_params.update(pdata.uns.get("pseudobulk_settings", {}))
     config = DiffExprConfigCollector(
         mode="pseudobulk",
         method_params={
-            "pseudobulk": {
-                "min_cells": min_cells,
-                "min_counts": min_counts
-            }.update(pdata.uns['pseudobulk_settings']),
+            "pseudobulk": pseudobulk_params,
             "deseq2": params
         }
     )
