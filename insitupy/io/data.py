@@ -44,6 +44,44 @@ def _handle_xenium_image_names(im_path):
 
     return ch, ch_name
 
+def _warn_ignored_spatialdata_params(
+    nuclei_type: str,
+    load_cell_segmentation_images: bool,
+    load_background_images: bool,
+    transcript_mode: str,
+    restructure_transcripts: bool,
+) -> None:
+    """Warn once, naming every ``read_xenium`` parameter the spatialdata backend ignores (SD-B18).
+
+    The spatialdata backend delegates reading to ``spatialdata_io.xenium()``, which has no
+    equivalent knob for any of these five insitupy-backend parameters - honoring them is
+    deferred to a follow-up (0.12.x reader-audit item), so this only makes the gap loud
+    instead of silently ignoring a value the caller explicitly asked for.
+    """
+    defaults = {
+        "nuclei_type": "focus",
+        "load_cell_segmentation_images": False,
+        "load_background_images": False,
+        "transcript_mode": "dask",
+        "restructure_transcripts": False,
+    }
+    passed = {
+        "nuclei_type": nuclei_type,
+        "load_cell_segmentation_images": load_cell_segmentation_images,
+        "load_background_images": load_background_images,
+        "transcript_mode": transcript_mode,
+        "restructure_transcripts": restructure_transcripts,
+    }
+    ignored = [name for name, value in passed.items() if value != defaults[name]]
+    if ignored:
+        warnings.warn(
+            f"The spatialdata backend does not honor the following parameter(s), which were "
+            f"passed with a non-default value: {', '.join(ignored)}. spatialdata_io.xenium() "
+            "has no equivalent knobs for these - the read proceeds with its own defaults "
+            "regardless of the value passed.",
+            UserWarning, stacklevel=3
+        )
+
 def read_xenium(
     path: str | os.PathLike | Path,
     nuclei_type: Literal["focus", "mip", ""] = "focus",
@@ -144,6 +182,13 @@ def read_xenium(
                 "(spatialdata_io.xenium() has no equivalent parameters).",
                 UserWarning, stacklevel=2
             )
+        _warn_ignored_spatialdata_params(
+            nuclei_type=nuclei_type,
+            load_cell_segmentation_images=load_cell_segmentation_images,
+            load_background_images=load_background_images,
+            transcript_mode=transcript_mode,
+            restructure_transcripts=restructure_transcripts,
+        )
         if verbose:
             logger.info("Reading Xenium data with spatialdata-io backend...")
         sdata = xenium(path)
@@ -155,9 +200,9 @@ def read_xenium(
             },
             cells={"main": {
                 "table_key": "table",
-                "cells_key": "cell_circles",
                 "cell_boundaries_data": ("cell_labels", pixel_size),
                 "nucleus_boundaries_data": ("nucleus_labels", pixel_size),
+                "label_map": "nucleus_boundaries",
             }},
             transcripts="transcripts",
             slide_id=dataset_name,

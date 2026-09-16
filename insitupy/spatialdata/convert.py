@@ -3,11 +3,12 @@ try:
 except ImportError:
     raise ImportError("This function requires the spatialdata framework, please install it with `pip install spatialdata`.")
 else:
-    pass
+    from spatialdata.transformations import Scale, get_transformation
 
 import logging
 import os
 from collections import defaultdict
+from numbers import Number
 from pathlib import Path
 from typing import Union
 
@@ -30,7 +31,6 @@ from insitupy.spatialdata._convert import (
     _build_insitudata_from_elements,
     _centroids_from_labels,
     _create_boundaries_from_spatialdata,
-    _extract_pixel_size_from_element,
     _generate_spatialdata_key,
     _get_base_resolution_array,
     _group_elements_by_sample,
@@ -290,6 +290,163 @@ def convert_to_spatialdata(
 
     return sdata
 
+def _resolve_foreign_pixel_size(
+    sdata: SpatialData,
+    region: str,
+    pixel_size_spec: Number | None,
+    coordinate_system: str,
+    verbose: bool,
+) -> float:
+    """Resolve the pixel size (um/pixel) for an auto-detected foreign labels element (SD-B1).
+
+    Never trusts a labels element's ``Identity`` transform as 1 um/pixel - that shortcut is
+    only valid for InSituPy's own dialect writer (see ``_extract_pixel_size_from_element``,
+    which stays unchanged for that reader; the dialect reader's ``Identity -> 1.0`` is
+    correct for its own store). Resolution order:
+
+    1. ``pixel_size_spec``, if the caller passed one explicitly in the cells spec.
+    2. The first sibling points/shapes element (in ``coordinate_system``) carrying a pure
+       ``Scale`` transform - spatialdata-io writes such elements as ``Scale([1/ps, 1/ps])``,
+       the inverse of InSituPy's own writer's ``Scale([ps, ps])`` convention, so the pixel
+       size is ``1 / scale_x``. Logged at info level, naming the element used.
+    3. Otherwise raise, naming both fixes.
+
+    Args:
+        sdata: SpatialData object.
+        region: the labels element key whose pixel size is being resolved (for error
+            messages only).
+        pixel_size_spec: the cells spec's ``pixel_size`` key, if given.
+        coordinate_system: coordinate system to resolve transforms in (already picked by
+            the caller - 'global' when present, else the table's own region).
+        verbose: if True, log the resolution.
+
+    Returns:
+        Pixel size in micrometers per pixel.
+
+    Raises:
+        ValueError: if no pixel size can be resolved from any source.
+    """
+    if pixel_size_spec is not None:
+        return float(pixel_size_spec)
+
+    for group_name in ("points", "shapes"):
+        group = getattr(sdata, group_name, None)
+        if not group:
+            continue
+        for elem_key, elem in group.items():
+            try:
+                transform = get_transformation(element=elem, to_coordinate_system=coordinate_system)
+            except Exception:
+                # Element has no transform to this coordinate system - not a usable sibling.
+                continue
+            if not isinstance(transform, Scale):
+                continue
+            axis_index = transform.axes.index("x") if "x" in transform.axes else 0
+            scale_value = transform.scale[axis_index].item()
+            if scale_value == 0:
+                continue
+            pixel_size = 1.0 / scale_value
+            if verbose:
+                logger.info(
+                    f"Resolved pixel size {pixel_size} for labels element '{region}' from "
+                    f"sibling {group_name[:-1]} element '{elem_key}' (Scale {scale_value})."
+                )
+            return pixel_size
+
+    raise ValueError(
+        f"Cannot resolve a pixel size for labels element '{region}': its transform does not "
+        "reliably imply 1 micrometer/pixel (an Identity transform on a foreign labels raster "
+        "is not trustworthy, unlike InSituPy's own dialect writer). Fix by either: (1) passing "
+        f"an explicit 'pixel_size' key in the cells spec for this layer, or (2) ensuring a "
+        f"sibling points/shapes element in coordinate system '{coordinate_system}' carries a "
+        "Scale transform (spatialdata_io.xenium() output does, e.g. via its 'transcripts' "
+        "points element)."
+    )
+
+
+def _resolve_nucleus_to_cell_map(
+    sdata: SpatialData,
+    label_map_spec: str,
+    cell_names: np.ndarray,
+) -> dict:
+    """Build a nucleus-index -> parent-cell-name map from a foreign store's map source (SD-B2).
+
+    Args:
+        sdata: SpatialData object.
+        label_map_spec: key of a shapes element (spatialdata-io's ``nucleus_boundaries``, a
+            GeoDataFrame indexed by nucleus label with a ``cell_id`` column) or a table
+            element with ``nucleus_label``/``cell_id`` columns (InSituPy dialect,
+            ``_transform_nucleus_map_for_spatialdata``'s output).
+        cell_names: this cell layer's ``obs_names`` - every mapped ``cell_id`` must be one
+            of these.
+
+    Returns:
+        ``{nucleus_index_0based: parent_cell_name}``, matching the convention documented on
+        ``BoundariesData.__init__``'s ``nucleus_to_cell_map`` parameter (mask value N maps to
+        key N - 1, since mask values are 1-indexed).
+
+    Raises:
+        ValueError: if ``label_map_spec`` names a missing element, is neither a shapes nor a
+            table element, has a non-integer/non-unique index (shapes) or missing columns, or
+            maps to a ``cell_id`` not present in ``cell_names``.
+    """
+    if label_map_spec not in sdata:
+        raise ValueError(
+            f"label_map '{label_map_spec}' not found in SpatialData - cannot resolve the "
+            "nucleus-to-cell map."
+        )
+
+    if label_map_spec in sdata.shapes:
+        gdf = sdata[label_map_spec]
+        if "cell_id" not in gdf.columns:
+            raise ValueError(
+                f"label_map shapes element '{label_map_spec}' has no 'cell_id' column."
+            )
+        try:
+            indices = gdf.index.astype(int)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"label_map shapes element '{label_map_spec}' has a non-integer index - "
+                "expected integer nucleus label values (1-based mask values)."
+            ) from e
+        if indices.duplicated().any():
+            raise ValueError(
+                f"label_map shapes element '{label_map_spec}' has a non-unique index."
+            )
+        nucleus_to_cell_map = {
+            int(idx) - 1: str(cell_id)
+            for idx, cell_id in zip(indices, gdf["cell_id"])
+        }
+    elif label_map_spec in sdata.tables:
+        table = sdata[label_map_spec]
+        obs = table.obs
+        missing_cols = {"nucleus_label", "cell_id"} - set(obs.columns)
+        if missing_cols:
+            raise ValueError(
+                f"label_map table element '{label_map_spec}' is missing column(s) "
+                f"{sorted(missing_cols)} - expected 'nucleus_label' and 'cell_id'."
+            )
+        nucleus_to_cell_map = {
+            int(row.nucleus_label) - 1: str(row.cell_id)
+            for row in obs.itertuples()
+        }
+    else:
+        raise ValueError(
+            f"label_map '{label_map_spec}' is neither a shapes nor a table element in "
+            "SpatialData."
+        )
+
+    cell_name_set = {str(c) for c in cell_names}
+    missing_cells = {cid for cid in nucleus_to_cell_map.values() if cid not in cell_name_set}
+    if missing_cells:
+        raise ValueError(
+            f"label_map '{label_map_spec}' maps to cell_id(s) not present in this cell "
+            f"layer's cell_names: {sorted(missing_cells)[:10]}"
+        )
+
+    return nucleus_to_cell_map
+
+
 def convert_from_foreign_spatialdata(
     sdata: SpatialData,
     images: dict[str, dict] | None = None,
@@ -351,7 +508,29 @@ def convert_from_foreign_spatialdata(
               is given.
             - ``nucleus_boundaries_data`` (tuple of (str, Number), optional):
               ``(labels_key, pixel_size)``; never auto-detected - no standard
-              annotation identifies a nucleus region.
+              annotation identifies a nucleus region. Requires ``label_map``
+              (raises otherwise) - a nucleus raster has no reliable 1:1
+              mapping to cells.
+            - ``pixel_size`` (Number, optional): microns/pixel for
+              auto-detected label-derived centroids and boundaries. Used only
+              when ``cell_boundaries_data`` is not given explicitly - an
+              ``Identity`` transform on a foreign labels element is never
+              trusted as 1 micrometer/pixel. When omitted, resolved from a
+              sibling points/shapes element's ``Scale`` transform; raises if
+              neither is available.
+            - ``spatial_source`` (Literal["table", "labels", "shapes"],
+              optional): where ``obsm["spatial"]`` comes from. Default: keep
+              an existing ``obsm["spatial"]`` (the vendor micrometre
+              centroids) if present, else derive from ``cells_key`` shapes,
+              else from ``cell_boundaries_data`` labels. ``"labels"``/
+              ``"shapes"`` force derivation even when ``obsm["spatial"]``
+              already exists; ``"table"`` requires it to already be present.
+            - ``label_map`` (str, optional): the nucleus-to-cell map source.
+              Either a shapes element indexed by nucleus label with a
+              ``cell_id`` column (spatialdata-io's ``nucleus_boundaries``), or
+              a table element with ``nucleus_label``/``cell_id`` columns
+              (InSituPy dialect). Required when ``nucleus_boundaries_data`` is
+              given.
         units: ``{layer: spec}`` - one entry per spatial-units layer to import.
             Spec keys:
 
@@ -434,7 +613,10 @@ def convert_from_foreign_spatialdata(
             _validate_foreign_spec(
                 spec, layer_name, "cells",
                 required=("table_key",),
-                allowed=("table_key", "cells_key", "cell_boundaries_data", "nucleus_boundaries_data"),
+                allowed=(
+                    "table_key", "cells_key", "cell_boundaries_data", "nucleus_boundaries_data",
+                    "pixel_size", "spatial_source", "label_map",
+                ),
             )
             table_key = spec["table_key"]
             if not isinstance(table_key, str):
@@ -449,7 +631,19 @@ def convert_from_foreign_spatialdata(
             cells_key = spec.get("cells_key")
             cell_boundaries_data = spec.get("cell_boundaries_data")
             nucleus_boundaries_data = spec.get("nucleus_boundaries_data")
-            table = sdata[table_key]
+            pixel_size_spec = spec.get("pixel_size")
+            spatial_source = spec.get("spatial_source")
+            label_map_spec = spec.get("label_map")
+
+            if spatial_source is not None and spatial_source not in ("table", "shapes", "labels"):
+                raise ValueError(
+                    f"cells spec for '{layer_name}': unknown spatial_source {spatial_source!r} - "
+                    "expected one of 'table', 'shapes', 'labels', or None."
+                )
+
+            # Copy the table before any mutation (SD-B8): obsm['spatial'] may be overwritten
+            # below, and the caller's SpatialData object must not be mutated by an import.
+            table = sdata[table_key].copy()
 
             spatialdata_attrs = table.uns.get("spatialdata_attrs", {}) or {}
             region = spatialdata_attrs.get("region")
@@ -503,28 +697,62 @@ def convert_from_foreign_spatialdata(
                     else:
                         raise ValueError("Cannot determine coordinate system for pixel size extraction.")
 
-                    pixel_size = _extract_pixel_size_from_element(sdata[region], coordinate_system=cs, verbose=verbose)
+                    pixel_size = _resolve_foreign_pixel_size(sdata, region, pixel_size_spec, cs, verbose)
                     cell_boundaries_data = (region, pixel_size)
 
             # Validate boundaries data formats (whatever the final values are, explicit or auto-detected)
             _validate_boundaries_data_format(cell_boundaries_data, param_name="cell_boundaries_data")
             _validate_boundaries_data_format(nucleus_boundaries_data, param_name="nucleus_boundaries_data")
 
-            # Spatial coordinates
-            if cells_key and cells_key in sdata:
-                if spatial_key in table.obsm:
-                    logger.warning(f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using centroids from `'{cells_key}'`.")
+            # Nucleus -> cell map (SD-B2): a nucleus raster has no reliable 1:1 relationship to
+            # cells (multinucleated cells, non-cell-ordered nucleus labels on XOA v2-v4) - require
+            # an explicit map source rather than silently falling back to the wrong identity rule.
+            nucleus_to_cell_map = None
+            if nucleus_boundaries_data is not None:
+                if label_map_spec is None:
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': nucleus_boundaries_data given without "
+                        "label_map; pass label_map=<shapes-or-table key> (e.g. 'nucleus_boundaries' "
+                        "for spatialdata-io) so nuclei are parented to the correct cells. Nucleus "
+                        "rasters have no reliable 1:1 mapping."
+                    )
+                nucleus_to_cell_map = _resolve_nucleus_to_cell_map(sdata, label_map_spec, cell_names)
+
+            # Spatial coordinates (SD-B1 + SD-B4 + SD-B8), resolved per `spatial_source`.
+            # Default keeps an already-present obsm['spatial'] (a foreign store's own,
+            # typically micrometre, centroids) instead of silently overwriting it with
+            # label-derived pixel centroids.
+            if spatial_source == "table":
+                if spatial_key not in table.obsm:
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': spatial_source='table' requires "
+                        f"obsm['{spatial_key}'] to already be present on the table."
+                    )
+            elif spatial_source == "shapes":
+                if not (cells_key and cells_key in sdata):
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': spatial_source='shapes' requires a "
+                        "resolvable 'cells_key' shapes element."
+                    )
                 table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
-            elif cell_boundaries_data is not None:
-                if spatial_key in table.obsm:
-                    logger.warning(
-                        f"Spatial coordinates in `obsm['{spatial_key}']` are overwritten using "
-                        f"centroids derived from '{cell_boundaries_data[0]}'."
+            elif spatial_source == "labels":
+                if cell_boundaries_data is None:
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': spatial_source='labels' requires a "
+                        "resolvable 'cell_boundaries_data'."
                     )
                 label_key, label_pixel_size = cell_boundaries_data
                 label_array = _get_base_resolution_array(sdata[label_key]).data
                 table.obsm[spatial_key] = _centroids_from_labels(label_array, seg_mask_value, label_pixel_size)
-            elif spatial_key not in table.obsm:
+            elif spatial_key in table.obsm:
+                pass  # keep the vendor centroids already on the table (SD-B1 fix)
+            elif cells_key and cells_key in sdata:
+                table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
+            elif cell_boundaries_data is not None:
+                label_key, label_pixel_size = cell_boundaries_data
+                label_array = _get_base_resolution_array(sdata[label_key]).data
+                table.obsm[spatial_key] = _centroids_from_labels(label_array, seg_mask_value, label_pixel_size)
+            else:
                 raise ValueError(
                     f"No shapes element ('cells_key') or labels element ('cell_boundaries_data') "
                     f"available to derive obsm['{spatial_key}'] from, and none is already present."
@@ -539,6 +767,7 @@ def convert_from_foreign_spatialdata(
                     seg_mask_value,
                     cell_boundaries_data,
                     nucleus_boundaries_data,
+                    nucleus_to_cell_map=nucleus_to_cell_map,
                 )
 
             cd = CellData(table=table, boundaries=boundaries)
