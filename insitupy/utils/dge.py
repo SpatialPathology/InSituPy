@@ -19,6 +19,11 @@ def create_deg_dataframe(
     specified group in the rank_genes_groups results of an AnnData object.
     It also handles zero p-values to avoid log10(0) errors.
 
+    Returned columns (per group): ``gene``, ``log2foldchange``, ``pvalue`` (raw,
+    scanpy's ``pvals``), ``padj`` (Benjamini-Hochberg adjusted, scanpy's
+    ``pvals_adj``), ``scores``, and ``neg_log10_pvals`` (derived from the
+    adjusted ``padj`` value, matching the downstream plotting consumers).
+
     Args:
         adata (AnnData): The AnnData object containing the results.
         groups (str or None): The name of the group to extract results for.
@@ -45,11 +50,14 @@ def create_deg_dataframe(
         volcano_data = pd.DataFrame({
             'gene': results['names'][group],
             'log2foldchange': results['logfoldchanges'][group],
-            'padj': results['pvals'][group],
+            'pvalue': results['pvals'][group],
+            'padj': results['pvals_adj'][group],
             'scores': results['scores'][group],
         })
-        # Replace zero p-values with a small value to avoid log10(0)
+        # Replace zero p-values with a small value to avoid log10(0) on either column
+        volcano_data['pvalue'] = volcano_data['pvalue'].replace(0, 1e-300)
         volcano_data['padj'] = volcano_data['padj'].replace(0, 1e-300)
+        # neg_log10_pvals is derived from the corrected value (padj)
         volcano_data['neg_log10_pvals'] = -np.log10(volcano_data['padj'])
         volcano_data_dict[group] = volcano_data
 

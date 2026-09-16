@@ -1,4 +1,5 @@
 import logging
+from warnings import warn
 
 import anndata
 import dask.array as da
@@ -98,6 +99,57 @@ def is_integer_counts(X):
 
     # check if the matrix contains raw counts
     return np.all(np.modf(X)[0] == 0)
+
+
+def _assert_log1p_state(adata, *, assert_log1p, where):
+    """Guard against running expression stats on non-log1p ``.X``.
+
+    Reads the marker written by ``normalize_and_transform``
+    (``adata.uns['insitupy']['transformation']``). Raises on a matrix we can positively
+    identify as wrong for log1p-based analysis:
+
+    - marker ``'sqrt'`` or ``'scaled'`` (verified wrong: sqrt roughly doubles log2FC,
+      scaling yields all-NaN fold changes);
+    - no marker but ``.X`` is raw integer counts (the common "forgot to normalize"
+      mistake).
+
+    Warns (does not raise) when there is no marker and ``.X`` is not integer counts, so
+    pre-marker stores and legitimately-transformed-but-unmarked inputs still run.
+
+    Args:
+        adata: AnnData object whose ``.X`` is about to be used.
+        assert_log1p: If False, the guard is skipped entirely (no raise, no warn).
+        where: Short label identifying the caller, used in the raised/warned message.
+    """
+    if not assert_log1p:
+        return
+    state = adata.uns.get("insitupy", {}).get("transformation")
+    if state in ("sqrt", "scaled"):
+        raise ValueError(
+            f"{where}: expression matrix (.X) is '{state}'-transformed, but differential "
+            "expression assumes log1p-normalized data (fold changes are otherwise wrong: "
+            "sqrt roughly doubles log2FC, scaling yields all-NaN). Re-run "
+            "insitupy.pp.normalize_and_transform(..., transformation_method='log1p', scale=False), "
+            "or pass assert_log1p=False to override this check."
+        )
+    if state is None:
+        # No marker (legacy store, or an externally built AnnData). If .X looks like raw
+        # integer counts, that is a positively-wrong input - escalate to a raise like sqrt/scaled.
+        if is_integer_counts(adata.X):
+            raise ValueError(
+                f"{where}: expression matrix (.X) appears to be raw integer counts, but "
+                "differential expression assumes log1p-normalized data. Run "
+                "insitupy.pp.normalize_and_transform(..., transformation_method='log1p'), or pass "
+                "assert_log1p=False to override this check."
+            )
+        warn(
+            f"{where}: cannot verify that the expression matrix (.X) is log1p-transformed "
+            "(no transformation marker found - e.g. a store written before this check, or an "
+            "externally built AnnData). Differential expression assumes log1p data. Re-run "
+            "insitupy.pp.normalize_and_transform to record the state, or pass assert_log1p=False "
+            "to silence this warning."
+        )
+
 
 def check_raw(adata, use_raw, layer=None):
     """Return the expression matrix, var DataFrame, and var names for either raw or processed data.

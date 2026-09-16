@@ -5,11 +5,13 @@ from warnings import catch_warnings, filterwarnings, warn
 import anndata
 import numpy as np
 import scanpy as sc
+from scipy import sparse
 
 from insitupy._core.data import InSituData
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors
+from insitupy.utils._checks import _assert_log1p_state
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
 
@@ -35,6 +37,7 @@ def dge(
     method: Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var'] | None = 't-test',
     exclude_ambiguous_assignments: bool = False,
     force_assignment: bool = False,
+    assert_log1p: bool = True,
     verbose: bool = False,
     ) -> DiffExprResults:
     """
@@ -58,10 +61,22 @@ def dge(
         ref_name (Optional[str]): Label for the reference group used in result output. Defaults to None.
         ref_metadata (Optional[dict]): Additional metadata to attach to the reference group. Defaults to None.
         cells_layer (Optional[str]): Name of the cell segmentation layer to use. Defaults to None (main layer).
-        consider_neighbors (bool): If True, only cells that are spatial neighbors of the target group are included in the reference. Defaults to False.
+        consider_neighbors (bool): If True, additionally compute, for the target and reference
+            groups separately, a comparison of each cell against its own spatial neighborhood
+            (within a 20 micrometer radius), returned as `target_neighborhood` and `ref_neighborhood`
+            on the result. This does **not** change the main target-vs-reference comparison.
+            Defaults to False.
         method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
-        exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data. Defaults to False.
+        exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data.
+            Only applies when target and reference are drawn from the same `InSituData` object - a
+            shared `obs_name` across two distinct objects is a coincidental ID collision, not the
+            same physical cell, so it is never dropped. Defaults to False.
         force_assignment (bool): Whether to force re-assignment of annotations and regions even if already done. Defaults to False.
+        assert_log1p (bool): If True, verify that the expression matrix (`.X`) of both target and
+            reference selections is log1p-normalized before running differential expression, and
+            raise a `ValueError` on data known to be wrong (sqrt/scaled transformation, or
+            marker-less raw integer counts). Warns (does not raise) when the transformation state
+            cannot be determined. Set to False to skip this check. Defaults to True.
         verbose (bool): Whether to print detailed information during the analysis. Defaults to False.
 
     Returns:
@@ -132,6 +147,7 @@ def dge(
         return_all_celltypes=True,
         verbose=verbose
     )
+    _assert_log1p_state(adata_target, assert_log1p=assert_log1p, where="dge target")
 
     # original tuples for plotting the configuration table
     orig_ref_annotation_tuple = ref_annotation_tuple
@@ -176,6 +192,11 @@ def dge(
     else:
         raise ValueError("`ref` must be an InSituData object or a list of InSituData objects.")
 
+    # The reference is drawn from the same physical cells as the target only when it is the
+    # same InSituData object. A shared obs_name only means "same physical cell" in that case -
+    # across distinct objects it is a coincidental ID collision (AC-B3).
+    same_source = all(rd is target for rd in ref)
+
     adata_ref_list = []
     adata_ref_full_list = []
     for rd in ref:
@@ -190,6 +211,7 @@ def dge(
             return_all_celltypes=True,
             verbose=verbose
         )
+        _assert_log1p_state(ad_ref, assert_log1p=assert_log1p, where="dge reference")
         adata_ref_list.append(ad_ref)
         adata_ref_full_list.append(ad_ref_full)
 
@@ -199,6 +221,13 @@ def dge(
     else:
         adata_ref = adata_ref_list[0]
         adata_ref_full = adata_ref_full_list[0]
+
+    if same_source and set(adata_target.obs_names) == set(adata_ref.obs_names):
+        raise ValueError(
+            "Target and reference select the same cells (identical selection) - there is nothing "
+            "to compare. This happens with the default reference tuples ('same') and ref=None. "
+            "Specify a distinct `ref`, or different ref_*_tuple values (e.g. 'rest')."
+        )
 
     # concatenate and ignore user warning about observations being not unique since we take care of this later by filtering out duplicate values if wanted.
     with catch_warnings():
@@ -211,30 +240,60 @@ def dge(
             label=DGE_COMPARISON_COLUMN
         )
 
-    if not exclude_ambiguous_assignments:
-        # check whether cells with identical names are found in both data and reference and if yes give a warning
-        if not set(adata_target.obs_names).isdisjoint(set(adata_ref.obs_names)):
-            n_duplicated_cells = len(set(adata_target.obs_names).intersection(set(adata_ref.obs_names)))
-            pct_duplicated_cells = round((n_duplicated_cells / 2) / (len(adata_target) + len(adata_target)) * 100, 1)
+    # The ambiguity check only makes sense when target and reference are drawn from the same
+    # InSituData object - a shared obs_name across two distinct objects is a coincidental
+    # hex-ID collision, not the same physical cell (AC-B3): do not warn and do not drop.
+    if same_source:
+        if not exclude_ambiguous_assignments:
+            # check whether cells with identical names are found in both data and reference and if yes give a warning
+            if not set(adata_target.obs_names).isdisjoint(set(adata_ref.obs_names)):
+                n_duplicated_cells = len(set(adata_target.obs_names).intersection(set(adata_ref.obs_names)))
+                n_union = len(set(adata_target.obs_names) | set(adata_ref.obs_names))
+                pct_duplicated_cells = round(n_duplicated_cells / n_union * 100, 1)
 
-            warn(
-                f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells with identical names were found to belong to both data and reference. "
-                "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
-                "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
-                "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
-            )
+                warn(
+                    f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells with identical names were found to belong to both data and reference. "
+                    "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
+                    "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
+                    "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
+                )
 
-    else:
-        # check whether some cells are in both data and reference
-        duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
+        else:
+            # check whether some cells are in both data and reference
+            duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
 
-        if np.any(duplicated_mask):
-            logger.info("Exclude ambiguously assigned cells...")
-            # remove duplicated values
-            adata_combined = adata_combined[~duplicated_mask].copy()
+            if np.any(duplicated_mask):
+                logger.info("Exclude ambiguously assigned cells...")
+                # remove duplicated values
+                adata_combined = adata_combined[~duplicated_mask].copy()
 
     # add column to .obs for its use in rank_genes_groups()
     #adata_combined.obs = adata_combined.obs.filter([dge_comparison_column]) # empty obs
+
+    # Filter out cells with NaN in .X before rank_genes_groups (NaNs propagate to NaN fold changes).
+    # Cheap-detect first so the common no-NaN path never densifies a large sparse matrix: for a
+    # sparse matrix NaNs can only live in the stored buffer, so testing X.data is O(nnz).
+    X = adata_combined.X
+    if sparse.issparse(X):
+        has_nan = np.isnan(X.data).any()
+    else:
+        has_nan = np.isnan(X).any()
+    if has_nan:
+        X_arr = X.toarray() if sparse.issparse(X) else np.asarray(X)
+        nan_cell_mask = np.isnan(X_arr).any(axis=1)
+        n_nan = int(nan_cell_mask.sum())
+        pct_nan = round(n_nan / adata_combined.n_obs * 100, 1)
+        logger.warning("Removing %d (%s%%) cells containing NaN values before DGE.", n_nan, pct_nan)
+        if pct_nan > 10:
+            warn(f"{pct_nan}% of cells contained NaN values and were removed before DGE - "
+                 "check upstream filtering/normalization.")
+        adata_combined = adata_combined[~nan_cell_mask].copy()
+        group_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
+        if group_counts.get("DATA", 0) == 0 or group_counts.get("REFERENCE", 0) == 0:
+            raise ValueError(
+                "After removing cells with NaN expression values, one of the groups (DATA / "
+                "REFERENCE) is empty. Cannot run differential expression."
+            )
 
     logger.info("Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '%s'.", method)
     sc.tl.rank_genes_groups(adata=adata_combined,

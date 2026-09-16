@@ -1326,6 +1326,7 @@ class InSituExperiment:
         method: Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var'] | None = 't-test',
         exclude_ambiguous_assignments: bool = False,
         force_assignment: bool = False,
+        assert_log1p: bool = True,
         name_col: str | None = "uid",
         ):
         """
@@ -1348,6 +1349,10 @@ class InSituExperiment:
             method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']], optional): Statistical method. Defaults to 't-test'.
             exclude_ambiguous_assignments (bool, optional): Whether to exclude ambiguous assignments. Defaults to False.
             force_assignment (bool, optional): Whether to force assignment of annotations and regions. Defaults to False.
+            assert_log1p (bool, optional): If True, verify that the expression matrix (`.X`) of
+                both target and reference selections is log1p-normalized before running
+                differential expression, raising a `ValueError` on data known to be wrong.
+                Defaults to True.
             name_col (str, optional): Column name in metadata to use for naming samples. Defaults to "uid".
 
         Returns:
@@ -1399,6 +1404,7 @@ class InSituExperiment:
             method=method,
             exclude_ambiguous_assignments=exclude_ambiguous_assignments,
             force_assignment=force_assignment,
+            assert_log1p=assert_log1p,
         )
 
         return dge_res

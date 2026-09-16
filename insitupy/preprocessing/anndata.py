@@ -25,6 +25,10 @@ def normalize_and_transform_anndata(
     saves normalized counts in ``adata.layers['norm_counts']``, then applies the
     requested transformation. Optionally scales the data to unit variance.
 
+    Records the resulting state of ``.X`` in ``adata.uns['insitupy']['transformation']``
+    (one of ``'log1p'``, ``'sqrt'``, or ``'scaled'`` when ``scale=True``), so downstream
+    tools (e.g. ``insitupy.tl.dge``) can verify the expression matrix before use.
+
     Args:
         adata: AnnData object to process. Modified in place.
         layer (Optional[str], optional): Name of the layer containing raw integer counts.
@@ -102,6 +106,12 @@ def normalize_and_transform_anndata(
 
         # make sure the matrix is saved as sparse array
         adata.X = csr_matrix(adata.X)
+
+    # record the transformation state so downstream tools (e.g. dge) can verify .X.
+    # Scaling supersedes the base transform for this purpose - a scaled matrix is not
+    # valid input for log1p-based tools regardless of the transformation applied before it.
+    adata.uns.setdefault("insitupy", {})
+    adata.uns["insitupy"]["transformation"] = "scaled" if scale else transformation_method
 
 def reduce_dimensions_anndata(
     adata,
