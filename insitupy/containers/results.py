@@ -324,5 +324,13 @@ class DiffExprResults:
                 f"The '{name}' DataFrame is missing following mandatory columns: {', '.join(missing)}. "
                 f"Expected at least following columns: {', '.join(required)}."
             )
+        dup = df.index[df.index.duplicated()].unique().tolist()
+        if dup:
+            raise ValueError(
+                f"The '{name}' DataFrame has duplicate gene names in its index: {dup[:10]}"
+                f"{' ...' if len(dup) > 10 else ''}. Downstream plots (e.g. dual_foldchange_plot) draw one "
+                "label per index entry and double-draw on a duplicated index (issue #437). De-duplicate "
+                "the gene index upstream."
+            )
 
 

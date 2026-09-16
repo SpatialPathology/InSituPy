@@ -14,8 +14,10 @@ from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
-from insitupy.containers.results import DiffExprResults
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
+from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing import normalize_and_transform
+from insitupy.preprocessing.pseudobulk import neighborhoods_pseudobulk, pseudobulk
 from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from
 from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors
@@ -449,6 +451,122 @@ class TestCalculateGexDiffToNeighbors:
             )
 
 
+# ── pp.pseudobulk / neighborhoods_pseudobulk (AC-B4, AC-A2, AC-B14) ────────────
+
+def _make_experiment_with_celltypes(n_samples=1, add_counts_layer=False):
+    """Build an InSituExperiment from `_make_insitudata_with_celltypes` samples."""
+    exp = InSituExperiment()
+    for i in range(n_samples):
+        xd = _make_insitudata_with_celltypes(seed=i)
+        if add_counts_layer:
+            xd.cells.table.layers["counts"] = xd.cells.table.X.copy()
+        exp._data.append(xd)
+    exp._metadata = pd.DataFrame({"uid": [f"s{i}" for i in range(n_samples)]})
+    return exp
+
+
+class TestNeighborhoodsPseudobulkOwnTypeExclusion:
+    """AC-B4: a cell type's own cells must not be counted in its own neighborhood."""
+
+    def test_own_type_excluded_and_isolated_type_skipped(self, caplog):
+        pytest.importorskip("decoupler")
+        # A0/A1 are mutual neighbors (same type); B0 is a neighbor of both A0 and A1
+        # but a different type; C0 is far from everything (isolated).
+        # Type A's corrected neighborhood must equal B0's counts only - the pre-fix
+        # code would additionally sum in A1 (the same-type neighbor of A0).
+        X = np.array([
+            [5, 3, 1],  # A0
+            [2, 2, 2],  # A1
+            [7, 0, 4],  # B0
+            [1, 1, 1],  # C0 (isolated)
+        ], dtype=float)
+        obs = pd.DataFrame(
+            {"celltype": ["A", "A", "B", "C"], "uid": ["s0"] * 4},
+            index=["A0", "A1", "B0", "C0"],
+        )
+        var = pd.DataFrame(index=["g0", "g1", "g2"])
+        adata = AnnData(X=X, obs=obs, var=var)
+        coords = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [1000.0, 1000.0]])
+        adata.obsm["spatial"] = coords
+
+        with _capture_insitupy_logs(
+            caplog, logging.WARNING, logger_name="insitupy.preprocessing.pseudobulk"
+        ):
+            pdata = neighborhoods_pseudobulk(
+                adata, coords, celltype_col="celltype", counts_layer=None,
+                sample_col="uid", radius=2.0,
+            )
+
+        a_row = pdata[pdata.obs["celltype"] == "A"]
+        assert a_row.shape[0] == 1
+        np.testing.assert_array_equal(np.asarray(a_row.X).ravel(), X[2])  # B0 only
+
+        # C is isolated (no other-type neighbor within radius) - skipped, not raised.
+        assert "C" not in set(pdata.obs["celltype"])
+        assert any(
+            "no cells of another type" in r.message for r in caplog.records
+        )
+
+
+class TestPseudobulkUidScoping:
+    """AC-B14: pseudobulk() must not leave a stray obs['uid'] column on user tables."""
+
+    def test_uid_column_not_persisted_on_cell_tables(self):
+        pytest.importorskip("decoupler")
+        exp = _make_experiment_with_celltypes(n_samples=2)
+        xd1, xd2 = exp._data[0], exp._data[1]
+        # Simulate a pre-existing "uid" column with an unrelated value on one sample.
+        xd2.cells.table.obs["uid"] = "orig_value"
+
+        result = pseudobulk(exp, celltype_col="celltype", counts_layer=None)
+
+        assert "uid" not in xd1.cells.table.obs.columns
+        assert (xd2.cells.table.obs["uid"] == "orig_value").all()
+        assert result.shape[0] > 0
+
+
+class TestPseudobulkCountsLayerDefault:
+    """AC-A2: counts_layer defaults to 'counts' and raises a clear error when absent."""
+
+    def test_default_raises_without_counts_layer(self):
+        pytest.importorskip("decoupler")
+        exp = _make_experiment_with_celltypes(n_samples=1, add_counts_layer=False)
+        with pytest.raises(ValueError, match="normalize_and_transform"):
+            pseudobulk(exp, celltype_col="celltype")
+
+    def test_explicit_none_or_present_counts_layer_proceeds(self):
+        pytest.importorskip("decoupler")
+        exp_none = _make_experiment_with_celltypes(n_samples=1, add_counts_layer=False)
+        result_none = pseudobulk(exp_none, celltype_col="celltype", counts_layer=None)
+        assert result_none.shape[0] > 0
+
+        exp_counts = _make_experiment_with_celltypes(n_samples=1, add_counts_layer=True)
+        result_counts = pseudobulk(exp_counts, celltype_col="celltype")
+        assert result_counts.shape[0] > 0
+
+
+# ── containers.results.DiffExprResults - index uniqueness (AC-B15 / #437) ──────
+
+class TestDiffExprResultsIndexUniqueness:
+    def test_duplicated_index_raises(self):
+        config = DiffExprConfigCollector(mode="pseudobulk", method_params={})
+        df = pd.DataFrame(
+            {"log2foldchange": [1.0, 2.0, 3.0], "padj": [0.1, 0.2, 0.3]},
+            index=["g0", "g0", "g1"],
+        )
+        with pytest.raises(ValueError, match="duplicate"):
+            DiffExprResults(main=df, config=config)
+
+    def test_unique_index_constructs_without_error(self):
+        config = DiffExprConfigCollector(mode="pseudobulk", method_params={})
+        df = pd.DataFrame(
+            {"log2foldchange": [1.0, 2.0, 3.0], "padj": [0.1, 0.2, 0.3]},
+            index=["g0", "g1", "g2"],
+        )
+        result = DiffExprResults(main=df, config=config)
+        assert len(result.main) == 3
+
+
 # ── tl.pseudobulk_dge ────────────────────────────────────────────────────────
 
 class TestPseudobulkDge:
@@ -495,6 +613,60 @@ class TestPseudobulkDge:
 
     def test_full_analysis(self):
         pytest.skip("requires real pseudobulk dataset with PyDESeq2")
+
+    def test_does_not_mutate_caller_pdata_and_config_is_populated(self):
+        """AC-B14: pseudobulk_dge must not mutate the caller's pdata (decoupler's
+        filter_samples defaults to inplace=True) and config.method_params['pseudobulk']
+        must be a populated dict, not None (the `{...}.update(...)` return-value bug)."""
+        pytest.importorskip("pydeseq2")
+        dc = pytest.importorskip("decoupler")
+
+        rng = np.random.default_rng(0)
+        n_per_sample = 20
+        n_genes = 8
+        uids, conds = [], []
+        for cond in ("treated", "control"):
+            for rep in range(4):
+                uid = f"{cond}_{rep}"
+                uids.extend([uid] * n_per_sample)
+                conds.extend([cond] * n_per_sample)
+        n = len(uids)
+        X = rng.integers(5, 30, size=(n, n_genes)).astype(float)
+        cond_arr = np.array(conds)
+        X[cond_arr == "treated", :4] += 20  # inject a real DE signal
+        obs = pd.DataFrame({"uid": uids, "condition": conds, "celltype": "cellA"})
+        var = pd.DataFrame(index=[f"g{j}" for j in range(n_genes)])
+        adata = AnnData(X=X, obs=obs, var=var)
+        pdata = dc.pp.pseudobulk(
+            adata=adata, sample_col="uid", groups_col="celltype", layer=None, mode="sum"
+        )
+        pdata.uns["pseudobulk_settings"] = {"celltype_col": "celltype", "mode": "sum"}
+
+        snapshot_shape = pdata.shape
+        snapshot_obs = pdata.obs.copy()
+
+        result = pseudobulk_dge(
+            pdata=pdata,
+            dge_setup=("condition", "treated", "control"),
+            celltype_col="celltype",
+            celltype="cellA",
+            plot_qc=False,
+            min_cells=1,
+            min_counts=1,
+            filter_by_expr_kwargs={"min_count": 0, "min_total_count": 0, "large_n": 0, "min_prop": 0.0},
+            filter_by_prop_kwargs={"min_prop": 0.0, "min_smpls": 1},
+            verbose=False,
+        )
+
+        # Caller's pdata is untouched (shape and obs equal the pre-call snapshot).
+        assert pdata.shape == snapshot_shape
+        assert pdata.obs.equals(snapshot_obs)
+
+        # method_params["pseudobulk"] is a populated dict, not None.
+        pb_params = result.config.method_params["pseudobulk"]
+        assert isinstance(pb_params, dict)
+        assert pb_params["min_cells"] == 1
+        assert pb_params["min_counts"] == 1
 
 
 # ── ShapesData.add_data / InSituData convenience conversions ──────────────────
