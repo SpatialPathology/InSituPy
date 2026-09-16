@@ -120,9 +120,14 @@ def apply_warp(
     max_dim = max(image.shape[img_axes.Y], image.shape[img_axes.X])
     if max_dim > SHRT_MAX:
         image, sf = fit_image_to_size_limit(image, axes=axes, size_limit=SHRT_MAX, return_scale_factor=True)
-        M = M.copy()
-        M[0, 2] *= sf  # scale x translation
-        M[1, 2] *= sf  # scale y translation
+        M = M.copy().astype(np.float64)
+        # The source image was downscaled by `sf`, so source pixel coordinates shrink
+        # by `sf`. `M` is a forward map (dst = M @ [x_src, y_src, 1]); to keep the same
+        # destination output we compensate with M @ diag(1/sf, 1/sf, 1), i.e. divide the
+        # two columns acting on x/y by `sf`. The translation column is unchanged, and
+        # `output_size` (the destination frame) is unchanged. Works for both the 2x3
+        # affine and 3x3 perspective matrix.
+        M[:, :2] /= sf
         logger.info(f"apply_warp: image resized by factor {sf:.4f} to satisfy SHRT_MAX limit.")
 
     # --- Determine warp type ---
