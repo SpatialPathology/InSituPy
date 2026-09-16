@@ -3391,6 +3391,26 @@ class InSituExperiment:
                 "Fix the failing datasets and call save() again."
             )
 
+        # Warn about orphan data-* directories that are not part of this experiment
+        # (e.g. left behind by remove() without delete_from_disk). They are not pruned
+        # automatically because a stray directory could be a deliberate manual copy;
+        # the reader skips them by uid, but list them so the user can clean up.
+        used_dirs = {Path(d.path).resolve() for d in self._data if d.path is not None}
+        orphan_dirs = sorted(
+            p.resolve()
+            for p in Path(self.path).glob("data-*")
+            if p.is_dir() and p.resolve() not in used_dirs
+        )
+        if orphan_dirs:
+            warnings.warn(
+                f"{len(orphan_dirs)} orphan 'data-*' director(ies) remain in "
+                f"'{self.path}' and are not part of this experiment: "
+                f"{[str(p) for p in orphan_dirs]}. They are ignored on read (datasets "
+                "are paired by uid); delete them manually if unwanted.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         self.save_metadata(overwrite=True)
         self.save_colors(overwrite=True)
         self.save_filters(path=self.path)
@@ -4572,12 +4592,18 @@ class InSituExperiment:
             if version == 2:
                 raw_composites = filters_payload.get("composites", {}) or {}
 
-        # Load each dataset
-        data = []
+        # Load each dataset (order on disk is not authoritative)
+        loaded = []
         dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
         for dataset_path in tqdm(dataset_paths):
             dataset = InSituData.read(dataset_path, load_all=False)
-            data.append(dataset)
+            loaded.append(dataset)
+
+        # Pair datasets to metadata rows by uid (see _pair_loaded_datasets); orphan
+        # data-* dirs (e.g. from remove() without delete_from_disk) are skipped with a
+        # warning, a metadata uid with no dir raises, pre-uid stores fall back to
+        # positional pairing with an equal-count check.
+        data = cls._pair_loaded_datasets(loaded, metadata, path)
 
         # Create a new InSituExperiment object
         experiment = cls()
@@ -4645,6 +4671,95 @@ class InSituExperiment:
             experiment = experiment.filters.apply(filter_key)
 
         return experiment
+
+    @staticmethod
+    def _pair_loaded_datasets(loaded, metadata, path):
+        """Order loaded datasets to match metadata rows by uid.
+
+        Modern stores persist a uid in each ``data-*/.ispy`` file and in the
+        metadata ``uid`` column. Pairing by uid means a stray ``data-*``
+        directory (e.g. left behind by ``remove(delete_from_disk=False)`` or a
+        manual copy) can never be silently mispaired with a metadata row.
+        Positional pairing is used only for genuine pre-uid stores (no
+        per-dataset uid persisted), and then only when the counts match.
+
+        Returns the datasets ordered to the metadata rows.
+        """
+        if not loaded:
+            # No 'data-*' directories on disk at all (e.g. a metadata-only
+            # legacy migration fixture). Nothing to pair; preserve the
+            # pre-existing behaviour of returning an empty list rather than
+            # raising a count-mismatch error that only makes sense when at
+            # least one dataset was actually loaded.
+            return loaded
+
+        has_meta_uid = "uid" in metadata.columns
+        disk_uids = [d._uid for d in loaded]
+        all_have_uid = len(loaded) > 0 and all(u is not None for u in disk_uids)
+        none_have_uid = all(u is None for u in disk_uids)
+
+        # Pre-uid store: positional fallback, equal counts required.
+        if not has_meta_uid or none_have_uid:
+            if len(loaded) != len(metadata):
+                raise ValueError(
+                    f"Cannot read experiment at '{path}': found {len(loaded)} "
+                    f"'data-*' director(ies) but {len(metadata)} metadata row(s). "
+                    "This store predates per-dataset uids, so datasets cannot be "
+                    "paired by uid, and the counts do not match. A 'data-*' "
+                    "directory was most likely left behind (e.g. by remove() "
+                    "without delete_from_disk). Remove the stray directory or "
+                    "re-save the experiment, then read again."
+                )
+            return loaded  # positional; legacy backfill fills _uid from metadata
+
+        # Mixed store: some directories predate uids, some do not -> unsafe to pair.
+        if not all_have_uid:
+            raise ValueError(
+                f"Cannot read experiment at '{path}': some 'data-*' directories "
+                "carry a per-dataset uid and some do not, so datasets cannot be "
+                "reliably paired with metadata rows. Re-save the experiment "
+                "(exp.save()) so every dataset persists its uid, then read again."
+            )
+
+        # Modern store: pair by uid.
+        by_uid = {}
+        for d in loaded:
+            if d._uid in by_uid:
+                raise ValueError(
+                    f"Cannot read experiment at '{path}': two 'data-*' directories "
+                    f"share the uid '{d._uid}', so pairing with metadata is "
+                    "ambiguous. Remove or re-key the duplicate directory."
+                )
+            by_uid[d._uid] = d
+
+        ordered, missing = [], []
+        for u in list(metadata["uid"]):
+            if u in by_uid:
+                ordered.append(by_uid.pop(u))
+            else:
+                missing.append(u)
+
+        if missing:
+            raise ValueError(
+                f"Cannot read experiment at '{path}': metadata references uid(s) "
+                f"{missing} with no matching 'data-*' directory on disk. The "
+                "dataset directory is missing or was deleted. Restore it or drop "
+                "the metadata row(s) and re-save."
+            )
+
+        # Any leftover on-disk uids are orphan directories -> warn and skip.
+        if by_uid:
+            orphan_uids = list(by_uid)
+            warnings.warn(
+                f"Skipping {len(orphan_uids)} 'data-*' director(ies) whose uid is "
+                f"not in the experiment metadata (orphans, e.g. from remove() "
+                f"without delete_from_disk): {orphan_uids}. Delete them manually if "
+                "unwanted.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        return ordered
 
     def _build_filters_payload(self) -> dict[str, Any]:
         """Build versioned JSON payload for ``filters.json``."""
