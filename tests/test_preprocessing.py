@@ -94,6 +94,21 @@ class TestNormalizeAndTransform:
         with pytest.raises(ValueError):
             normalize_and_transform(xd, transformation_method="invalid")
 
+    def test_log1p_records_transformation_marker(self):
+        xd = _make_insitudata()
+        normalize_and_transform(xd, transformation_method="log1p")
+        assert xd.cells.table.uns["insitupy"]["transformation"] == "log1p"
+
+    def test_sqrt_records_transformation_marker(self):
+        xd = _make_insitudata()
+        normalize_and_transform(xd, transformation_method="sqrt")
+        assert xd.cells.table.uns["insitupy"]["transformation"] == "sqrt"
+
+    def test_scale_records_transformation_marker_as_scaled(self):
+        xd = _make_insitudata()
+        normalize_and_transform(xd, transformation_method="log1p", scale=True)
+        assert xd.cells.table.uns["insitupy"]["transformation"] == "scaled"
+
 
 # ── filter_cells ──────────────────────────────────────────────────────────────
 

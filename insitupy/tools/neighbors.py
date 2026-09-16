@@ -10,6 +10,8 @@ from sklearn.neighbors import radius_neighbors_graph
 from statsmodels.stats import multitest
 from tqdm import tqdm
 
+from insitupy.utils._checks import _assert_log1p_state
+
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -453,6 +455,7 @@ def calculate_gex_diff_to_neighbors(
     use_distance_weighting: bool = False,
     exclude_zeros_from_max: bool = True,
     batch_size: int | None = None,
+    assert_log1p: bool = True,
     verbose: bool = True,
 ) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
@@ -487,6 +490,11 @@ def calculate_gex_diff_to_neighbors(
         exclude_zeros_from_max (bool): Exclude zero values when computing maximum (only
             for max strategy). Zeros cannot be contamination sources. Default is True.
         batch_size (int, optional): Process genes in batches to reduce memory usage.
+        assert_log1p (bool): If True, verify that the expression matrix (`.X`) is
+            log1p-normalized before running the analysis, and raise a `ValueError` on data
+            known to be wrong (sqrt/scaled transformation, or marker-less raw integer counts).
+            Warns (does not raise) when the transformation state cannot be determined. Set to
+            False to skip this check. Default is True.
         verbose (bool): Print progress messages. Default is True.
 
     Returns:
@@ -519,6 +527,8 @@ def calculate_gex_diff_to_neighbors(
         warnings.warn("'test' is deprecated, use 'method' instead.",
                       DeprecationWarning, stacklevel=2)
         method = test
+
+    _assert_log1p_state(adata, assert_log1p=assert_log1p, where="calculate_gex_diff_to_neighbors")
 
     # Validate inputs
     celltype_col, celltype = celltype_tuple if celltype_tuple is not None else (None, None)

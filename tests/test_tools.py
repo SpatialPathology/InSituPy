@@ -1,22 +1,43 @@
 """Tests for tools: tl.dge, calc_distance_of_cells_from,
 calculate_gex_diff_to_neighbors, pseudobulk_dge."""
 
+import contextlib
+import logging
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from anndata import AnnData
+from scipy.sparse import issparse
 from shapely.geometry import Polygon
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.containers.results import DiffExprResults
+from insitupy.preprocessing import normalize_and_transform
 from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from
 from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors
 from insitupy.tools.pseudobulk import pseudobulk_dge
+from insitupy.utils.dge import create_deg_dataframe
+from insitupy.utils.go import get_up_down_genes
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+@contextlib.contextmanager
+def _capture_insitupy_logs(caplog, level, logger_name="insitupy.tools.dge"):
+    """caplog's handler is attached at the root logger, but `insitupy` sets
+    `propagate=False` (see insitupy/_logging.py), so records from `insitupy.*`
+    loggers never reach it. Attach the handler directly to the source logger.
+    """
+    logger = logging.getLogger(logger_name)
+    caplog.set_level(level, logger=logger_name)
+    logger.addHandler(caplog.handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(caplog.handler)
 
 def _make_insitudata_with_celltypes(n_per_type=15, n_genes=10, seed=0):
     """InSituData with two cell types ('A' and 'B') with distinct expression."""
@@ -66,8 +87,14 @@ def _make_adata_with_spatial(n_cells=20, n_genes=8, seed=0):
 # ── tl.dge ────────────────────────────────────────────────────────────────────
 
 class TestDge:
+    # NOTE: dge() raises by default (assert_log1p=True) on marker-less raw integer counts
+    # (AC-B2/AC-2) - the fixture builds raw counts, so every test here normalizes (log1p)
+    # first. This is the correct altitude: DGE on raw counts is exactly the wrong-science
+    # case the guard targets. See TestDgeLog1pGuard for the guard's own regression tests.
+
     def test_returns_diffexprresults(self):
         xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
         result = dge(
             target=xd,
             target_cell_type_tuple=("celltype", "A"),
@@ -79,6 +106,7 @@ class TestDge:
 
     def test_main_is_dataframe_with_expected_columns(self):
         xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
         result = dge(
             target=xd,
             target_cell_type_tuple=("celltype", "A"),
@@ -86,11 +114,12 @@ class TestDge:
             method="t-test",
             verbose=False,
         )
-        for col in ("log2foldchange", "padj", "scores"):
+        for col in ("log2foldchange", "pvalue", "padj", "scores"):
             assert col in result.main.columns, f"Missing column: {col}"
 
     def test_main_index_is_gene_names(self):
         xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
         result = dge(
             target=xd,
             target_cell_type_tuple=("celltype", "A"),
@@ -102,6 +131,7 @@ class TestDge:
 
     def test_explicit_ref_cell_type_tuple(self):
         xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
         result = dge(
             target=xd,
             target_cell_type_tuple=("celltype", "A"),
@@ -110,6 +140,224 @@ class TestDge:
         )
         assert isinstance(result, DiffExprResults)
         assert result.main is not None
+
+
+# ── tl.dge: create_deg_dataframe column correctness (AC-B1) ────────────────────
+
+class TestCreateDegDataframe:
+    def test_padj_is_bh_adjusted_and_excludes_raw_only_significant_gene(self):
+        """Regression for AC-B1: `padj` must hold scanpy's `pvals_adj` (BH-corrected),
+        not the raw `pvals`, and a gene that is only raw-significant (not BH-significant)
+        must not be plotted/counted as significant downstream (get_up_down_genes)."""
+        genes = ["g0", "g1", "g2"]
+        logfc = np.array([2.0, -2.0, 0.1])
+        pvals = np.array([0.01, 0.02, 0.5])
+        # g0: raw p < 0.05 but BH-adjusted >= 0.05 - the "plotted-significant-when-it-isn't" case
+        pvals_adj = np.array([0.08, 0.03, 0.6])
+        scores = np.array([3.0, -3.0, 0.2])
+
+        adata = AnnData(
+            X=np.zeros((2, len(genes))),
+            var=pd.DataFrame(index=pd.Index(genes)),
+        )
+        adata.uns["rank_genes_groups"] = {
+            "names": np.array(genes, dtype=[("DATA", object)]),
+            "logfoldchanges": np.array(logfc, dtype=[("DATA", float)]),
+            "pvals": np.array(pvals, dtype=[("DATA", float)]),
+            "pvals_adj": np.array(pvals_adj, dtype=[("DATA", float)]),
+            "scores": np.array(scores, dtype=[("DATA", float)]),
+        }
+
+        res_dict = create_deg_dataframe(adata, groups="DATA")
+        df = res_dict["DATA"]
+
+        np.testing.assert_array_equal(df["pvalue"].to_numpy(), pvals)
+        np.testing.assert_array_equal(df["padj"].to_numpy(), pvals_adj)
+        np.testing.assert_allclose(df["neg_log10_pvals"].to_numpy(), -np.log10(pvals_adj))
+
+        # concrete downstream regression: g0 must not appear as "up" under the default
+        # pval_col="padj", even though it was raw-significant under the old (buggy) meaning.
+        genes_up, genes_down = get_up_down_genes(df.set_index("gene"))
+        assert "g0" not in genes_up
+        assert "g1" in genes_down
+
+
+# ── tl.dge: log1p input guard (AC-B2 / AC-2) ────────────────────────────────────
+
+class TestDgeLog1pGuard:
+    def test_markerless_raw_integer_counts_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        with pytest.raises(ValueError, match="raw integer counts"):
+            dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
+
+    def test_markerless_raw_integer_counts_assert_log1p_false_proceeds(self):
+        xd = _make_insitudata_with_celltypes()
+        result = dge(
+            target=xd,
+            target_cell_type_tuple=("celltype", "A"),
+            ref_cell_type_tuple="rest",
+            assert_log1p=False,
+            verbose=False,
+        )
+        assert isinstance(result, DiffExprResults)
+
+    def test_sqrt_transformed_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="sqrt")
+        with pytest.raises(ValueError, match="sqrt"):
+            dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
+
+    def test_scaled_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p", scale=True)
+        with pytest.raises(ValueError, match="scaled"):
+            dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
+
+    def test_sqrt_transformed_assert_log1p_false_proceeds(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="sqrt")
+        result = dge(
+            target=xd,
+            target_cell_type_tuple=("celltype", "A"),
+            ref_cell_type_tuple="rest",
+            assert_log1p=False,
+            verbose=False,
+        )
+        assert isinstance(result, DiffExprResults)
+
+    def test_log1p_normalized_does_not_raise(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        result = dge(
+            target=xd,
+            target_cell_type_tuple=("celltype", "A"),
+            ref_cell_type_tuple="rest",
+            verbose=False,
+        )
+        assert isinstance(result, DiffExprResults)
+
+    def test_markerless_non_integer_warns_but_proceeds(self):
+        xd = _make_insitudata_with_celltypes()
+        # hand-transform floats without going through normalize_and_transform, so no
+        # marker is written - a legacy-store / externally-built-AnnData stand-in.
+        table = xd.cells.table
+        X = table.X.toarray() if issparse(table.X) else np.asarray(table.X)
+        table.X = X / 3.14159
+
+        with pytest.warns(UserWarning, match="cannot verify"):
+            result = dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
+        assert isinstance(result, DiffExprResults)
+
+
+# ── tl.dge: ambiguity check restricted to a single object (AC-B3) ──────────────
+
+class TestDgeCrossObjectAmbiguity:
+    def test_exclude_ambiguous_does_not_drop_cross_object_id_collisions(self):
+        """Two distinct InSituData objects whose cell tables coincidentally share
+        obs_names (both built with the same default naming) are different physical
+        cells. exclude_ambiguous_assignments=True must not drop them (AC-B3) - unlike
+        the same-object case, which still deduplicates genuine duplicates."""
+        xd_a = _make_insitudata_with_celltypes(seed=1)
+        xd_b = _make_insitudata_with_celltypes(seed=2)
+        normalize_and_transform(xd_a, transformation_method="log1p")
+        normalize_and_transform(xd_b, transformation_method="log1p")
+
+        # both objects use the same default obs_names ("cell_0".."cell_14" for celltype A) -
+        # a coincidental hex-ID-style collision across two distinct slides/objects.
+        assert set(xd_a.cells.table.obs_names[:15]) == set(xd_b.cells.table.obs_names[:15])
+
+        result = dge(
+            target=xd_a,
+            target_cell_type_tuple=("celltype", "A"),
+            ref=xd_b,
+            ref_cell_type_tuple=("celltype", "A"),
+            exclude_ambiguous_assignments=True,
+            verbose=False,
+        )
+
+        # no cells were dropped despite the fully-overlapping obs_names
+        assert result.config.target_cell_number == 15
+        assert result.config.ref_cell_number == 15
+
+
+# ── tl.dge: identical target/reference selection raises (AC-B19) ───────────────
+
+class TestDgeIdenticalSelectionRaises:
+    def test_default_tuples_raise_without_exclude_ambiguous(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        with pytest.raises(ValueError, match="identical selection"):
+            dge(target=xd, exclude_ambiguous_assignments=False, verbose=False)
+
+    def test_default_tuples_raise_with_exclude_ambiguous(self):
+        # previously crashed on an empty object once ambiguous cells were dropped
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        with pytest.raises(ValueError, match="identical selection"):
+            dge(target=xd, exclude_ambiguous_assignments=True, verbose=False)
+
+
+# ── tl.dge: NaN rows filtered before rank_genes_groups (section 4f) ────────────
+
+class TestDgeNanFilter:
+    def test_nan_rows_removed_and_logged(self, caplog):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+
+        table = xd.cells.table
+        X = table.X.toarray() if issparse(table.X) else np.array(table.X)
+        X[0, 0] = np.nan
+        X[1, 1] = np.nan
+        table.X = X
+
+        with _capture_insitupy_logs(caplog, logging.WARNING):
+            result = dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
+
+        assert not result.main["log2foldchange"].isna().any()
+        assert any("NaN" in rec.getMessage() for rec in caplog.records)
+
+    def test_nan_wiping_out_a_group_raises(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+
+        table = xd.cells.table
+        X = table.X.toarray() if issparse(table.X) else np.array(table.X)
+        # celltype A occupies the first 15 rows (see _make_insitudata_with_celltypes)
+        X[:15, :] = np.nan
+        table.X = X
+
+        with pytest.raises(ValueError, match="empty"):
+            dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple="rest",
+                verbose=False,
+            )
 
 
 # ── tl.calc_distance_of_cells_from ───────────────────────────────────────────
@@ -158,10 +406,13 @@ class TestCalcDistanceOfCellsFrom:
 # ── tl.calculate_gex_diff_to_neighbors ───────────────────────────────────────
 
 class TestCalculateGexDiffToNeighbors:
+    # NOTE: _make_adata_with_spatial builds raw integer counts with no transformation
+    # marker; these tests exercise the function's I/O shape, not DGE scientific
+    # correctness, so they opt out of the log1p guard (AC-B2/AC-2) via assert_log1p=False.
     def test_returns_four_tuple(self):
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         result = calculate_gex_diff_to_neighbors(
-            adata, radius=200.0, strategy="mean", verbose=False
+            adata, radius=200.0, strategy="mean", assert_log1p=False, verbose=False
         )
         assert isinstance(result, tuple)
         assert len(result) == 4
@@ -169,14 +420,14 @@ class TestCalculateGexDiffToNeighbors:
     def test_first_element_is_dataframe(self):
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
-            adata, radius=200.0, strategy="mean", verbose=False
+            adata, radius=200.0, strategy="mean", assert_log1p=False, verbose=False
         )
         assert isinstance(df, pd.DataFrame)
 
     def test_adjacency_matrix_shape(self):
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
-            adata, radius=200.0, strategy="mean", verbose=False
+            adata, radius=200.0, strategy="mean", assert_log1p=False, verbose=False
         )
         n = adata.n_obs
         assert A.shape == (n, n)
@@ -184,9 +435,18 @@ class TestCalculateGexDiffToNeighbors:
     def test_qc_stats_is_dict(self):
         adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
         df, A, diffs, qc = calculate_gex_diff_to_neighbors(
-            adata, radius=200.0, strategy="mean", verbose=False
+            adata, radius=200.0, strategy="mean", assert_log1p=False, verbose=False
         )
         assert isinstance(qc, dict)
+
+    def test_log1p_guard_fires_on_raw_counts(self):
+        # Direct coverage of the AC-B2/AC-2 guard on this function (not only via dge):
+        # a marker-less raw integer-count matrix must raise unless assert_log1p=False.
+        adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
+        with pytest.raises(ValueError, match="raw integer counts"):
+            calculate_gex_diff_to_neighbors(
+                adata, radius=200.0, strategy="mean", verbose=False
+            )
 
 
 # ── tl.pseudobulk_dge ────────────────────────────────────────────────────────
