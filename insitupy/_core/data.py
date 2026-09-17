@@ -834,7 +834,9 @@ class InSituData:
             region_tuple (Optional[Tuple[str, str]]): A tuple specifying the region to crop.
             xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
             ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
-            inplace (bool): If True, modify the data in place. Otherwise, return a new cropped data.
+            inplace (bool): If True, modify the data in place (keeping the object's uid).
+                Otherwise, return a new cropped dataset - a detached copy whose experiment
+                uid is cleared to None; adding it to an InSituExperiment mints a fresh uid.
             materialize_transcripts (bool): If True (default), compute and re-wrap the transcript
                 Dask DataFrame after cropping to avoid accumulating a deep lazy task graph.
                 Set to False to defer computation (e.g., when chaining multiple crops).
@@ -847,6 +849,12 @@ class InSituData:
             _self = self
         else:
             _self = self.copy()
+            # A non-inplace crop yields a new, detached dataset that belongs to no
+            # InSituExperiment, so clear the experiment-slot uid; add() then mints a
+            # fresh one instead of colliding with the parent (see decisions.md
+            # "Identity model"). This is separate from the versioning list
+            # metadata["uids"], which crop still appends to below.
+            _self._uid = None
 
         if region_tuple is None:
             if xlim is None or ylim is None:
