@@ -301,7 +301,7 @@ class MultiCellData(DeepCopyMixin):
 
     def add_baysor(
                     self,
-                    xd: str | os.PathLike | Path, # XeniumRanger output
+                    xd: str | os.PathLike | Path | "InSituData", # XeniumRanger output, or an already-loaded InSituData
                     path: str | os.PathLike | Path, # baysor output
                     counts_file: str | None = None,
                     cell_metadata_file: str | None = None,
@@ -319,9 +319,13 @@ class MultiCellData(DeepCopyMixin):
         resulting cell data as a new segmentation layer named ``key``.
 
         Args:
-            xd (Union[str, os.PathLike, Path]): Path to the XeniumRanger output
-                directory. Used alongside the Baysor output to reconstruct cell
-                boundaries.
+            xd (Union[str, os.PathLike, Path, InSituData]): Path to the
+                XeniumRanger output directory, or an already-loaded
+                ``InSituData`` instance for that same raw output. Used to
+                restrict the Baysor gene panel to genes present in the
+                original Xenium panel. Passing an already-loaded
+                ``InSituData`` avoids re-reading the raw Xenium output from
+                disk.
             path (Union[str, os.PathLike, Path]): Path to the Baysor output
                 directory containing individual result files.
             counts_file (Optional[str], optional): Name of the counts file

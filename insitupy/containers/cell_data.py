@@ -120,7 +120,7 @@ class CellData(DeepCopyMixin):
     @table.setter
     def table(self, value: AnnData):
         """Alias for matrix setter. This is the preferred name going forward."""
-        self._set_table(value=value, allow_partial_overlap=False)
+        self._set_table(value=value, allow_partial_overlap=True)
 
     def set_table(self,
                   value: AnnData,

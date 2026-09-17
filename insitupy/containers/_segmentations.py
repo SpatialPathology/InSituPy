@@ -52,7 +52,7 @@ def _read_baysor_polygons(
             p = shapely.LineString(coords)
             df["geometry"].append(p)
             df["type"].append("line")
-        df["cell"].append(i)
+        df["cell"].append(cell["id"])
 
         # extract bounding box
         bounds = p.bounds
@@ -363,6 +363,7 @@ def _read_baysor(
 
     import scanpy as sc
 
+    from insitupy._core.data import InSituData
     from insitupy.io import read_xenium
 
     if counts_file is None:
@@ -381,12 +382,18 @@ def _read_baysor(
         path_polygons = path / polygons_file
 
     # read baysor counts
-    xd=read_xenium(xd)
+    xd = xd if isinstance(xd, InSituData) else read_xenium(xd)
     cell_metadata=pd.read_csv(path_cell_metadata)
     counts=sc.read_loom(path_counts)
 
     counts.obs=cell_metadata.copy()
     counts.var_names=counts.var['Name'].copy()
+    counts.obsm["spatial"] = np.stack([cell_metadata["x"].to_numpy(), cell_metadata["y"].to_numpy()], axis=1)
+
+    # use the actual Baysor cell IDs as obs_names so they match `boundaries.cell_names`
+    counts.obs.set_index("cell", inplace=True)
+    counts.obs_names = counts.obs_names.astype(str)
+    counts.obs_names.name = None
 
     adata=counts[:,counts.var_names.isin(xd.cells['main'].matrix.var.index.tolist())].copy()
 

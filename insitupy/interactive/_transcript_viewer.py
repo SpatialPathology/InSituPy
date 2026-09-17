@@ -830,7 +830,10 @@ if WITH_NAPARI:
             layer = self.viewer.layers[self.LAYER_NAME]
             layer.data = points_yx
             layer.face_color = colors
-            layer.properties = {"gene": gene_names}
+            # "value" is the key `colorlegend()` reads (insitupy/plotting/plots.py) to
+            # build the "Save Colorlegends" PDF export; "gene" is kept for napari's
+            # built-in hover status text.
+            layer.properties = {"gene": gene_names, "value": gene_names}
             layer.size = layer.current_size
 
             # Update status

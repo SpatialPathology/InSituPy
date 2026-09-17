@@ -228,39 +228,29 @@ def single_volcano(
     else:
         raise TypeError(f"label_top_n must be int or list, got {type(genes_to_label)}")
 
-    # Calculate axis limits with margins
-    if not down_data.empty:
-        xmin = min(
-            down_data[logfoldchanges_col].min() * AXIS_MARGIN_FACTOR,
-            -(lfc_threshold * AXIS_MARGIN_FACTOR)
-        )
-    else:
-        xmin = -(lfc_threshold * AXIS_MARGIN_FACTOR)
+    # Calculate axis limits with margins.
+    # Base the range on the *full* dataset (not just genes passing the
+    # significance/fold-change filters), so the plot doesn't collapse to a
+    # zero-width range when few/no genes are significant -- this happened
+    # e.g. for foldchange_threshold=1, where lfc_threshold=log2(1)=0 made the
+    # old up_data/down_data-only fallback produce xmin == xmax == 0.
+    raw_xmin = min(data[logfoldchanges_col].min(), -lfc_threshold)
+    raw_xmax = max(data[logfoldchanges_col].max(), lfc_threshold)
+    x_margin = (raw_xmax - raw_xmin) * (AXIS_MARGIN_FACTOR - 1) or 0.1
+    xmin = raw_xmin - x_margin
+    xmax = raw_xmax + x_margin
 
-    if not up_data.empty:
-        xmax = max(
-            up_data[logfoldchanges_col].max() * AXIS_MARGIN_FACTOR,
-            lfc_threshold * AXIS_MARGIN_FACTOR
-        )
-        ymax = max(
-            up_data[neg_log_pval_column].max() * AXIS_MARGIN_FACTOR,
-            down_data[neg_log_pval_column].max() * AXIS_MARGIN_FACTOR if not down_data.empty else 0,
-            neg_log_sig_thresh * AXIS_MARGIN_FACTOR
-        )
-    else:
-        xmax = lfc_threshold * AXIS_MARGIN_FACTOR
-        ymax = (
-            down_data[neg_log_pval_column].max() * AXIS_MARGIN_FACTOR
-            if not down_data.empty
-            else neg_log_sig_thresh * AXIS_MARGIN_FACTOR
-        )
+    ymax = max(
+        data[neg_log_pval_column].max() * AXIS_MARGIN_FACTOR,
+        neg_log_sig_thresh * AXIS_MARGIN_FACTOR
+    )
 
     if xlim is not None:
-        if (xmin / AXIS_MARGIN_FACTOR) < xlim[0]:
+        if raw_xmin < xlim[0]:
             logger.warning("Provided xlim lower bound excludes some significant genes.")
 
             #warn("Provided xlim lower bound excludes some significant genes.", UserWarning)
-        if (xmax / AXIS_MARGIN_FACTOR) > xlim[1]:
+        if raw_xmax > xlim[1]:
             logger.warning("Provided xlim upper bound excludes some significant genes.",)
 
         xmin, xmax = xlim
