@@ -329,9 +329,9 @@ def read_visium(
         slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
         sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
-        fullres_pixel_size (Optional[Number], optional): Physical size of one full-resolution
+        fullres_pixel_size (Number): Physical size of one full-resolution
             pixel in micrometers. Used to convert spot geometries to micron coordinates.
-            Defaults to None (falls back to 1.0 with a warning).
+            Required - there is no reliable default; omitting it raises ``ValueError``.
         **kwargs: Additional keyword arguments forwarded to ``spatialdata_io.visium()``.
             Commonly used arguments include:
 
@@ -377,10 +377,11 @@ def read_visium(
         logger.info("Reading Visium data with spatialdata-io...")
 
     if fullres_pixel_size is None:
-        logger.warning("No `fullres_pixel_size` provided. Setting to 1.0 by default. "
-                       "For downstream analysis setting the correct pixel size might be important. "
-                       "If possible, try to find out the resolution of the fullres image")
-        fullres_pixel_size = 1.0 # microns per pixel
+        raise ValueError(
+            "`fullres_pixel_size` is required (microns per full-resolution pixel). "
+            "Without it, spot geometries would be left in pixel coordinates. "
+            "Please determine the resolution of the full-resolution image and pass it explicitly."
+        )
 
     sf_file = path / "spatial" / "scalefactors_json.json"
     scale_factors = read_json(sf_file)
