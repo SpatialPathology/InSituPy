@@ -9,6 +9,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
+from insitupy._exceptions import NoImageOverlapError
 from insitupy.images import (
     read_image,
     read_ome_tiff,
@@ -214,3 +215,90 @@ class TestCropDaskArrayOrPyramid:
         cropped = crop_dask_array_or_pyramid(pyramid, xlim=(0, 32), ylim=(0, 32), pixel_size=1.0)
         assert isinstance(cropped, list)
         assert len(cropped) == len(pyramid)
+
+    def test_out_of_bounds_pyramid_crop_raises(self):
+        size = 64
+        arr = np.zeros((size, size), dtype=np.uint8)
+        img = da.from_array(arr, chunks=(size, size))
+        pyramid = create_img_pyramid(img, axes="YX", nsubres=2, scale_steps=2)
+        with pytest.raises(NoImageOverlapError):
+            crop_dask_array_or_pyramid(
+                pyramid, xlim=(1000, 2000), ylim=(1000, 2000), pixel_size=1.0
+            )
+
+    def test_pyramid_crop_multilevel_alignment_fractional_bounds(self):
+        # Regression test for compounded truncation across pyramid levels (F2).
+        # size=201 is not evenly divisible by scale_steps=2, so each level's
+        # step scale factor is non-integer (e.g. 201/101 ~= 1.99) - exactly the
+        # condition that exposes the compounding bug, since nested int()
+        # truncation at each step then no longer equals a single truncation
+        # applied once to the original physical limits.
+        size = 201
+        arr = np.zeros((size, size), dtype=np.uint8)
+        img = da.from_array(arr, chunks=(size, size))
+        pyramid = create_img_pyramid(img, axes="YX", nsubres=3, scale_steps=2)
+        level_sizes = [p.shape[0] for p in pyramid]
+        assert level_sizes == [201, 101, 51, 26]
+
+        pixel_size = 1.0
+        xlim = (30.93, 121.4)
+        ylim = (30.93, 121.4)
+
+        cropped = crop_dask_array_or_pyramid(pyramid, xlim=xlim, ylim=ylim, pixel_size=pixel_size)
+
+        x0_full, x1_full = xlim
+        y0_full, y1_full = ylim
+        for level, (orig, crop) in enumerate(zip(pyramid, cropped, strict=True)):
+            sf_x = pyramid[0].shape[1] / orig.shape[1]
+            sf_y = pyramid[0].shape[0] / orig.shape[0]
+            expected_x0 = max(0, int(x0_full / sf_x))
+            expected_x1 = min(orig.shape[1], int(x1_full / sf_x))
+            expected_y0 = max(0, int(y0_full / sf_y))
+            expected_y1 = min(orig.shape[0], int(y1_full / sf_y))
+            assert crop.shape == (expected_y1 - expected_y0, expected_x1 - expected_x0), (
+                f"level {level} misaligned: shape not derived fresh from physical limits"
+            )
+
+    def test_pyramid_crop_matches_fixed_formula_not_compounded_truncation(self):
+        # Explicit divergence check: for these fractional bounds, the old
+        # cumulative-reassignment ("buggy") formula and the fixed
+        # from-physical-limits-each-time formula give different pixel bounds
+        # at levels 1 and 3. Pins the implementation to the fixed formula and
+        # would fail if the compounding bug were reintroduced.
+        size = 201
+        arr = np.zeros((size, size), dtype=np.uint8)
+        img = da.from_array(arr, chunks=(size, size))
+        pyramid = create_img_pyramid(img, axes="YX", nsubres=3, scale_steps=2)
+
+        pixel_size = 1.0
+        xlim = (30.93, 121.4)
+        ylim = (30.93, 121.4)
+
+        cropped = crop_dask_array_or_pyramid(pyramid, xlim=xlim, ylim=ylim, pixel_size=pixel_size)
+
+        # reproduce the pre-fix cumulative-reassignment computation verbatim
+        scale_factors = [1] + [
+            pyramid[i].shape[0] / pyramid[i + 1].shape[0] for i in range(len(pyramid) - 1)
+        ]
+        xlim_scaled = (xlim[0] / pixel_size, xlim[1] / pixel_size)
+        buggy_bounds = []
+        for sf in scale_factors:
+            xlim_scaled = (int(xlim_scaled[0] / sf), int(xlim_scaled[1] / sf))
+            buggy_bounds.append(xlim_scaled)
+
+        # fixed formula, computed independently of the implementation
+        fixed_bounds = []
+        for img_level in pyramid:
+            sf_x = pyramid[0].shape[1] / img_level.shape[1]
+            fixed_bounds.append((int(xlim[0] / sf_x), int(xlim[1] / sf_x)))
+
+        # sanity: these parameters actually exercise the bug (levels 1 and 3
+        # differ between the two formulas) - otherwise this test would not be
+        # exercising the regression it claims to guard
+        assert buggy_bounds[1] != fixed_bounds[1]
+        assert buggy_bounds[3] != fixed_bounds[3]
+
+        # the implementation's crop width matches the fixed formula at every
+        # level, not the buggy compounded one
+        for level, (crop, (fx0, fx1)) in enumerate(zip(cropped, fixed_bounds, strict=True)):
+            assert crop.shape[1] == fx1 - fx0, f"level {level} used compounded truncation"

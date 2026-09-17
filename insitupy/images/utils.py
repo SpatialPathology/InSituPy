@@ -360,24 +360,29 @@ def crop_dask_array_or_pyramid(
     # check if image data is one dask array or a pyramid of dask arrays
     if isinstance(data, list):
         if np.all([isinstance(elem, da.core.Array) for elem in data]):
-            # get scale factors between the different pyramid levels
-            scale_factors = [1] + [data[i].shape[0] / data[i+1].shape[0] for i in range(len(data)-1)]
             cropped_data = []
-            xlim_scaled = (xlim[0] / pixel_size, xlim[1] / pixel_size) # convert to pixel unit
-            ylim_scaled = (ylim[0] / pixel_size, ylim[1] / pixel_size) # convert to pixel unit
-            for img, sf in zip(data, scale_factors):
-                # do cropping while taking the scale factor into account
-                # scale the x and y limits
-                xlim_scaled = (int(xlim_scaled[0] / sf), int(xlim_scaled[1] / sf))
-                ylim_scaled = (int(ylim_scaled[0] / sf), int(ylim_scaled[1] / sf))
+            # full-resolution pixel coordinates (kept as floats; do not truncate here)
+            x0_full = xlim[0] / pixel_size
+            x1_full = xlim[1] / pixel_size
+            y0_full = ylim[0] / pixel_size
+            y1_full = ylim[1] / pixel_size
+            for img in data:
+                # cumulative downscale of THIS level relative to full resolution,
+                # recomputed from the physical limits each time (no compounded int()).
+                sf_y = data[0].shape[0] / img.shape[0]
+                sf_x = data[0].shape[1] / img.shape[1]
+                xs0 = int(x0_full / sf_x)
+                xs1 = int(x1_full / sf_x)
+                ys0 = int(y0_full / sf_y)
+                ys1 = int(y1_full / sf_y)
 
                 # clamp to valid pixel range to handle regions that extend beyond
                 # image boundaries; negative indices would wrap around in numpy/dask
                 img_h, img_w = img.shape[0], img.shape[1]
-                x0 = max(0, xlim_scaled[0])
-                x1 = min(img_w, xlim_scaled[1])
-                y0 = max(0, ylim_scaled[0])
-                y1 = min(img_h, ylim_scaled[1])
+                x0 = max(0, xs0)
+                x1 = min(img_w, xs1)
+                y0 = max(0, ys0)
+                y1 = min(img_h, ys1)
                 if x0 >= x1 or y0 >= y1:
                     raise NoImageOverlapError(xlim, ylim)
 
