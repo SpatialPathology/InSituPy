@@ -234,18 +234,26 @@ class InSituData:
         self._sample_id = sample_id
         self._uid: str | None = None
 
-        if metadata is None:
-            # initialize metadata
-            self._metadata = {}
-            self._metadata["data"] = {}
-            self._metadata["history"] = {}
-            self._metadata["history"]["cells"] = []
-            self._metadata["history"]["annotations"] = []
-            self._metadata["history"]["regions"] = []
-            self._metadata["uids"] = [str(uuid4())] # initialize the uid section
-            self._metadata["method"] = method_name
-        else:
-            self._metadata = metadata
+        # Always build the skeleton first, then overlay any caller-provided metadata, so
+        # required keys survive even when a partial dict is passed (e.g. from-scratch
+        # construction). read() passes a complete on-disk metadata dict, so for a valid
+        # saved project the overlay reproduces today's behavior exactly.
+        self._metadata = {}
+        self._metadata["data"] = {}
+        self._metadata["history"] = {}
+        self._metadata["history"]["cells"] = []
+        self._metadata["history"]["annotations"] = []
+        self._metadata["history"]["regions"] = []
+        self._metadata["uids"] = [str(uuid4())] # initialize the uid section
+        self._metadata["method"] = method_name
+
+        if metadata is not None:
+            self._metadata.update(metadata)  # caller values win
+            history = self._metadata.get("history")
+            if isinstance(history, dict):
+                for _hk in ("cells", "annotations", "regions"):
+                    history.setdefault(_hk, [])
+            self._metadata.setdefault("uids", [str(uuid4())])
 
         # add method parameters
         if not isinstance(method_params, dict):
@@ -586,8 +594,21 @@ class InSituData:
                           ):
         '''
         Function to assign geometries (annotations or regions) to the anndata object in
-        InSituData.cells[layer].table. Assignment information is added to the DataFrame in `.obs`.
+        InSituData.cells[layer].table.
+
+        By default (``add_to_obs=False``), results are written to
+        ``.cells[layer].table.obsm[geometry_type][key]`` as a single categorical label
+        column per key (``"unassigned"`` where no polygon contains the cell). Set
+        ``add_to_obs=True`` to instead merge a ``"{geometry_type}-{key}"`` column (plus
+        per-name masks if ``add_masks=True``) into ``.obs``. ``add_masks`` only applies
+        when ``add_to_obs=True``.
         '''
+        if add_masks and not add_to_obs:
+            raise ValueError(
+                "`add_masks=True` only applies when `add_to_obs=True`; the obsm path "
+                "stores a single label column per key."
+            )
+
         # assert that prerequisites are met
         try:
             geom_attr = getattr(self, geometry_type)
@@ -685,6 +706,10 @@ class InSituData:
                 if geometry_type not in obsm_keys:
                     # add empty pandas dataframe with obs_names as index
                     celldata.table.obsm[geometry_type] = pd.DataFrame(index=celldata.table.obs_names)
+                elif key in celldata.table.obsm[geometry_type].columns and not overwrite:
+                    warn(f'Column "{key}" exists already in `{name}.table.obsm[\'{geometry_type}\']`. '
+                         f'Assignment of key "{key}" was skipped. To force assignment, select `overwrite=True`.')
+                    continue
 
                 celldata.table.obsm[geometry_type][key] = column_to_add
 
@@ -699,23 +724,31 @@ class InSituData:
         keys: str | Literal["all"] = "all",
         cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
+        add_to_obs: bool = False,
         overwrite: bool = True
     ):
         """Assign annotation geometries to cell layers.
 
-        For each cell layer, spatial point-in-polygon assignment is performed
-        and the result is stored in ``.cells[layer].table.obs``.  Wraps
-        :meth:`assign_geometries` with ``geometry_type="annotations"``.
+        For each cell layer, spatial point-in-polygon assignment is performed.
+        By default (``add_to_obs=False``), the result is stored in
+        ``.cells[layer].table.obsm["annotations"][key]`` as a single
+        categorical label column per key (``"unassigned"`` where no polygon
+        contains the cell). Wraps :meth:`assign_geometries` with
+        ``geometry_type="annotations"``.
 
         Args:
             keys: Annotation key(s) to assign, or ``"all"`` to assign every
                 available annotation. Defaults to ``"all"``.
             cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
                 all available layers. Defaults to ``None``.
-            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+            add_masks: If ``True``, also add per-name binary mask columns.
+                Only applies when ``add_to_obs=True``; raises otherwise.
                 Defaults to ``False``.
-            overwrite: If ``True``, overwrite existing assignment columns.
-                Defaults to ``True``.
+            add_to_obs: If ``True``, merge a ``"annotations-{key}"`` column
+                into ``.cells[layer].table.obs`` instead of writing to
+                ``obsm``. Defaults to ``False``.
+            overwrite: If ``True``, overwrite an existing assignment column
+                for the same key. Defaults to ``True``.
         """
         if cells_layers is None:
             layers_list = self._cells.keys()
@@ -727,6 +760,7 @@ class InSituData:
                 geometry_type="annotations",
                 keys=keys,
                 add_masks=add_masks,
+                add_to_obs=add_to_obs,
                 overwrite=overwrite,
                 cells_layer=l
             )
@@ -736,23 +770,28 @@ class InSituData:
         keys: str | Literal["all"] = "all",
         cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
+        add_to_obs: bool = False,
         overwrite: bool = True
     ):
         """Assign region geometries to cell layers.
 
         Identical to :meth:`assign_annotations` but operates on
-        ``geometry_type="regions"``.  Results are stored in
-        ``.cells[layer].table.obs``.
+        ``geometry_type="regions"``. By default (``add_to_obs=False``),
+        results are stored in ``.cells[layer].table.obsm["regions"][key]``.
 
         Args:
             keys: Region key(s) to assign, or ``"all"`` to assign every
                 available region. Defaults to ``"all"``.
             cells_layers: Cell layer name(s) to assign to. ``None`` assigns to
                 all available layers. Defaults to ``None``.
-            add_masks: If ``True``, also add binary mask arrays to ``obsm``.
+            add_masks: If ``True``, also add per-name binary mask columns.
+                Only applies when ``add_to_obs=True``; raises otherwise.
                 Defaults to ``False``.
-            overwrite: If ``True``, overwrite existing assignment columns.
-                Defaults to ``True``.
+            add_to_obs: If ``True``, merge a ``"regions-{key}"`` column into
+                ``.cells[layer].table.obs`` instead of writing to ``obsm``.
+                Defaults to ``False``.
+            overwrite: If ``True``, overwrite an existing assignment column
+                for the same key. Defaults to ``True``.
         """
         if cells_layers is None:
             layers_list = self._cells.keys()
@@ -764,6 +803,7 @@ class InSituData:
                 geometry_type="regions",
                 keys=keys,
                 add_masks=add_masks,
+                add_to_obs=add_to_obs,
                 overwrite=overwrite,
                 cells_layer=l
             )
@@ -2384,6 +2424,10 @@ class InSituData:
                 (recommended for datasets > 50M transcripts).
             transcript_config: TranscriptViewerConfig object for customizing
                 the transcript viewer. Import from insitupy.interactive.
+
+        Returns:
+            The napari Viewer instance if ``return_viewer`` is ``True``,
+            otherwise ``None``.
         """
         # check whether napari is installed
         try:
@@ -2393,7 +2437,7 @@ class InSituData:
         except ImportError:
             raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
 
-        _show(
+        return _show(
             data=self,
             keys=keys,
             key_type=key_type,
@@ -2515,23 +2559,26 @@ class InSituData:
                 Defaults to ``True``.
 
         Raises:
-            ValueError: If no save path is set and at least one target
+            ValueError: If the object is not backed by a saved project (i.e.
+                ``from_insitudata`` is ``False``) and at least one target
                 modality is loaded, because unloading would make the
                 in-memory data unrecoverable.
         """
         target_set = set(_RESET_MAP.keys()) if modalities is None else set(convert_to_list(modalities))
 
         # Early-exit if none of the requested modalities are actually loaded —
-        # also skips the path guard when there is nothing to lose.
+        # also skips the guard when there is nothing to lose.
         loaded = set(self.get_loaded_modalities())
         if not loaded & target_set:
             return
 
-        if self._path is None:
+        if not self.from_insitudata:
             raise ValueError(
-                "Cannot unload: no save path is set. Save the object with "
-                "'saveas()' first to avoid permanent data loss. "
-                "To discard in-memory data intentionally, use 'del xd.<modality>'."
+                "Cannot unload: this object is not backed by a saved project "
+                "(from_insitudata is False), so the in-memory data cannot be "
+                "reloaded. Save the object with 'saveas()' first to avoid "
+                "permanent data loss. To discard in-memory data intentionally, "
+                "use 'del xd.<modality>'."
             )
 
         cleared = []

@@ -100,3 +100,51 @@ def test_from_insitudata_true_after_saveas(tmp_path):
     xd.saveas(proj_dir, verbose=False)
 
     assert xd.from_insitudata is True
+
+
+# ── partial metadata skeleton merge (U-B9) ──────────────────────────────────
+
+def test_partial_metadata_preserves_skeleton_keys():
+    xd = InSituData(
+        path=None, metadata={"method": "scratch"},
+        slide_id="s", sample_id="x",
+        method_name="not specified", method_params={},
+    )
+    assert "uids" in xd.metadata
+    assert xd.metadata["data"] == {}
+    assert xd.metadata["history"].keys() == {"cells", "annotations", "regions"}
+    for key in ("cells", "annotations", "regions"):
+        assert xd.metadata["history"][key] == []
+    # caller-provided value overrides the skeleton default
+    assert xd.metadata["method"] == "scratch"
+
+
+def test_partial_metadata_then_saveas_roundtrips(tmp_path):
+    base = _make_insitudata()
+    xd = InSituData(
+        path=None, metadata={"method": "scratch"},
+        slide_id="slide1", sample_id="s1",
+        method_name="test", method_params={},
+    )
+    xd.cells.add_celldata(cd=base.cells["main"], key="main", is_main=True)
+
+    proj_dir = tmp_path / "proj_partial"
+    xd.saveas(proj_dir, verbose=False)  # previously: KeyError 'uids'
+
+    reloaded = InSituData.read(proj_dir)
+    assert reloaded.from_insitudata is True
+
+
+def test_partial_metadata_then_crop():
+    xd = InSituData(
+        path=None, metadata={"method": "scratch"},
+        slide_id="slide1", sample_id="s1",
+        method_name="test", method_params={},
+    )
+    base = _make_insitudata()
+    xd.cells.add_celldata(cd=base.cells["main"], key="main", is_main=True)
+
+    n_uids_before = len(xd.metadata["uids"])
+    cropped = xd.crop(xlim=(0, 100), ylim=(0, 100), inplace=False)  # previously: KeyError 'uids'
+
+    assert len(cropped.metadata["uids"]) == n_uids_before + 1

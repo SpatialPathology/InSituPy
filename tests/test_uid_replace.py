@@ -102,6 +102,62 @@ def test_idempotent_readd_same_experiment():
     assert len(exp.data) == 1  # no duplicate appended
 
 
+# ── U-B7: re-add must not silently drop metadata ────────────────────────────
+
+def test_readd_same_dataset_warns():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd)
+    assert len(exp) == 1
+
+
+def test_readd_with_conflicting_metadata_raises():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd, metadata={"condition": "control"})
+
+    with pytest.raises(ValueError, match="condition"):
+        exp.add(xd, metadata={"condition": "treated"})
+    # the conflicting add must not have mutated existing metadata
+    assert exp.metadata.loc[0, "condition"] == "control"
+
+
+def test_readd_with_matching_metadata_warns_not_raises():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd, metadata={"condition": "control"})
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd, metadata={"condition": "control"})
+    assert len(exp) == 1
+    assert exp.metadata.loc[0, "condition"] == "control"
+
+
+def test_readd_via_copy_still_warns_and_stays_one_sample():
+    """copy() preserves _uid by design, so re-adding a copy of an already-present
+    dataset hits the same idempotent re-add path as re-adding the original object:
+    it warns and does not create a second sample."""
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd.copy())
+    assert len(exp) == 1
+
+
+def test_add_distinct_dataset_creates_two_samples():
+    exp = InSituExperiment()
+    xd1 = _make_insitudata(slide_id="slide1", sample_id="s1")
+    xd2 = _make_insitudata(slide_id="slide2", sample_id="s2")
+    exp.add(xd1)
+    exp.add(xd2)
+    assert len(exp) == 2
+
+
 # ── Phase 2: metadata reclassification ──────────────────────────────────────
 
 def test_experiment_metadata_has_no_slide_sample_columns():

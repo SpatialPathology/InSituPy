@@ -137,6 +137,20 @@ class TestReadVisium:
                 dataset_name="test",
             )
 
+    def test_missing_pixel_size_raises(self, tmp_path):
+        """fullres_pixel_size is required; omitting it must raise before any
+        spatialdata-io parsing happens (no real Visium bundle needed - the
+        raise precedes the directory-content checks)."""
+        pytest.importorskip("spatialdata_io")
+        existing_dir = tmp_path / "visium_bundle"
+        existing_dir.mkdir()
+        with pytest.raises(ValueError, match="fullres_pixel_size"):
+            read_visium(
+                path=existing_dir,
+                dataset_name="test",
+                fullres_pixel_size=None,
+            )
+
     def test_basic_load(self):
         pytest.skip("requires real Visium dataset")
 

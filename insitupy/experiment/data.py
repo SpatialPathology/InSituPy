@@ -901,13 +901,21 @@ class InSituExperiment:
         """
         Add a dataset to the experiment and update metadata.
 
+        If a dataset with the same uid is already present in this experiment,
+        this only refreshes the in-memory reference to it (a UserWarning is
+        emitted) instead of adding a new sample. Passing ``metadata`` that
+        conflicts with the existing values raises ``ValueError``; passing
+        matching ``metadata`` still just warns.
+
         Args:
             data (Union[str, os.PathLike, Path, InSituData]): The dataset to add. Can be a path or an InSituData object.
             mode (Literal["insitupy", "xenium"], optional): The mode for loading the dataset. Defaults to "insitupy".
             metadata (dict, optional): Additional metadata to associate with the dataset. Defaults to an empty dictionary.
 
         Raises:
-            ValueError: If the mode is invalid.
+            ValueError: If the mode is invalid, or if the dataset is already
+                present in this experiment and `metadata` conflicts with its
+                existing values.
             AssertionError: If the loaded dataset is not an InSituData object.
         """
         # Check if the dataset is of the correct type
@@ -933,6 +941,33 @@ class InSituExperiment:
             # idempotent re-add: dataset already belongs to this experiment slot
             slot_uid = dataset.uid
             idx = existing_uids.index(slot_uid)
+
+            if metadata:
+                existing_row = self._metadata.iloc[idx]
+                conflicting = [
+                    k for k, v in metadata.items()
+                    if k in existing_row.index and existing_row[k] != v
+                ]
+                if conflicting:
+                    raise ValueError(
+                        f"Cannot re-add dataset with uid '{slot_uid}': the provided "
+                        f"`metadata` conflicts with existing values for key(s): "
+                        f"{conflicting}. Use `set_metadata_values()` or "
+                        f"`add_metadata_column()` to update existing metadata."
+                    )
+                warnings.warn(
+                    f"Dataset with uid '{slot_uid}' is already present in this "
+                    f"experiment; `add()` only refreshed the in-memory reference and "
+                    f"did not apply `metadata`.",
+                    UserWarning, stacklevel=2
+                )
+            else:
+                warnings.warn(
+                    f"Dataset with uid '{slot_uid}' is already present in this "
+                    f"experiment; `add()` only refreshed the in-memory reference.",
+                    UserWarning, stacklevel=2
+                )
+
             self._data[idx] = dataset
             return
         else:
@@ -3077,19 +3112,21 @@ class InSituExperiment:
                 Defaults to ``None``, which unloads all modalities.
 
         Raises:
-            ValueError: If any dataset has no save path set and has loaded
-                modalities, because unloading would make that data unrecoverable.
+            ValueError: If any dataset is not backed by a saved project (i.e.
+                ``from_insitudata`` is ``False``) and has loaded modalities,
+                because unloading would make that data unrecoverable.
         """
 
         target = set(convert_to_list(modalities)) if modalities is not None else set(MODALITIES)
         missing = [
             i for i, xd in enumerate(self._data)
-            if xd._path is None and bool(set(xd.get_loaded_modalities()) & target)
+            if not xd.from_insitudata and bool(set(xd.get_loaded_modalities()) & target)
         ]
         if missing:
             raise ValueError(
-                f"Cannot unload: dataset(s) at index {missing} have no save "
-                f"path. Call saveas() first to avoid permanent data loss."
+                f"Cannot unload: dataset(s) at index {missing} are not backed "
+                f"by a saved project. Call saveas() first to avoid permanent "
+                f"data loss."
             )
 
         all_modalities = list(MODALITIES)
@@ -3943,7 +3980,8 @@ class InSituExperiment:
         index: int,
         cells_layer: str | None = None,
         auto_sync_colors: bool = True,
-        verbose: bool = False
+        verbose: bool = False,
+        return_viewer: bool = False,
         ):
         """
         Displays the dataset at the specified index.
@@ -3958,6 +3996,11 @@ class InSituExperiment:
                 ``sync_colors`` call are already write-through and are left untouched.
                 Set False to skip (e.g. for speed or to preserve per-sample colors).
             verbose (bool, optional): If True, show verbose output. Defaults to False.
+            return_viewer: Whether to return the napari viewer instance.
+
+        Returns:
+            The napari Viewer instance if ``return_viewer`` is ``True``,
+            otherwise ``None``.
         """
         dataset = self.data[index]
 
@@ -3976,7 +4019,7 @@ class InSituExperiment:
             except Exception as exc:
                 logger.warning(f"Automatic color synchronization skipped: {exc}")
 
-        dataset.show(cells_layer=cells_layer, verbose=verbose)
+        return dataset.show(cells_layer=cells_layer, verbose=verbose, return_viewer=return_viewer)
 
     def show_modality(self, modality, uid_column: str = "uid"):
         """Show a modality for all datasets."""
