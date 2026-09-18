@@ -1,0 +1,115 @@
+name: Tests (spatialdata)
+
+# First CI to run any test. Deliberately spatialdata-scoped (the spatialdata
+# test modules plus a minimal smoke subset) so it sidesteps the headless-napari
+# blocker that stalls a full test CI (see planning backlog "No test CI exists").
+# The broad, all-except-napari suite is tracked there and is not yet scheduled.
+
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+  schedule:
+    # Weekly, Monday 06:00 UTC - only the allowed-to-fail pre-release job runs.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: tests-spatialdata-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Offscreen Qt keeps any incidental Qt import headless-safe. The napari-driven
+  # test modules are not selected here, so no display is ever required.
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  spatialdata:
+    name: py${{ matrix.python-version }} / ${{ matrix.deps }}
+    # Skip on the weekly schedule; that trigger is for the prerelease job only.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+        deps: [locked, floor, latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: pip install "poetry==2.4.1"
+
+      - name: Install package (locked deps + extras)
+        run: poetry install --extras "dev spatialdata"
+
+      - name: Pin dependency floor
+        if: matrix.deps == 'floor'
+        run: >
+          poetry run pip install
+          "spatialdata==0.8.0" "zarr==3.2.1" "anndata==0.12.0"
+          "pyarrow==14.0.1" "spatialdata-io==0.7.1"
+
+      - name: Upgrade to latest within pins
+        if: matrix.deps == 'latest'
+        run: >
+          poetry run pip install --upgrade --upgrade-strategy eager
+          "spatialdata[extra]>=0.8.0,<0.9.0" "spatialdata-io<0.8"
+
+      - name: Run spatialdata tests + smoke subset
+        run: >
+          poetry run pytest -v
+          tests/test_spatialdata_convert.py
+          tests/test_spatialdata_roundtrip.py
+          tests/test_spatialdata_concat_table.py
+          tests/test_spatialdata_foreign_import.py
+          tests/test_import.py
+          tests/test_version.py
+          tests/test_checks.py
+          tests/test_exceptions.py
+
+  prerelease:
+    name: pre-release (allowed to fail)
+    # Only on the weekly schedule; catches upstream breakage early.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        run: pip install "poetry==2.4.1"
+
+      - name: Install package (locked deps + extras)
+        run: poetry install --extras "dev spatialdata"
+
+      - name: Upgrade spatialdata stack to latest pre-releases
+        run: >
+          poetry run pip install --pre --upgrade --upgrade-strategy eager
+          spatialdata spatialdata-io zarr anndata pyarrow
+
+      - name: Run spatialdata tests + smoke subset
+        run: >
+          poetry run pytest -v
+          tests/test_spatialdata_convert.py
+          tests/test_spatialdata_roundtrip.py
+          tests/test_spatialdata_concat_table.py
+          tests/test_spatialdata_foreign_import.py
+          tests/test_import.py
+          tests/test_version.py
+          tests/test_checks.py
+          tests/test_exceptions.py
