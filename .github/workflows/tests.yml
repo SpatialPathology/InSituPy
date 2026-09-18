@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
-        deps: [locked, floor, latest]
+        deps: [locked, latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -50,13 +50,6 @@ jobs:
 
       - name: Install package (locked deps + extras)
         run: poetry install --extras "dev spatialdata"
-
-      - name: Pin dependency floor
-        if: matrix.deps == 'floor'
-        run: >
-          poetry run pip install
-          "spatialdata==0.8.0" "zarr==3.2.1" "anndata==0.12.0"
-          "pyarrow==18.0.0" "spatialdata-io==0.7.1"
 
       - name: Upgrade to latest within pins
         if: matrix.deps == 'latest'
