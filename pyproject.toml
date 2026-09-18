@@ -29,7 +29,7 @@ dependencies = [
     # .log/reports/260706/transcript-viewer-race-fix/report-transcript-viewer-race-fix.md
     "napari[all] (>=0.7.0,<0.8.0)",
     "parse>=1.19.1",
-    "opencv-python>=4.8.0.76",
+    "opencv-python>=4.8.0.76,<5.0.0",
     "scikit-image (>=0.21.0,<1.0.0)",
     "scipy (>=1.14,<1.17.0)",
     "pandas (>=1.5.0,<3.0.0)",
