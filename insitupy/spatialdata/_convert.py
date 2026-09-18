@@ -45,6 +45,44 @@ from insitupy.utils.utils import convert_to_list
 logger = logging.getLogger(__name__)
 
 
+# obs column names the SpatialData-dialect writer injects as bookkeeping and the
+# reader strips again (SD-B3). A user obs column of one of these names would be
+# silently overwritten on write and dropped on read, so the writer refuses it.
+_RESERVED_CELL_OBS = ("cell_id", "region", "_insitupy_seg_mask_value")
+_RESERVED_UNIT_OBS = ("unit_id", "region")
+
+
+def _assert_no_reserved_obs_collision(adata, reserved, layer_desc):
+    """Raise if a user table's ``obs`` already carries a dialect-reserved column name (SD-B3).
+
+    Must be called on the user's table before the writer injects its own
+    bookkeeping columns, so it inspects only user-provided columns.
+    """
+    collisions = [name for name in reserved if name in adata.obs.columns]
+    if collisions:
+        raise ValueError(
+            f"{layer_desc} has obs column(s) {collisions} that collide with reserved "
+            f"SpatialData dialect bookkeeping name(s) {list(reserved)}. These names are "
+            "reserved for round-trip identity and would be overwritten on export and "
+            "dropped on read. Rename the column(s) before exporting to SpatialData."
+        )
+
+
+def _assert_key_absent(d, key, modality_desc="element"):
+    """Raise if ``key`` is already present in ``d`` (SD-B5) - refuse a silent overwrite.
+
+    Two source names differing only by ``.``/``-`` (both sanitised to ``_`` by
+    :func:`_generate_spatialdata_key`) or by case collapse to one dialect key; the
+    second would otherwise silently overwrite the first in a modality's element dict.
+    """
+    if key in d:
+        raise ValueError(
+            f"Two {modality_desc}s map to the same SpatialData dialect key '{key}'. "
+            "This happens when names differ only by '.', '-' (both become '_') or case. "
+            "Rename one so the names differ by more than those characters."
+        )
+
+
 def _generate_spatialdata_key(
     sample_id: str,
     modality: Literal[MODALITIES], # type: ignore
@@ -67,6 +105,21 @@ def _generate_spatialdata_key(
     if sample_id is None:
         sample_part = ""
     else:
+        # A uid is identity - never silently sanitise it. A ".." in a uid would
+        # collide with the "SAMPLE.<uid>.." prefix separator and make the key
+        # un-parseable (SD-B10), so reject it; a single "." round-trips fine
+        # (_parse_dialect_key splits the prefix on "..") but is worth a warning.
+        if ".." in str(sample_id):
+            raise ValueError(
+                f"Sample uid '{sample_id}' contains '..', which collides with the "
+                f"'{SAMPLE_STR}.<uid>..' dialect key separator and cannot be encoded. "
+                "Rename the sample uid."
+            )
+        if "." in str(sample_id):
+            logger.warning(
+                f"Sample uid '{sample_id}' contains '.'; it round-trips through the "
+                "SpatialData dialect but a uid without '.' is recommended."
+            )
         sample_part = f"{SAMPLE_STR}.{sample_id}.."
 
     if locator is not None:
@@ -102,14 +155,16 @@ def _parse_dialect_key(key: str) -> tuple[str | None, str, list[str]]:
     ``InSituData`` export). ``modality`` is upper-case, matching how
     :func:`_generate_spatialdata_key` emits it.
     """
-    parts = key.split(".")
     if key.startswith(f"{SAMPLE_STR}."):
-        sample_uid = parts[1]
-        # parts[2] is the empty string produced by the prefix's trailing ".."
-        rest = parts[3:]
+        # Split off the "SAMPLE.<uid>.." prefix on the ".." delimiter first, so a uid
+        # that itself contains a single "." (SD-B10) is not mis-split. The write side
+        # rejects a uid containing "..", so the first ".." is always the prefix separator.
+        prefix, _sep, rest_str = key.partition("..")
+        sample_uid = prefix[len(SAMPLE_STR) + 1:]
+        rest = rest_str.split(".")
     else:
         sample_uid = None
-        rest = parts
+        rest = key.split(".")
 
     modality = rest[0]
     locator_parts = rest[1:]
@@ -245,6 +300,7 @@ def _transform_images_for_spatialdata(
                 modality="images",
                 locator=name
             )
+            _assert_key_absent(images, dict_key, "image")
             if is_rgb:
                 axes = tuple(list(axes_isp.lower().replace("s", "c")))
                 array = DataArray(
@@ -299,6 +355,29 @@ def _transform_transcripts_for_spatialdata(
     points = {}
     if xd.transcripts is not None:
         df = xd.transcripts
+
+        # Build the coordinate / feature / instance mapping from the columns actually
+        # present (SD-B9): a 2D transcript frame carries no "z_location", and an
+        # unassigned frame carries no "cell_id" - neither should raise KeyError inside
+        # spatialdata. x/y and feature_name are genuinely required, so raise clearly.
+        missing_xy = [c for c in ("x_location", "y_location") if c not in df.columns]
+        if missing_xy:
+            raise ValueError(
+                f"Transcript frame is missing required coordinate column(s) {missing_xy}; "
+                "cannot export transcripts to SpatialData."
+            )
+        coordinates = {"x": "x_location", "y": "y_location"}
+        if "z_location" in df.columns:
+            coordinates["z"] = "z_location"
+
+        if "feature_name" not in df.columns:
+            raise ValueError(
+                "Transcript frame is missing the required 'feature_name' column; "
+                "cannot export transcripts to SpatialData."
+            )
+
+        instance_key = "cell_id" if "cell_id" in df.columns else None
+
         if isinstance(df, dd.DataFrame):
             # Pre-compute known categories for the feature column. Without this,
             # PointsModel.parse(..., sort=True) treats the categories as unknown and
@@ -307,9 +386,9 @@ def _transform_transcripts_for_spatialdata(
             df = df.assign(feature_name=df["feature_name"].astype("category").cat.as_known())
         parsed_points = PointsModel.parse(
             df,
-            coordinates={"x": "x_location", "y": "y_location", "z": "z_location"},
+            coordinates=coordinates,
             feature_key="feature_name",
-            instance_key="cell_id",
+            instance_key=instance_key,
             sort=True
             )
 
@@ -349,6 +428,9 @@ def _transform_table_for_spatialdata(
         for cell_key in xd.cells.keys():
             celldata = xd.cells[cell_key]
             if celldata.table is not None:
+                _assert_no_reserved_obs_collision(
+                    celldata.table, _RESERVED_CELL_OBS, f"Cell layer '{cell_key}'"
+                )
                 tables_key = _generate_spatialdata_key(
                     sample_id=sample_id,
                     modality="cells",
@@ -372,6 +454,8 @@ def _transform_table_for_spatialdata(
                     )
 
                 # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
+                _assert_key_absent(tables, tables_key, "cell table")
+                _assert_key_absent(cell_shapes, circles_dict_key, "cell shapes")
                 tables[tables_key] = TableModel.parse(adata)
                 cell_shapes[circles_dict_key] = circles
 
@@ -383,6 +467,7 @@ def _transform_table_for_spatialdata(
                     )
 
                     # add sized circles
+                    _assert_key_absent(cell_shapes, circles_sized_dict_key, "cell shapes")
                     cell_shapes[circles_sized_dict_key] = circles_sized
 
     return tables, cell_shapes
@@ -471,6 +556,7 @@ def _transform_nucleus_map_for_spatialdata(
                 modality="cells",
                 locator=[cell_key, "nucleus_map"]
             )
+            _assert_key_absent(tables, dict_key, "nucleus-map table")
             tables[dict_key] = TableModel.parse(nucleus_map_adata)
 
     return tables
@@ -513,6 +599,9 @@ def _transform_units_for_spatialdata(
                 )
 
                 adata = sud.table.copy()
+                _assert_no_reserved_obs_collision(
+                    adata, _RESERVED_UNIT_OBS, f"Units layer '{unit_key}'"
+                )
                 adata.obs["unit_id"] = adata.obs.index
                 adata.obs["region"] = shapes_key
                 adata.obs["region"] = adata.obs["region"].astype("category")
@@ -522,6 +611,8 @@ def _transform_units_for_spatialdata(
                     "instance_key": "unit_id",
                 }
 
+                _assert_key_absent(tables, table_dict_key, "units table")
+                _assert_key_absent(unit_shapes, shapes_key, "units shapes")
                 tables[table_dict_key] = TableModel.parse(adata)
                 unit_shapes[shapes_key] = ShapesModel.parse(sud.shapes)
     return tables, unit_shapes
@@ -666,6 +757,7 @@ def _transform_concat_tables_for_spatialdata(
             modality="tables",
             locator=cells_layer,
         )
+        _assert_key_absent(tables, key, "concatenated table")
         tables[key] = TableModel.parse(adata)
 
     return tables
@@ -725,6 +817,7 @@ def _transform_cell_boundaries_for_spatialdata(
                         locator=[cell_key, "boundaries", name]
                     )
 
+                    _assert_key_absent(cell_boundaries, dict_key, "cell boundary label")
                     cell_boundaries[dict_key] = Labels2DModel.parse(
                         array,
                         scale_factors=[2 for _ in range(n_pyramids)],
@@ -762,6 +855,7 @@ def _transform_annotations_for_spatialdata(
                 locator=key
             )
 
+            _assert_key_absent(shapes, dict_key, "annotation")
             shapes[dict_key] = gdf
     return shapes
 
@@ -793,18 +887,27 @@ def _transform_regions_for_spatialdata(
                 locator=key
             )
 
+            _assert_key_absent(shapes, dict_key, "region")
             shapes[dict_key] = gdf
     return shapes
 
 
 def _merge_dicts_with_warning(*dicts):
+    """Merge element dicts, raising on any duplicate key (SD-B5 backstop).
+
+    The per-modality builders already refuse within-modality collisions via
+    :func:`_assert_key_absent`; this catches a duplicate arising when the
+    per-modality / per-sample dicts are combined (e.g. two samples sharing a uid).
+    """
     merged = {}
-    seen_keys = set()
     for d in dicts:
         for key in d:
-            if key in seen_keys:
-                logger.warning(f"Duplicate key detected - '{key}'")
-            seen_keys.add(key)
+            if key in merged:
+                raise ValueError(
+                    f"Duplicate SpatialData dialect key '{key}' while merging elements. "
+                    "Two elements (possibly from different samples sharing a uid, or names "
+                    "differing only by '.', '-' or case) map to the same key."
+                )
         merged.update(d)
     return merged
 
@@ -930,6 +1033,7 @@ def _build_cells_into_insitudata(
     data: InSituData,
     cells_elements: dict[str, tuple[str, object]],
     verbose: bool = True,
+    strict: bool = False,
     ) -> None:
     """Reconstruct ``CELLS.<key>.*`` elements (table, boundaries, nucleus map) into an :class:`InSituData`.
 
@@ -946,6 +1050,14 @@ def _build_cells_into_insitudata(
     for i, (cell_key, parts) in enumerate(by_cell_key.items()):
         table_entry = parts.get("table")
         if table_entry is None:
+            msg = (
+                f"Cell layer '{cell_key}' has elements but no 'table' - the SpatialData "
+                "store may be partially written."
+            )
+            if strict:
+                raise ValueError(msg + " (strict=True)")
+            logger.warning(msg + " Skipping this layer. Pass strict=True to raise instead.")
+            warnings.warn(msg + " Skipping this layer.", stacklevel=2)
             continue
         _, table = table_entry
         cell_names = table.obs_names
@@ -958,12 +1070,20 @@ def _build_cells_into_insitudata(
             if "_insitupy_seg_mask_value" in table.obs.columns:
                 seg_mask_value = table.obs["_insitupy_seg_mask_value"].to_numpy()
             else:
-                seg_mask_value = np.arange(1, len(cell_names) + 1)
-                logger.warning(
+                msg = (
                     f"Cell layer '{cell_key}' has boundaries but no "
                     "'_insitupy_seg_mask_value' column in its table (a "
-                    "pre-dialect-v2 store?) - falling back to an assumed "
-                    "1..N mapping between obs order and mask value."
+                    "pre-dialect-v2 store?)"
+                )
+                if strict:
+                    raise ValueError(
+                        msg + " - refusing to assume a 1..N obs-order-to-mask-value "
+                        "mapping under strict=True."
+                    )
+                seg_mask_value = np.arange(1, len(cell_names) + 1)
+                logger.warning(
+                    msg + " - falling back to an assumed 1..N mapping between obs "
+                    "order and mask value."
                 )
 
             nucleus_to_cell_map = None
@@ -1016,6 +1136,7 @@ def _build_units_into_insitudata(
     data: InSituData,
     units_elements: dict[str, tuple[str, object]],
     verbose: bool = True,
+    strict: bool = False,
     ) -> None:
     """Reconstruct ``UNITS.<key>.*`` elements - each unit key's own table + shapes."""
     by_unit_key: dict[str, dict[str, tuple[str, object]]] = defaultdict(dict)
@@ -1027,6 +1148,15 @@ def _build_units_into_insitudata(
         table_entry = parts.get("table")
         shapes_entry = parts.get("shapes")
         if table_entry is None or shapes_entry is None:
+            missing = [n for n, e in (("table", table_entry), ("shapes", shapes_entry)) if e is None]
+            msg = (
+                f"Units layer '{unit_key}' is missing element(s) {missing} - the "
+                "SpatialData store may be partially written."
+            )
+            if strict:
+                raise ValueError(msg + " (strict=True)")
+            logger.warning(msg + " Skipping this layer. Pass strict=True to raise instead.")
+            warnings.warn(msg + " Skipping this layer.", stacklevel=2)
             continue
         _, table = table_entry
         _, shapes = shapes_entry
@@ -1101,6 +1231,7 @@ def _build_insitudata_from_elements(
     sample_id: str | None = None,
     method_params: dict | None = None,
     verbose: bool = True,
+    strict: bool = False,
     ) -> InSituData:
     """Reconstruct a single :class:`InSituData` from one sample's grouped SpatialData elements.
 
@@ -1132,8 +1263,8 @@ def _build_insitudata_from_elements(
         by_modality[modality][locator_str] = entry
 
     _build_images_into_insitudata(data, by_modality.get("IMAGES", {}), verbose=verbose)
-    _build_cells_into_insitudata(data, by_modality.get("CELLS", {}), verbose=verbose)
-    _build_units_into_insitudata(data, by_modality.get("UNITS", {}), verbose=verbose)
+    _build_cells_into_insitudata(data, by_modality.get("CELLS", {}), verbose=verbose, strict=strict)
+    _build_units_into_insitudata(data, by_modality.get("UNITS", {}), verbose=verbose, strict=strict)
     _build_transcripts_into_insitudata(data, by_modality.get("TRANSCRIPTS", {}), verbose=verbose)
     _build_annotations_into_insitudata(data, by_modality.get("ANNOTATIONS", {}), verbose=verbose)
     _build_regions_into_insitudata(data, by_modality.get("REGIONS", {}), verbose=verbose)
