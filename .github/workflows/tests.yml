@@ -64,6 +64,7 @@ jobs:
           tests/test_spatialdata_roundtrip.py
           tests/test_spatialdata_concat_table.py
           tests/test_spatialdata_foreign_import.py
+          tests/test_spatialdata_dialect_hardening.py
           tests/test_import.py
           tests/test_version.py
           tests/test_checks.py
@@ -102,6 +103,7 @@ jobs:
           tests/test_spatialdata_roundtrip.py
           tests/test_spatialdata_concat_table.py
           tests/test_spatialdata_foreign_import.py
+          tests/test_spatialdata_dialect_hardening.py
           tests/test_import.py
           tests/test_version.py
           tests/test_checks.py
