@@ -56,23 +56,25 @@ def check_and_fix_case_insensitive_conflicts(
     sdata: SpatialData
     ):
     """
-    Check for case-insensitive key conflicts in a SpatialData object and fix them in place.
+    Refuse case-insensitive element-name conflicts in a SpatialData object (SD-B6).
 
-    When keys differ only in capitalization (e.g., 'ANNOTATIONS.Demo' and 'ANNOTATIONS.demo'),
-    this can cause conflicts when writing to disk on case-insensitive filesystems.
+    When two element keys differ only in capitalization (e.g. 'ANNOTATIONS.Demo' and
+    'ANNOTATIONS.demo'), they cannot be stored distinctly on a case-insensitive
+    filesystem, and the InSituPy dialect cannot round-trip them without a durable
+    rename map (deferred to dialect 4). Rather than silently auto-renaming one element
+    - which changed the layer name, left the table's ``region`` attr dangling and was
+    not recorded, so the layer was dropped or mislabelled on read - this raises and
+    asks the caller to rename.
 
     Args:
-        sdata: SpatialData object to check and modify in place.
+        sdata: SpatialData object to check.
 
     Returns:
-        tuple: (sdata, rename_map)
-            - sdata: The same SpatialData object, with conflicting keys renamed in place.
-            - rename_map: Dictionary mapping old keys to new keys (empty if no conflicts)
+        tuple: ``(sdata, {})`` - the same object and an empty rename map, kept for
+        backward-compatible call sites. A non-empty rename map is never returned.
 
-    Example:
-        >>> sdata, renames = check_and_fix_case_insensitive_conflicts(sdata)
-        >>> print(renames)
-        {'ANNOTATIONS.demo': 'ANNOTATIONS.demo_v2'}
+    Raises:
+        ValueError: If any two element keys collide case-insensitively.
     """
     # Collect all keys from all element types
     all_keys = []
@@ -94,47 +96,18 @@ def check_and_fix_case_insensitive_conflicts(
         logger.info("No case-insensitive conflicts found.")
         return sdata, {}
 
-    # Generate rename map
-    rename_map = {}
-    all_existing_keys = set(all_keys)  # Track all keys including future renames
-
-    for lower_key, variants in conflicts.items():
-        # Keep first variant unchanged, rename the rest
-        for i, key in enumerate(variants[1:], start=2):
-            new_key = key
-            suffix_num = 2
-
-            # Find a unique suffix that doesn't conflict
-            while new_key in all_existing_keys or new_key.lower() in [k.lower() for k in all_existing_keys if k != key]:
-                new_key = f"{key}_v{suffix_num}"
-                suffix_num += 1
-
-            rename_map[key] = new_key
-            all_existing_keys.add(new_key)
-            all_existing_keys.discard(key)
-
-    if not rename_map:
-        return sdata, {}
-
-    # Log warning with conflicts and renames
-    message_lines = ["Case-insensitive key conflicts detected and automatically fixed:"]
-    for old_key, new_key in rename_map.items():
-        message_lines.append(f"  '{old_key}' -> '{new_key}'")
-    logger.warning("\n".join(message_lines))
-
-    # Apply renames in place
-    for attr in ['images', 'labels', 'points', 'shapes', 'tables']:
-        if hasattr(sdata, attr):
-            element_dict = getattr(sdata, attr)
-            if element_dict is not None:
-                # Create new dict with renamed keys
-                items_to_rename = [(k, v) for k, v in element_dict.items() if k in rename_map]
-                for old_key, value in items_to_rename:
-                    new_key = rename_map[old_key]
-                    del element_dict[old_key]
-                    element_dict[new_key] = value
-
-    return sdata, rename_map
+    # SD-B6: refuse rather than silently auto-rename. Auto-renaming one variant to
+    # "..._v2" changed the layer name, left the table's `region` attr dangling, and
+    # was not recorded, so the layer was dropped or mislabelled on read. A lossless
+    # fix needs a durable rename map in the store descriptor (deferred to dialect 4);
+    # for now, ask the caller to rename.
+    conflict_lines = [f"  {sorted(variants)}" for variants in conflicts.values()]
+    raise ValueError(
+        "Case-insensitive element-name conflict(s) in the SpatialData dialect - the "
+        "following key groups differ only by case and cannot be stored or round-tripped "
+        "distinctly:\n" + "\n".join(conflict_lines) + "\nRename one element in each group "
+        "so the names differ by more than case."
+    )
 
 def convert_to_spatialdata_dict(
     data: Union[InSituData, "InSituExperiment"], # type: ignore
@@ -815,6 +788,7 @@ def convert_from_foreign_spatialdata(
 def convert_from_spatialdata(
     sdata: SpatialData,
     verbose: bool = True,
+    strict: bool = False,
 ) -> InSituData | InSituExperiment:
     """
     Convert an InSituPy-dialect SpatialData object back into an InSituData or InSituExperiment.
@@ -833,6 +807,10 @@ def convert_from_spatialdata(
     Args:
         sdata: A SpatialData object written by :func:`convert_to_spatialdata`.
         verbose: If True, log progress for each modality.
+        strict: If True, raise on an incompletely-written store (a cell/units layer
+            present but missing its ``table``, or a cell layer with boundaries but no
+            recorded ``_insitupy_seg_mask_value``) instead of warning and skipping it
+            (SD-B7). Default ``False`` preserves the lenient warn-and-skip behaviour.
 
     Returns:
         InSituData or InSituExperiment: The reconstructed object(s).
@@ -869,6 +847,7 @@ def convert_from_spatialdata(
             sample_id=dialect.get("sample_id"),
             method_params=dict(sdata.attrs),
             verbose=verbose,
+            strict=strict,
         )
 
     sample_meta = dialect.get("samples", {})
@@ -889,6 +868,7 @@ def convert_from_spatialdata(
             sample_id=meta.get("sample_id"),
             method_params=dict(sdata.attrs),
             verbose=verbose,
+            strict=strict,
         )
         xd._uid = uid
         data.append(xd)
@@ -909,6 +889,7 @@ def convert_from_spatialdata(
 def read_spatialdata(
     path: str | os.PathLike | Path,
     verbose: bool = True,
+    strict: bool = False,
 ) -> InSituData | InSituExperiment:
     """
     Read an InSituPy-dialect SpatialData zarr store into an InSituData or InSituExperiment.
@@ -932,7 +913,7 @@ def read_spatialdata(
     import spatialdata
 
     sdata = spatialdata.read_zarr(path)
-    return convert_from_spatialdata(sdata, verbose=verbose)
+    return convert_from_spatialdata(sdata, verbose=verbose, strict=strict)
 
 
 def convert_table_from_spatialdata(

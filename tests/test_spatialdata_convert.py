@@ -204,19 +204,20 @@ class TestRegionsAnnotationsGuardFix:
         assert shapes == {}
 
 
-# ── Case-insensitive conflict resolution, end to end (item 3) ──────────────────
+# ── Case-insensitive conflict now refused, end to end (SD-B6) ──────────────────
 
-class TestCaseInsensitiveConflictResolution:
-    def test_conflicting_annotation_keys_are_renamed(self):
+class TestCaseInsensitiveConflictRaises:
+    def test_conflicting_annotation_keys_raise(self):
+        """SD-B6: two element names differing only by case can neither be stored
+        distinctly on a case-insensitive filesystem nor round-tripped, so the
+        export refuses instead of silently auto-renaming one to '..._v2' (which
+        dropped/mislabelled the layer on read)."""
         xd = make_insitudata(n_cells=2)
         xd.annotations.add_data(data=poly_gdf("x"), key="Demo", scale_factor=1.0)
         xd.annotations.add_data(data=poly_gdf("y"), key="demo", scale_factor=1.0)
 
-        sdata = convert_to_spatialdata(xd)  # must not raise
-
-        assert "ANNOTATIONS.Demo" in sdata.shapes
-        assert "ANNOTATIONS.demo_v2" in sdata.shapes
-        assert "ANNOTATIONS.demo" not in sdata.shapes
+        with pytest.raises(ValueError, match="differ only by case"):
+            convert_to_spatialdata(xd)
 
 
 # ── include_transcripts flag (transcripts-optional item) ───────────────────────
