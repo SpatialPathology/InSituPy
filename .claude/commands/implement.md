@@ -1,7 +1,7 @@
 ---
 description: Execute an implementation report produced by /plan, /plan-opus, or /plan-fable, on Sonnet, end to end.
 argument-hint: @<path-to-report>
-model: claude-sonnet-4-6
+model: claude-sonnet-5
 allowed-tools: Read, Glob, Grep, Edit, Write, PowerShell, mcp__insitupy__*
 ---
 
