@@ -52,6 +52,9 @@ jobs:
       - name: Symbol drift gate
         run: poetry run python tools/generate_skill_reference.py --check-symbols
 
+      - name: Call-binding gate
+        run: poetry run python tools/generate_skill_reference.py --check-calls
+
       - name: Build package
         run: poetry build
 

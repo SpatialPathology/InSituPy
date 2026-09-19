@@ -70,6 +70,38 @@ jobs:
           tests/test_checks.py
           tests/test_exceptions.py
 
+  skill-reference:
+    name: skill reference (drift + symbols + calls)
+    # The shipped AI skill / llms.txt / MCP curated text is generated from
+    # tools/mcp_server/server.py; these gates keep it truthful against the live
+    # API (JW decision 8 / U-P1). Runs on the same PR/push triggers, not the
+    # weekly schedule.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install "poetry==2.4.1"
+
+      - name: Install package (mcp + spatialdata extras)
+        run: poetry install --extras "mcp spatialdata"
+
+      - name: Content drift gate
+        run: poetry run python tools/generate_skill_reference.py --check
+
+      - name: Symbol drift gate
+        run: poetry run python tools/generate_skill_reference.py --check-symbols
+
+      - name: Call-binding gate
+        run: poetry run python tools/generate_skill_reference.py --check-calls
+
   prerelease:
     name: pre-release (allowed to fail)
     # Only on the weekly schedule; catches upstream breakage early.

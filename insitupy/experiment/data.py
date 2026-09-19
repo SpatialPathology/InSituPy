@@ -4669,7 +4669,7 @@ class InSituExperiment:
             if backfilled:
                 warnings.warn(
                     f"{len(backfilled)} dataset(s) had no uid stored on disk and were "
-                    f"backfilled from the experiment metadata. Call .save_geometries() on each dataset to persist the uids.",
+                    f"backfilled from the experiment metadata. Call exp.save() to persist the uids to each dataset's .ispy file.",
                     UserWarning,
                     stacklevel=2,
                 )
