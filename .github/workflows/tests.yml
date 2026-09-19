@@ -82,10 +82,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      # Pinned to 3.13: `--check` compares the committed reference files against a
+      # fresh render, and `_format_signature` renders evaluated (non-PEP-563)
+      # annotations whose repr can vary across Python versions. Generate and check
+      # on the same version to keep the drift gate deterministic.
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Install Poetry
         run: pip install "poetry==2.4.1"
