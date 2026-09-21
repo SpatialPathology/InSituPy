@@ -45,7 +45,7 @@ project_folder/
 {
   "slide_id": "string",
   "sample_id": "string",
-  "version": "0.12.0b7",
+  "version": "<insitupy_version>",
   "method": "Xenium",
   "method_params": {
     "pixel_size": 0.2125,

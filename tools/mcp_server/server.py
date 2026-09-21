@@ -1141,7 +1141,6 @@ def get_storage_format() -> str:
         Directory structure, metadata JSON schema (.ispy), zarr layout,
         parquet files, and GeoJSON conventions.
     """
-    _version = getattr(_ispy, "__version__", "unknown")
     return textwrap.dedent("""\
     # InSituPy Storage Format
 
@@ -1188,7 +1187,7 @@ def get_storage_format() -> str:
     {
       "slide_id": "string",
       "sample_id": "string",
-      "version": "VERSION_PLACEHOLDER",
+      "version": "<insitupy_version>",
       "method": "Xenium",
       "method_params": {
         "pixel_size": 0.2125,
@@ -1226,7 +1225,7 @@ def get_storage_format() -> str:
     - Timestamps use format YYYYMMDD_HHMMSS for versioning
     - UIDs are short hex strings for uniqueness
     - Paths in .ispy are relative to the project folder
-    """).replace('"VERSION_PLACEHOLDER"', f'"{_version}"')
+    """)
 
 
 # ============================
