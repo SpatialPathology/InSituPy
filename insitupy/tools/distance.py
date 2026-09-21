@@ -7,6 +7,7 @@ import pandas as pd
 
 from insitupy._core.data import InSituData
 from insitupy.containers._utils import _get_cell_layer
+from insitupy.utils._dge import _check_string_in_assignment
 
 logger = logging.getLogger(__name__)
 
@@ -93,8 +94,14 @@ def calc_distance_of_cells_from(
             if region_key_resolved not in region_df.columns:
                 data.assign_regions(keys=region_key_resolved)
 
-        # generate mask for selected region
-        region_mask = region_df[region_key_resolved] == region_name_resolved
+        # generate mask for selected region. Cells assigned to multiple
+        # overlapping regions carry a " & "-joined string (e.g.
+        # "Region A & Region B"); split on it so those cells are included
+        # in a single-region run instead of being excluded by an exact
+        # match (AC-B10).
+        region_mask = region_df[region_key_resolved].apply(
+            _check_string_in_assignment, string_to_check=region_name_resolved
+        )
 
     # create geopandas points from cells
     x = adata.obsm["spatial"][:, 0][region_mask]
@@ -118,6 +125,14 @@ def calc_distance_of_cells_from(
     if key_to_save is None:
         key_to_save = annotation_name
     #adata.obs[key_to_save] = min_dists
+
+    if "distance_from" in adata.obsm and key_to_save in adata.obsm["distance_from"].columns:
+        logger.warning(
+            "Overwriting existing distances in "
+            "`.cells['%s'].table.obsm[\"distance_from\"][\"%s\"]`. "
+            "Pass a distinct `key_to_save` to keep both.",
+            cells_layer_name, key_to_save,
+        )
 
     obsm_keys = adata.obsm.keys()
     if "distance_from" not in obsm_keys:

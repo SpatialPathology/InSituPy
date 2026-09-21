@@ -246,7 +246,7 @@ def reduce_dimensions(
     cells_layer: str | None = None,
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
-    n_pcs: int = 0,
+    n_pcs: int | None = None,
     ):
     """
     Perform dimensionality reduction on cell data using UMAP or t-SNE.
@@ -265,7 +265,10 @@ def reduce_dimensions(
         n_neighbors (int, optional): Number of neighbors for the neighborhood
             graph. Defaults to 16.
         n_pcs (int, optional): Number of principal components to use for the
-            neighborhood graph. Set to 0 to use all PCs. Defaults to 0.
+            neighborhood graph. Defaults to ``None``, which uses all principal
+            components from the PCA (``X_pca``) - i.e. the neighbor graph is
+            built on the PCA representation. Passing ``0`` forces scanpy to
+            build the graph on ``.X`` (the raw feature matrix) instead.
 
     Raises:
         ModalityNotFoundError: If a sample has no cells modality.

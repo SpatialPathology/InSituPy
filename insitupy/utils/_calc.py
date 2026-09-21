@@ -82,7 +82,9 @@ def calc_density(
         mode (Literal["gauss", "mellon"], optional): The mode of density estimation.
             "gauss" for Gaussian KDE using scipy, "mellon" for Mellon density estimator.
             Defaults to "gauss".
-        clip (bool, optional): If True, clip the density values to the 5th and 95th percentile.
+        clip (bool, optional): If True, clip the lower tail of the density values at the
+            5th percentile. The upper bound is the per-group maximum, so no upper
+            clipping is applied.
         inplace (bool, optional): If True, modify `adata` in place. If False, return a copy of `adata` with the modifications.
             Defaults to False.
 

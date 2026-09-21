@@ -404,6 +404,63 @@ class TestCalcDistanceOfCellsFrom:
         distances = xd.cells.table.obsm["distance_from"]["roi"]
         assert (distances >= 0).all()
 
+    def test_region_restriction_includes_overlapping_regions(self):
+        # AC-B10: a cell assigned to overlapping regions (stored as
+        # "A & B") must still be included when restricting to a single
+        # region name, instead of being excluded by an exact string match.
+        xd = _make_insitudata_with_celltypes()
+
+        # overlapping region polygons under key "zones"
+        poly_a = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        poly_b = Polygon([(5, 5), (15, 5), (15, 15), (5, 15)])
+        zones_gdf = gpd.GeoDataFrame(
+            {
+                "id": ["A_0", "B_0"],
+                "name": ["A", "B"],
+                "geometry": [poly_a, poly_b],
+                "color": ["#ff0000", "#0000ff"],
+            }
+        )
+        xd._regions.add_data(data=zones_gdf, key="zones", scale_factor=1.0)
+
+        # place one cell inside the overlap of A and B
+        xd.cells.table.obsm["spatial"][0] = [7.0, 7.0]
+        overlap_cell = xd.cells.table.obs_names[0]
+
+        # annotation to compute distance from
+        rect = Polygon([(0, 0), (200, 0), (200, 200), (0, 200)])
+        annot_gdf = gpd.GeoDataFrame(
+            {"id": ["roi_0"], "name": ["roi"], "geometry": [rect], "color": ["#ff0000"]}
+        )
+        xd._annotations.add_data(data=annot_gdf, key="rois", scale_factor=1.0)
+
+        calc_distance_of_cells_from(
+            xd,
+            annotation_tuple=("rois", "roi"),
+            region_tuple=("zones", "A"),
+        )
+
+        # the overlap cell is assigned "A & B" in obsm["regions"]["zones"];
+        # restricting to region "A" must still include it (finite distance)
+        assert xd.cells.table.obsm["regions"]["zones"][overlap_cell] == "A & B"
+        distance = xd.cells.table.obsm["distance_from"]["roi"][overlap_cell]
+        assert np.isfinite(distance)
+
+    def test_key_to_save_overwrite_warns(self, caplog):
+        xd = _make_insitudata_with_celltypes()
+        rect = Polygon([(0, 0), (200, 0), (200, 200), (0, 200)])
+        gdf = gpd.GeoDataFrame(
+            {"id": ["roi_0"], "name": ["roi"], "geometry": [rect], "color": ["#ff0000"]}
+        )
+        xd._annotations.add_data(data=gdf, key="rois", scale_factor=1.0)
+
+        calc_distance_of_cells_from(xd, annotation_tuple=("rois", "roi"), key_to_save="roi_dist")
+
+        with _capture_insitupy_logs(caplog, logging.WARNING, logger_name="insitupy.tools.distance"):
+            calc_distance_of_cells_from(xd, annotation_tuple=("rois", "roi"), key_to_save="roi_dist")
+
+        assert any("Overwriting existing distances" in rec.getMessage() for rec in caplog.records)
+
 
 # ── tl.calculate_gex_diff_to_neighbors ───────────────────────────────────────
 
