@@ -7,7 +7,7 @@
     Cluster cells in an AnnData object using Leiden or Louvain community detection.
   normalize_and_transform_anndata(adata, layer: str | None = None, transformation_method: Literal['log1p', 'sqrt'] = 'log1p', target_sum: int = None, scale: bool = False, assert_integer_counts: bool = True, verbose: bool = False) -> None
     Normalize and transform a single AnnData object in place.
-  reduce_dimensions_anndata(adata, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int = 0, verbose: bool = False, **kwargs) -> None
+  reduce_dimensions_anndata(adata, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int | None = None, verbose: bool = False, **kwargs) -> None
     Reduce the dimensionality of data using PCA followed by UMAP or t-SNE.
 
 ## Experiment-level (insitupy.preprocessing.experiment)
@@ -21,7 +21,7 @@
     Filter genes from the cell count matrix based on count and cell thresholds.
   normalize_and_transform(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, adata_layer: str | None = None, transformation_method: Literal['log1p', 'sqrt'] = 'log1p', target_sum: int = 250, scale: bool = False, assert_integer_counts: bool = True, verbose: bool = False) -> None
     Normalize and transform the cell count data for an experiment or sample.
-  reduce_dimensions(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int = 0)
+  reduce_dimensions(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int | None = None)
     Perform dimensionality reduction on cell data using UMAP or t-SNE.
 
 ## Filtering (insitupy.preprocessing.filtering)
