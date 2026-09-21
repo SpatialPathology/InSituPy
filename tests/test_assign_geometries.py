@@ -130,3 +130,28 @@ def test_overwrite_false_skips_existing_obsm_key():
 
     xd.assign_annotations(keys="zones", overwrite=True)
     assert list(table.obsm["annotations"]["zones"]) == EXPECTED_LABELS
+
+
+# ── zero-assignment guard (AC-A4 1) ─────────────────────────────────────────
+
+def test_assign_annotations_warns_when_zero_cells_assigned():
+    """A key whose polygons are far from every cell (e.g. a wrong
+    scale_factor at import) assigns "unassigned" to every cell. This should
+    warn instead of failing silently.
+    """
+    xd = _make_insitudata_with_geometries()
+
+    poly_far = Polygon([(1000, 1000), (1010, 1000), (1010, 1010), (1000, 1010)])
+    gdf = gpd.GeoDataFrame({
+        "id": ["far_0"],
+        "name": ["far"],
+        "geometry": [poly_far],
+        "color": ["#00ff00"],
+    })
+    xd._annotations.add_data(data=gdf, key="far", scale_factor=1.0)
+
+    with pytest.warns(UserWarning, match="assigned zero cells"):
+        xd.assign_annotations(keys="far")
+
+    table = xd.cells["main"].table
+    assert list(table.obsm["annotations"]["far"]) == ["unassigned"] * 4

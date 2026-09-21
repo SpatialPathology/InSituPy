@@ -226,6 +226,24 @@ class TestReduceDimensions:
         n = xd.cells.table.n_obs
         assert xd.cells.table.obsm["X_pca"].shape[0] == n
 
+    def test_default_n_pcs_builds_neighbor_graph_on_pca(self):
+        # AC-B8: the default n_pcs must build the neighbor graph on the PCA
+        # representation (X_pca), not fall back to the raw feature matrix
+        # (.X). Use more genes than scanpy's default PCA component count
+        # (50) so a graph built on X_pca is numerically distinguishable
+        # from one built on the full .X matrix - with fewer genes than the
+        # component count, PCA is just a rank-preserving rotation and the
+        # two graphs would coincide even without the fix.
+        xd_default = self._normalized_data(n_cells=80, n_genes=60)
+        reduce_dimensions(xd_default, method="umap", n_neighbors=5)
+
+        xd_explicit_zero = self._normalized_data(n_cells=80, n_genes=60)
+        reduce_dimensions(xd_explicit_zero, method="umap", n_neighbors=5, n_pcs=0)
+
+        dist_default = xd_default.cells.table.obsp["distances"].toarray()
+        dist_zero = xd_explicit_zero.cells.table.obsp["distances"].toarray()
+        assert not np.allclose(dist_default, dist_zero)
+
 
 # ── cluster_cells ─────────────────────────────────────────────────────────────
 

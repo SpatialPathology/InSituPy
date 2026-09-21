@@ -117,7 +117,7 @@ def reduce_dimensions_anndata(
     adata,
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
-    n_pcs: int = 0,
+    n_pcs: int | None = None,
     verbose: bool = False,
     **kwargs
     ) -> None:
@@ -136,7 +136,10 @@ def reduce_dimensions_anndata(
             Number of neighbors for ``sc.pp.neighbors``. Defaults to 16.
         n_pcs (int, optional):
             Number of principal components to use when computing the neighbor
-            graph. 0 means use all PCs. Defaults to 0.
+            graph. Defaults to ``None``, which uses all principal components
+            from the PCA (``X_pca``) - i.e. the neighbor graph is built on the
+            PCA representation. Passing ``0`` forces scanpy to build the graph
+            on ``.X`` (the raw feature matrix) instead.
         verbose (bool, optional):
             If True, print progress messages. Defaults to False.
         **kwargs:

@@ -351,8 +351,9 @@ def permutation_test_gex_diff(
         - perm_pvalue: Empirical p-value from permutation test
           (two-sided for mean strategy, one-sided lower-tail for max strategy)
         - perm_padj: FDR-corrected permutation p-values
-        - perm_mean: Mean of null distribution
-        - perm_std: Standard deviation of null distribution
+        - perm_mean: Mean of null distribution, reported in log2 units
+          (matching the observed `log2foldchange` column)
+        - perm_std: Standard deviation of null distribution, in log2 units
         - perm_zscore: Z-score = (observed_mean - perm_mean) / perm_std
 
     Notes
@@ -469,7 +470,12 @@ def permutation_test_gex_diff(
         )
 
     # Stack results into matrix (n_permutations x n_genes)
-    perm_matrix = np.array(perm_results)
+    # Convert the permutation statistic from natural-log (log1p) units to log2,
+    # matching the observed `log2foldchange` column (AC-B5). Without this, the
+    # null distribution is in ln units while `observed_mean_diff` is in log2
+    # units, making p-values anti-conservative and z-scores inflated by
+    # 1 / ln(2) (~1.44x).
+    perm_matrix = np.array(perm_results) / np.log(2)
 
     if verbose:
         logger.info("Computing empirical p-values...")

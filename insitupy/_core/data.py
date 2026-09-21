@@ -677,6 +677,13 @@ class InSituData:
             # transform data into one column
             column_to_add = [" & ".join(geom_names[row.values]) if np.any(row.values) else "unassigned" for _, row in data.iterrows()]
 
+            if all(label == "unassigned" for label in column_to_add):
+                warn(
+                    f"Key '{key}' assigned zero cells to any {geometry_type} name - every cell is "
+                    f"'unassigned'. Check that the geometry and cell coordinates share the same units "
+                    f"(a wrong scale_factor at import is the usual cause)."
+                )
+
             if add_to_obs:
                 # create annotation from annotation masks
                 col_name = f"{geometry_type}-{key}"
