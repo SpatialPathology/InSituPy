@@ -649,7 +649,10 @@ def get_data_model() -> str:
     └── unit_type: str                  # E.g. "Visium_spot", "niche"
 
     ## Key Relationships
-    - InSituExperiment[i] → InSituData (subscript access)
+    - InSituExperiment[i] → InSituExperimentView (a linked, shared view; its
+      .cells/.images/... print and return None). Use InSituExperiment.data[i]
+      to get the underlying InSituData, or call .copy() on the view for an
+      independent InSituExperiment.
     - InSituData.cells.table → AnnData (scanpy-compatible)
     - InSituData.cells.boundaries → segmentation masks as dask arrays
     - Annotations/Regions are GeoDataFrames assignable to cells via .assign_annotations()
@@ -670,15 +673,17 @@ def get_io_formats() -> str:
 
     ## Reading Raw Data (insitupy.io)
 
-    | Function            | Format     | Key Input Files                          | Output       |
-    |---------------------|------------|------------------------------------------|--------------|
-    | read_xenium()       | 10x Xenium | cell_feature_matrix.h5, cells.parquet,   | InSituData   |
-    |                     |            | cells.zarr.zip, morphology images        |              |
-    | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData   |
-    |                     |            | spatial/tissue_positions.csv, images     |              |
-    | read_qupath()       | QuPath     | QuPath project directory                 | InSituData   |
-    | read_qupath_project() | QuPath   | QuPath project file                      | InSituData   |
-    | read_any()          | Generic    | Varies                                   | InSituData   |
+    | Function            | Format     | Key Input Files                          | Output           |
+    |---------------------|------------|------------------------------------------|------------------|
+    | read_xenium()       | 10x Xenium | cell_feature_matrix.h5, cells.parquet,   | InSituData       |
+    |                     |            | cells.zarr.zip, morphology images        |                  |
+    | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData       |
+    |                     |            | spatial/tissue_positions.csv, images     |                  |
+    | read_qupath()       | QuPath     | one exported sample dir (annotation.geojson, | InSituData   |
+    |                     |            | measurements.tsv, cells.geojson, image.ome.tif) |           |
+    | read_qupath_project() | QuPath   | QuPath project directory (project.qpproj + | InSituExperiment |
+    |                     |            | exported samples)                        |                  |
+    | read_any()          | Generic    | Varies                                   | InSituData       |
 
     ## InSituPy Native Format
 
@@ -705,33 +710,37 @@ def get_io_formats() -> str:
 
     ## SpatialData Integration (insitupy.spatialdata)
 
-    | Function                   | Direction | Description                         |
-    |----------------------------|-----------|-------------------------------------|
-    | convert_to_spatialdata()   | Export    | InSituData → SpatialData object     |
-    | convert_from_spatialdata() | Import    | SpatialData → InSituData            |
+    | Function                          | Direction | Description                              |
+    |-----------------------------------|-----------|------------------------------------------|
+    | convert_to_spatialdata()          | Export    | InSituData/InSituExperiment → SpatialData |
+    | convert_from_spatialdata()        | Import    | InSituPy-dialect SpatialData → InSituData/InSituExperiment |
+    | convert_from_foreign_spatialdata() | Import   | Foreign/labels-native SpatialData → InSituData |
 
     ## On-Disk Storage Structure
 
     project_folder/
     ├── .ispy                    # JSON metadata (slide_id, paths, history)
     ├── cells/                   # MultiCellData layers
-    │   └── <timestamp_uid>/
+    │   └── <timestamp>_<uid>/
     │       ├── .celldata        # Layer metadata
+    │       ├── .multicelldata   # MultiCellData metadata (if multiple layers)
     │       ├── table.h5ad       # AnnData (scanpy format)
-    │       └── boundaries.zarr.zip  # Segmentation masks (zarr)
+    │       └── boundaries.zarr  # Segmentation masks (zarr)
     ├── images/                  # ImageData
     │   └── <name>.zarr/         # Pyramidal zarr arrays
     ├── transcripts/
     │   └── transcripts.parquet  # Per-transcript coordinates
-    ├── units/                   # SpatialUnitsData
-    │   ├── shapes.parquet
-    │   ├── data.h5ad
-    │   └── metadata.json
+    ├── units/                   # MultiSpatialUnitsData
+    │   ├── .multispatialunitsdata   # Layer metadata (key_main, all_keys)
+    │   └── <key>/               # One subfolder per units layer
+    │       ├── shapes.parquet
+    │       ├── data.h5ad
+    │       └── metadata.json
     ├── annotations/             # AnnotationsData
-    │   └── <timestamp_uid>/
+    │   └── <timestamp>_<uid>/
     │       └── <key>.geojson
     └── regions/                 # RegionsData
-        └── <timestamp_uid>/
+        └── <timestamp>_<uid>/
             └── <key>.geojson
     """)
 
@@ -999,11 +1008,10 @@ def get_workflow_guide() -> str:
     ```python
     import insitupy as ispy
 
-    # Read from 10x Xenium output directory
+    # Read from 10x Xenium output directory. The available modalities
+    # (cells, images, transcripts, ...) are populated and ready to use;
+    # large arrays (images, transcripts) stay lazy until accessed.
     data = ispy.io.read_xenium("path/to/xenium_output/")
-
-    # Optionally load transcripts (lazy by default)
-    data.load_transcripts()
 
     # Save as InSituPy project for fast future loading
     data.saveas("path/to/my_project/")
@@ -1012,12 +1020,16 @@ def get_workflow_guide() -> str:
     ## 2. Load an Existing Project
 
     ```python
+    # read() loads all available modalities by default (load_all=True)
     data = ispy.InSituData.read("path/to/my_project/")
 
-    # Load specific modalities (lazy loading)
+    # To defer loading (e.g. to save memory), read with load_all=False and
+    # then load individual modalities on demand:
+    data = ispy.InSituData.read("path/to/my_project/", load_all=False)
     data.load_images()
     data.load_cells()
     data.load_annotations()
+    data.load_transcripts()   # only works on a saved project
     ```
 
     ## 3. Standard Single-Cell Analysis
@@ -1047,8 +1059,8 @@ def get_workflow_guide() -> str:
     data.show(keys=["DAPI"], cells_layer="main")
 
     # Static matplotlib plots
-    ispy.pl.spatial(data, color="leiden", image_key="DAPI")
-    ispy.pl.umap(data, color="leiden")
+    ispy.pl.spatial(data, keys="leiden", image_key="DAPI")
+    ispy.pl.umap(data, keys="leiden")
     ```
 
     ## 5. Annotations and Regions
@@ -1061,7 +1073,10 @@ def get_workflow_guide() -> str:
     # Assign annotations to cells (spatial join)
     data.assign_annotations(keys="all")
     data.assign_regions(keys="all")
-    # → Adds columns to data.cells.table.obs
+    # → By default results are stored in data.cells.table.obsm["annotations"]
+    #   and obsm["regions"] (one categorical column per key, "unassigned"
+    #   where no polygon contains the cell). Pass add_to_obs=True to instead
+    #   merge "annotations-{key}" / "regions-{key}" columns into .obs.
     ```
 
     ## 6. Crop to a Region of Interest
@@ -1090,21 +1105,27 @@ def get_workflow_guide() -> str:
     ## 8. Image Registration (Multi-Modal Alignment)
 
     ```python
-    reg = ispy.tl.register_images(
-        source=data_he,
-        target=data_xenium,
-        source_image="H&E",
-        target_image="DAPI"
+    # Register an external image (e.g. H&E/IF) onto a template image already
+    # present in `data`. register_images mutates `data` in place and returns
+    # None; the registered image is added to data.images and written to
+    # output_dir.
+    ispy.tl.register_images(
+        data,
+        image_path="path/to/HE.ome.tif",
+        channel_names="H&E",
+        channel_name_for_registration="H&E",   # required for IF/H&E images
+        template_image_name="nuclei",           # image already in `data` to align onto
+        output_dir="path/to/registration_output/",
     )
-    # Apply transformation
-    data_he.transform(reg.transformation_matrix, ...)
     ```
 
     ## 9. Alternative Segmentations
 
     ```python
-    # Add Baysor segmentation as an additional layer
-    data.cells.add_baysor("path/to/baysor_output/", pixel_size=0.2125)
+    # Add Baysor segmentation as an additional layer. The first positional
+    # argument is the XeniumRanger output directory, the second is the Baysor
+    # output directory.
+    data.cells.add_baysor("path/to/xenium_output/", "path/to/baysor_output/", pixel_size=0.2125)
 
     # Switch between segmentation layers
     data.cells.set_main("baysor")
@@ -1120,7 +1141,6 @@ def get_storage_format() -> str:
         Directory structure, metadata JSON schema (.ispy), zarr layout,
         parquet files, and GeoJSON conventions.
     """
-    _version = getattr(_ispy, "__version__", "unknown")
     return textwrap.dedent("""\
     # InSituPy Storage Format
 
@@ -1134,7 +1154,7 @@ def get_storage_format() -> str:
     │       ├── .celldata               # CellData metadata (JSON)
     │       ├── .multicelldata          # MultiCellData metadata (JSON, if multiple layers)
     │       ├── table.h5ad              # AnnData (cells × genes, obs, var, obsm)
-    │       └── boundaries.zarr.zip     # Segmentation masks
+    │       └── boundaries.zarr         # Segmentation masks
     │           ├── cell_names/         # Zarr array of cell IDs
     │           ├── seg_mask_value/     # Zarr array mapping mask values → cells
     │           ├── data/0/             # Cell mask pyramid level 0 (full res)
@@ -1147,10 +1167,12 @@ def get_storage_format() -> str:
     │       └── .zattrs                 # OME metadata, axes, pixel_size
     ├── transcripts/
     │   └── transcripts.parquet         # Columns: x, y, gene, qv, ...
-    ├── units/
-    │   ├── shapes.parquet              # GeoDataFrame with geometries
-    │   ├── data.h5ad                   # Associated AnnData
-    │   └── metadata.json               # Unit type, pixel size, etc.
+    ├── units/                          # MultiSpatialUnitsData
+    │   ├── .multispatialunitsdata      # Layer metadata (key_main, all_keys)
+    │   └── <key>/                      # One subfolder per units layer
+    │       ├── shapes.parquet          # GeoDataFrame with geometries
+    │       ├── data.h5ad               # Associated AnnData (optional)
+    │       └── metadata.json           # Unit type, version
     ├── annotations/
     │   └── <timestamp>_<uid>/
     │       └── <key>.geojson           # Annotation polygons/points
@@ -1165,7 +1187,7 @@ def get_storage_format() -> str:
     {
       "slide_id": "string",
       "sample_id": "string",
-      "version": "VERSION_PLACEHOLDER",
+      "version": "<insitupy_version>",
       "method": "Xenium",
       "method_params": {
         "pixel_size": 0.2125,
@@ -1203,7 +1225,7 @@ def get_storage_format() -> str:
     - Timestamps use format YYYYMMDD_HHMMSS for versioning
     - UIDs are short hex strings for uniqueness
     - Paths in .ispy are relative to the project folder
-    """).replace('"VERSION_PLACEHOLDER"', f'"{_version}"')
+    """)
 
 
 # ============================
@@ -1319,7 +1341,12 @@ def get_result_types() -> str:
 
     # ImageRegistration
     lines.append("## ImageRegistration")
-    lines.append("Returned by: ispy.tl.register_images()\n")
+    lines.append(
+        "Internal engine used by ispy.tl.register_images(). Note that "
+        "register_images() itself returns None (it mutates the InSituData in "
+        "place and writes registered images to output_dir); the attributes "
+        "below live on this internal object.\n"
+    )
     try:
         from insitupy.tools.registration import ImageRegistration as _IR
 
@@ -1363,14 +1390,17 @@ def get_result_types() -> str:
     df = result.main           # pd.DataFrame with DGE columns
     result.summary()           # print a quick summary
 
-    # ImageRegistration
-    reg = ispy.tl.register_images(
-        source=data_he, target=data_xenium,
-        source_image="H&E", target_image="DAPI"
+    # Image registration: register_images mutates `data` in place and returns
+    # None. The registered image is added to data.images and written to
+    # output_dir; there is no result object to unpack.
+    ispy.tl.register_images(
+        data,
+        image_path="path/to/HE.ome.tif",
+        channel_names="H&E",
+        channel_name_for_registration="H&E",
+        template_image_name="nuclei",
+        output_dir="path/to/registration_output/",
     )
-    T = reg.T                  # transformation matrix
-    # Apply to another image:
-    data_he.transform(T, ...)
     ```
     """))
 
@@ -1468,7 +1498,8 @@ def get_interactive_guide() -> str:
     # 4. Sync annotations back to the InSituData object
     ispy.interactive.viewer.sync_geometries()
 
-    # 5. Assign annotations to cells
+    # 5. Assign annotations to cells. By default the result is written to
+    #    data.cells.table.obsm["annotations"] (pass add_to_obs=True for .obs).
     data.assign_annotations(keys="all")
     ```
 
@@ -1556,6 +1587,7 @@ def get_spatialdata_api() -> str:
 
     try:
         from insitupy.spatialdata.convert import (
+            convert_from_foreign_spatialdata,
             convert_from_spatialdata,
             convert_to_spatialdata,
         )
@@ -1563,6 +1595,7 @@ def get_spatialdata_api() -> str:
         for fn_name, fn_obj in [
             ("convert_to_spatialdata", convert_to_spatialdata),
             ("convert_from_spatialdata", convert_from_spatialdata),
+            ("convert_from_foreign_spatialdata", convert_from_foreign_spatialdata),
         ]:
             sig = _format_signature(fn_obj)
             doc = inspect.getdoc(fn_obj)
@@ -1583,20 +1616,36 @@ def get_spatialdata_api() -> str:
     data = ispy.InSituData.read("path/to/project/")
     sdata = ispy.spatialdata.convert_to_spatialdata(data, n_pyramids=3)
 
-    # Import from SpatialData
-    data = ispy.spatialdata.convert_from_spatialdata(
+    # Round-trip an InSituPy-written store back to InSituData: no keys or pixel
+    # sizes are needed - the dialect descriptor drives auto-detection.
+    data = ispy.spatialdata.convert_from_spatialdata(sdata)
+
+    # Import a FOREIGN / labels-native store (e.g. spatialdata_io.xenium()
+    # output) that carries no InSituPy dialect descriptor: each modality is a
+    # keyed spec dict, and pixel sizes must be supplied explicitly.
+    data = ispy.spatialdata.convert_from_foreign_spatialdata(
         sdata,
-        image_data=("image", 0.2125),   # (image_key, pixel_size_µm)
-        table_key="table",
+        images={"nuclei": {"key": "morphology_focus", "pixel_size": 0.2125}},
+        cells={"main": {"table_key": "table"}},
         slide_id="my_slide",
     )
     ```
 
     ## Notes
-    - `convert_to_spatialdata` wraps InSituData images, cell tables, and shapes.
-    - `convert_from_spatialdata` reconstructs an InSituData from a SpatialData object.
-    - The `image_data` parameter accepts a tuple or list of tuples: `(key, pixel_size)`.
-    - Use `check_and_fix_case_insensitive_conflicts()` if SpatialData has key conflicts.
+    - `convert_to_spatialdata` wraps InSituData images, cell tables, shapes,
+      spatial units, transcripts, and cell boundary labels.
+    - `convert_from_spatialdata(sdata, verbose=True, strict=False)` is the true
+      inverse of `convert_to_spatialdata`: it reads the InSituPy dialect
+      descriptor from `sdata.attrs` and auto-detects everything. It raises if
+      the store carries no dialect descriptor (use
+      `convert_from_foreign_spatialdata` for those). `strict=True` raises on an
+      incompletely-written store instead of warning and skipping.
+    - `convert_from_foreign_spatialdata(sdata, images=None, cells=None,
+      units=None, transcripts=None, ...)` imports a non-InSituPy store. Each of
+      `images`/`cells`/`units` is a `{name: spec_dict}` mapping (the first entry
+      of each becomes the main layer); `transcripts` is a single points key.
+      Image specs require an explicit `pixel_size`; the minimal cells spec is
+      `{"main": {"table_key": "table"}}`.
     """))
 
     return _truncate("\n".join(lines), 3000)

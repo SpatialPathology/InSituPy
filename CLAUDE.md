@@ -13,8 +13,9 @@ The package is built around a two-level hierarchical data structure:
   segmentation `boundaries`), `images` (`ImageData`, lazy dask arrays), `transcripts`,
   `annotations`, `regions`, and `units` (`SpatialUnitsData`).
 - **`InSituExperiment`** — aggregates multiple `InSituData` instances with a sample-level
-  `metadata` DataFrame, enabling cross-sample analysis. Subscript access returns an
-  `InSituData` (`experiment[i]`).
+  `metadata` DataFrame, enabling cross-sample analysis. Subscript access (`experiment[i]`)
+  returns a linked `InSituExperimentView` (shared, not copied; its `.cells` etc. print and
+  return `None`); use `experiment.data[i]` for the underlying `InSituData`.
 
 Use the `insitupy` MCP server (below) for an always-current view of the data model; prefer it
 over this summary if they ever conflict.

@@ -23,11 +23,26 @@ Usage:
     python tools/generate_skill_reference.py                     # regenerate + stamp version
     python tools/generate_skill_reference.py --check              # verify no drift; exit 1 on drift
     python tools/generate_skill_reference.py --check-symbols       # verify curated symbols resolve
+    python tools/generate_skill_reference.py --check-calls         # bind every curated call; exit 1 on a bad call
+
+``--check-calls`` extracts every fenced ``python`` block from the curated renderer outputs
+(plus ``SKILL.md`` and ``llms.txt``), parses it with ``ast``, and for each function/method call
+it can statically resolve against the live ``insitupy`` package, checks the documented arguments
+against the real signature with ``inspect.signature(...).bind_partial(...)``. A ``TypeError``
+(unknown keyword, too many positionals) is a hard failure. It is a *best-effort* binder: a callee
+it cannot resolve (a scanpy call, an instance-method receiver whose type it does not know) is
+skipped, never failed - so it never false-positives, it only fails on a *resolvable* callee with
+an *impossible* binding. This is the regression guard for the U-B1 class of drift (e.g. a
+fabricated ``register_images(source=..., target=...)`` call). Fabricated *names* under a real
+module are out of scope here (they don't resolve, so they're skipped) - ``--check-symbols`` and
+the drift sweep cover those.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
+import inspect
 import re
 import sys
 import textwrap
@@ -176,7 +191,7 @@ _LLMS_TXT_TEMPLATE = textwrap.dedent("""\
     ispy.pp.normalize_and_transform(data)
     ispy.pp.cluster_cells(data)
     result = ispy.tl.dge(data, target_annotation_tuple=("tumor", "region1"))
-    ispy.pl.spatial(data, color="leiden", image_key="DAPI")
+    ispy.pl.spatial(data, keys="leiden", image_key="DAPI")
     data.saveas("path/to/my_project/")
     ```
 
@@ -294,6 +309,156 @@ def check_symbols() -> int:
     return 0
 
 
+# --- --check-calls: static call-binding of curated example code ----------------------------
+
+# Module-alias roots that stand for the insitupy package in curated snippets.
+_MODULE_ALIASES: dict[str, str] = {"ispy": "insitupy", "isp": "insitupy", "insitupy": "insitupy"}
+
+# Bare InSituPy class/callable names used directly in curated snippets (constructor or
+# classmethod calls), mapped to a dotted path _resolve_object can resolve. Only unambiguous
+# InSituPy names belong here.
+_CLASS_ROOTS: dict[str, str] = {
+    "InSituData": "insitupy._core.data.InSituData",
+    "InSituExperiment": "insitupy.experiment.data.InSituExperiment",
+    "CellData": "insitupy.containers.cell_data.CellData",
+    "ImageData": "insitupy.containers.image_data.ImageData",
+}
+
+# Conventional instance-variable receivers in curated snippets, mapped to the class whose
+# (unbound) methods we bind against. The implicit ``self`` is dropped before binding. Keep this
+# small and conventional; a wrong entry could false-positive, which the "corrected renderers
+# pass" test guards against.
+_RECEIVER_CLASSES: dict[str, str] = {
+    "data": "insitupy._core.data.InSituData",
+    "xd": "insitupy._core.data.InSituData",
+    "cells": "insitupy.containers.multi_cell_data.MultiCellData",
+    "data.cells": "insitupy.containers.multi_cell_data.MultiCellData",
+    "exp": "insitupy.experiment.data.InSituExperiment",
+    "experiment": "insitupy.experiment.data.InSituExperiment",
+}
+
+_PY_BLOCK_RE = re.compile(r"```python\n(.*?)```", re.DOTALL)
+
+_BIND_DUMMY = object()  # opaque placeholder value for bind_partial
+
+
+def _dotted_from_func(func: ast.AST) -> str | None:
+    """Return the dotted call target (e.g. ``ispy.tl.dge``, ``data.cells.add_baysor``) for an
+    ``ast.Call`` func node, or ``None`` if it is not a plain Name/Attribute chain (e.g. the call
+    target is itself a call result or a subscript)."""
+    parts: list[str] = []
+    node = func
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _resolve_callee(dotted: str) -> tuple[object, bool] | None:
+    """Resolve *dotted* to a live callable, or ``None`` if it is not an insitupy callee this
+    best-effort binder can resolve. Returns ``(obj, is_unbound_instance_method)``; the caller
+    drops the implicit ``self`` for unbound instance methods. Any resolution error means "skip"."""
+    parts = dotted.split(".")
+    root = parts[0]
+
+    if root in _MODULE_ALIASES:
+        target = ".".join([_MODULE_ALIASES[root], *parts[1:]])
+        return (S._resolve_object(target), False)
+
+    if root in _CLASS_ROOTS:
+        target = ".".join([_CLASS_ROOTS[root], *parts[1:]])
+        return (S._resolve_object(target), False)
+
+    receiver = ".".join(parts[:-1])
+    if receiver in _RECEIVER_CLASSES:
+        cls = S._resolve_object(_RECEIVER_CLASSES[receiver])
+        return (getattr(cls, parts[-1]), True)
+
+    return None
+
+
+def _binding_signature(obj: object, is_unbound_instance_method: bool) -> inspect.Signature:
+    """Signature to bind against. Drops the leading ``self``/``cls`` for an unbound instance
+    method accessed off its class (bound methods and classmethods already exclude it; a class
+    resolves to its ``__init__`` signature minus ``self``)."""
+    sig = inspect.signature(obj)
+    if is_unbound_instance_method and not inspect.ismethod(obj):
+        params = list(sig.parameters.values())
+        if params and params[0].name in ("self", "cls"):
+            sig = sig.replace(parameters=params[1:])
+    return sig
+
+
+def _check_call_node(node: ast.Call) -> str | None:
+    """Return a failure message if *node* is a resolvable insitupy call whose documented
+    arguments cannot bind to the real signature, else ``None``."""
+    dotted = _dotted_from_func(node.func)
+    if dotted is None:
+        return None
+    # A starred positional (*args) or a ** spread means we cannot count arguments reliably.
+    if any(isinstance(a, ast.Starred) for a in node.args):
+        return None
+    if any(kw.arg is None for kw in node.keywords):
+        return None
+
+    try:
+        resolved = _resolve_callee(dotted)
+    except Exception:
+        return None  # unresolvable -> skip, never fail
+    if resolved is None:
+        return None
+    obj, is_unbound_instance_method = resolved
+    if not callable(obj):
+        return None
+
+    try:
+        sig = _binding_signature(obj, is_unbound_instance_method)
+    except (ValueError, TypeError):
+        return None  # no introspectable signature -> skip
+
+    n_positional = len(node.args)
+    kw_names = [kw.arg for kw in node.keywords]
+    try:
+        sig.bind_partial(*([_BIND_DUMMY] * n_positional), **{name: _BIND_DUMMY for name in kw_names})
+    except TypeError as exc:
+        return f"{dotted}(...): {exc}"
+    return None
+
+
+def _iter_curated_code_blocks(version: str):
+    """Yield the source of every fenced ``python`` block in the curated renderer outputs,
+    ``llms.txt``, and ``SKILL.md``."""
+    texts: list[str] = [getattr(S, renderer_name)() for renderer_name, _ in RENDERERS.values()]
+    texts.append(render_llms_txt(version))
+    texts.append(SKILL_MD.read_text(encoding="utf-8"))
+    for text in texts:
+        for match in _PY_BLOCK_RE.finditer(text):
+            yield match.group(1)
+
+
+def check_calls(version: str) -> int:
+    failures: list[str] = []
+    for block in _iter_curated_code_blocks(version):
+        try:
+            tree = ast.parse(block)
+        except SyntaxError:
+            continue  # not parseable as a standalone module -> skip the block
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                message = _check_call_node(node)
+                if message:
+                    failures.append(message)
+    if failures:
+        print(f"{len(failures)} curated call(s) do not bind against the live API:")
+        print("\n".join(f"  {msg}" for msg in failures))
+        return 1
+    print("All resolvable curated calls bind against the live API.")
+    return 0
+
+
 def _display_path(path: Path) -> str:
     try:
         return str(path.relative_to(REPO_ROOT))
@@ -345,12 +510,22 @@ def main() -> int:
         help="Verify every curated load-bearing symbol resolves in the live package; "
         "exit non-zero if any is missing. No writes.",
     )
+    parser.add_argument(
+        "--check-calls",
+        action="store_true",
+        help="Statically bind every insitupy call in the curated example code against the live "
+        "API; exit non-zero on a call that cannot bind (unknown keyword, too many positionals). "
+        "No writes.",
+    )
     args = parser.parse_args()
 
     if args.check_symbols:
         return check_symbols()
 
     version = resolve_version()
+
+    if args.check_calls:
+        return check_calls(version)
 
     if args.check:
         return check_drift(version)

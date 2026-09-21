@@ -193,12 +193,13 @@ shared with collaborators.
 ## Downstream use of a view
 
 `InSituExperimentView` carries its own `.table` accessor. When the parent experiment has
-a concatenated zarr table built with `exp.build_table()`, `view.table` returns a
-row-sliced version of that table containing only the cells from the filtered samples:
+a concatenated zarr table built with `exp.build_table()`, subscripting the accessor with a
+cells layer -- `view.table["main"]` -- returns a row-sliced version of that table containing
+only the cells from the filtered samples:
 
 ```python
 view = exp.filters.view("high_quality")
-view_tbl = view.table
+view_tbl = view.table["main"]   # .table is an accessor; subscript it with the cells layer
 print(f"View covers {view_tbl.n_obs} cells from {len(view.data)} samples")
 ```
 
@@ -237,7 +238,7 @@ print(exp.filters.summary())
 # 4. Lazy view for quick inspection and table access
 view = exp.filters.view("high_quality")
 print(f"View: {len(view.data)} samples")
-print(f"Table rows: {view.table.n_obs}")
+print(f"Table rows: {view.table['main'].n_obs}")
 
 # 5. Full copy for a stand-alone project
 subset = exp.filters.apply("high_quality")

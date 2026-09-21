@@ -5,7 +5,7 @@ description: >-
   histology-guided, multi-sample single-cell spatial transcriptomics (10x Xenium, Visium, ...).
   Use whenever a user asks how to read, preprocess, analyze, plot, or save spatial
   transcriptomics data with insitupy, or writes code that imports insitupy.
-version: "0.12.0b7"   # AUTO-STAMPED by tools/generate_skill_reference.py to the package version
+version: "0.12.0b8"   # AUTO-STAMPED by tools/generate_skill_reference.py to the package version
 ---
 
 # InSituPy
@@ -76,8 +76,10 @@ InSituPy has a two-level hierarchy:
   cell-by-gene tables, possibly multiple segmentation layers), `images` (lazy dask arrays),
   `transcripts` (per-transcript coordinates), `annotations`, `regions`, and `units`.
 - **`InSituExperiment`** - aggregates multiple `InSituData` instances with a sample-level
-  `metadata` DataFrame for cross-sample analysis. Subscript access returns an `InSituData`
-  (`experiment[i]`).
+  `metadata` DataFrame for cross-sample analysis. Subscript access (`experiment[i]`) returns a
+  linked `InSituExperimentView` (its datasets are shared, not copied; its `.cells`/`.images`/...
+  print and return `None`). Use `experiment.data[i]` to get the underlying `InSituData`, or call
+  `.copy()` on the view for an independent `InSituExperiment`.
 
 See `reference/data_model.md` for the full container tree (fields, relationships, on-disk
 layout notes).
@@ -98,8 +100,8 @@ ispy.pp.cluster_cells(data)
 result = ispy.tl.dge(data, target_annotation_tuple=("tumor", "region1"))
 
 # 4. Plot (see reference/plotting.md)
-ispy.pl.spatial(data, color="leiden", image_key="DAPI")
-ispy.pl.umap(data, color="leiden")
+ispy.pl.spatial(data, keys="leiden", image_key="DAPI")
+ispy.pl.umap(data, keys="leiden")
 
 # 5. Save (see reference/storage_format.md)
 data.saveas("path/to/my_project/")
@@ -122,7 +124,7 @@ Read only what the current task needs:
 | `reference/preprocessing.md` | calling `pp` functions - signatures and grouping |
 | `reference/plotting.md` | calling `pl` functions - signatures grouped by category |
 | `reference/tools.md` | calling `tl` functions - DGE, distance, neighbors, registration |
-| `reference/result_types.md` | working with objects returned by `tl.dge()` / `tl.register_images()` |
+| `reference/result_types.md` | working with the `DiffExprResults` object from `tl.dge()`, or the `ImageRegistration` engine behind `tl.register_images()` (which mutates in place and returns `None`) |
 | `reference/spatialdata.md` | converting to/from the SpatialData format |
 | `reference/images.md` | image I/O and lazy-loading utilities (`im`) |
 | `reference/datasets.md` | loading bundled sample datasets |
