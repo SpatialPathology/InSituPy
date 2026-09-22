@@ -37,6 +37,7 @@ from insitupy._constants import (
     SPATIALDATA_DERIVED_MODALITIES,
 )
 from insitupy._core.data import InSituData
+from insitupy._exceptions import InSituPyError
 from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.images.axes import ImageAxes
@@ -60,7 +61,7 @@ def _assert_no_reserved_obs_collision(adata, reserved, layer_desc):
     """
     collisions = [name for name in reserved if name in adata.obs.columns]
     if collisions:
-        raise ValueError(
+        raise InSituPyError(
             f"{layer_desc} has obs column(s) {collisions} that collide with reserved "
             f"SpatialData dialect bookkeeping name(s) {list(reserved)}. These names are "
             "reserved for round-trip identity and would be overwritten on export and "
@@ -76,7 +77,7 @@ def _assert_key_absent(d, key, modality_desc="element"):
     second would otherwise silently overwrite the first in a modality's element dict.
     """
     if key in d:
-        raise ValueError(
+        raise InSituPyError(
             f"Two {modality_desc}s map to the same SpatialData dialect key '{key}'. "
             "This happens when names differ only by '.', '-' (both become '_') or case. "
             "Rename one so the names differ by more than those characters."
@@ -110,7 +111,7 @@ def _generate_spatialdata_key(
         # un-parseable (SD-B10), so reject it; a single "." round-trips fine
         # (_parse_dialect_key splits the prefix on "..") but is worth a warning.
         if ".." in str(sample_id):
-            raise ValueError(
+            raise InSituPyError(
                 f"Sample uid '{sample_id}' contains '..', which collides with the "
                 f"'{SAMPLE_STR}.<uid>..' dialect key separator and cannot be encoded. "
                 "Rename the sample uid."
@@ -362,7 +363,7 @@ def _transform_transcripts_for_spatialdata(
         # spatialdata. x/y and feature_name are genuinely required, so raise clearly.
         missing_xy = [c for c in ("x_location", "y_location") if c not in df.columns]
         if missing_xy:
-            raise ValueError(
+            raise InSituPyError(
                 f"Transcript frame is missing required coordinate column(s) {missing_xy}; "
                 "cannot export transcripts to SpatialData."
             )
@@ -903,7 +904,7 @@ def _merge_dicts_with_warning(*dicts):
     for d in dicts:
         for key in d:
             if key in merged:
-                raise ValueError(
+                raise InSituPyError(
                     f"Duplicate SpatialData dialect key '{key}' while merging elements. "
                     "Two elements (possibly from different samples sharing a uid, or names "
                     "differing only by '.', '-' or case) map to the same key."
@@ -1055,7 +1056,7 @@ def _build_cells_into_insitudata(
                 "store may be partially written."
             )
             if strict:
-                raise ValueError(msg + " (strict=True)")
+                raise InSituPyError(msg + " (strict=True)")
             logger.warning(msg + " Skipping this layer. Pass strict=True to raise instead.")
             warnings.warn(msg + " Skipping this layer.", stacklevel=2)
             continue
@@ -1154,7 +1155,7 @@ def _build_units_into_insitudata(
                 "SpatialData store may be partially written."
             )
             if strict:
-                raise ValueError(msg + " (strict=True)")
+                raise InSituPyError(msg + " (strict=True)")
             logger.warning(msg + " Skipping this layer. Pass strict=True to raise instead.")
             warnings.warn(msg + " Skipping this layer.", stacklevel=2)
             continue

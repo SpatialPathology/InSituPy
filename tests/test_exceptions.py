@@ -5,6 +5,7 @@ import pytest
 from insitupy._exceptions import (
     InSituDataMissingObject,
     InSituDataRepeatedCropError,
+    InSituPyError,
     InvalidDataTypeError,
     InvalidFileTypeError,
     InvalidXeniumDirectory,
@@ -17,6 +18,15 @@ from insitupy._exceptions import (
     UnknownOptionError,
     WrongNapariLayerTypeError,
 )
+
+
+class TestInSituPyError:
+    def test_insitupyerror_is_valueerror(self):
+        # The whole SD-P2 retrofit backward-compat decision rests on this: existing
+        # `except ValueError` handlers must keep catching InSituPyError.
+        assert issubclass(InSituPyError, ValueError)
+        with pytest.raises(ValueError):
+            raise InSituPyError("boom")
 
 
 class TestModuleNotFoundOnWindows:

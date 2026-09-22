@@ -120,9 +120,10 @@ where to re-verify it if the codebase has moved on.
 ## Two distinct "metadata"
 
 - `InSituExperiment.metadata` is a cross-sample `pd.DataFrame` (one row per sample). Reading it
-  returns a **copy** (and currently logs a warning), so mutating the returned frame in place
-  (`exp.metadata["group"] = ...`) does **not** persist. Use `exp.add_metadata_column(...)`,
-  `exp.append_metadata(...)`, or `exp.set_metadata_values(...)` to change sample metadata.
+  is free (no warning) and returns a **read-only** view: assigning to a column
+  (`exp.metadata["group"] = ...`) or an attribute raises `InSituPyError` instead of silently
+  failing. Use `exp.add_metadata_column(...)`, `exp.append_metadata(...)`, or
+  `exp.set_metadata_values(...)` to change sample metadata, or `.copy()` for an editable frame.
 - `InSituData.metadata` is a per-sample `dict` (method info, history, uids, cropping history).
   Don't confuse the two when a task says "add metadata".
 

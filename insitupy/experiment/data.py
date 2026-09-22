@@ -36,6 +36,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true, read_json, wr
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
+from insitupy.experiment._metadata_frame import _GuardedMetadataFrame
 from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, FilterSpec
 from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
@@ -799,21 +800,16 @@ class InSituExperiment:
         """
         Returns the experiment-level metadata as a pandas DataFrame.
 
-        Returns a copy of the metadata DataFrame. For interactive display, use :attr:`imetadata`.
-
-        Note:
-            This returns a **copy** of the internal metadata :class:`pandas.DataFrame`. Any modifications
-            to this copy will **not** affect the actual metadata. To modify metadata, use
-            `add_metadata_column()` or `append_metadata()`.
+        Reads are free and unrestricted. The returned frame is read-only: assigning to a
+        column (`exp.metadata["col"] = ...`) or an attribute (`exp.metadata.attr = ...`)
+        raises `InSituPyError`. To modify metadata, use `add_metadata_column()`,
+        `append_metadata()`, or `set_metadata_values()`. For an editable copy, call
+        `.copy()` on the returned frame.
 
         Returns:
-            pandas.DataFrame: A copy of the metadata DataFrame.
+            pandas.DataFrame: A read-only view of the metadata DataFrame.
         """
-        logger.warning(
-            "You are accessing a copy of the metadata. Changes to this DataFrame will not affect the internal metadata. "
-            "Use `add_metadata_column()` or `append_metadata()` to add new information to the metadata."
-        )
-        return self._metadata.copy()
+        return _GuardedMetadataFrame(self._metadata.copy())
 
     # @property
     def imetadata(self, fixed=None):
@@ -881,7 +877,7 @@ class InSituExperiment:
                 f"Package `itables` not installed. Install with `pip install itables` for interactive display. "
                 f"Falling back to static display.{tf.ResetAll}"
             )
-            return self._metadata.copy()
+            return _GuardedMetadataFrame(self._metadata.copy())
 
     @property
     def path(self):

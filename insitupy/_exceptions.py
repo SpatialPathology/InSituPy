@@ -4,6 +4,15 @@ from ._constants import ISPY_METADATA_FILE
 from .utils.utils import convert_to_list
 
 
+class InSituPyError(ValueError):
+    """Base class for InSituPy-specific errors.
+
+    Subclasses :class:`ValueError` so that existing ``except ValueError`` handlers
+    around InSituPy input-validation calls keep working. Catch ``InSituPyError`` to
+    catch InSituPy's own raised errors specifically.
+    """
+
+
 class ModuleNotFoundOnWindows(ModuleNotFoundError):
     '''
     Code from https://github.com/theislab/scib/blob/main/scib/exceptions.py
