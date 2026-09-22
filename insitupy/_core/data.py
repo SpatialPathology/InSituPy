@@ -602,6 +602,11 @@ class InSituData:
         ``add_to_obs=True`` to instead merge a ``"{geometry_type}-{key}"`` column (plus
         per-name masks if ``add_masks=True``) into ``.obs``. ``add_masks`` only applies
         when ``add_to_obs=True``.
+
+        A cell is assigned to a geometry only if its centroid lies strictly inside a polygon;
+        centroids exactly on a polygon boundary are treated as outside. A cell inside two or more
+        overlapping geometries of the same key gets a `" & "`-joined label (for example
+        ``"Region 2 & Region 3"``); downstream tools that filter by a single name split on `" & "`.
         '''
         if add_masks and not add_to_obs:
             raise ValueError(

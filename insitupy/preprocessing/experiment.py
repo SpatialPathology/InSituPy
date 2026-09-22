@@ -206,6 +206,10 @@ def normalize_and_transform(
             Transformation applied after normalization. Defaults to ``'log1p'``.
         target_sum (int, optional): Total counts each cell is normalized to.
             Defaults to 250.
+            Note: this experiment-level wrapper defaults to 250, whereas the lower-level
+            AnnData function ``insitupy.pp.normalize_and_transform_anndata`` defaults to ``None``
+            (the median total count across cells). Pass ``target_sum`` explicitly for a value that
+            is identical across both entry points.
         scale (bool, optional): If True, scale each gene to zero mean and unit
             variance after transformation. Defaults to False.
         assert_integer_counts (bool, optional): If True, raise an error when the
