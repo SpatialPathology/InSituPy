@@ -65,6 +65,10 @@ def dge(
             groups separately, a comparison of each cell against its own spatial neighborhood
             (within a 20 micrometer radius), returned as `target_neighborhood` and `ref_neighborhood`
             on the result. This does **not** change the main target-vs-reference comparison.
+            The neighbourhood is restricted to cells inside the same target/reference annotation
+            and region selection (but spanning all cell types, so that neighbouring types can be
+            detected), so cells just outside a drawn annotation or region border are not counted as
+            neighbours; the 20 micrometer radius is fixed.
             Defaults to False.
         method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data.
