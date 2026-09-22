@@ -8419,4 +8419,4 @@ spatialdata = ["spatialdata", "spatialdata-io"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<4.0"
-content-hash = "a89b64a399eb04f18f2eb95e44c47a30a7f708256f4d6ff4421b9e96435ddadf"
+content-hash = "2a5acb79346a22cafe6403b145513c2d64205b30e4450f1f296610eb8726f83b"

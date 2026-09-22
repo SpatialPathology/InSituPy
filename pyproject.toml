@@ -29,11 +29,11 @@ dependencies = [
     # .log/reports/260706/transcript-viewer-race-fix/report-transcript-viewer-race-fix.md
     "napari[all] (>=0.7.0,<0.8.0)",
     "parse>=1.19.1",
-    "opencv-python>=4.8.0.76,<5.0.0",
+    "opencv-python>=4.8.1.78,<5.0.0", # GHSA-qr4w-53vh-m672 (bundled libwebp CVE-2023-4863)
     "scikit-image (>=0.21.0,<1.0.0)",
     "scipy (>=1.14,<1.17.0)",
     "pandas (>=1.5.0,<3.0.0)",
-    "geopandas>=1.0.1",
+    "geopandas>=1.1.2", # GHSA-6497-prx7-gpmq (to_postgis SQLi; path not used, floor hardening)
     # "fiona>=1.10.1",
     "openpyxl (>=3.1.2,<4.0.0)",
     "xmltodict>=0.13.0",
@@ -54,10 +54,10 @@ dependencies = [
     "dask-geopandas>=0.4.2",
     "imagecodecs>=2024.12.30",
     "rasterio>=1.4.3",
-    "requests",
+    "requests>=2.33.0", # GHSA-gc5v-m9x4-r6x2 and related (netrc/verify/temp-file advisories)
     "decoupler (>=2.1.1,<3.0.0)",
     # security patches
-    "tornado>=6.5.7", # https://github.com/advisories/GHSA-3x9g-8vmp-wqvf
+    "tornado>=6.5.8", # GHSA-mpf4-983q-p7j4 (#71) / GHSA-768j-98cg-p3fv (#70)
     "urllib3>=2.7.0", # GHSA-2xpw-w6gg-jr37
     "pillow>=12.3.0" # GHSA-3f63-hfp8-52jq
 ]
