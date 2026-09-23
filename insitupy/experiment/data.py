@@ -5448,9 +5448,13 @@ class InSituExperimentView(InSituExperiment):
                 "mask": full.tolist(),
                 "note": entry.get("note"),
             }
+            # A key lives in exactly one store; drop a stale on-disk composite that the
+            # view replaced with a base filter (overwrite=True).
+            payload["composites"].pop(key, None)
 
         for key, entry in self._composites.items():
             payload["composites"][key] = CompositeFilterSpec.from_entry(key, entry).to_dict()
+            payload["filters"].pop(key, None)
 
         with open(filters_json_path, "w") as f:
             json.dump(payload, f)

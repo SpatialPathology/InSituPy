@@ -216,7 +216,7 @@ def test_combine_overwrite_referenced_base_raises():
     filters_before = dict(exp._filters)
     composites_before = dict(exp._composites)
 
-    with pytest.raises(ValueError, match="x"):
+    with pytest.raises(ValueError, match="referenced by composite"):
         fm.combine(["y"], "and", key="x", overwrite=True)
 
     assert exp._filters == filters_before
@@ -233,7 +233,7 @@ def test_rename_overwrite_referenced_base_raises():
     filters_before = dict(exp._filters)
     composites_before = dict(exp._composites)
 
-    with pytest.raises(ValueError, match="x"):
+    with pytest.raises(ValueError, match="referenced by composite"):
         fm.rename("c2", "x", overwrite=True)
 
     assert exp._filters == filters_before
@@ -246,7 +246,7 @@ def test_combine_self_reference_raises():
     fm.create(by="qc", include="pass", key="x")
     fm.create(by="region", include="R2", key="y")
 
-    with pytest.raises(ValueError, match="x"):
+    with pytest.raises(ValueError, match="cannot reference itself"):
         fm.combine(["x", "y"], "and", key="x", overwrite=True)
 
     assert "x" in fm.base_keys()
