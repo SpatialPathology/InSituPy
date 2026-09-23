@@ -645,3 +645,40 @@ def test_is_experiment_exact_class_checks_unchanged():
 
     with pytest.raises(ValueError, match="neither InSituData or InSituExperiment"):
         _is_experiment(object())
+
+
+# ── view.save_filters() keeps each key in exactly one on-disk store (R-A2) ─────
+
+
+def test_view_save_filters_base_overwrite_drops_stale_composite(tmp_path):
+    """A view that replaces a composite with a base filter must not leave the old
+    composite in the parent's filters.json."""
+    exp = _make_metadata_experiment(tmp_path, n=10)
+    exp.filters.create(by="group", include="A", key="grpA")
+    exp.filters.combine(["qc", "grpA"], "and", key="x")
+    exp.save_filters(path=tmp_path)
+
+    view = exp._subset(slice(0, 5), as_view=True)
+    view.filters.create(by="group", include="B", key="x", overwrite=True)
+    view.save_filters()
+
+    payload = json.loads((tmp_path / "filters.json").read_text())
+    assert "x" in payload["filters"]
+    assert "x" not in payload["composites"]
+
+
+def test_view_save_filters_composite_overwrite_drops_stale_base(tmp_path):
+    """A view that replaces an unreferenced base filter with a composite must not
+    leave the old base in the parent's filters.json."""
+    exp = _make_metadata_experiment(tmp_path, n=10)
+    exp.filters.create(by="group", include="A", key="grpA")
+    exp.filters.create(by="group", include="B", key="x")
+    exp.save_filters(path=tmp_path)
+
+    view = exp._subset(slice(0, 5), as_view=True)
+    view.filters.combine(["qc", "grpA"], "or", key="x", overwrite=True)
+    view.save_filters()
+
+    payload = json.loads((tmp_path / "filters.json").read_text())
+    assert "x" in payload["composites"]
+    assert "x" not in payload["filters"]

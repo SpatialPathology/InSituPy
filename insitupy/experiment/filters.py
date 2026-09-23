@@ -192,12 +192,55 @@ class FilterManager:
             f"Filter '{key}' not found. Available filters: {self.keys()}"
         )
 
-    def _check_key_free(self, key: str, overwrite: bool) -> None:
-        """Raise if *key* already exists and *overwrite* is ``False``."""
+    def _check_key_free(
+        self, key: str, overwrite: bool, target: Literal["base", "composite"]
+    ) -> None:
+        """Raise if *key* is not writable for *target*.
+
+        This only validates - it never mutates either store. Call
+        :meth:`_evict_other_store` separately, right before the write, so a
+        writer that fails validation later never loses an existing filter.
+
+        Args:
+            key: The filter key to check.
+            overwrite: Whether the caller intends to overwrite an existing key.
+            target: Whether the caller is about to write a "base" or
+                "composite" filter under *key*.
+
+        Raises:
+            ValueError: If *key* already exists and *overwrite* is ``False``;
+                or if *target* is ``"composite"`` and *key* names a base
+                filter that one or more composite filters still reference
+                (overwriting it would orphan those composites).
+        """
         if (key in self._experiment._filters or key in self._composites) and not overwrite:
             raise ValueError(
                 f"Filter '{key}' already exists. Set overwrite=True to replace it."
             )
+        if target == "composite" and key in self._experiment._filters:
+            refs = self._composites_referencing(key)
+            if refs:
+                raise ValueError(
+                    f"Cannot overwrite base filter '{key}' with a composite: referenced by "
+                    f"composite filter(s) {refs}. Remove or update those composites first."
+                )
+
+    def _evict_other_store(self, key: str, target: Literal["base", "composite"]) -> None:
+        """Remove *key* from the store opposite *target*, if present.
+
+        Call this right before writing *key* into *target*'s store, so an
+        ``overwrite=True`` write fully replaces an existing filter of the
+        same name instead of leaving it in both stores.
+
+        Args:
+            key: The filter key being written.
+            target: Which store is about to receive the new entry; the other
+                store is the one evicted from.
+        """
+        if target == "base":
+            self._composites.pop(key, None)
+        else:
+            self._experiment._filters.pop(key, None)
 
     def _composites_referencing(self, base_key: str) -> list[str]:
         """Return names of composite filters that reference *base_key*."""
@@ -377,7 +420,7 @@ class FilterManager:
         if include is None and exclude is None:
             raise ValueError("Specify either `include` or `exclude`.")
 
-        self._check_key_free(key, overwrite)
+        self._check_key_free(key, overwrite, "base")
 
         metadata = self._experiment._metadata
         if by not in metadata.columns:
@@ -392,6 +435,7 @@ class FilterManager:
 
         mask_arr = mask.astype(bool).to_numpy()
         spec = FilterSpec(key=key, mask=mask_arr.tolist(), note=note)
+        self._evict_other_store(key, "base")
         self._experiment._filters[key] = spec.to_dict()
         n_selected = int(mask_arr.sum())
         n_total = int(len(mask_arr))
@@ -430,7 +474,10 @@ class FilterManager:
 
         Raises:
             ValueError: If *keys* is empty, *operation* is invalid, any key in
-                *keys* is a composite filter, or a key in *negate* is not in *keys*.
+                *keys* is a composite filter, a key in *negate* is not in
+                *keys*, *key* is itself one of *keys* (self-reference), or
+                *key* names a base filter still referenced by other composite
+                filters.
             KeyError: If any key in *keys* does not exist.
         """
         if not keys:
@@ -450,15 +497,17 @@ class FilterManager:
                     f"Base filter '{k}' not found. Available base filters: {self.base_keys()}"
                 )
 
+        if key in keys:
+            raise ValueError(f"Composite filter '{key}' cannot reference itself.")
+
         for k in negated:
             if k not in keys:
                 raise ValueError(
                     f"Negated key '{k}' is not in `keys`. Only keys listed in `keys` can be negated."
                 )
 
-        self._check_key_free(key, overwrite)
-        if key in self._experiment._filters:
-            del self._experiment._filters[key]
+        self._check_key_free(key, overwrite, "composite")
+        self._evict_other_store(key, "composite")
 
         comp = CompositeFilterSpec(
             key=key,
@@ -513,7 +562,7 @@ class FilterManager:
             raise KeyError(
                 f"Base filter '{key}' not found. Available base filters: {self.base_keys()}"
             )
-        self._check_key_free(new_key, overwrite)
+        self._check_key_free(new_key, overwrite, "base")
 
         spec = FilterSpec.from_entry(key, self._experiment._filters[key])
         inverted = (~np.asarray(spec.mask, dtype=bool)).tolist()
@@ -522,6 +571,7 @@ class FilterManager:
             mask=inverted,
             note=note if note is not None else f"NOT {key}",
         )
+        self._evict_other_store(new_key, "base")
         self._experiment._filters[new_key] = new_spec.to_dict()
         n_selected = int(sum(inverted))
         n_total = len(inverted)
@@ -564,7 +614,7 @@ class FilterManager:
 
         target_key = new_key if new_key is not None else key
         if new_key is not None:
-            self._check_key_free(new_key, overwrite)
+            self._check_key_free(new_key, overwrite, "base")
 
         comp = CompositeFilterSpec.from_entry(key, self._composites[key])
         mask = self._resolve_mask(key)
@@ -573,6 +623,12 @@ class FilterManager:
 
         if new_key is None:
             del self._composites[key]
+        # Evict a stale composite under target_key. When new_key is None the
+        # `del` above already removed it (target_key == key), so this is a
+        # no-op; it must run after comp/mask are read above, or a
+        # new_key == key overwrite would pop self._composites[key] before
+        # CompositeFilterSpec.from_entry(key, ...) can read it.
+        self._evict_other_store(target_key, "base")
         self._experiment._filters[target_key] = spec.to_dict()
 
         n_selected = int(mask.sum())
@@ -689,7 +745,9 @@ class FilterManager:
         Raises:
             KeyError: If *old_key* is not a stored filter.
             ValueError: If *new_key* already exists and *overwrite* is
-                ``False``, or if *old_key* is a base filter referenced by
+                ``False``; if *old_key* is a base filter referenced by
+                composite filters; or if *old_key* is a composite and
+                *new_key* names a base filter still referenced by other
                 composite filters.
         """
         if old_key not in self._experiment._filters and old_key not in self._composites:
@@ -698,7 +756,10 @@ class FilterManager:
             )
         if old_key == new_key:
             return
-        self._check_key_free(new_key, overwrite)
+        target: Literal["base", "composite"] = (
+            "base" if old_key in self._experiment._filters else "composite"
+        )
+        self._check_key_free(new_key, overwrite, target)
 
         if old_key in self._experiment._filters:
             refs = self._composites_referencing(old_key)
@@ -707,11 +768,13 @@ class FilterManager:
                     f"Cannot rename base filter '{old_key}': referenced by composite filter(s) "
                     f"{refs}. Remove or update those composites first."
                 )
+            self._evict_other_store(new_key, target)
             spec = FilterSpec.from_entry(old_key, self._experiment._filters[old_key])
             spec.key = new_key
             self._experiment._filters[new_key] = spec.to_dict()
             del self._experiment._filters[old_key]
         else:
+            self._evict_other_store(new_key, target)
             comp = CompositeFilterSpec.from_entry(old_key, self._composites[old_key])
             comp.key = new_key
             self._composites[new_key] = comp.to_dict()
