@@ -144,6 +144,33 @@ def test_partial_manual_dict_fills_gaps():
     assert exp.colors["celltype"] == partial
 
 
+# ── 2b. partial dict fallback is consistent across samples (R-A4) ────────────
+
+
+def test_partial_dict_fallback_consistent_across_samples():
+    exp = InSituExperiment()
+    exp._data.append(_make_xd(seed=0, categories=("A", "C"), slide_id="s0"))
+    exp._data.append(_make_xd(seed=1, categories=("A", "B", "C"), slide_id="s1"))
+    exp._metadata = pd.DataFrame({"uid": ["s0", "s1"]})
+
+    exp.colors["celltype"] = {"A": "#ff0000"}
+
+    def _uns_by_category(xd):
+        cats = xd.cells["main"].table.obs["celltype"].cat.categories
+        uns_colors = [c.lower() for c in xd.cells["main"].table.uns["celltype_colors"]]
+        return dict(zip(cats, uns_colors, strict=False))
+
+    uns0 = _uns_by_category(exp._data[0])
+    uns1 = _uns_by_category(exp._data[1])
+
+    assert uns0["A"] == "#ff0000"
+    assert uns1["A"] == "#ff0000"
+    # "C" is missing from color_dict on both samples; before the fix it would
+    # get a different fallback color per sample because its index in the local
+    # category list differs ("C" is index 1 on s0, index 2 on s1).
+    assert uns0["C"] == uns1["C"]
+
+
 # ── 3. layer dimension is independent ────────────────────────────────────────
 
 
@@ -169,6 +196,53 @@ def test_layer_dimension_independent():
 
     # main is unaffected by the layerB write
     assert exp.colors["celltype"] == main_colors
+
+
+# ── 3b. delete clears .uns (R-A3) ─────────────────────────────────────────────
+
+
+def test_delete_clears_uns_on_all_samples():
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    exp.colors["celltype"] = {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+
+    del exp.colors["celltype"]
+
+    assert "celltype" not in exp.colors
+    for xd in exp._data:
+        assert "celltype_colors" not in xd.cells["main"].table.uns
+
+
+def test_delete_layer_aware():
+    exp = InSituExperiment()
+    exp._data.append(_make_xd_two_layers(0, ["A", "B"], ["X", "Y"], slide_id="s0"))
+    exp._metadata = pd.DataFrame({"uid": ["s0"]})
+
+    main_colors = {"A": "#ff0000", "B": "#00ff00"}
+    layerb_colors = {"X": "#0000ff", "Y": "#ffff00"}
+    exp.colors["celltype"] = main_colors
+    exp.colors.set("celltype", layerb_colors, cells_layer="layerB")
+
+    exp.colors.delete("celltype", cells_layer="layerB")
+
+    xd = exp._data[0]
+    assert exp.colors.get("celltype", cells_layer="layerB") is None
+    assert "celltype_colors" not in xd.cells["layerB"].table.uns
+
+    # main is unaffected
+    assert exp.colors["celltype"] == main_colors
+    assert "celltype_colors" in xd.cells["main"].table.uns
+
+
+def test_delete_missing_key_raises_without_side_effects():
+    exp = _make_experiment(n=2, categories=("A", "B"))
+    exp.colors["celltype"] = {"A": "#ff0000", "B": "#00ff00"}
+
+    with pytest.raises(KeyError):
+        del exp.colors["nope"]
+
+    assert exp.colors["celltype"] == {"A": "#ff0000", "B": "#00ff00"}
+    for xd in exp._data:
+        assert "celltype_colors" in xd.cells["main"].table.uns
 
 
 # ── 4. pl.embedding picks up manual colors via .uns (no signature change) ───

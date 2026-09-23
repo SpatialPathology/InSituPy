@@ -339,6 +339,7 @@ class ExperimentColors(MutableMapping):
 
         exp.colors.get("celltype", cells_layer="baysor")
         exp.colors.set("celltype", {...}, cells_layer="baysor")
+        exp.colors.delete("celltype", cells_layer="baysor")
         exp.colors.layer("baysor")          # read-only dict snapshot of one layer
         exp.colors.layers                   # list of layer names present
     """
@@ -354,7 +355,7 @@ class ExperimentColors(MutableMapping):
         self._exp._apply_colors(key, color_dict, cells_layer=None)
 
     def __delitem__(self, key):
-        del self._exp._colors[self._exp._default_color_layer()][key]
+        self._exp._remove_colors(key, cells_layer=None)
 
     def __contains__(self, key):
         return key in self._exp._colors.get(self._exp._default_color_layer(), {})
@@ -374,6 +375,11 @@ class ExperimentColors(MutableMapping):
         """Return the color dict for *key* on *cells_layer* (default: main layer), or *default*."""
         layer = self._exp._resolve_color_layer(cells_layer)
         return self._exp._colors.get(layer, {}).get(key, default)
+
+    def delete(self, key, cells_layer: str | None = None):
+        """Remove the color dict for *key* on *cells_layer* (default: main layer) and clear
+        ``.uns[f"{key}_colors"]`` on every sample."""
+        self._exp._remove_colors(key, cells_layer=cells_layer)
 
     def layer(self, cells_layer: str | None = None) -> dict:
         """Return a read-only snapshot dict of all color entries for *cells_layer*."""
@@ -757,7 +763,8 @@ class InSituExperiment:
         immediately writes an aligned hex list into every sample's
         ``.uns[f"{key}_colors"]`` so the colors are picked up by ``pl.spatial``,
         ``pl.cellular_composition``, ``pl.embedding``/``pl.umap``, and napari
-        without any further call. Use ``exp.colors.set(...)``/``.get(...)`` with
+        without any further call. Deletion also clears ``.uns``. Use
+        ``exp.colors.set(...)``/``.get(...)``/``.delete(...)`` with
         ``cells_layer=`` for non-main layers.
 
         Returns:
@@ -4852,11 +4859,34 @@ class InSituExperiment:
 
         Categories present in ``color_dict`` keep the user's exact color; any
         category absent from it gets a deterministic palette color in ``.uns``
-        only — the stored intent (``self._colors``) keeps just what was assigned.
+        only - the stored intent (``self._colors``) keeps just what was assigned.
+        Missing categories get a palette color by their position in the sorted
+        union of categories across all samples in the experiment (or view), so
+        a label gets the same fallback color on every sample.
         """
         layer_name = self._resolve_color_layer(cells_layer)
         color_dict = dict(color_dict)
         self._colors.setdefault(layer_name, {})[obs_col] = color_dict
+
+        # Pre-pass: build one experiment-wide fallback map so a category missing
+        # from color_dict gets the same color regardless of which sample it is
+        # looked up on (a sample-local index would give it a different color if
+        # samples have different category sets).
+        collected = []
+        for _, xd in self.iterdata():
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            if obs_col not in celldata.table.obs.columns:
+                continue
+            collected.append(_parse_unique_categories(celldata.table.obs[obs_col]))
+        union = set().union(*collected)
+        try:
+            ordered = sorted(union)
+        except TypeError:
+            ordered = sorted(union, key=str)
+        fallback = {
+            c: to_hex(palette(i % palette.N), keep_alpha=False)
+            for i, c in enumerate(ordered)
+        }
 
         uns_key = f"{obs_col}_colors"
         for _, xd in self.iterdata():
@@ -4869,9 +4899,32 @@ class InSituExperiment:
             cats = celldata.table.obs[obs_col].cat.categories.values
             celldata.table.uns[uns_key] = [
                 to_hex(color_dict[c], keep_alpha=False) if c in color_dict
-                else to_hex(palette(i % palette.N), keep_alpha=False)
-                for i, c in enumerate(cats)
+                else fallback[c]
+                for c in cats
             ]
+
+    def _remove_colors(self, obs_col: str, cells_layer: str | None = None):
+        """Remove the stored color dict for *obs_col* on *cells_layer* and clear
+        ``.uns[f"{obs_col}_colors"]`` on every sample.
+
+        Raises ``KeyError`` if *obs_col* is not present in the color store for
+        that layer, before touching any sample's ``.uns``.
+        """
+        layer_name = self._resolve_color_layer(cells_layer)
+        if obs_col not in self._colors.get(layer_name, {}):
+            raise KeyError(obs_col)
+        del self._colors[layer_name][obs_col]
+        if not self._colors[layer_name]:
+            del self._colors[layer_name]
+
+        uns_key = f"{obs_col}_colors"
+        for _, xd in self.iterdata():
+            if xd.cells.is_empty:
+                continue
+            if cells_layer is not None and cells_layer not in xd.cells.keys():
+                continue
+            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+            celldata.table.uns.pop(uns_key, None)
 
     def _check_obs_uniqueness(
         self,
