@@ -109,6 +109,11 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
 - Session log → `.log/log.md` (append via Edit, **never** overwrite) after any task that
   changed files
 - Backlog → `planning/backlog.md`
+- Pending release notes → `planning/release-notes.md`. Append a line here (not to the backlog)
+  whenever a user-facing change is decided or ships, grouped under the in-progress version header.
+  At version-bump time (global CLAUDE.md "Version bumping" step 6), consume the current version's
+  section into the dated release-note report, then delete that section here so the file only ever
+  holds pending, not-yet-released content. `planning/backlog.md` §2a just points here.
 
 ### `.log/` and `planning/` are not tracked by git — links required on each machine
 
