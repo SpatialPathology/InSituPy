@@ -14,4 +14,4 @@ from .experiment import (
 from .filtering import calculate_mad_thresholds
 from .pseudobulk import pseudobulk
 from .pseudobulk_annotation import pseudobulk_annotation
-from .spatial_clustering import spatial_clustering
+from .spatial_clustering import spatial_clustering, spatial_clustering_into_polygons
