@@ -800,11 +800,14 @@ class InSituExperiment:
         """
         Returns the experiment-level metadata as a pandas DataFrame.
 
-        Reads are free and unrestricted. The returned frame is read-only: assigning to a
-        column (`exp.metadata["col"] = ...`) or an attribute (`exp.metadata.attr = ...`)
-        raises `InSituPyError`. To modify metadata, use `add_metadata_column()`,
-        `append_metadata()`, or `set_metadata_values()`. For an editable copy, call
-        `.copy()` on the returned frame.
+        Reads are free and unrestricted. The returned frame is read-only: common
+        mutation paths (column/attribute assignment, `.loc`/`.iloc`/`.at`/`.iat`
+        writes, `inplace=True` methods, `pop`, `del`, `insert`, `update`) raise
+        `InSituPyError`. The guard is not exhaustive (e.g. chained assignment or
+        writes through `.values` are not caught), and such writes never reach the
+        experiment. To modify metadata, use `add_metadata_column()`,
+        `append_metadata()`, or `set_metadata_values()`. Call `.copy()` on the
+        returned frame for an editable copy.
 
         Returns:
             pandas.DataFrame: A read-only view of the metadata DataFrame.
@@ -3581,12 +3584,14 @@ class InSituExperiment:
         """Read experiment metadata, preferring the Parquet canonical store.
 
         Falls back to ``metadata.csv`` + optional schema sidecar for legacy directories
-        that predate the Parquet format.
+        that predate the Parquet format. The legacy ``slide_id``/``sample_id`` column
+        drop (see ``_migrate_legacy_metadata``) applies only to the CSV fallback; the
+        Parquet store is never subject to it, since no released version ever wrote
+        those columns to Parquet automatically.
         """
         parquet_path = path / _METADATA_PARQUET_FILENAME
         if parquet_path.exists():
-            metadata = pd.read_parquet(parquet_path)
-            return cls._migrate_legacy_metadata(metadata)
+            return pd.read_parquet(parquet_path)
 
         # Legacy path: CSV + optional dtype schema sidecar.
         metadata_path = path / "metadata.csv"
@@ -3627,7 +3632,12 @@ class InSituExperiment:
 
     @staticmethod
     def _migrate_legacy_metadata(df: pd.DataFrame) -> pd.DataFrame:
-        """Discard legacy slide_id/sample_id columns from loaded metadata CSVs."""
+        """Discard legacy slide_id/sample_id columns from a loaded ``metadata.csv``.
+
+        This runs only for pre-Parquet ``metadata.csv`` directories, where these
+        columns were generated automatically. User-added ``slide_id``/``sample_id``
+        columns in the Parquet store are never passed to this method.
+        """
         legacy_cols = [c for c in ("slide_id", "sample_id") if c in df.columns]
         if legacy_cols:
             df = df.drop(columns=legacy_cols)

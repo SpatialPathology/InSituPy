@@ -30,6 +30,35 @@ def test_metadata_parquet_round_trip(tmp_path):
     assert is_integer_dtype(out["n_cells"])
 
 
+def test_user_slide_sample_id_columns_survive_parquet_round_trip(tmp_path):
+    """User-added slide_id/sample_id columns must survive a Parquet save/reload.
+
+    The legacy-column drop in `_migrate_legacy_metadata` must apply only to the CSV
+    fallback path, not to the Parquet canonical store (R-A1).
+    """
+    exp = InSituExperiment()
+    exp._metadata = pd.DataFrame(
+        {
+            "uid": ["sample-1", "sample-2"],
+            "n_cells": pd.Series([10, 20], dtype="Int64"),
+        }
+    )
+
+    with pytest.warns(UserWarning, match="slide_id"):
+        exp.add_metadata_column("slide_id", ["0000001", "0000456"])
+    with pytest.warns(UserWarning, match="sample_id"):
+        exp.add_metadata_column("sample_id", ["s1", "s2"])
+
+    exp.save_metadata(path=tmp_path)
+    assert (tmp_path / "metadata.parquet").exists()
+
+    reloaded = InSituExperiment._read_insitupy(tmp_path)
+    out = reloaded.metadata
+
+    assert out["slide_id"].tolist() == ["0000001", "0000456"]
+    assert out["sample_id"].tolist() == ["s1", "s2"]
+
+
 def test_metadata_csv_only_remains_loadable(tmp_path):
     metadata = pd.DataFrame(
         {
