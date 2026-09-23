@@ -240,6 +240,9 @@ if WITH_NAPARI:
                 masks = []
                 boundaries = self.data.cells[self.data_name].boundaries
 
+                if boundaries is None:
+                    return masks
+
                 for n in boundaries._data.keys():
                     b = boundaries[n]
                     if b is not None:
