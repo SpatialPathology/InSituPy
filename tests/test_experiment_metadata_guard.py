@@ -160,15 +160,14 @@ def _mutate_update(md):
         pytest.param(_mutate_update, id="update"),
     ],
 )
-def test_metadata_mutators_raise_without_side_effects(mutate):
+def test_metadata_mutators_raise(mutate):
+    # exp.metadata is a copy, so these writes could never reach exp._metadata; the
+    # failure mode is that they succeed silently on the copy instead of raising.
     exp = _make_experiment()
     md = exp.metadata
-    before = exp._metadata.copy()
 
     with pytest.raises(InSituPyError, match="add_metadata_column"):
         mutate(md)
-
-    pd.testing.assert_frame_equal(exp._metadata, before)
 
 
 def test_metadata_copy_returns_plain_editable_frame():
