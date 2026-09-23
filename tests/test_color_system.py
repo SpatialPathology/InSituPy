@@ -456,7 +456,7 @@ def test_show_preflight_populates_uns(monkeypatch):
         assert "celltype_colors" in xd.cells["main"].table.uns
     assert "celltype" in exp.colors
     assert len(calls) == 1
-    assert calls[0] == {"cells_layer": None, "verbose": False}
+    assert calls[0] == {"cells_layer": None, "verbose": False, "return_viewer": False}
 
 
 def test_show_auto_sync_false_skips(monkeypatch):
