@@ -75,6 +75,100 @@ def test_metadata_reads_work():
 
     assert _first_uid(md) == "sample-1"
 
+    # Reads through the indexer proxies must behave exactly like plain pandas.
+    assert md.iloc[0]["uid"] == "sample-1"
+    assert md.at[0, "uid"] == "sample-1"
+    assert md.iat[0, 0] == "sample-1"
+    assert md.loc[md["n_cells"] > 10]["uid"].tolist() == ["sample-2", "sample-3"]
+    assert md.loc(axis=1)["uid"].tolist() == ["sample-1", "sample-2", "sample-3"]
+
+    # Non-inplace operations must return plain, editable DataFrames.
+    filled = md.fillna(0)
+    assert type(filled) is pd.DataFrame
+    sorted_md = md.sort_values("n_cells")
+    assert type(sorted_md) is pd.DataFrame
+    assert sorted_md["n_cells"].tolist() == [10, 20, 30]
+
+
+def _mutate_loc_scalar_set(md):
+    md.loc[0, "group"] = "Z"
+
+
+def _mutate_loc_new_column_set(md):
+    md.loc[:, "new_col"] = 1
+
+
+def _mutate_iloc_set(md):
+    md.iloc[0, 0] = "z"
+
+
+def _mutate_at_set(md):
+    md.at[0, "group"] = "Z"
+
+
+def _mutate_iat_set(md):
+    md.iat[0, 0] = "z"
+
+
+def _mutate_fillna_inplace(md):
+    md.fillna(0, inplace=True)
+
+
+def _mutate_drop_inplace(md):
+    md.drop(columns=["group"], inplace=True)
+
+
+def _mutate_reset_index_inplace(md):
+    md.reset_index(inplace=True)
+
+
+def _mutate_set_index_inplace(md):
+    md.set_index("uid", inplace=True)
+
+
+def _mutate_pop(md):
+    md.pop("group")
+
+
+def _mutate_del(md):
+    del md["group"]
+
+
+def _mutate_insert(md):
+    md.insert(0, "new_col", 1)
+
+
+def _mutate_update(md):
+    md.update(pd.DataFrame({"group": ["Z"]}, index=[0]))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_mutate_loc_scalar_set, id="loc-scalar-set"),
+        pytest.param(_mutate_loc_new_column_set, id="loc-new-column-set"),
+        pytest.param(_mutate_iloc_set, id="iloc-set"),
+        pytest.param(_mutate_at_set, id="at-set"),
+        pytest.param(_mutate_iat_set, id="iat-set"),
+        pytest.param(_mutate_fillna_inplace, id="fillna-inplace"),
+        pytest.param(_mutate_drop_inplace, id="drop-inplace"),
+        pytest.param(_mutate_reset_index_inplace, id="reset_index-inplace"),
+        pytest.param(_mutate_set_index_inplace, id="set_index-inplace"),
+        pytest.param(_mutate_pop, id="pop"),
+        pytest.param(_mutate_del, id="del"),
+        pytest.param(_mutate_insert, id="insert"),
+        pytest.param(_mutate_update, id="update"),
+    ],
+)
+def test_metadata_mutators_raise(mutate):
+    # exp.metadata is a copy, so these writes could never reach exp._metadata; the
+    # failure mode is that they succeed silently on the copy instead of raising.
+    exp = _make_experiment()
+    md = exp.metadata
+
+    with pytest.raises(InSituPyError, match="add_metadata_column"):
+        mutate(md)
+
 
 def test_metadata_copy_returns_plain_editable_frame():
     exp = _make_experiment()
