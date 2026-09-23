@@ -342,7 +342,8 @@ class CellData(DeepCopyMixin):
 
         # write table to file
         mtx_file = path / "table.h5ad"
-        self._table.write(mtx_file)
+        # gzip over lzf: lzf is an h5py-only filter that R/Julia HDF5 readers may lack
+        self._table.write(mtx_file, compression="gzip")
         celldata_metadata["table"] = Path(relpath(mtx_file, path)).as_posix()
 
         # save boundaries

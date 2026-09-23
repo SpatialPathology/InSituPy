@@ -396,7 +396,7 @@ class SpatialUnitsData(DeepCopyMixin):
         # Save data as h5ad
         if self._data is not None:
             data_file = path / "data.h5ad"
-            self._data.write_h5ad(data_file)
+            self._data.write_h5ad(data_file, compression="gzip")
 
         # Save metadata
         metadata = {
