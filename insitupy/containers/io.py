@@ -1,5 +1,7 @@
+import contextlib
 import logging
 import os
+import shutil
 import warnings
 from contextlib import ExitStack
 from numbers import Number
@@ -17,7 +19,7 @@ import scanpy as sc
 import zarr
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._io.files import read_json
+from insitupy._io.files import atomic_replace_dir, check_overwrite_and_remove_if_true, read_json
 
 logger = logging.getLogger(__name__)
 from insitupy.containers.boundaries_data import BoundariesData
@@ -367,6 +369,21 @@ def _read_multispatialunitsdata(path: str | os.PathLike | Path) -> MultiSpatialU
     return musd
 
 
+@contextlib.contextmanager
+def _discard_on_failure(path):
+    """Delete the freshly created save directory *path* if the block raises.
+
+    A half-written versioned save directory would otherwise sit next to the
+    committed one and, for stores without an ``.ispy`` pointer, be mistaken for
+    the newest save.
+    """
+    try:
+        yield
+    except Exception:
+        shutil.rmtree(path, ignore_errors=True)
+        raise
+
+
 def _save_images(imagedata: ImageData,
                  path: str | os.PathLike,
                  metadata: dict | None = None,
@@ -405,11 +422,12 @@ def _save_cells(cells: MultiCellData,
     cells_path = path / "cells" / uid
 
     # save cells to path and write info to metadata
-    cells.save(
-        path=cells_path,
-        max_resolution_boundaries=max_resolution_boundaries,
-        overwrite=overwrite
-        )
+    with _discard_on_failure(cells_path):
+        cells.save(
+            path=cells_path,
+            max_resolution_boundaries=max_resolution_boundaries,
+            overwrite=overwrite
+            )
 
     #if metadata is not None:
     try:
@@ -462,7 +480,19 @@ def _save_transcripts(transcripts, path, metadata):
 
 def _save_units(units: MultiSpatialUnitsData, path, metadata, overwrite: bool = False):
     units_path = path / "units"
-    units.save(path=units_path, overwrite=overwrite)
+    if overwrite and units_path.exists():
+        # Stage then swap: the existing units are only replaced once the new ones are
+        # completely written, so a failure mid-write cannot leave the project without units.
+        staging = path / "units.__ispy_tmp__"
+        check_overwrite_and_remove_if_true(staging, overwrite=True)  # stale staging from a crash
+        try:
+            units.save(path=staging)
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        atomic_replace_dir(staging, units_path, what="saving units")
+    else:
+        units.save(path=units_path, overwrite=overwrite)
     metadata["data"]["units"] = Path(relpath(units_path, path)).as_posix()
 
 
@@ -471,7 +501,8 @@ def _save_annotations(annotations, path, metadata):
     annot_path = path / "annotations" / uid
 
     # save annotations
-    annotations.save(annot_path)
+    with _discard_on_failure(annot_path):
+        annotations.save(annot_path)
 
     #if metadata is not None:
     try:
@@ -491,7 +522,8 @@ def _save_regions(regions, path, metadata):
     annot_path = path / "regions" / uid
 
     # save annotations
-    regions.save(annot_path)
+    with _discard_on_failure(annot_path):
+        regions.save(annot_path)
 
     #if metadata is not None:
     try:
