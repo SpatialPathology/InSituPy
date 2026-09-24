@@ -182,6 +182,24 @@ class TransformResult:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+def _convert_to_grayscale(img: np.ndarray, axes: str) -> np.ndarray:
+    """Convert a 3D image to a single-channel ``YX`` image using its axes descriptor.
+
+    RGB images (``S`` axis, e.g. ``YXS`` or ``SYX``) use OpenCV's RGB luminance weights.
+    Multi-channel images (``C`` axis, e.g. ``CYX``) are averaged over the channels.
+    """
+    if "S" in axes:
+        rgb = np.moveaxis(img, axes.index("S"), -1)
+        if rgb.shape[-1] == 3:
+            return cv2.cvtColor(np.ascontiguousarray(rgb), cv2.COLOR_RGB2GRAY)
+        return rgb.mean(axis=-1).astype(img.dtype)
+    if "C" in axes:
+        return img.mean(axis=axes.index("C")).astype(img.dtype)
+    raise ValueError(
+        f"convert_to_grayscale requires a channel axis ('S' or 'C') for 3D images, got axes '{axes}'"
+    )
+
+
 def _deconvolve_he_image(
     img: np.ndarray,
     axes: str,
@@ -555,7 +573,7 @@ def load_and_scale_images(
         moving_for_feature = moving_np
 
     if config.convert_to_grayscale and len(moving_for_feature.shape) == 3:
-        moving_for_feature = cv2.cvtColor(moving_for_feature, cv2.COLOR_BGR2GRAY)
+        moving_for_feature = _convert_to_grayscale(moving_for_feature, axes_moving_effective)
         axes_moving_effective = "YX"
 
     # --- Preprocessing for fixed_scaled ---
@@ -576,7 +594,7 @@ def load_and_scale_images(
         fixed_for_feature = fixed_np
 
     if config.convert_to_grayscale and len(fixed_for_feature.shape) == 3:
-        fixed_for_feature = cv2.cvtColor(fixed_for_feature, cv2.COLOR_BGR2GRAY)
+        fixed_for_feature = _convert_to_grayscale(fixed_for_feature, axes_fixed_effective)
         axes_fixed_effective = "YX"
 
     # --- Scale to max_width ---
@@ -1166,6 +1184,8 @@ def register_images_standalone(
         max_width: Maximum width (in pixels) for downscaling before feature detection.
             None disables scaling.
         convert_to_grayscale: If True, convert images to grayscale before feature detection.
+            RGB images (``S`` axis) use luminance weights, multi-channel images (``C``
+            axis) are averaged over their channels.
         deconvolve_moving: If True, apply H&E colour deconvolution to extract nuclei channel
             from moving image.
         deconvolve_fixed: If True, apply H&E colour deconvolution to extract nuclei channel

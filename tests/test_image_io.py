@@ -5,6 +5,8 @@ Covers:
 - Priority 5: im.create_img_pyramid, crop_dask_array_or_pyramid, read_image
 """
 
+import zipfile
+
 import dask.array as da
 import numpy as np
 import pytest
@@ -134,6 +136,45 @@ class TestWriteZarrRoundtrip:
         )
         assert out.exists()
 
+    def test_single_array_store_roundtrip(self, tmp_path):
+        arr = np.arange(64 * 64, dtype=np.uint16).reshape(64, 64)
+        img = da.from_array(arr, chunks=(64, 64))
+        out = tmp_path / "test.zarr"
+        write_zarr(image=img, file=out, img_metadata=self._metadata(), axes="YX", save_pyramid=False)
+
+        result_img, _, axes_out, _ = read_zarr(out)
+        assert not isinstance(result_img, list)
+        np.testing.assert_array_equal(np.asarray(result_img), arr)
+        assert axes_out == "YX"
+
+    @pytest.mark.parametrize("save_pyramid", [True, False])
+    def test_zarr_zip_suffix_writes_zip_archive(self, tmp_path, save_pyramid):
+        arr = np.arange(64 * 64, dtype=np.uint16).reshape(64, 64)
+        img = da.from_array(arr, chunks=(64, 64))
+        out = tmp_path / "test.zarr.zip"
+        meta = self._metadata(pixel_size=0.2125)
+        write_zarr(image=img, file=out, img_metadata=meta, axes="YX", save_pyramid=save_pyramid)
+
+        assert out.is_file()
+        assert zipfile.is_zipfile(out)
+
+        result_img, _, axes_out, pixel_size_out = read_zarr(out)
+        level0 = result_img[0] if isinstance(result_img, list) else result_img
+        np.testing.assert_array_equal(np.asarray(level0), arr)
+        assert axes_out == "YX"
+        assert pixel_size_out == pytest.approx(0.2125)
+
+
+    def test_pyramid_with_more_than_ten_levels_keeps_resolution_order(self, tmp_path):
+        # level keys "10", "11" must not sort between "1" and "2"
+        arr = np.zeros((2048, 2048), dtype=np.uint8)
+        pyramid = create_img_pyramid(da.from_array(arr, chunks=(512, 512)), axes="YX", nsubres=11)
+        assert len(pyramid) == 12
+        out = tmp_path / "test.zarr"
+        write_zarr(image=pyramid, file=out, img_metadata=self._metadata(), axes="YX")
+
+        result_img, _, _, _ = read_zarr(out)
+        assert [lvl.shape for lvl in result_img] == [lvl.shape for lvl in pyramid]
 
 # ── Priority 5: read_image dispatch ───────────────────────────────────────────
 

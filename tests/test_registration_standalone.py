@@ -6,6 +6,7 @@ import pytest
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.registration import (
     RegistrationConfig,
+    load_and_scale_images,
     register_images_standalone,
 )
 
@@ -170,3 +171,43 @@ def test_rgb_axes_accepted():
             test_flipping=False,
             verbose=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# convert_to_grayscale respects the axes descriptor
+# ---------------------------------------------------------------------------
+
+def _grayscale_features(img, axes):
+    config = RegistrationConfig(
+        axes_moving=axes, axes_fixed=axes, max_width=None, convert_to_grayscale=True, verbose=False
+    )
+    scaled = load_and_scale_images(img, img, config)
+    return scaled.moving_scaled, scaled.axes_moving_effective
+
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV not installed")
+def test_grayscale_channels_first_rgb_matches_channels_last():
+    rng = np.random.default_rng(0)
+    yxs = rng.integers(0, 256, size=(40, 50, 3), dtype=np.uint8)
+    gray_yxs, axes_yxs = _grayscale_features(yxs, "YXS")
+    gray_syx, axes_syx = _grayscale_features(np.moveaxis(yxs, -1, 0), "SYX")
+
+    assert axes_yxs == axes_syx == "YX"
+    assert gray_syx.shape == (40, 50)
+    np.testing.assert_array_equal(gray_syx, gray_yxs)
+    # RGB luminance weights (not BGR)
+    red = np.zeros((8, 8, 3), dtype=np.uint8)
+    red[..., 0] = 255
+    np.testing.assert_array_equal(
+        _cv2.cvtColor(red, _cv2.COLOR_RGB2GRAY), _grayscale_features(red, "YXS")[0]
+    )
+
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV not installed")
+def test_grayscale_multichannel_is_channel_mean():
+    cyx = np.stack([np.full((30, 20), v, dtype=np.uint8) for v in (0, 60, 120, 240)])
+    gray, axes = _grayscale_features(cyx, "CYX")
+
+    assert axes == "YX"
+    assert gray.shape == (30, 20)
+    assert np.all(gray == 105)
