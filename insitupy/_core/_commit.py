@@ -14,7 +14,7 @@ from warnings import warn
 
 from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._io.files import read_json, write_dict_to_json
-from insitupy.utils._helpers import sort_paths_by_datetime
+from insitupy.utils._helpers import parse_save_dir_datetime, sort_paths_by_datetime
 
 VERSIONED_MODALITIES = ("cells", "annotations", "regions")
 
@@ -115,7 +115,13 @@ def prune_uncommitted(project: str | Path, metadata: dict | None = None) -> dict
             continue
         root = project / modality
         keep = keep.resolve()
-        saves = sort_paths_by_datetime([p for p in root.glob("[!.]*") if p.is_dir()])
+        # Only directories that follow the save-directory pattern are candidates. Parsed
+        # directly (not via sort_paths_by_datetime) so that a user folder, which is left
+        # alone, does not trigger a warning on every save.
+        saves = [
+            p for p in root.glob("[!.]*")
+            if p.is_dir() and parse_save_dir_datetime(p.name) is not None
+        ]
         for d in saves:
             if d.resolve() != keep:
                 shutil.rmtree(d)

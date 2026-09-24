@@ -128,6 +128,24 @@ def test_concat_move_force_deletes(tmp_path):
     assert len(InSituExperiment.read(dst)) == 4
 
 
+def test_concat_move_staging_leftovers(tmp_path):
+    """A partial ``.__ispy_tmp__`` needs no consent; a ``.__ispy_bak__`` (maybe the only copy) does."""
+    a = _saved_experiment(tmp_path, "expA", offset=0)
+    b = _saved_experiment(tmp_path, "expB", offset=10)
+    bak = tmp_path / "expA" / "data-000.__ispy_bak__"
+    bak.mkdir()
+
+    with pytest.raises(ValueError, match=r"data-000\.__ispy_bak__"):
+        InSituExperiment.concat([a, b], path=tmp_path / "merged", mode="move")
+    assert bak.is_dir()
+
+    bak.rmdir()
+    (tmp_path / "expA" / "data-001.__ispy_tmp__").mkdir()
+    merged = InSituExperiment.concat([a, b], path=tmp_path / "merged", mode="move")
+    assert len(merged) == 4
+    assert not (tmp_path / "expA").exists()
+
+
 def test_concat_move_into_nonempty_path_refused(tmp_path):
     a = _saved_experiment(tmp_path, "expA", offset=0)
     b = _saved_experiment(tmp_path, "expB", offset=10)

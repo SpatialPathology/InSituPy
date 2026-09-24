@@ -15,6 +15,7 @@ Every test runs against a real on-disk project.
 import json
 import os
 import shutil
+import warnings
 import zipfile
 
 import dask.dataframe as dd
@@ -153,18 +154,27 @@ def test_pointer_outside_project_ignored(tmp_path):
 
 
 def test_non_insitupy_dir_left_alone(tmp_path):
-    """Folders InSituPy did not create are ignored with a warning and never deleted."""
+    """Folders InSituPy did not create are never deleted, and a normal save does not warn."""
     p, xd = _saved(tmp_path)
     backup = p / "cells" / "my_backup"
     backup.mkdir()
     (backup / "keep.txt").write_text("mine")
 
     xd.cells.table.obs["flag"] = "x"
-    with pytest.warns(UserWarning, match="my_backup"):
-        xd.save(verbose=False)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        xd.save(verbose=False)  # the pointer resolves, and pruning skips the folder silently
+    assert not [w for w in caught if "my_backup" in str(w.message)]
 
     assert (backup / "keep.txt").read_text() == "mine"
     assert "flag" in InSituData.read(p).cells.table.obs.columns
+
+    # Only the newest-by-name fallback (no pointer) reports the ignored folder.
+    meta = _ispy(p)
+    del meta["data"]["cells"]
+    (p / ISPY_METADATA_FILE).write_text(json.dumps(meta))
+    with pytest.warns(UserWarning, match="my_backup"):
+        InSituData.read(p)
 
 
 def test_crash_before_commit_keeps_old_state(tmp_path, monkeypatch):
@@ -187,6 +197,32 @@ def test_crash_before_commit_keeps_old_state(tmp_path, monkeypatch):
     assert _ispy(p)["data"]["cells"] == committed
     assert _dirs(p / "cells") == dirs_before, "the uncommitted cells dir must be removed"
     assert "flag" not in InSituData.read(p).cells.table.obs.columns
+    assert json.loads(json.dumps(xd.metadata)) == meta_before
+
+
+def test_save_geometries_crash_before_commit_keeps_old_state(tmp_path, monkeypatch):
+    """The partial saver rolls back like save(): new annotations dir removed, metadata restored."""
+    p, xd = _saved(tmp_path)
+    poly = gpd.GeoDataFrame({
+        "id": ["a_0"], "name": ["Tumor"], "color": ["#ff0000"],
+        "geometry": [Point(5, 5).buffer(5)],
+    })
+    xd._annotations.add_data(data=poly, key="pathology", scale_factor=1.0)
+    ispy_before = _ispy(p)
+    meta_before = json.loads(json.dumps(xd.metadata))
+
+    def _boom(*args, **kwargs):
+        raise OSError("simulated crash before the .ispy write")
+
+    monkeypatch.setattr("insitupy._core.data.write_dict_to_json", _boom)
+    with pytest.raises(OSError, match="simulated crash"):
+        xd.save_geometries(verbose=False)
+    monkeypatch.undo()
+
+    assert _ispy(p) == ispy_before
+    annot_root = p / "annotations"
+    assert not annot_root.exists() or not any(annot_root.iterdir()), \
+        "the uncommitted annotations dir must be removed"
     assert json.loads(json.dumps(xd.metadata)) == meta_before
 
 

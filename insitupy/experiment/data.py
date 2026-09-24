@@ -93,7 +93,9 @@ def _unexpected_root_items(obj) -> list[str]:
 
     Used by ``concat(mode="move")``, which deletes the source root after moving its
     datasets out: whatever this returns would be deleted with it. The experiment's own
-    dataset directories count as expected, since they are what gets moved.
+    dataset directories count as expected, since they are what gets moved. So does a
+    ``*.__ispy_tmp__`` staging directory (always a partial write); a ``*.__ispy_bak__``
+    does not, because it can be the only surviving copy of a dataset.
     """
     root = Path(obj._path).resolve()
     own = {
@@ -101,7 +103,10 @@ def _unexpected_root_items(obj) -> list[str]:
         for xd in obj._data
         if xd._path is not None and Path(xd._path).resolve().parent == root
     }
-    return sorted(p.name for p in root.iterdir() if p.name not in _EXPECTED_ROOT_FILES | own)
+    return sorted(
+        p.name for p in root.iterdir()
+        if p.name not in _EXPECTED_ROOT_FILES | own and not p.name.endswith(".__ispy_tmp__")
+    )
 
 
 def _list_dataset_dirs(root: Path) -> list[Path]:
