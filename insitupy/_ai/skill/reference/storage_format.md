@@ -76,7 +76,10 @@ project_folder/
 ```
 
 ## Key Conventions
-- All spatial coordinates are in pixels at the native resolution
+- Coordinates are in µm: cell centroids (`obsm["spatial"]`), transcript
+  positions, annotation/region/unit geometries and the crop limits in
+  `cropping_history`. Only raster data (images, boundary masks) is stored
+  on a pixel grid, converted via its pixel_size
 - pixel_size is in µm/pixel (e.g. 0.2125 for Xenium)
 - Boundaries are stored as label masks (integer arrays where pixel value = cell ID)
 - Images use OME-Zarr with multiscale pyramids for efficient access
