@@ -15,7 +15,7 @@ Every test runs against a real on-disk project.
 import json
 import os
 import shutil
-import warnings
+import zipfile
 
 import dask.dataframe as dd
 import geopandas as gpd
@@ -207,3 +207,171 @@ def test_units_failure_mid_write_keeps_old_units(tmp_path, monkeypatch):
     on_disk = InSituData.read(p)
     assert {k: list(on_disk.units[k].table.obs_names) for k in on_disk.units.keys()} == old_names
     assert "new_col" not in on_disk.units["visium"].table.obs.columns
+
+
+# ── B3: save(path=<another copy>) is refused ──────────────────────────────────
+
+
+def test_save_to_other_copy_refused(tmp_path):
+    xd = _make_xd()
+    a, b = tmp_path / "a", tmp_path / "b"
+    xd.saveas(a, verbose=False)
+    shutil.copytree(a, b)
+    listing_a, listing_b = _tree(a), _tree(b)
+
+    xd.cells.table.obs["flag"] = "x"
+    with pytest.raises(ValueError, match="another copy of the same dataset"):
+        xd.save(path=b, verbose=False)
+    # an unlinked object that shares the uid must not write into the copy either
+    with pytest.raises(ValueError, match="another copy of the same dataset"):
+        xd.copy().save(path=a, verbose=False)
+
+    assert _tree(a) == listing_a
+    assert _tree(b) == listing_b
+
+
+def test_save_to_linked_path_and_new_path_still_work(tmp_path):
+    xd = _make_xd()
+    a = tmp_path / "a"
+    xd.saveas(a, verbose=False)
+
+    xd.save(path=a, verbose=False)  # explicit path that is the linked project
+    xd.save(path=tmp_path / "new", verbose=False)  # non-existent path routes to saveas
+
+    assert (tmp_path / "new" / ISPY_METADATA_FILE).exists()
+    assert xd.path == (tmp_path / "new").resolve()
+
+
+def test_partial_saves_to_other_path_refused_when_linked(tmp_path):
+    p, xd = _saved(tmp_path)
+    other = tmp_path / "other"
+
+    with pytest.raises(ValueError, match="only writes into the project"):
+        xd.save_cells(path=other)
+    with pytest.raises(ValueError, match="only writes into the project"):
+        xd.save_geometries(path=other)
+    assert not other.exists()
+
+    xd.save_cells(path=p)  # the linked project itself is fine
+
+
+# ── saveas(overwrite=True): stage then swap ──────────────────────────────────
+
+
+def test_saveas_overwrite_failure_keeps_target(tmp_path, monkeypatch):
+    target = tmp_path / "other"
+    _make_xd(seed=0).saveas(target, verbose=False)
+    listing, ispy_before = _tree(target), (target / ISPY_METADATA_FILE).read_bytes()
+
+    xd = _make_xd(seed=1)
+    meta_before = json.loads(json.dumps(xd.metadata))
+
+    def _boom(*args, **kwargs):
+        raise OSError("simulated failure while writing cells")
+
+    monkeypatch.setattr("insitupy._core.data._save_cells", _boom)
+    with pytest.raises(OSError, match="simulated failure"):
+        xd.saveas(target, overwrite=True, verbose=False)
+    monkeypatch.undo()
+
+    assert _tree(target) == listing
+    assert (target / ISPY_METADATA_FILE).read_bytes() == ispy_before
+    assert not (tmp_path / "other.__ispy_tmp__").exists()
+    assert json.loads(json.dumps(xd.metadata)) == meta_before
+    assert xd.path is None
+
+
+def test_saveas_overwrite_replaces_and_cleans(tmp_path):
+    target = tmp_path / "other"
+    _make_xd(seed=0, n_cells=5).saveas(target, verbose=False)
+    (target / "stale.txt").write_text("old")
+
+    xd = _make_xd(seed=1, n_cells=8)
+    xd.saveas(target, overwrite=True, verbose=False)
+
+    assert not (target / "stale.txt").exists()
+    assert InSituData.read(target).cells.table.n_obs == 8
+    assert _dirs(tmp_path) == ["other"], "no staging or backup siblings may remain"
+
+
+def test_copy_saveas_over_own_source_is_safe(tmp_path):
+    """A copy that still reads lazily from the slot it overwrites must not lose data."""
+    p, xd = _saved(tmp_path, transcripts=True)
+    original = xd.transcripts.compute().reset_index(drop=True)
+
+    c = xd.copy()
+    assert isinstance(c.transcripts, dd.DataFrame)
+    c.saveas(p, overwrite=True, verbose=False)
+
+    on_disk = InSituData.read(p).transcripts.compute().reset_index(drop=True)
+    pd.testing.assert_frame_equal(on_disk, original)
+    # the copy was re-opened from the new files, so it still computes after the swap
+    pd.testing.assert_frame_equal(c.transcripts.compute().reset_index(drop=True), original)
+    assert c.path == p.resolve()
+    assert _dirs(tmp_path) == ["p"]
+
+
+def test_atomic_replace_dir_recovers_orphaned_backup(tmp_path, monkeypatch):
+    """A lone .__ispy_bak__ is the only surviving copy of an interrupted swap."""
+    from insitupy._io.files import atomic_replace_dir
+
+    dest = tmp_path / "dest"
+    backup = tmp_path / "dest.__ispy_bak__"
+    staging = tmp_path / "dest.__ispy_tmp__"
+    backup.mkdir()
+    (backup / "old.txt").write_text("survivor")
+    staging.mkdir()
+    (staging / "new.txt").write_text("new")
+
+    original_rename = os.rename
+
+    def _fail_on_staging(src, dst):
+        if os.fspath(src) == os.fspath(staging):
+            raise OSError("simulated rename failure")
+        return original_rename(src, dst)
+
+    monkeypatch.setattr(os, "rename", _fail_on_staging)
+    with pytest.raises(OSError, match="simulated rename failure"):
+        atomic_replace_dir(staging, dest)
+    monkeypatch.undo()
+
+    assert (dest / "old.txt").read_text() == "survivor", "the orphaned backup must not be deleted"
+    assert not backup.exists()
+    assert not staging.exists()
+
+
+# ── B7: zip_output checks and writes <path>.zip only ─────────────────────────
+
+
+def test_zip_output_checks_real_zip_path(tmp_path):
+    xd = _make_xd()
+    path = tmp_path / "out"
+    zip_path = tmp_path / "out.zip"
+    zip_path.write_text("not a real archive")
+    path.mkdir()
+    (path / "sentinel.txt").write_text("mine")
+
+    with pytest.raises(FileExistsError, match=r"out\.zip"):
+        xd.saveas(path, zip_output=True, verbose=False)
+    assert zip_path.read_text() == "not a real archive"
+    assert (path / "sentinel.txt").exists(), "the directory at `path` is never touched"
+
+    meta_before = json.loads(json.dumps(xd.metadata))
+    xd.saveas(path, zip_output=True, overwrite=True, verbose=False)
+
+    with zipfile.ZipFile(zip_path) as zf:
+        names = zf.namelist()
+    assert ISPY_METADATA_FILE in names and any(n.startswith("cells/") for n in names)
+    assert (path / "sentinel.txt").exists(), "the directory at `path` is never deleted"
+    assert xd.path is None, "an in-memory object is not re-pointed at the archive"
+    assert json.loads(json.dumps(xd.metadata)) == meta_before
+    assert sorted(d.name for d in tmp_path.iterdir()) == ["out", "out.zip"]
+
+
+def test_zip_export_keeps_linked_project(tmp_path):
+    p, xd = _saved(tmp_path)
+    xd.saveas(tmp_path / "export", zip_output=True, verbose=False)
+
+    assert (tmp_path / "export.zip").is_file()
+    assert not (tmp_path / "export").exists()
+    assert xd.path == p, "the object stays backed by the project it was loaded from"
