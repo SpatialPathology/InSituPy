@@ -1,6 +1,7 @@
 import contextlib
 import logging
 import os
+import re
 import sys
 from datetime import datetime
 from warnings import warn
@@ -96,31 +97,65 @@ def _generate_mask(values, xmax, ymax, seg_mask_value):
     return boundaries_mask
 
 
+_SAVE_DIR_NAME = re.compile(r"(\d{6})-(\d{12})(?:-|$)")
+
+
+def parse_save_dir_datetime(name: str) -> datetime | None:
+    """Parse the datetime encoded in the name of an InSituPy save directory.
+
+    Save directories are named ``YYMMDD-HHMMSSffffff-<hash>``
+    (e.g. ``250805-115555000343-2c58ca86``).
+
+    Args:
+        name: Directory name (not a full path).
+
+    Returns:
+        The encoded datetime, or ``None`` if *name* does not follow the pattern
+        (e.g. a folder the user created by hand).
+    """
+    match = _SAVE_DIR_NAME.match(name)
+    if match is None:
+        return None
+    try:
+        # YYMMDD + HHMMSSffffff
+        return datetime.strptime(match.group(1) + match.group(2), "%y%m%d%H%M%S%f")
+    except ValueError:
+        return None
+
+
 def sort_paths_by_datetime(paths):
     """Sort a list of paths by the datetime encoded in their names, newest first.
 
-    Assumes filenames follow the pattern ``YYMMDD-HHMMSSffffff-<hash>``
-    (e.g. ``250805-115555000343-2c58ca86``).
+    Assumes directory names follow the pattern ``YYMMDD-HHMMSSffffff-<hash>``
+    (e.g. ``250805-115555000343-2c58ca86``). Paths whose name does not follow
+    it are not InSituPy save directories: they are left out of the result and
+    reported in a single warning.
 
     Args:
         paths: Iterable of :class:`~pathlib.Path` objects to sort.
 
     Returns:
-        A new list of paths sorted from most-recent to oldest.
+        A new list of the recognised paths sorted from most-recent to oldest.
     """
-    def extract_datetime(path):
-        # Assumes ID format: "250805-115555000343-2c58ca86"
-        parts = path.name.split("-")
-        date_part = parts[0]  # "250805"
-        time_part = parts[1]  # "115555000343"
+    parsed = []
+    skipped = []
+    for p in paths:
+        dt = parse_save_dir_datetime(p.name)
+        if dt is None:
+            skipped.append(p.name)
+        else:
+            parsed.append((dt, p))
 
-        # Combine into full datetime string: "250805115555000343"
-        full_dt_str = date_part + time_part
+    if skipped:
+        warn(
+            f"Ignoring {len(skipped)} entr{'y' if len(skipped) == 1 else 'ies'} that "
+            f"{'is' if len(skipped) == 1 else 'are'} not an InSituPy save directory: "
+            f"{sorted(skipped)}.",
+            UserWarning,
+            stacklevel=2,
+        )
 
-        # Parse as datetime: YYMMDDHHMMSSffffff
-        return datetime.strptime(full_dt_str, "%y%m%d%H%M%S%f")
-
-    return sorted(paths, key=extract_datetime, reverse=True)
+    return [p for _, p in sorted(parsed, key=lambda item: item[0], reverse=True)]
 
 
 
