@@ -32,7 +32,12 @@ from insitupy._constants import (
 )
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy._io.files import check_overwrite_and_remove_if_true, read_json, write_dict_to_json
+from insitupy._io.files import (
+    atomic_replace_dir,
+    check_overwrite_and_remove_if_true,
+    read_json,
+    write_dict_to_json,
+)
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
@@ -2521,46 +2526,12 @@ class InSituExperiment:
 
     @staticmethod
     def _atomic_replace_dir(staging: Path, destination: Path, *, what: str = "write") -> None:
-        """Atomically replace directory *destination* with directory *staging*.
+        """Atomically replace directory *destination* with *staging*.
 
-        Moves an existing *destination* aside to a backup, renames *staging* into
-        place, and deletes the backup only once *destination* is confirmed
-        present. On failure the original *destination* is restored and *staging*
-        is removed; if neither the swap nor the restore succeeds, the backup is
-        kept as the only surviving copy. Any stale backup left by a previous
-        failed write is cleared first.
-
-        Args:
-            staging: Freshly written directory to move into place. Must exist.
-            destination: Final path to replace.
-            what: Verb used in the unrecoverable-failure log message.
+        Thin delegate to :func:`insitupy._io.files.atomic_replace_dir`, kept so the
+        table build can call it through the class.
         """
-        backup = destination.parent / (destination.name + ".__ispy_bak__")
-        # Clear any stale backup left by a previous failed write.
-        check_overwrite_and_remove_if_true(backup, overwrite=True)
-
-        destination_backed_up = False
-        try:
-            if destination.exists():
-                os.rename(destination, backup)
-                destination_backed_up = True
-            os.rename(staging, destination)
-        except Exception:
-            shutil.rmtree(staging, ignore_errors=True)
-            if destination_backed_up and not destination.exists() and backup.exists():
-                try:
-                    os.rename(backup, destination)
-                except Exception:
-                    logger.error(
-                        "%s failed AND the previous data could not be restored "
-                        "automatically. Your original data is preserved at '%s' — "
-                        "rename it back to '%s' manually.", what, backup, destination,
-                    )
-            raise
-        finally:
-            # Remove the backup only once the destination is confirmed in place.
-            if backup.exists() and destination.exists():
-                shutil.rmtree(backup, ignore_errors=True)
+        atomic_replace_dir(staging, destination, what=what)
 
     def build_table(
         self,
