@@ -303,18 +303,17 @@ def read_zarr(path):
         if not ZARR_V3:
             dirstore = stack.enter_context(dirstore)
 
-        # open zarr group
-        root = zarr.open_group(store=dirstore, mode='r')
-        components = sorted(root.keys())
+        # open the store root, which is an array (no pyramid) or a group of pyramid levels
+        root = zarr.open(store=dirstore, mode='r')
 
-        if ".zarray" in components:
+        if isinstance(root, zarr.Array):
             # the store is an array which can be opened
             if zipped:
                 img = da.from_zarr(dirstore).persist()
             else:
                 img = da.from_zarr(dirstore)
         else:
-            subres = [elem for elem in components if not elem.startswith(".")]
+            subres = [elem for elem in sorted(root.keys()) if not elem.startswith(".")]
             img = []
             for s in subres:
                 if zipped:
@@ -327,8 +326,7 @@ def read_zarr(path):
                                 )
 
         # retrieve OME metadata
-        store = zarr.open(dirstore)
-        meta = store.attrs.asdict()
+        meta = root.attrs.asdict()
         ome_meta = meta["OME"]
         axes = meta["axes"]
         pixel_size = meta["pixel_size"]
@@ -426,15 +424,17 @@ def write_zarr(
     """Write image data to a Zarr store.
 
     Saves an image (or existing pyramid) together with OME metadata as a
-    ``.zarr`` directory.  When ``save_pyramid=True`` and a non-pyramidal
-    array is provided, a six-level pyramid is created automatically.
+    ``.zarr`` directory, or as a zip archive if *file* ends in ``.zarr.zip``.
+    When ``save_pyramid=True`` and a non-pyramidal array is provided, a
+    six-level pyramid is created automatically.
     Compatible with Zarr v2 and v3.
 
     Args:
         image: Input image as a :class:`dask.array.Array`,
             :class:`numpy.ndarray`, or a :class:`list` of arrays representing
             an existing pyramid (index 0 = full resolution).
-        file: Output path for the ``.zarr`` directory store.
+        file: Output path. A ``.zip`` suffix (e.g. ``.zarr.zip``) writes a
+            zip archive; anything else writes a ``.zarr`` directory store.
         img_metadata: Metadata dict to store in the Zarr root attributes
             (e.g. ``{"OME": ..., "axes": "YXS", "pixel_size": 0.2125}``).
         axes: Axis string describing the image dimensions, e.g. ``"YX"``
@@ -459,15 +459,22 @@ def write_zarr(
     if file.exists() and not overwrite:
         raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
-    # Write to a staging path; commit to final path only after a successful write
+    # a .zip suffix (e.g. .zarr.zip) requests a zip archive
+    zipped = file.suffix == ".zip"
+
+    # Write to a staging path; commit to final path only after a successful write.
+    # A zip archive is staged as a directory store first and packed afterwards,
+    # since a Zarr v3 ZipStore opened for writing cannot be read back to add attrs.
     tmp_file = file.parent / (file.name + ".__ispy_tmp__")
+    tmp_zip = file.parent / (file.name + ".__ispy_tmp_zip__")
 
     # Clean any stale staging left by a previous failed write
-    if tmp_file.exists():
-        if tmp_file.is_dir():
-            shutil.rmtree(tmp_file)
-        else:
-            tmp_file.unlink()
+    for stale in (tmp_file, tmp_zip):
+        if stale.exists():
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            else:
+                stale.unlink()
 
     # decide whether to save as pyramid or not
     if isinstance(image, list):
@@ -508,6 +515,16 @@ def write_zarr(
         # open zarr store save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
         store.attrs.put(make_json_serializable(img_metadata))
+
+    if zipped:
+        # pack the staged directory store into an uncompressed zip, the layout
+        # zarr's ZipStore reads (chunks are already compressed)
+        with zipfile.ZipFile(tmp_zip, mode="w", compression=zipfile.ZIP_STORED) as zf:
+            for member in sorted(tmp_file.rglob("*")):
+                if member.is_file():
+                    zf.write(member, arcname=member.relative_to(tmp_file).as_posix())
+        shutil.rmtree(tmp_file)
+        tmp_file = tmp_zip
 
     # Commit: delete original only after new write has fully completed
     if file.exists():

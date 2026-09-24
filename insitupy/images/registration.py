@@ -555,7 +555,7 @@ def load_and_scale_images(
         moving_for_feature = moving_np
 
     if config.convert_to_grayscale and len(moving_for_feature.shape) == 3:
-        moving_for_feature = cv2.cvtColor(moving_for_feature, cv2.COLOR_BGR2GRAY)
+        moving_for_feature = cv2.cvtColor(moving_for_feature, cv2.COLOR_RGB2GRAY)
         axes_moving_effective = "YX"
 
     # --- Preprocessing for fixed_scaled ---
@@ -576,7 +576,7 @@ def load_and_scale_images(
         fixed_for_feature = fixed_np
 
     if config.convert_to_grayscale and len(fixed_for_feature.shape) == 3:
-        fixed_for_feature = cv2.cvtColor(fixed_for_feature, cv2.COLOR_BGR2GRAY)
+        fixed_for_feature = cv2.cvtColor(fixed_for_feature, cv2.COLOR_RGB2GRAY)
         axes_fixed_effective = "YX"
 
     # --- Scale to max_width ---
