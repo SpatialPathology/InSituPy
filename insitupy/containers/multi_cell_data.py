@@ -4,6 +4,7 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
+from warnings import warn
 
 from shapely import MultiPolygon, Polygon
 
@@ -43,12 +44,14 @@ class MultiCellData(DeepCopyMixin):
 
     def __repr__(self):
         if len(self._layers) > 0:
-            if self._main_key is not None:
+            if self._main_key in self._layers:
                 indented_repr = self._layers[self._main_key].__repr__().replace('\n', f'\n{tf.SPACER}')
                 repr = (
                     f"{tf.Bold}MultiCellData with main layer{tf.ResetAll} '{self._main_key}'\n"
                     f"{tf.SPACER}{indented_repr}"
                 )
+            else:
+                repr = f"{tf.Bold}MultiCellData without main layer{tf.ResetAll}"
 
             non_main_keys = [f"'{k}'" for k in self._layers.keys() if k != self._main_key]
             if len(non_main_keys) > 0:
@@ -314,6 +317,13 @@ class MultiCellData(DeepCopyMixin):
         """
         Add Baysor (https://github.com/kharchenkolab/Baysor) segmentation output to the object.
 
+        .. deprecated:: 0.12
+            ``add_baysor`` will be removed in 0.13. For Xenium data, import the Baysor
+            segmentation with ``xeniumranger import-segmentation`` and read the result with
+            :func:`insitupy.io.read_xenium`; otherwise build a
+            :class:`~insitupy.containers.CellData` layer from the Baysor output files. Both
+            routes are shown in the "Use a Baysor segmentation" tutorial.
+
         Reads Baysor output files (counts, cell metadata, and polygon files)
         together with the XeniumRanger output directory and registers the
         resulting cell data as a new segmentation layer named ``key``.
@@ -343,6 +353,14 @@ class MultiCellData(DeepCopyMixin):
             None: Modifies the object in place by adding a new cell segmentation
                 layer accessible via ``self[key]``.
         """
+        warn(
+            "`add_baysor()` is deprecated and will be removed in InSituPy 0.13. For Xenium data, "
+            "import the Baysor segmentation with `xeniumranger import-segmentation` and read it "
+            "with `insitupy.io.read_xenium()`; otherwise build a CellData layer from the Baysor "
+            "output files (see the 'Use a Baysor segmentation' tutorial).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         from ._segmentations import _read_baysor
         from .boundaries_data import BoundariesData
