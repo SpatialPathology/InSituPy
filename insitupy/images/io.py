@@ -268,6 +268,16 @@ def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
             return zarr.DirectoryStore(path)
 
 
+def _sorted_pyramid_levels(keys) -> list[str]:
+    """Return pyramid level keys in resolution order ("0", "1", ..., "10", ...).
+
+    Hidden keys (starting with ".") are dropped. Numeric keys are sorted as integers,
+    so levels above "9" do not sort before "2" as they would as strings.
+    """
+    levels = [k for k in keys if not k.startswith(".")]
+    return sorted(levels, key=lambda k: (0, int(k), k) if k.isdigit() else (1, 0, k))
+
+
 def read_zarr(path):
     """Read an image from a Zarr or Zarr.zip store.
 
@@ -313,7 +323,7 @@ def read_zarr(path):
             else:
                 img = da.from_zarr(dirstore)
         else:
-            subres = [elem for elem in sorted(root.keys()) if not elem.startswith(".")]
+            subres = _sorted_pyramid_levels(root.keys())
             img = []
             for s in subres:
                 if zipped:
@@ -711,7 +721,7 @@ def read_zarr_pyramid(dirstore, persist):
         else:
             img = da.from_zarr(dirstore)
     else:
-        subres = sorted([elem for elem in components if not elem.startswith(".")])
+        subres = _sorted_pyramid_levels(components)
         img = []
         for s in subres:
             if persist:

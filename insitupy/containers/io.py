@@ -31,6 +31,7 @@ from insitupy.containers.shapes_data import AnnotationsData, RegionsData, Shapes
 from insitupy.containers.spatial_units_data import SpatialUnitsData
 from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
+from insitupy.images.io import _sorted_pyramid_levels
 from insitupy.utils.utils import (
     _generate_time_based_uid,
     convert_int_to_xenium_hex,
@@ -266,7 +267,7 @@ def _read_boundaries_from_celldata_zarr(
             comp = f"masks/{k}"
             if comp in root:
                 # boundary masks are always stored as a pyramid group: masks/{k}/{level}
-                subresolutions = sorted(root[comp].keys())
+                subresolutions = _sorted_pyramid_levels(root[comp].keys())
                 bound_data[k] = []
                 for subres in subresolutions:
                     if not subres.startswith("."):

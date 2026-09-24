@@ -165,6 +165,17 @@ class TestWriteZarrRoundtrip:
         assert pixel_size_out == pytest.approx(0.2125)
 
 
+    def test_pyramid_with_more_than_ten_levels_keeps_resolution_order(self, tmp_path):
+        # level keys "10", "11" must not sort between "1" and "2"
+        arr = np.zeros((2048, 2048), dtype=np.uint8)
+        pyramid = create_img_pyramid(da.from_array(arr, chunks=(512, 512)), axes="YX", nsubres=11)
+        assert len(pyramid) == 12
+        out = tmp_path / "test.zarr"
+        write_zarr(image=pyramid, file=out, img_metadata=self._metadata(), axes="YX")
+
+        result_img, _, _, _ = read_zarr(out)
+        assert [lvl.shape for lvl in result_img] == [lvl.shape for lvl in pyramid]
+
 # ── Priority 5: read_image dispatch ───────────────────────────────────────────
 
 class TestReadImageDispatch:
