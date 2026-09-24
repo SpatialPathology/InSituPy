@@ -64,8 +64,32 @@ _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 _METADATA_PARQUET_FILENAME = "metadata.parquet"
 _TABLE_FORMAT_VERSION = 2
 
+# Suffixes of the staging / backup siblings that an interrupted atomic write leaves behind.
+_STAGING_SUFFIXES = (".__ispy_tmp__", ".__ispy_bak__")
+
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
+
+
+def _list_dataset_dirs(root: Path) -> list[Path]:
+    """Return the ``data-*`` dataset directories of an experiment root, sorted.
+
+    Directories left behind by an interrupted atomic write are not datasets:
+    ``*.__ispy_tmp__`` is a partial dataset and ``*.__ispy_bak__`` a superseded copy
+    (which can be the only surviving one). They are excluded, with one warning.
+    """
+    found = sorted(p for p in Path(root).glob("data-*") if p.is_dir())
+    leftovers = [p.name for p in found if p.name.endswith(_STAGING_SUFFIXES)]
+    if leftovers:
+        warnings.warn(
+            f"Ignoring {len(leftovers)} director(ies) in '{root}' left over from an "
+            f"interrupted save: {leftovers}. A '.__ispy_bak__' directory can be the only "
+            "surviving copy of a dataset: make sure every dataset reads correctly before "
+            "deleting them.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return [p for p in found if not p.name.endswith(_STAGING_SUFFIXES)]
 
 
 class TableAccessor:
@@ -3414,8 +3438,8 @@ class InSituExperiment:
         used_dirs = {Path(d.path).resolve() for d in self._data if d.path is not None}
         orphan_dirs = sorted(
             p.resolve()
-            for p in Path(self.path).glob("data-*")
-            if p.is_dir() and p.resolve() not in used_dirs
+            for p in _list_dataset_dirs(Path(self.path))
+            if p.resolve() not in used_dirs
         )
         if orphan_dirs:
             warnings.warn(
@@ -4623,7 +4647,7 @@ class InSituExperiment:
 
         # Load each dataset (order on disk is not authoritative)
         loaded = []
-        dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
+        dataset_paths = _list_dataset_dirs(path)
         for dataset_path in tqdm(dataset_paths):
             dataset = InSituData.read(dataset_path, load_all=False)
             loaded.append(dataset)
