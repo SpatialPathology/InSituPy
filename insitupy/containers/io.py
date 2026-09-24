@@ -2,7 +2,6 @@ import logging
 import os
 import warnings
 from contextlib import ExitStack
-from math import ceil
 from numbers import Number
 from os.path import relpath
 from pathlib import Path
@@ -15,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import scanpy as sc
-import toml
 import zarr
 from zarr.errors import ArrayNotFoundError
 
@@ -29,7 +27,6 @@ from insitupy.containers.multi_cell_data import MultiCellData
 from insitupy.containers.multi_spatial_units_data import MultiSpatialUnitsData
 from insitupy.containers.shapes_data import AnnotationsData, RegionsData, ShapesData
 from insitupy.containers.spatial_units_data import SpatialUnitsData
-from insitupy.containers._segmentations import _read_baysor_polygons
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.images.io import _sorted_pyramid_levels
 from insitupy.utils.utils import (
@@ -45,74 +42,6 @@ from insitupy.utils.utils import (
 # name-like. An int/float-categorical column would need its value type derived
 # from the column instead (none exist today).
 _CATEGORICAL_PARQUET_DTYPE = pa.dictionary(pa.int32(), pa.string())
-
-
-def _read_baysor_cells(
-    baysor_output: str | os.PathLike | Path,
-    pixel_size: Number = 1 # the pixel size is usually 1 since baysor runs on the µm coordinates
-    ) -> CellData:
-    try:
-        from rasterio.features import rasterize
-    except ImportError:
-        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-
-    # convert to pathlib path
-    baysor_output = Path(baysor_output)
-
-    # read baysor metadata
-    tomlfile = baysor_output / "segmentation_params.dump.toml"
-    with open(tomlfile) as f:
-        baysor_config = toml.load(f)
-
-    # read table
-    logger.info("Parsing count table...")
-    loomfile = baysor_output / "segmentation_counts.loom"
-    table = sc.read_loom(loomfile)
-
-    # set indices for .obs and .var
-    table.obs = table.obs.reset_index().set_index("Name")
-    table.obs["CellID"] = table.obs["CellID"].astype(float).astype(int) # convert cell id to int
-    table.var.set_index("Name", inplace=True)
-
-    # remove unassigned codewords from genes and obs entries with an NaN in any column
-    varmask = ~table.var_names.str.startswith("UnassignedCodeword")
-    obsmask = ~table.obs.isna().any(axis=1)
-    table = table[obsmask, varmask].copy()
-
-    # set spatial coordinates
-    table.obsm["spatial"] = table.obs[["x", "y"]].values
-    table.obs.drop(["x", "y"], axis=1, inplace=True) # drop the coordinate columns
-
-    # read polygons
-    logger.info("Reading segmentation masks")
-    logger.info("Read polygons")
-    jsonfile = baysor_output / "segmentation_polygons.json"
-    df = _read_baysor_polygons(jsonfile)
-
-    # remove polygons of cells that have been removed in the table
-    df = df[df.cell.astype(int).isin(table.obs["CellID"])]
-
-    # determine dimensions of dataset based on polygons
-    polygon_bounds = df.geometry.bounds
-    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
-    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
-
-    # generate a segmentation mask
-    logger.info("Convert polygons to segmentation mask")
-    img = rasterize(list(zip(df["geometry"], df["cell"])), out_shape=(ymax,xmax))
-
-    # convert to dask array
-    img = da.from_array(img)
-
-    # create boundaries object
-    cell_ids = da.from_array(table.obs["CellID"].values) # extract cell ids from adata
-    seg_mask_value = da.from_array(sorted(df["cell"]))
-    boundaries = BoundariesData(cell_ids=cell_ids, seg_mask_value=seg_mask_value)
-    boundaries.add_boundaries(data={"cellular": img}, pixel_size=pixel_size)
-
-    celldata = CellData(table=table, boundaries=boundaries, config=baysor_config)
-
-    return celldata
 
 
 def _read_table_from_celldata(
@@ -396,13 +325,13 @@ def _read_multicelldata(
         path_upper: str | os.PathLike | Path | None = None,
         alt_path_dict: dict | None = None,
     ) -> MultiCellData:
+    path = Path(path)
     if os.path.exists(path / ".multicelldata"):
         old = False
     elif os.path.exists(path / ".celldata"):
         old = True
     else:
         raise FileNotFoundError(f"Metadata file for cells dimension in {path} was not found.")
-    path = Path(path)
     mcd = MultiCellData()
     if not old:
         celldata_metadata = read_json(path / ".multicelldata")
@@ -609,13 +538,3 @@ def read_multicelldata(path, path_upper=None, alt_path_dict=None):
         stacklevel=2,
     )
     return _read_multicelldata(path, path_upper, alt_path_dict)
-
-
-def read_baysor_cells(baysor_output, pixel_size=1):
-    """Deprecated: Use CellData.read_baysor() instead."""
-    warnings.warn(
-        "read_baysor_cells() is deprecated. Use the private _read_baysor_cells() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return _read_baysor_cells(baysor_output, pixel_size)

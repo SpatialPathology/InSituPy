@@ -41,12 +41,14 @@ class MultiSpatialUnitsData(DeepCopyMixin):
 
     def __repr__(self):
         if len(self._layers) > 0:
-            if self._main_key is not None:
+            if self._main_key in self._layers:
                 indented_repr = self._layers[self._main_key].__repr__().replace('\n', f'\n{tf.SPACER}')
                 repr = (
                     f"{tf.Bold}MultiSpatialUnitsData with main layer{tf.ResetAll} '{self._main_key}'\n"
                     f"{tf.SPACER}{indented_repr}"
                 )
+            else:
+                repr = f"{tf.Bold}MultiSpatialUnitsData without main layer{tf.ResetAll}"
 
             non_main_keys = [f"'{k}'" for k in self._layers.keys() if k != self._main_key]
             if len(non_main_keys) > 0:

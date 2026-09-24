@@ -36,8 +36,8 @@
 
 | Method                         | Source                                   |
 |--------------------------------|------------------------------------------|
-| MultiCellData.add_baysor()     | Baysor output (segmentation_polygons.json) |
 | MultiCellData.add_proseg()     | Proseg output (transcript assignments)    |
+| MultiCellData.add_baysor()     | Deprecated in 0.12, removed in 0.13 - see the "Use a Baysor segmentation" tutorial |
 
 ## SpatialData Integration (insitupy.spatialdata)
 

@@ -310,42 +310,43 @@ class BoundariesData(DeepCopyMixin):
 
         # Open the Xenium zarr store
         store = zarr.storage.ZipStore(cells_zarr_file, mode='r')
+        try:
+            # Read nucleus_to_cell_map if needed
+            if needs_nucleus_map:
+                try:
+                    nucleus_to_cell_map = _read_nucleus_to_cell_map_from_store(store, self._cell_names.compute())
 
-        # Read nucleus_to_cell_map if needed
-        if needs_nucleus_map:
-            try:
-                nucleus_to_cell_map = _read_nucleus_to_cell_map_from_store(store, self._cell_names.compute())
-
-                # Validate that the number of nuclei matches
-                if nnuclei_current is not None and len(nucleus_to_cell_map) != nnuclei_current:
-                    warn(f"Number of nuclei in nucleus_to_cell_map ({len(nucleus_to_cell_map)}) does not match "
-                         f"the number of unique nuclei in boundaries mask ({nnuclei_current}). This may indicate "
-                         f"a mismatch between the saved boundaries and the source Xenium data.")
-
-                self._nucleus_to_cell_map = nucleus_to_cell_map
-                logger.info(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
-            except (KeyError, IndexError, zarr.errors.ArrayNotFoundError) as e:
-                warn(f"Could not read nucleus_to_cell_map from Xenium data: {e}")
-
-        # Read nucleus_count if needed
-        if needs_nucleus_count:
-            try:
-                nucleus_count = _read_nucleus_count_from_store(store)
-                if nucleus_count is not None:
-                    # Validate that the number of cells matches
-                    if len(nucleus_count) != ncells_current:
-                        warn(f"Number of cells in nucleus_count ({len(nucleus_count)}) does not match "
-                             f"the number of unique cells in boundaries mask ({ncells_current}). This may indicate "
+                    # Validate that the number of nuclei matches
+                    if nnuclei_current is not None and len(nucleus_to_cell_map) != nnuclei_current:
+                        warn(f"Number of nuclei in nucleus_to_cell_map ({len(nucleus_to_cell_map)}) does not match "
+                             f"the number of unique nuclei in boundaries mask ({nnuclei_current}). This may indicate "
                              f"a mismatch between the saved boundaries and the source Xenium data.")
 
-                    self._nucleus_count = nucleus_count
-                    logger.info(f"Updated nucleus_count for {len(nucleus_count)} cells.")
-                else:
-                    warn("nucleus_count not available in Xenium data.")
-            except (KeyError, IndexError, zarr.errors.ArrayNotFoundError) as e:
-                warn(f"Could not read nucleus_count from Xenium data: {e}")
+                    self._nucleus_to_cell_map = nucleus_to_cell_map
+                    logger.info(f"Updated nucleus_to_cell_map with {len(nucleus_to_cell_map)} entries.")
+                except (KeyError, IndexError, zarr.errors.ArrayNotFoundError) as e:
+                    warn(f"Could not read nucleus_to_cell_map from Xenium data: {e}")
 
-        store.close()
+            # Read nucleus_count if needed
+            if needs_nucleus_count:
+                try:
+                    nucleus_count = _read_nucleus_count_from_store(store)
+                    if nucleus_count is not None:
+                        # Validate that the number of cells matches
+                        if len(nucleus_count) != ncells_current:
+                            warn(f"Number of cells in nucleus_count ({len(nucleus_count)}) does not match "
+                                 f"the number of unique cells in boundaries mask ({ncells_current}). This may indicate "
+                                 f"a mismatch between the saved boundaries and the source Xenium data.")
+
+                        self._nucleus_count = nucleus_count
+                        logger.info(f"Updated nucleus_count for {len(nucleus_count)} cells.")
+                    else:
+                        warn("nucleus_count not available in Xenium data.")
+                except (KeyError, IndexError, zarr.errors.ArrayNotFoundError) as e:
+                    warn(f"Could not read nucleus_count from Xenium data: {e}")
+        finally:
+            # close the zip store even if an unexpected error escapes the reads
+            store.close()
 
     def add_boundaries(self,
                        cell_boundaries: da.core.Array | np.ndarray,

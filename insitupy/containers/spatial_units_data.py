@@ -51,7 +51,7 @@ class SpatialUnitsData(DeepCopyMixin):
             unit_type: Description of unit type (e.g., 'niche', 'functional_unit').
         """
         self._shapes = shapes.copy() if shapes is not None else gpd.GeoDataFrame()
-        self._data = data.copy()
+        self._data = data.copy() if data is not None else None
         self._unit_type = unit_type
 
         # Convert Point geometries with radius to circles
@@ -118,8 +118,8 @@ class SpatialUnitsData(DeepCopyMixin):
                 repr_str += (
                     f"{tf.SPACER}.table: {self._data.n_obs} obs x "
                     f"{self._data.n_vars} vars\n"
-                    f"{tf.SPACER}.shapes: {n_units} geometries"
                 )
+            repr_str += f"{tf.SPACER}.shapes: {n_units} geometries"
         else:
             repr_str = "Empty SpatialUnitsData object"
 

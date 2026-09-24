@@ -121,11 +121,14 @@ ispy.tl.register_images(
 ## 9. Alternative Segmentations
 
 ```python
-# Add Baysor segmentation as an additional layer. The first positional
-# argument is the XeniumRanger output directory, the second is the Baysor
-# output directory.
-data.cells.add_baysor("path/to/xenium_output/", "path/to/baysor_output/", pixel_size=0.2125)
+# Add a Proseg segmentation as an additional layer (a Proseg output
+# directory, or a .zarr SpatialData store written by Proseg).
+data.cells.add_proseg(path="path/to/proseg_results")
 
 # Switch between segmentation layers
-data.cells.set_main("baysor")
+data.cells.set_main("proseg")
+
+# Baysor: add_baysor() is deprecated (removed in 0.13). For Xenium data,
+# import the segmentation with `xeniumranger import-segmentation` and read
+# the new bundle with ispy.io.read_xenium().
 ```
