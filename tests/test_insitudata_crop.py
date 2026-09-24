@@ -15,6 +15,7 @@ import pytest
 from anndata import AnnData
 
 from insitupy._core.data import InSituData
+from insitupy._exceptions import NoImageOverlapError
 from insitupy.containers.cell_data import CellData
 
 
@@ -122,3 +123,32 @@ def test_successful_inplace_crop_is_committed():
     assert xd.images["big"].shape == (25, 25)
     assert xd.images["small"].shape == (25, 25)
     assert len(xd.transcripts) < 100
+
+
+def test_imagedata_crop_without_any_overlap_raises_and_leaves_images_unchanged():
+    xd = _make_insitudata(with_cells=False, with_transcripts=False)
+
+    with pytest.raises(NoImageOverlapError):
+        xd.images.crop(xlim=(300, 350), ylim=(300, 350), inplace=True)
+
+    assert sorted(xd.images.keys()) == ["big", "small"]
+    assert xd.images["big"].shape == (200, 200)
+    assert "cropping_xlim" not in xd.images.metadata["big"]
+
+
+def test_lazy_transcripts_without_cells_or_images_warn_instead_of_raising():
+    # the region misses all transcripts, but lazy transcripts are not counted
+    xd = _make_insitudata(with_cells=False, with_images=False)
+
+    with pytest.warns(UserWarning, match="may be empty"):
+        xd.crop(xlim=(300, 350), ylim=(300, 350), materialize_transcripts=False)
+
+
+def test_lazy_transcripts_with_cells_do_not_warn_about_empty_result():
+    xd = _make_insitudata(with_images=False)
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        xd.crop(xlim=(0, 25), ylim=(0, 25), materialize_transcripts=False)
+
+    assert not any("may be empty" in str(w.message) for w in record)
