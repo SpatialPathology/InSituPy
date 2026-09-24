@@ -2,6 +2,7 @@
 import functools as ft
 import logging
 import os
+import re
 import shutil
 import zipfile
 from copy import deepcopy
@@ -21,7 +22,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from parse import parse as parse_string
 from pyarrow import ArrowInvalid
 from tqdm import tqdm
 
@@ -79,7 +79,9 @@ from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
 # Cache directory for annotation snapshots written by InSituData.quicksave().
 _QUICKSAVE_DIR = CACHE / "quicksaves"
-_QUICKSAVE_PATTERN = "{slide_id}__{sample_id}__{savetime}__{uid}"
+# name parts written by quicksave(): savetime "%y%m%d_%H-%M-%S", uid = first 8 hex chars of a uuid4
+_QUICKSAVE_SAVETIME = re.compile(r"\d{6}_\d{2}-\d{2}-\d{2}")
+_QUICKSAVE_UID = re.compile(r"[0-9a-f]{8}")
 
 # Maps modality name → (factory_callable_or_None, private_attr_name).
 # Used by _clear_modality and unload as the single source of truth for
@@ -2452,19 +2454,28 @@ class InSituData:
 
         logger.info("Quicksave '%s' written to %s.", uid, outdir)
 
+    def _quicksave_prefix(self) -> str:
+        return f"{self._slide_id}__{self._sample_id}"
+
     @staticmethod
     def _iter_quicksaves():
-        """Yield ``(directory, parsed_name_fields)`` for every readable quicksave."""
+        """Yield ``(directory, prefix, savetime, uid)`` for every readable quicksave.
+
+        Names are ``<slide_id>__<sample_id>__<savetime>__<uid>``. They are split from the
+        right, because the ids may themselves contain ``__``; ``prefix`` is
+        ``<slide_id>__<sample_id>``.
+        """
         if not _QUICKSAVE_DIR.is_dir():
             return
         for d in sorted(_QUICKSAVE_DIR.glob("[!.]*")):
             if not d.is_dir():
                 continue
-            parsed = parse_string(_QUICKSAVE_PATTERN, d.name)
-            if parsed is None:
+            parts = d.name.rsplit("__", 2)
+            if len(parts) != 3 or not _QUICKSAVE_SAVETIME.fullmatch(parts[1]) \
+                    or not _QUICKSAVE_UID.fullmatch(parts[2]):
                 # not a quicksave directory (e.g. a user folder) - ignore it
                 continue
-            yield d, parsed.named
+            yield d, parts[0], parts[1], parts[2]
 
     def list_quicksaves(self):
         """List all available quicksaves for this object.
@@ -2485,11 +2496,14 @@ class InSituData:
             "uid": [],
             "note": []
         }
-        for d, fields in self._iter_quicksaves():
-            if fields["slide_id"] != str(self._slide_id) or fields["sample_id"] != str(self._sample_id):
+        own_prefix = self._quicksave_prefix()
+        for d, prefix, savetime, uid in self._iter_quicksaves():
+            if prefix != own_prefix:
                 continue
-            for key, value in fields.items():
-                res[key].append(value)
+            res["slide_id"].append(str(self._slide_id))
+            res["sample_id"].append(str(self._sample_id))
+            res["savetime"].append(savetime)
+            res["uid"].append(uid)
 
             notepath = d / "note.txt"
             if notepath.exists():
@@ -2514,18 +2528,23 @@ class InSituData:
             uid: The 8-character UID of the quicksave to restore.
         """
         # find quicksaves with the uid
-        matches = [d for d, fields in self._iter_quicksaves() if fields["uid"] == uid]
+        matches = [(d, prefix) for d, prefix, _, u in self._iter_quicksaves() if u == uid]
 
         if len(matches) == 0:
             logger.warning("No quicksave with uid '%s' found. Use `.list_quicksaves()` to list all available quicksaves.", uid)
             return
         if len(matches) > 1:
             raise ValueError(f"More than one quicksave with uid '{uid}' found.")
+        match_dir, match_prefix = matches[0]
+        if match_prefix != self._quicksave_prefix():
+            logger.warning(
+                "Quicksave '%s' was written from a different slide/sample ('%s'); restoring it anyway.",
+                uid, match_prefix)
 
         # quicksave() writes the snapshot into annotations/<time-based uid>/;
         # take the newest one by name should there be several
         snapshot_dirs = sorted(
-            (p for p in (matches[0] / "annotations").glob("[!.]*") if p.is_dir()),
+            (p for p in (match_dir / "annotations").glob("[!.]*") if p.is_dir()),
             key=lambda p: p.name
         )
         if not snapshot_dirs:

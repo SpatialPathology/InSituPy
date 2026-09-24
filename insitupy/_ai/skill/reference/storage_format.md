@@ -83,7 +83,10 @@ project_folder/
 - Versioned save directories (cells/, annotations/, regions/) are named
   `<YYMMDD-HHMMSSffffff-hex8>` (e.g. `250805-115555000343-2c58ca86`): a
   microsecond timestamp plus an 8-character hex uid
-- `data.<modality>` in .ispy is the committed save; loaders read it and fall
-  back to the newest directory name only when it is absent; `history` lists
-  older saves still on disk (pruned by `save()` unless `keep_history=True`)
+- For cells, annotations and regions, `data.<modality>` in .ispy is the
+  committed save; loaders read it and fall back to the newest directory name
+  only when it is absent; `history` lists older saves still on disk (pruned
+  by `save()` unless `keep_history=True`). Images, transcripts and units are
+  read from their fixed paths (`images/*.zarr`,
+  `transcripts/transcripts.parquet`, `units/`), not via `data.<modality>`
 - Paths in .ispy are relative to the project folder

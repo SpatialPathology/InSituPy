@@ -34,8 +34,9 @@ def _make_xd(slide_id="slide1", sample_id="sampleA"):
     return xd
 
 
-def test_quicksave_roundtrip(quicksave_dir):
-    xd = _make_xd()
+@pytest.mark.parametrize("slide_id", ["slide1", "run__7"])  # "__" is the name separator
+def test_quicksave_roundtrip(quicksave_dir, slide_id):
+    xd = _make_xd(slide_id=slide_id)
     original = xd.annotations["pathology"].geometry.iloc[0]
 
     xd.quicksave(note="before edit")
@@ -43,7 +44,7 @@ def test_quicksave_roundtrip(quicksave_dir):
     listing = xd.list_quicksaves()
     assert len(listing) == 1
     assert listing["note"].iloc[0] == "before edit"
-    assert listing["slide_id"].iloc[0] == "slide1"
+    assert listing["slide_id"].iloc[0] == slide_id
     uid = listing["uid"].iloc[0]
 
     xd._annotations = AnnotationsData()
