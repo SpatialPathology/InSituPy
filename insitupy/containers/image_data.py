@@ -5,10 +5,12 @@ import os
 from numbers import Number
 from pathlib import Path
 from typing import Literal
+from warnings import warn
 
 import dask.array as da
 import numpy as np
 
+from insitupy._exceptions import NoImageOverlapError
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.images.axes import (
@@ -465,7 +467,10 @@ class ImageData(DeepCopyMixin):
         Slices each stored image (or pyramid) to the physical-unit region
         defined by *xlim* and *ylim* using
         :func:`~insitupy.images.utils.crop_dask_array_or_pyramid`, and
-        records the crop coordinates in the metadata.
+        records the crop coordinates in the metadata. Images that do not
+        overlap the region are dropped with a warning, since keeping them
+        uncropped would leave them in a different coordinate frame than the
+        cropped ones.
 
         Args:
             xlim: ``(x_min, x_max)`` in physical units (e.g. µm).
@@ -476,28 +481,40 @@ class ImageData(DeepCopyMixin):
         Returns:
             ImageData or None: Cropped copy when ``inplace=False``,
             otherwise None.
+
+        Raises:
+            NoImageOverlapError: If the region does not overlap any of the
+                images. The object is left unchanged.
         """
+        # crop all images first, so that a region overlapping no image raises
+        # before anything is modified
+        names = list(self._metadata.keys())
+        cropped = {}
+        dropped = []
+        for n in names:
+            try:
+                cropped[n] = crop_dask_array_or_pyramid(
+                    data=self[n],
+                    xlim=xlim,
+                    ylim=ylim,
+                    pixel_size=self._metadata[n]['pixel_size']
+                )
+            except NoImageOverlapError:
+                dropped.append(n)
+
+        if names and not cropped:
+            raise NoImageOverlapError(xlim, ylim)
+
         # check if the changes are supposed to be made in place or not
         if inplace:
             _self = self
         else:
             _self = self.copy()
-        # extract names from metadata
-        names = list(_self._metadata.keys())
-        for n in names:
-            # extract the image pyramid
-            img_data = _self[n]
 
-            # extract pixel size
-            pixel_size = _self._metadata[n]['pixel_size']
+        for n in dropped:
+            del _self[n]
 
-            cropped_img_data = crop_dask_array_or_pyramid(
-                data=img_data,
-                xlim=xlim,
-                ylim=ylim,
-                pixel_size=pixel_size
-            )
-
+        for n, cropped_img_data in cropped.items():
             # save cropping properties in metadata
             _self._metadata[n]["cropping_xlim"] = xlim
             _self._metadata[n]["cropping_ylim"] = ylim
@@ -509,6 +526,14 @@ class ImageData(DeepCopyMixin):
 
             # add cropped pyramid to object
             _self._data[n] = cropped_img_data
+
+        if dropped:
+            warn(
+                f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap with "
+                f"image(s) {dropped}. They were removed from the cropped data.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if not inplace:
             return _self

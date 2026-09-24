@@ -114,7 +114,6 @@ def apply_warp(
     import cv2
 
     img_axes = ImageAxes(axes)
-    h_img, w_img = img_axes.Y, img_axes.X  # axis indices
 
     # --- SHRT_MAX size guard ---
     max_dim = max(image.shape[img_axes.Y], image.shape[img_axes.X])

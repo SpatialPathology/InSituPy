@@ -38,6 +38,7 @@ from insitupy._exceptions import (
     InSituDataRepeatedCropError,
     ModalityNotFoundError,
     ModalityNotFoundWarning,
+    NoImageOverlapError,
 )
 from insitupy._io.files import (
     check_overwrite_and_remove_if_true,
@@ -70,26 +71,6 @@ from insitupy.containers.io import (
 from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
-
-
-def _region_overlaps_image(images, xlim, ylim) -> bool:
-    """Return True if the crop region overlaps with any image in *images*.
-
-    Args:
-        images: :class:`~insitupy.containers.ImageData` instance.
-        xlim: ``(x_min, x_max)`` of the crop region in physical units.
-        ylim: ``(y_min, y_max)`` of the crop region in physical units.
-    """
-    for name in images.names:
-        meta = images._metadata[name]
-        pixel_size = meta['pixel_size']
-        shape = meta['shape']
-        img_h, img_w = shape[0], shape[1]
-        img_xmax = img_w * pixel_size
-        img_ymax = img_h * pixel_size
-        if xlim[0] < img_xmax and xlim[1] > 0 and ylim[0] < img_ymax and ylim[1] > 0:
-            return True
-    return False
 
 
 # Maps modality name → (factory_callable_or_None, private_attr_name).
@@ -847,14 +828,25 @@ class InSituData:
             xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
             ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
             inplace (bool): If True, modify the data in place (keeping the object's uid).
-                Otherwise, return a new cropped dataset - a detached copy whose experiment
-                uid is cleared to None; adding it to an InSituExperiment mints a fresh uid.
+                If the crop raises, the object is left unchanged. The modality containers
+                (``cells``, ``images``, ...) are replaced by cropped ones, so a reference
+                taken before the crop (e.g. ``cells = data.cells``) still holds the uncropped
+                data; access them through the object again after the crop. Otherwise, return
+                a new cropped dataset - a detached copy whose experiment uid is cleared to
+                None; adding it to an InSituExperiment mints a fresh uid.
             materialize_transcripts (bool): If True (default), compute and re-wrap the transcript
                 Dask DataFrame after cropping to avoid accumulating a deep lazy task graph.
-                Set to False to defer computation (e.g., when chaining multiple crops).
+                Set to False to defer computation (e.g., when chaining multiple crops). With
+                False, the cropped transcripts are not counted, so a region that contains
+                only transcripts is never reported as empty; a warning is issued if the
+                region contains no cells and no image.
+
+        Images that do not overlap the region are removed with a warning (see
+        :meth:`~insitupy.containers.ImageData.crop`).
 
         Raises:
-            ValueError: If none of region_tuple, layer_name, or xlim/ylim are provided.
+            ValueError: If none of region_tuple, layer_name, or xlim/ylim are provided, or
+                if the region contains no image, cells or transcripts.
         """
         # check if the changes are supposed to be made in place or not
         if inplace:
@@ -910,43 +902,63 @@ class InSituData:
         cells_were_loaded = not self.cells.is_empty
         transcripts_were_loaded = self._transcripts is not None
 
-        if not _self.cells.is_empty:
-            _self.cells.crop(
-                shape=shape,
-                xlim=xlim, ylim=ylim,
-                inplace=True, verbose=False
+        # Crop every modality into staged results first and commit them to _self
+        # only after the checks below pass, so a failing in-place crop leaves the
+        # object unchanged. A non-inplace crop works on a throwaway copy, which
+        # can be cropped in place directly without a second copy.
+        def _staged_crop(container, **kwargs):
+            if inplace:
+                return container.crop(inplace=False, **kwargs)
+            container.crop(inplace=True, **kwargs)
+            return container
+
+        cropped_cells = _self._cells
+        if not _self._cells.is_empty:
+            cropped_cells = _staged_crop(
+                _self._cells, shape=shape, xlim=xlim, ylim=ylim, verbose=False
             )
 
-        if not _self.units.is_empty:
-            _self.units.crop(shape=shape, xlim=xlim, ylim=ylim, inplace=True, verbose=verbose)
+        cropped_units = _self._units
+        if not _self._units.is_empty:
+            cropped_units = _staged_crop(
+                _self._units, shape=shape, xlim=xlim, ylim=ylim, verbose=verbose
+            )
 
-        if _self.transcripts is not None:
-            _self.transcripts = _crop_transcripts(
-                transcript_df=_self.transcripts,
+        # _crop_transcripts never modifies its input
+        cropped_transcripts = _self._transcripts
+        if _self._transcripts is not None:
+            cropped_transcripts = _crop_transcripts(
+                transcript_df=_self._transcripts,
                 shape=shape,
                 xlim=xlim, ylim=ylim, verbose=verbose,
                 materialize=materialize_transcripts
             )
 
-        # check image overlap before attempting to crop; if the region is entirely
-        # outside the image extent we skip the image crop rather than raise an error
-        if not self._images.is_empty:
-            image_overlap = _region_overlaps_image(self._images, xlim, ylim)
-            if image_overlap:
-                _self.images.crop(xlim=xlim, ylim=ylim, inplace=True)
-        else:
-            image_overlap = False
+        # images that do not overlap the region are dropped (with a warning) by
+        # ImageData.crop; if none overlaps, it raises and all images are dropped
+        cropped_images = _self._images
+        missed_images = []
+        if not _self._images.is_empty:
+            try:
+                cropped_images = _staged_crop(_self._images, xlim=xlim, ylim=ylim)
+            except NoImageOverlapError:
+                missed_images = list(_self._images.keys())
+                cropped_images = ImageData()
+        image_overlap = not cropped_images.is_empty
 
-        # post-crop omic presence check
-        has_cells = cells_were_loaded and not _self.cells.is_empty
-        has_transcripts = (
-            transcripts_were_loaded
-            and _self.transcripts is not None
-            and (
-                isinstance(_self._transcripts, dd.DataFrame)
-                or len(_self.transcripts) > 0
-            )
+        # post-crop omic presence check; a layer can survive the crop with 0 cells
+        has_cells = cells_were_loaded and any(
+            cropped_cells[k].table.n_obs > 0 for k in cropped_cells.keys()
         )
+        if cropped_transcripts is None:
+            has_transcripts = False
+        elif materialize_transcripts:
+            # materialized transcripts are backed by in-memory pandas partitions,
+            # so len() is cheap
+            has_transcripts = len(cropped_transcripts) > 0
+        else:
+            # lazy transcripts are treated as present to avoid a costly compute
+            has_transcripts = True
         has_omic_data = has_cells or has_transcripts
 
         if not image_overlap and not has_omic_data:
@@ -970,30 +982,44 @@ class InSituData:
                 stacklevel=2,
             )
 
-        if not image_overlap and not self._images.is_empty:
+        if missed_images:
             warn(
                 f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap with any "
-                f"loaded image. The returned object contains omic data only.",
+                f"image ({missed_images}). They were removed from the cropped data.",
                 UserWarning,
                 stacklevel=2,
             )
 
-        if not self._annotations.is_empty:
-
-            _self.annotations.crop(
-                shape=shape,
-                xlim=tuple([elem for elem in xlim]),
-                ylim=tuple([elem for elem in ylim]),
-                verbose=verbose, inplace=True
-                )
-
-        if not self._regions.is_empty:
-            _self.regions.crop(
-                shape=shape,
-                xlim=tuple([elem for elem in xlim]),
-                ylim=tuple([elem for elem in ylim]),
-                verbose=verbose, inplace=True
+        if cropped_transcripts is not None and not materialize_transcripts                 and not has_cells and not image_overlap:
+            warn(
+                f"The crop region (xlim={xlim}, ylim={ylim}) contains no cells or images, "
+                f"and transcripts were not counted (materialize_transcripts=False). "
+                f"The cropped data may be empty.",
+                UserWarning,
+                stacklevel=2,
             )
+
+        cropped_annotations = _self._annotations
+        if not _self._annotations.is_empty:
+            cropped_annotations = _staged_crop(
+                _self._annotations, shape=shape,
+                xlim=tuple(xlim), ylim=tuple(ylim), verbose=verbose
+            )
+
+        cropped_regions = _self._regions
+        if not _self._regions.is_empty:
+            cropped_regions = _staged_crop(
+                _self._regions, shape=shape,
+                xlim=tuple(xlim), ylim=tuple(ylim), verbose=verbose
+            )
+
+        # commit: all checks passed, replace the modalities with their cropped versions
+        _self._cells = cropped_cells
+        _self._units = cropped_units
+        _self._transcripts = cropped_transcripts
+        _self._images = cropped_images
+        _self._annotations = cropped_annotations
+        _self._regions = cropped_regions
 
         #if _self.metadata is not None:
         # add information about cropping to metadata
