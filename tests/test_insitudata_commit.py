@@ -27,6 +27,7 @@ from shapely.geometry import Point
 
 from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._core.data import InSituData
+from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.containers.cell_data import CellData
 from insitupy.containers.spatial_units_data import SpatialUnitsData
 
@@ -46,7 +47,11 @@ def _make_units(names, unit_type="unit", seed=0):
     return SpatialUnitsData(shapes=gdf, data=table, unit_type=unit_type)
 
 
-def _make_xd(seed=0, n_cells=5, n_genes=3, transcripts=False, units=False):
+# label mask of the boundaries fixture: values 1..5 = seg_mask_value of cells c0..c4
+_MASK = np.arange(6, dtype=np.uint32).reshape(2, 3)
+
+
+def _make_xd(seed=0, n_cells=5, n_genes=3, transcripts=False, units=False, boundaries=False):
     rng = np.random.default_rng(seed)
     X = rng.integers(0, 10, size=(n_cells, n_genes)).astype(float)
     obs = pd.DataFrame(index=pd.Index([f"c{i}" for i in range(n_cells)]))
@@ -55,7 +60,11 @@ def _make_xd(seed=0, n_cells=5, n_genes=3, transcripts=False, units=False):
     table.obsm["spatial"] = rng.random((n_cells, 2)) * 100
     xd = InSituData(path=None, metadata=None,
                     slide_id="s", sample_id="s", method_name="t", method_params={})
-    xd.cells.add_celldata(cd=CellData(table=table, boundaries=None), key="main", is_main=True)
+    bounds = None
+    if boundaries:
+        bounds = BoundariesData(cell_names=list(obs.index), seg_mask_value=list(range(1, n_cells + 1)))
+        bounds.add_boundaries(cell_boundaries=_MASK, nuclei_boundaries=None, pixel_size=1)
+    xd.cells.add_celldata(cd=CellData(table=table, boundaries=bounds), key="main", is_main=True)
     if transcripts:
         df = pd.DataFrame({
             "x": rng.random(40) * 100,
@@ -309,6 +318,24 @@ def test_copy_saveas_over_own_source_is_safe(tmp_path):
     pd.testing.assert_frame_equal(c.transcripts.compute().reset_index(drop=True), original)
     assert c.path == p.resolve()
     assert _dirs(tmp_path) == ["p"]
+
+
+def test_overwrite_reopens_lazily_read_boundaries(tmp_path):
+    """Every save writes boundaries to a NEW cells/<uid> directory, so masks that a copy still
+    reads lazily from the overwritten project point into a deleted directory after the swap.
+    zarr reads a missing chunk as zeros instead of raising, so without re-opening them the
+    segmentation masks would silently become all-zero."""
+    p, xd = _saved(tmp_path, boundaries=True)
+    before = sorted(d.name for d in (p / "cells").iterdir())
+
+    c = xd.copy()  # keeps reading the masks lazily from the cells/<uid> directory in p
+    c.saveas(p, overwrite=True, verbose=False)
+
+    assert sorted(d.name for d in (p / "cells").iterdir()) != before, "expected a new cells/<uid>"
+    np.testing.assert_array_equal(np.asarray(c.cells.boundaries["cells"][0]), _MASK)
+    np.testing.assert_array_equal(
+        np.asarray(InSituData.read(p).cells.boundaries["cells"][0]), _MASK
+    )
 
 
 def test_atomic_replace_dir_recovers_orphaned_backup(tmp_path, monkeypatch):
