@@ -30,6 +30,7 @@ from insitupy._constants import (
     MODALITIES_ABBR,
     with_insitupy_style,
 )
+from insitupy._core._commit import resolve_committed_dir
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
 from insitupy._io.files import (
@@ -2290,10 +2291,11 @@ class InSituExperiment:
             return "unknown"
 
     def _latest_cells_save_dir(self, xd: "InSituData", *, label: str | None = None) -> Path:
-        """Return the most recent timestamped cells save directory for *xd*.
+        """Return the committed cells save directory for *xd*.
 
-        Locates ``<xd path>/cells`` and returns its newest (by timestamp) layer
-        directory.  Shared by :meth:`_resolve_cell_layer_from_disk` and
+        Locates ``<xd path>/cells`` and returns the directory the project's
+        ``.ispy`` pointer names (newest-by-name only for stores without a
+        pointer).  Shared by :meth:`_resolve_cell_layer_from_disk` and
         :meth:`_resolve_per_sample_h5ad_paths`; callers read the
         ``.multicelldata`` sidecar inside the returned directory as needed.
 
@@ -2303,14 +2305,12 @@ class InSituExperiment:
                 error messages to keep them actionable.
 
         Returns:
-            Path: The most recent timestamped directory under ``cells/``.
+            Path: The committed timestamped directory under ``cells/``.
 
         Raises:
             ValueError: If *xd* has no save path, no ``cells`` directory, or no
                 saved cells timestamp directory.
         """
-        from insitupy.utils._helpers import sort_paths_by_datetime
-
         desc = f" for dataset '{label}'" if label is not None else ""
         if xd._path is None:
             raise ValueError(
@@ -2323,10 +2323,10 @@ class InSituExperiment:
                 f"No cells directory found{desc} at '{cells_dir}'. "
                 "Ensure the dataset has been saved with cell data."
             )
-        timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
-        if not timestamp_dirs:
+        committed = resolve_committed_dir(xd._path, "cells")
+        if committed is None:
             raise ValueError(f"No saved cells found{desc} in '{cells_dir}'.")
-        return sort_paths_by_datetime(timestamp_dirs)[0]
+        return committed
 
     def _resolve_per_sample_h5ad_paths(
         self,

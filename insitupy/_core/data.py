@@ -33,6 +33,11 @@ from insitupy._constants import (
     MODALITIES_COLOR_DICT,
     with_insitupy_style,
 )
+from insitupy._core._commit import (
+    discard_new_saves,
+    prune_uncommitted,
+    resolve_committed_dir,
+)
 from insitupy._exceptions import (
     InSituDataConstructorPathError,
     InSituDataRepeatedCropError,
@@ -41,6 +46,7 @@ from insitupy._exceptions import (
     NoImageOverlapError,
 )
 from insitupy._io.files import (
+    atomic_replace_dir,
     check_overwrite_and_remove_if_true,
     read_json,
     write_dict_to_json,
@@ -68,7 +74,6 @@ from insitupy.containers.io import (
     _save_transcripts,
     _save_units,
 )
-from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
@@ -1294,9 +1299,11 @@ class InSituData:
     def load_annotations(self, verbose: bool = False):
         """Load annotations from the project directory into :attr:`annotations`.
 
-        Reads the most recently saved annotations sub-folder.  If no
-        annotations are found on disk, a warning is issued when
-        ``verbose=True`` and the attribute remains empty.
+        Reads the committed annotations sub-folder (the one the project's
+        ``.ispy`` file points to; the newest sub-folder by name only for
+        stores without a pointer).  If no annotations are found on disk, a
+        warning is issued when ``verbose=True`` and the attribute remains
+        empty.
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1304,21 +1311,14 @@ class InSituData:
         """
         if verbose:
             logger.info("Loading annotations...")
-        # try:
-        #     p = self._metadata["data"]["annotations"]
-        # except KeyError:
-        #     if verbose:
-        #         raise ModalityNotFoundError(modality="annotations")
-        # extract available paths
-        paths = [p for p in (self.path / "annotations").glob("[!.]*") if p.is_dir()]
 
-        if len(paths) == 0:
+        path = resolve_committed_dir(self.path, "annotations")
+
+        if path is None:
             if verbose:
                 # Example usage
                 warn(ModalityNotFoundWarning("annotations"), stacklevel=2)
         else:
-            # extract the latest entry
-            path = sort_paths_by_datetime(paths)[0]
             self._annotations = _read_shapesdata(path=path, mode="annotations")
 
 
@@ -1370,8 +1370,10 @@ class InSituData:
     def load_regions(self, verbose: bool = False):
         """Load regions from the project directory into :attr:`regions`.
 
-        Reads the most recently saved regions sub-folder.  If no regions are
-        found on disk, a warning is issued when ``verbose=True``.
+        Reads the committed regions sub-folder (the one the project's
+        ``.ispy`` file points to; the newest sub-folder by name only for
+        stores without a pointer).  If no regions are found on disk, a
+        warning is issued when ``verbose=True``.
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1379,21 +1381,13 @@ class InSituData:
         """
         if verbose:
             logger.info("Loading regions...")
-        # try:
-        #     p = self._metadata["data"]["regions"]
-        # except KeyError:
-        #     if verbose:
-        #         raise ModalityNotFoundError(modality="regions")
 
-        # extract available paths
-        paths = [p for p in (self.path / "regions").glob("[!.]*") if p.is_dir()]
+        path = resolve_committed_dir(self.path, "regions")
 
-        if len(paths) == 0:
+        if path is None:
             if verbose:
                 warn(ModalityNotFoundWarning("regions"), stacklevel=2)
         else:
-            # extract the latest entry
-            path = sort_paths_by_datetime(paths)[0]
             self._regions = _read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
@@ -1513,9 +1507,11 @@ class InSituData:
     def load_cells(self, verbose: bool = False):
         """Load cell data from the project directory into :attr:`cells`.
 
-        Reads the most recently saved cells sub-folder, which contains the
-        expression matrix and segmentation boundaries.  Requires the object to
-        have been loaded from a saved project (:attr:`from_insitudata`).
+        Reads the committed cells sub-folder (the one the project's ``.ispy``
+        file points to; the newest sub-folder by name only for stores without
+        a pointer), which contains the expression matrix and segmentation
+        boundaries.  Requires the object to have been loaded from a saved
+        project (:attr:`from_insitudata`).
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1525,21 +1521,12 @@ class InSituData:
             logger.info("Loading cells...")
 
         if self.from_insitudata:
-            # try:
-            #     cells_path = self._metadata["data"]["cells"]
-            # except KeyError:
-            #     if verbose:
-            #         raise ModalityNotFoundError(modality="cells")
+            path = resolve_committed_dir(self.path, "cells")
 
-            # extract available paths
-            paths = [p for p in (self.path / "cells").glob("[!.]*") if p.is_dir()]
-
-            if len(paths) == 0:
+            if path is None:
                 if verbose:
                     warn(ModalityNotFoundWarning("cells"), stacklevel=2)
             else:
-                # extract the latest entry
-                path = sort_paths_by_datetime(paths)[0]
                 self._cells = _read_multicelldata(path=path)
         else:
             NoProjectLoadWarning()
@@ -2111,30 +2098,37 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
-        self._metadata["uid"] = self._uid
-        self._metadata["slide_id"] = self._slide_id
-        self._metadata["sample_id"] = self._sample_id
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._metadata["uid"] = self._uid
+            self._metadata["slide_id"] = self._slide_id
+            self._metadata["sample_id"] = self._sample_id
 
-        if not self._annotations.is_empty:
-            if verbose:
-                logger.info("Updating annotations...")
-            _save_annotations(
-                annotations=self._annotations,
-                path=path,
-                metadata=self._metadata,
-            )
+            if not self._annotations.is_empty:
+                if verbose:
+                    logger.info("Updating annotations...")
+                _save_annotations(
+                    annotations=self._annotations,
+                    path=path,
+                    metadata=self._metadata,
+                )
 
-        if not self._regions.is_empty:
-            if verbose:
-                logger.info("Updating regions...")
-            _save_regions(
-                regions=self._regions,
-                path=path,
-                metadata=self._metadata,
-            )
+            if not self._regions.is_empty:
+                if verbose:
+                    logger.info("Updating regions...")
+                _save_regions(
+                    regions=self._regions,
+                    path=path,
+                    metadata=self._metadata,
+                )
 
-        self._metadata["version"] = __version__
-        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+            self._metadata["version"] = __version__
+            write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
 
         if verbose:
             logger.info("Geometries saved.")
@@ -2169,22 +2163,29 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
-        self._metadata["uid"] = self._uid
-        self._metadata["slide_id"] = self._slide_id
-        self._metadata["sample_id"] = self._sample_id
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._metadata["uid"] = self._uid
+            self._metadata["slide_id"] = self._slide_id
+            self._metadata["sample_id"] = self._sample_id
 
-        if not self._cells.is_empty:
-            if verbose:
-                logger.info("Updating cells...")
-            _save_cells(
-                cells=self._cells,
-                path=path,
-                metadata=self._metadata,
-                overwrite=True,
-            )
+            if not self._cells.is_empty:
+                if verbose:
+                    logger.info("Updating cells...")
+                _save_cells(
+                    cells=self._cells,
+                    path=path,
+                    metadata=self._metadata,
+                    overwrite=True,
+                )
 
-        self._metadata["version"] = __version__
-        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+            self._metadata["version"] = __version__
+            write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
 
         if verbose:
             logger.info("Cells saved.")
@@ -2675,30 +2676,33 @@ class InSituData:
     def remove_history(self,
                        verbose: bool = True
                        ):
-        """Delete all but the most recent save of each modality from disk.
+        """Delete all but the committed save of each modality from disk.
 
         InSituPy preserves previous saves as time-stamped sub-folders.  This
-        method removes all but the latest entry for ``annotations``, ``cells``,
-        and ``regions``, freeing disk space.
+        method removes every save of ``annotations``, ``cells`` and ``regions``
+        except the one the project's ``.ispy`` file marks as current (not the
+        one with the newest name, which is unreliable under clock skew),
+        freeing disk space.  Sub-folders InSituPy did not create are left
+        alone.  ``history`` entries of deleted saves are dropped as well.
 
         Args:
             verbose: If ``True``, log how many entries were removed per
                 modality. Defaults to ``True``.
+
+        Raises:
+            RuntimeError: If no project is linked.
         """
-        for cat in ["annotations", "cells", "regions"]:
-            dirs_to_remove = []
-            #if hasattr(self, cat):
-            files = sorted((self._path / cat).glob("[!.]*"))
-            if len(files) > 1:
-                dirs_to_remove = files[:-1]
+        if self._path is None:
+            raise RuntimeError(
+                "Cannot remove history: no project is linked. Save the object first."
+            )
 
-                for d in dirs_to_remove:
-                    shutil.rmtree(d)
-
-                if verbose:
-                    logger.info("Removed %d entries from '.%s'.", len(dirs_to_remove), cat)
-            else:
-                if verbose:
+        removed = prune_uncommitted(self._path, metadata=self._metadata)
+        if verbose:
+            for cat, n_removed in removed.items():
+                if n_removed > 0:
+                    logger.info("Removed %d entries from '.%s'.", n_removed, cat)
+                else:
                     logger.info("No history found for '%s'.", cat)
 
     def remove_modality(self,
@@ -2724,6 +2728,36 @@ class InSituData:
             logger.warning("No modality '%s' found. Nothing removed.", modality)
 
     def _update_to_existing_project(
+        self,
+        path: str | os.PathLike | Path | None,
+        verbose: bool = True,
+        sync_images: bool = False,
+        images_only: bool = False,
+        overwrite_images: bool = False
+        ):
+        """Write the changed modalities into the existing project at *path* and commit.
+
+        The ``.ispy`` write is the commit: it is the last step, and it is atomic.
+        If anything fails before it, the save directories written so far are
+        deleted and the in-memory metadata is restored, so the previously
+        committed state stays what loaders read and the object stays consistent.
+        """
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._write_project_update(
+                path=path,
+                verbose=verbose,
+                sync_images=sync_images,
+                images_only=images_only,
+                overwrite_images=overwrite_images,
+            )
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
+
+    def _write_project_update(
         self,
         path: str | os.PathLike | Path | None,
         verbose: bool = True,
@@ -2775,12 +2809,6 @@ class InSituData:
                     overwrite=True
                 )
 
-            # save units
-            if not self._units.is_empty:
-                if verbose:
-                    logger.info("Updating units...")
-                _save_units(units=self._units, path=path, metadata=self._metadata, overwrite=True)
-
             # save annotations
             if not self._annotations.is_empty:
                 annotations = self._annotations
@@ -2802,6 +2830,15 @@ class InSituData:
                     path=path,
                     metadata=self._metadata
                 )
+
+            # save units - last, so the (unversioned) units swap is the final write before
+            # the .ispy commit. A hard crash between this swap and the .ispy write can still
+            # pair new units with the old cells/geometries; that residual closes only once
+            # units are versioned like the other modalities.
+            if not self._units.is_empty:
+                if verbose:
+                    logger.info("Updating units...")
+                _save_units(units=self._units, path=path, metadata=self._metadata, overwrite=True)
 
         # save version of InSituPy
         self._metadata["version"] = __version__
