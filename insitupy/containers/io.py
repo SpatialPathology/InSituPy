@@ -504,7 +504,10 @@ def _save_annotations(annotations, path, metadata):
     with _discard_on_failure(annot_path):
         annotations.save(annot_path)
 
-    #if metadata is not None:
+    # metadata=None: standalone write outside a project (e.g. quicksave)
+    if metadata is None:
+        return
+
     try:
         # move old paths to history
         old_path = metadata["data"]["annotations"]
@@ -525,7 +528,10 @@ def _save_regions(regions, path, metadata):
     with _discard_on_failure(annot_path):
         regions.save(annot_path)
 
-    #if metadata is not None:
+    # metadata=None: standalone write outside a project
+    if metadata is None:
+        return
+
     try:
         # move old paths to history
         old_path = metadata["data"]["regions"]

@@ -77,6 +77,9 @@ from insitupy.containers.io import (
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
+# Cache directory for annotation snapshots written by InSituData.quicksave().
+_QUICKSAVE_DIR = CACHE / "quicksaves"
+_QUICKSAVE_PATTERN = "{slide_id}__{sample_id}__{savetime}__{uid}"
 
 # Maps modality name → (factory_callable_or_None, private_attr_name).
 # Used by _clear_modality and unload as the single source of truth for
@@ -117,7 +120,6 @@ class InSituData:
         from_insitudata (bool): Indicates whether the object is backed by a saved InSituPy project (its path contains ``.ispy``).
 
         viewer (napari.Viewer): Napari viewer for visualizing the data.
-        quicksave_dir (Path): *Experimental feature!* Directory for quicksave operations.
 
     Methods:
         assign_geometries(geometry_type, keys, add_masks, add_to_obs, overwrite, cells_layer):
@@ -256,7 +258,6 @@ class InSituData:
 
         # other
         #self._viewer = None
-        self._quicksave_dir = None
 
     def __repr__(self):
         # if len(self._metadata) == 0:
@@ -2411,58 +2412,71 @@ class InSituData:
         """Save the current annotations to a time-stamped cache directory.
 
         Creates a snapshot of :attr:`annotations` in a dedicated quicksave
-        cache (``~/.insitupy/quicksaves/``).  Each snapshot is identified by a
-        short UID and can be restored with :meth:`load_quicksave`.  Useful for
-        preserving intermediate annotation states without triggering a full
+        cache (``~/.cache/InSituPy/quicksaves/``).  Each snapshot is identified
+        by a short UID and can be restored with :meth:`load_quicksave`.  Useful
+        for preserving intermediate annotation states without triggering a full
         :meth:`save`.
 
         Args:
             note: Optional free-text note saved alongside the snapshot as
                 ``note.txt``. Defaults to ``None``.
         """
-        # create quicksave directory if it does not exist already
-        self._quicksave_dir = CACHE / "quicksaves"
-        self._quicksave_dir.mkdir(parents=True, exist_ok=True)
-
         # save annotations
-        if self._annotations.is_empty:
+        if self._annotations is None or self._annotations.is_empty:
             logger.warning("No annotations found. Quicksave skipped.")
-        else:
-            annotations = self._annotations
-            # create filename
-            current_datetime = datetime.now().strftime("%y%m%d_%H-%M-%S")
-            slide_id = self._slide_id
-            sample_id = self._sample_id
-            uid = str(uuid4())[:8]
+            return
 
-            # create output directory
-            outname = f"{slide_id}__{sample_id}__{current_datetime}__{uid}"
-            outdir = self._quicksave_dir / outname
+        # create filename
+        current_datetime = datetime.now().strftime("%y%m%d_%H-%M-%S")
+        uid = str(uuid4())[:8]
 
+        # create output directory
+        outname = f"{self._slide_id}__{self._sample_id}__{current_datetime}__{uid}"
+        outdir = _QUICKSAVE_DIR / outname
+        outdir.mkdir(parents=True, exist_ok=True)
+
+        try:
             _save_annotations(
-                annotations=annotations,
+                annotations=self._annotations,
                 path=outdir,
                 metadata=None
             )
 
             if note is not None:
-                with open(outdir / "note.txt", "w") as notefile:
+                with open(outdir / "note.txt", "w", encoding="utf-8") as notefile:
                     notefile.write(note)
+        except Exception:
+            # do not leave a half-written snapshot that list_quicksaves() would show
+            shutil.rmtree(outdir, ignore_errors=True)
+            raise
 
-            # # # zip the output
-            # shutil.make_archive(outdir, format='zip', root_dir=outdir, verbose=False)
-            # shutil.rmtree(outdir) # delete directory
+        logger.info("Quicksave '%s' written to %s.", uid, outdir)
 
+    @staticmethod
+    def _iter_quicksaves():
+        """Yield ``(directory, parsed_name_fields)`` for every readable quicksave."""
+        if not _QUICKSAVE_DIR.is_dir():
+            return
+        for d in sorted(_QUICKSAVE_DIR.glob("[!.]*")):
+            if not d.is_dir():
+                continue
+            parsed = parse_string(_QUICKSAVE_PATTERN, d.name)
+            if parsed is None:
+                # not a quicksave directory (e.g. a user folder) - ignore it
+                continue
+            yield d, parsed.named
 
     def list_quicksaves(self):
         """List all available quicksaves for this object.
 
+        Only snapshots written from an object with the same ``slide_id`` and
+        ``sample_id`` are listed.
+
         Returns:
             A :class:`pandas.DataFrame` with columns ``slide_id``,
-            ``sample_id``, ``savetime``, ``uid``, and ``note``.
+            ``sample_id``, ``savetime``, ``uid``, and ``note`` (empty if there
+            are no quicksaves).
         """
-        pattern = "{slide_id}__{sample_id}__{savetime}__{uid}"
-
         # collect results
         res = {
             "slide_id": [],
@@ -2471,14 +2485,15 @@ class InSituData:
             "uid": [],
             "note": []
         }
-        for d in self._quicksave_dir.glob("[!.]*"):
-            parse_res = parse_string(pattern, d.stem).named
-            for key, value in parse_res.items():
+        for d, fields in self._iter_quicksaves():
+            if fields["slide_id"] != str(self._slide_id) or fields["sample_id"] != str(self._sample_id):
+                continue
+            for key, value in fields.items():
                 res[key].append(value)
 
             notepath = d / "note.txt"
             if notepath.exists():
-                with open(notepath) as notefile:
+                with open(notepath, encoding="utf-8") as notefile:
                     res["note"].append(notefile.read())
             else:
                 res["note"].append("")
@@ -2498,22 +2513,32 @@ class InSituData:
         Args:
             uid: The 8-character UID of the quicksave to restore.
         """
-        # find files with the uid
-        files = list(self._quicksave_dir.glob(f"*{uid}*"))
+        # find quicksaves with the uid
+        matches = [d for d, fields in self._iter_quicksaves() if fields["uid"] == uid]
 
-        if len(files) == 1:
-            ad = _read_shapesdata(files[0] / "annotations", mode="annotations")
-        elif len(files) == 0:
+        if len(matches) == 0:
             logger.warning("No quicksave with uid '%s' found. Use `.list_quicksaves()` to list all available quicksaves.", uid)
-        else:
+            return
+        if len(matches) > 1:
             raise ValueError(f"More than one quicksave with uid '{uid}' found.")
 
+        # quicksave() writes the snapshot into annotations/<time-based uid>/;
+        # take the newest one by name should there be several
+        snapshot_dirs = sorted(
+            (p for p in (matches[0] / "annotations").glob("[!.]*") if p.is_dir()),
+            key=lambda p: p.name
+        )
+        if not snapshot_dirs:
+            logger.warning("Quicksave '%s' contains no annotations.", uid)
+            return
+        ad = _read_shapesdata(snapshot_dirs[-1], mode="annotations")
+
         # add annotations to existing annotations attribute or add a new one
-        # if self._annotations is None:
-        #     self._annotations = AnnotationsData()
-        # else:
+        if self._annotations is None:
+            self._annotations = AnnotationsData()
         for k in ad.metadata.keys():
-            self._annotations.add_data(ad[k], k, verbose=True)
+            # geometries in a quicksave are stored in µm already
+            self._annotations.add_data(ad[k], k, scale_factor=1, verbose=True)
 
     def show(self,
         keys: str | None = None,
