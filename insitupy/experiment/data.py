@@ -30,9 +30,15 @@ from insitupy._constants import (
     MODALITIES_ABBR,
     with_insitupy_style,
 )
+from insitupy._core._commit import resolve_committed_dir
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy._io.files import check_overwrite_and_remove_if_true, read_json, write_dict_to_json
+from insitupy._io.files import (
+    atomic_replace_dir,
+    check_overwrite_and_remove_if_true,
+    read_json,
+    write_dict_to_json,
+)
 from insitupy._logging import WarningCollector, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
@@ -58,8 +64,70 @@ _METADATA_SCHEMA_FILENAME = "metadata.schema.json"
 _METADATA_PARQUET_FILENAME = "metadata.parquet"
 _TABLE_FORMAT_VERSION = 2
 
+# Suffixes of the staging / backup siblings that an interrupted atomic write leaves behind.
+_STAGING_SUFFIXES = (".__ispy_tmp__", ".__ispy_bak__")
+
+# Entries InSituPy itself writes into an experiment root besides its data-NNN dataset
+# directories. ``tables`` holds derived data (the union table) and counts as InSituPy-owned.
+_EXPECTED_ROOT_FILES = {
+    "metadata.csv",
+    _METADATA_PARQUET_FILENAME,
+    _METADATA_SCHEMA_FILENAME,
+    "colors.json",
+    "filters.json",
+    "tables",
+}
+
+_ZIP_OUTPUT_UNSUPPORTED = (
+    "zip_output is not supported for experiments: the resulting data-NNN.zip files cannot be "
+    "read back by InSituExperiment.read(). Use InSituData.saveas(path, zip_output=True) on an "
+    "individual dataset to export a zip archive."
+)
+
 # Sentinel value to detect when 'by' is not explicitly provided
 _UNSET = object()
+
+
+def _unexpected_root_items(obj) -> list[str]:
+    """Names in an experiment root that InSituPy did not write, sorted.
+
+    Used by ``concat(mode="move")``, which deletes the source root after moving its
+    datasets out: whatever this returns would be deleted with it. The experiment's own
+    dataset directories count as expected, since they are what gets moved. So does a
+    ``*.__ispy_tmp__`` staging directory (always a partial write); a ``*.__ispy_bak__``
+    does not, because it can be the only surviving copy of a dataset.
+    """
+    root = Path(obj._path).resolve()
+    own = {
+        Path(xd._path).name
+        for xd in obj._data
+        if xd._path is not None and Path(xd._path).resolve().parent == root
+    }
+    return sorted(
+        p.name for p in root.iterdir()
+        if p.name not in _EXPECTED_ROOT_FILES | own and not p.name.endswith(".__ispy_tmp__")
+    )
+
+
+def _list_dataset_dirs(root: Path) -> list[Path]:
+    """Return the ``data-*`` dataset directories of an experiment root, sorted.
+
+    Directories left behind by an interrupted atomic write are not datasets:
+    ``*.__ispy_tmp__`` is a partial dataset and ``*.__ispy_bak__`` a superseded copy
+    (which can be the only surviving one). They are excluded, with one warning.
+    """
+    found = sorted(p for p in Path(root).glob("data-*") if p.is_dir())
+    leftovers = [p.name for p in found if p.name.endswith(_STAGING_SUFFIXES)]
+    if leftovers:
+        warnings.warn(
+            f"Ignoring {len(leftovers)} director(ies) in '{root}' left over from an "
+            f"interrupted save: {leftovers}. A '.__ispy_bak__' directory can be the only "
+            "surviving copy of a dataset: make sure every dataset reads correctly before "
+            "deleting them.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return [p for p in found if not p.name.endswith(_STAGING_SUFFIXES)]
 
 
 class TableAccessor:
@@ -2285,10 +2353,11 @@ class InSituExperiment:
             return "unknown"
 
     def _latest_cells_save_dir(self, xd: "InSituData", *, label: str | None = None) -> Path:
-        """Return the most recent timestamped cells save directory for *xd*.
+        """Return the committed cells save directory for *xd*.
 
-        Locates ``<xd path>/cells`` and returns its newest (by timestamp) layer
-        directory.  Shared by :meth:`_resolve_cell_layer_from_disk` and
+        Locates ``<xd path>/cells`` and returns the directory the project's
+        ``.ispy`` pointer names (newest-by-name only for stores without a
+        pointer).  Shared by :meth:`_resolve_cell_layer_from_disk` and
         :meth:`_resolve_per_sample_h5ad_paths`; callers read the
         ``.multicelldata`` sidecar inside the returned directory as needed.
 
@@ -2298,14 +2367,12 @@ class InSituExperiment:
                 error messages to keep them actionable.
 
         Returns:
-            Path: The most recent timestamped directory under ``cells/``.
+            Path: The committed timestamped directory under ``cells/``.
 
         Raises:
             ValueError: If *xd* has no save path, no ``cells`` directory, or no
                 saved cells timestamp directory.
         """
-        from insitupy.utils._helpers import sort_paths_by_datetime
-
         desc = f" for dataset '{label}'" if label is not None else ""
         if xd._path is None:
             raise ValueError(
@@ -2318,10 +2385,10 @@ class InSituExperiment:
                 f"No cells directory found{desc} at '{cells_dir}'. "
                 "Ensure the dataset has been saved with cell data."
             )
-        timestamp_dirs = [p for p in cells_dir.glob("[!.]*") if p.is_dir()]
-        if not timestamp_dirs:
+        committed = resolve_committed_dir(xd._path, "cells")
+        if committed is None:
             raise ValueError(f"No saved cells found{desc} in '{cells_dir}'.")
-        return sort_paths_by_datetime(timestamp_dirs)[0]
+        return committed
 
     def _resolve_per_sample_h5ad_paths(
         self,
@@ -2521,46 +2588,12 @@ class InSituExperiment:
 
     @staticmethod
     def _atomic_replace_dir(staging: Path, destination: Path, *, what: str = "write") -> None:
-        """Atomically replace directory *destination* with directory *staging*.
+        """Atomically replace directory *destination* with *staging*.
 
-        Moves an existing *destination* aside to a backup, renames *staging* into
-        place, and deletes the backup only once *destination* is confirmed
-        present. On failure the original *destination* is restored and *staging*
-        is removed; if neither the swap nor the restore succeeds, the backup is
-        kept as the only surviving copy. Any stale backup left by a previous
-        failed write is cleared first.
-
-        Args:
-            staging: Freshly written directory to move into place. Must exist.
-            destination: Final path to replace.
-            what: Verb used in the unrecoverable-failure log message.
+        Thin delegate to :func:`insitupy._io.files.atomic_replace_dir`, kept so the
+        table build can call it through the class.
         """
-        backup = destination.parent / (destination.name + ".__ispy_bak__")
-        # Clear any stale backup left by a previous failed write.
-        check_overwrite_and_remove_if_true(backup, overwrite=True)
-
-        destination_backed_up = False
-        try:
-            if destination.exists():
-                os.rename(destination, backup)
-                destination_backed_up = True
-            os.rename(staging, destination)
-        except Exception:
-            shutil.rmtree(staging, ignore_errors=True)
-            if destination_backed_up and not destination.exists() and backup.exists():
-                try:
-                    os.rename(backup, destination)
-                except Exception:
-                    logger.error(
-                        "%s failed AND the previous data could not be restored "
-                        "automatically. Your original data is preserved at '%s' — "
-                        "rename it back to '%s' manually.", what, backup, destination,
-                    )
-            raise
-        finally:
-            # Remove the backup only once the destination is confirmed in place.
-            if backup.exists() and destination.exists():
-                shutil.rmtree(backup, ignore_errors=True)
+        atomic_replace_dir(staging, destination, what=what)
 
     def build_table(
         self,
@@ -3213,11 +3246,13 @@ class InSituExperiment:
                 "Use confirm=False only after verifying the path is set."
             )
 
-        # new_data's _path was relabeled to the slot above for in-memory consistency, but the
-        # object does not lazily read from bad_path (its modalities are held independently).
-        # Clear the label across the write so InSituData.saveas's self-overwrite guard - which
-        # treats _path as the live backing store - does not misfire on this legitimate replace.
-        # saveas restores _path to bad_path after the write completes.
+        # new_data's _path was relabeled to the slot above for in-memory consistency. Clear the
+        # label across the write only so InSituData.saveas's self-overwrite guard - which treats
+        # _path as the live backing store - does not misfire on this legitimate replace.
+        # new_data may still read lazily from bad_path (e.g. new_data = exp.data[i].copy(), whose
+        # dask graphs point into the slot): that is safe, because saveas writes into a staging
+        # directory first (bad_path stays readable until the swap) and re-opens lazily backed
+        # modalities from the new files afterwards. saveas restores _path to bad_path when done.
         new_data._path = None
         new_data.saveas(bad_path, overwrite=True)
 
@@ -3235,11 +3270,17 @@ class InSituExperiment:
                 confirmation before proceeding.  Set to ``False`` for scripted use.
             delete_from_disk: If ``True``, permanently delete the dataset
                 directory from disk using :func:`shutil.rmtree`.  Skipped
-                silently when the dataset has no path set.  Default ``False``.
+                silently when the dataset has no path set.  Only datasets
+                stored directly inside this experiment's directory can be
+                deleted; a dataset stored elsewhere is not owned by the
+                experiment and is refused.  Default ``False``.
 
         Raises:
             IndexError: If *idx* is an integer outside the valid range.
             KeyError: If *idx* is a UID string not present in the experiment.
+            ValueError: If ``delete_from_disk=True`` and the dataset lies
+                outside this experiment's directory (or the experiment has no
+                directory).  Nothing is removed in that case.
 
         Note:
             Filter masks are truncated to match the new dataset count after
@@ -3278,6 +3319,16 @@ class InSituExperiment:
 
         path = self._data[pos].path
         uid = self._metadata.loc[pos, "uid"]
+
+        # Refuse before the prompt and before touching memory: the experiment only owns the
+        # datasets stored directly inside its own directory (mirrors save()'s external check).
+        if delete_from_disk and path is not None:
+            if self.path is None or Path(path).resolve().parent != Path(self.path).resolve():
+                raise ValueError(
+                    f"Refusing to delete '{path}' from disk: it lies outside this experiment's "
+                    f"directory ({self.path}), so the experiment does not own it. Nothing was "
+                    "removed; delete it manually if intended."
+                )
 
         if confirm:
             print(
@@ -3337,7 +3388,10 @@ class InSituExperiment:
             RuntimeError: If one or more datasets fail to save. All datasets are attempted
                 regardless of individual failures; experiment-level files (metadata, colors,
                 filters) are written only when all datasets succeed.
+            ValueError: If ``zip_output=True`` is passed (not supported for experiments).
         """
+        if kwargs.get("zip_output"):
+            raise ValueError(_ZIP_OUTPUT_UNSUPPORTED)
 
         if self.is_view:
             if collect_warnings_mode:
@@ -3394,7 +3448,7 @@ class InSituExperiment:
                 xd.save(verbose=verbose, **kwargs)
             else:
                 saveas_keys = {"images_as_zarr",
-                               "images_max_resolution", "debug", "zip_output"}
+                               "images_max_resolution", "debug"}
                 saveas_kwargs = {k: v for k, v in kwargs.items() if k in saveas_keys}
                 xd.saveas(xd._path, verbose=False, **saveas_kwargs)
 
@@ -3441,8 +3495,8 @@ class InSituExperiment:
         used_dirs = {Path(d.path).resolve() for d in self._data if d.path is not None}
         orphan_dirs = sorted(
             p.resolve()
-            for p in Path(self.path).glob("data-*")
-            if p.is_dir() and p.resolve() not in used_dirs
+            for p in _list_dataset_dirs(Path(self.path))
+            if p.resolve() not in used_dirs
         )
         if orphan_dirs:
             warnings.warn(
@@ -3863,7 +3917,10 @@ class InSituExperiment:
                 empty data containers and should be reloaded from disk for further
                 use.  Defaults to False.
             **kwargs: Additional keyword arguments passed to dataset.saveas().
+                ``zip_output=True`` is not supported and raises ``ValueError``.
         """
+        if kwargs.get("zip_output"):
+            raise ValueError(_ZIP_OUTPUT_UNSUPPORTED)
 
         path = Path(path)
         staging = path.parent / (path.name + ".__ispy_tmp__")
@@ -4131,6 +4188,7 @@ class InSituExperiment:
         new_col_name=None,
         path: str | os.PathLike | Path | None = None,
         mode: Literal["copy", "move"] = "copy",
+        force: bool = False,
     ):
         """Concatenate multiple InSituExperiment objects.
 
@@ -4143,7 +4201,8 @@ class InSituExperiment:
                 Defaults to None.
             path (Union[str, os.PathLike, Path], optional):
                 Destination directory for the concatenated experiment.
-                Required when ``mode="move"``.
+                Required when ``mode="move"``, where it must be absent or an
+                empty directory outside the source experiments.
             mode (str):
                 ``"copy"`` (default) — datasets remain at their original paths
                 and the new experiment object is in-memory only (no save path
@@ -4165,12 +4224,26 @@ class InSituExperiment:
                     automatically — a :class:`UserWarning` is emitted and the
                     caller is responsible for cleaning up the remainder.
 
+                    The removal of a source experiment root deletes everything
+                    in it. If a root contains anything InSituPy did not write
+                    (besides its datasets and experiment-level files), the call
+                    is refused before anything is moved, unless ``force=True``.
+                    The derived union table (``tables/``) is not carried over:
+                    call :meth:`build_table` on the result.
+            force (bool):
+                Only used with ``mode="move"``. Allow deleting content InSituPy
+                did not write when a source experiment root is removed.
+                Defaults to ``False``.
+
         Returns:
             InSituExperiment: A new InSituExperiment object.
 
         Raises:
             ValueError: For invalid arguments or precondition violations in
-                ``mode="move"``.
+                ``mode="move"``: ``path`` exists and is not empty (never
+                overridable), ``path`` lies inside a source experiment, or a
+                source root holds unexpected content and ``force`` is not set.
+                Raised before anything is moved or deleted.
 
         Notes:
             Existing filter masks are **always dropped** after concatenation
@@ -4219,6 +4292,43 @@ class InSituExperiment:
 
             path = Path(path)
 
+            # The source roots are deleted after the move: a destination inside one would be
+            # deleted with it (and one equal to it is non-empty, so refused just below anyway).
+            dst_resolved = path.resolve()
+            for i, obj in enumerate(objs):
+                if obj._path is None:
+                    continue
+                src_root = Path(obj._path).resolve()
+                if dst_resolved == src_root or src_root in dst_resolved.parents:
+                    raise ValueError(
+                        f"mode='move' cannot write into a source experiment: '{path}' lies "
+                        f"inside the experiment at index {i} ('{obj._path}'), which is deleted "
+                        "after its datasets are moved. Choose a path outside all sources."
+                    )
+
+            # Nesting data-000/data-000 and overwriting the target's experiment files is never
+            # correct, so a non-empty destination is refused outright (no force override).
+            if path.exists() and (not path.is_dir() or any(path.iterdir())):
+                raise ValueError(
+                    f"mode='move' requires path to be absent or an empty directory, but "
+                    f"'{path}' exists and is not empty."
+                )
+
+            # Refuse before anything moves if a source root holds content InSituPy did not
+            # write: removing the root afterwards would delete it irreversibly.
+            if not force:
+                for i, obj in enumerate(objs):
+                    if obj._path is None:
+                        continue
+                    unexpected = _unexpected_root_items(obj)
+                    if unexpected:
+                        raise ValueError(
+                            f"mode='move' would delete content InSituPy did not write from the "
+                            f"source experiment at index {i} ('{obj._path}'): {unexpected}. "
+                            "Nothing was moved. Move or back up these items, or pass "
+                            "force=True to delete them."
+                        )
+
             # Verify same filesystem per dataset (covers subset experiments whose
             # obj._path is None): compare device of destination against each source.
             path.mkdir(parents=True, exist_ok=True)
@@ -4238,6 +4348,7 @@ class InSituExperiment:
                 keys=list(keys),
                 new_col_name=new_col_name,
                 path=path,
+                force=force,
             )
 
         # --- mode="copy" (original behaviour + colors merge) ---
@@ -4279,6 +4390,7 @@ class InSituExperiment:
         keys: list,
         new_col_name,
         path: Path,
+        force: bool = False,
     ) -> "InSituExperiment":
         """Back-end for ``concat(..., mode='move')``.
 
@@ -4287,6 +4399,10 @@ class InSituExperiment:
         files to ``path``, and removes the now-empty source experiment roots.
         Subset experiments (``obj._path is None``) are supported: their datasets
         are moved normally but the original experiment root is not removed.
+
+        A root that still holds content InSituPy did not write is kept (with a
+        warning) unless ``force=True``; :meth:`concat` normally refuses that case
+        up front, so this only guards against content that appeared during the move.
         """
         new_experiment = cls()
         new_metadata: list = []
@@ -4343,25 +4459,36 @@ class InSituExperiment:
 
         # Remove source experiment roots (datasets have already been moved out).
         # Subset experiments have no root path and are skipped.
-        _EXPECTED_ROOT_FILES = {
-            "metadata.csv",
-            _METADATA_PARQUET_FILENAME,
-            _METADATA_SCHEMA_FILENAME,
-            "colors.json",
-            "filters.json",
-        }
         for obj in objs:
             if getattr(obj, "is_view", False):
                 continue
             if obj._path is None:
                 continue
-            remaining = {p.name for p in obj._path.iterdir()}
-            unexpected = remaining - _EXPECTED_ROOT_FILES
+            if (obj._path / "tables").exists():
+                logger.info(
+                    "The union table of '%s' is not carried over; call build_table() on the "
+                    "new experiment.", obj._path,
+                )
+            # Recomputed here (concat() already checked before the move) in case content
+            # appeared in the root during the move.
+            unexpected = _unexpected_root_items(obj)
+            if unexpected and not force:
+                # The datasets are already moved, so raising would leave a half-finished
+                # result: keep the root and say what is left in it instead of deleting it.
+                warnings.warn(
+                    f"Kept source experiment root '{obj._path}' because it still contains "
+                    f"{len(unexpected)} item(s) InSituPy did not write: {unexpected}. Its "
+                    "datasets were moved; delete the folder manually if it is no longer needed.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                obj._path = None
+                continue
             if unexpected:
                 warnings.warn(
                     f"Removing source experiment root '{obj._path}' which still contains "
-                    f"{len(unexpected)} unexpected item(s): {sorted(unexpected)}. "
-                    f"These will be permanently deleted.",
+                    f"{len(unexpected)} unexpected item(s): {unexpected}. "
+                    f"These will be permanently deleted (force=True).",
                     UserWarning,
                     stacklevel=3,
                 )
@@ -4650,7 +4777,7 @@ class InSituExperiment:
 
         # Load each dataset (order on disk is not authoritative)
         loaded = []
-        dataset_paths = sorted([elem for elem in path.glob("data-*") if elem.is_dir()])
+        dataset_paths = _list_dataset_dirs(path)
         for dataset_path in tqdm(dataset_paths):
             dataset = InSituData.read(dataset_path, load_all=False)
             loaded.append(dataset)

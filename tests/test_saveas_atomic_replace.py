@@ -7,6 +7,7 @@ Covers acceptance criteria from the 260608 saveas-atomic-replace report:
 """
 
 import os
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -177,8 +178,10 @@ def test_saveas_failure_at_swap_restores_old(tmp_path, monkeypatch):
     original_rename = os.rename
 
     def _fail_on_staging_rename(src, dst):
-        # Let path→backup pass; fail only when staging (.__ispy_tmp__) is the source.
-        if str(src).endswith(".__ispy_tmp__"):
+        # Let path→backup pass; fail only when the EXPERIMENT staging dir is the source.
+        # (Each dataset write also swaps its own "<data-NNN>.__ispy_tmp__" into place first;
+        # those renames must succeed so the failure hits the experiment-level swap.)
+        if Path(src) == tmp_path / "exp.__ispy_tmp__":
             raise OSError("simulated rename failure")
         return original_rename(src, dst)
 

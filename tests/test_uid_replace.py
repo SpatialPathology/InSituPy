@@ -2,6 +2,7 @@
 
 import json
 
+import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pytest
@@ -238,6 +239,40 @@ def test_replace_writes_to_disk(tmp_path):
     # Reload and verify the replacement is on disk
     reloaded = InSituData.read(save_dir / "data-000")
     assert reloaded.slide_id == "replacement"
+
+
+def test_replace_with_lazily_backed_copy(tmp_path):
+    """Replacing a dataset with a lazy copy of itself must not lose the data it reads from."""
+    rng = np.random.default_rng(0)
+    xd = _make_insitudata()
+    xd._transcripts = dd.from_pandas(
+        pd.DataFrame({
+            "x": rng.random(40) * 100,
+            "y": rng.random(40) * 100,
+            "feature_name": [f"g{i % 3}" for i in range(40)],
+        }),
+        npartitions=2,
+    )
+    exp = InSituExperiment()
+    exp.add(xd)
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    exp = InSituExperiment.read(save_dir)
+
+    slot = save_dir / "data-000"
+    original = InSituData.read(slot).transcripts.compute().reset_index(drop=True)
+
+    # copy() clears _path, but the dask graphs still point into the slot being overwritten
+    new = InSituData.read(slot).copy()
+    assert isinstance(new.transcripts, dd.DataFrame)
+    with pytest.warns(UserWarning, match="uid"):
+        exp.replace(0, new, confirm=False)
+
+    pd.testing.assert_frame_equal(
+        InSituData.read(slot).transcripts.compute().reset_index(drop=True), original
+    )
+    pd.testing.assert_frame_equal(new.transcripts.compute().reset_index(drop=True), original)
+    assert sorted(p.name for p in save_dir.glob("data-*")) == ["data-000"]
 
 
 def test_replace_warns_if_new_data_has_uid(tmp_path):

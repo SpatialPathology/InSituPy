@@ -51,8 +51,14 @@ Once a project exists on disk, use `save()` to update it in place:
 
 ```python
 xd.save()                         # saves to the linked project path
-xd.save(path="path/to/project")   # or specify explicitly
+xd.save(path="path/to/project")   # same, with the linked path spelled out
 ```
+
+An explicit `path` must be the project the object is linked to (or a directory
+that does not exist yet, which writes a new copy via `saveas()`). Another
+existing copy of the same dataset is refused: use
+`saveas(path, overwrite=True)` to replace it, or `InSituData.read(path)` to work
+on that copy.
 
 ### Saving only geometries
 

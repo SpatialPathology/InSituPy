@@ -33,6 +33,11 @@ from insitupy._constants import (
     MODALITIES_COLOR_DICT,
     with_insitupy_style,
 )
+from insitupy._core._commit import (
+    discard_new_saves,
+    prune_uncommitted,
+    resolve_committed_dir,
+)
 from insitupy._exceptions import (
     InSituDataConstructorPathError,
     InSituDataRepeatedCropError,
@@ -41,6 +46,7 @@ from insitupy._exceptions import (
     NoImageOverlapError,
 )
 from insitupy._io.files import (
+    atomic_replace_dir,
     check_overwrite_and_remove_if_true,
     read_json,
     write_dict_to_json,
@@ -68,7 +74,6 @@ from insitupy.containers.io import (
     _save_transcripts,
     _save_units,
 )
-from insitupy.utils._helpers import sort_paths_by_datetime
 from insitupy.utils.geo import _fast_query_points_within_polygon
 from insitupy.utils.utils import _crop_transcripts, convert_to_list
 
@@ -1294,9 +1299,11 @@ class InSituData:
     def load_annotations(self, verbose: bool = False):
         """Load annotations from the project directory into :attr:`annotations`.
 
-        Reads the most recently saved annotations sub-folder.  If no
-        annotations are found on disk, a warning is issued when
-        ``verbose=True`` and the attribute remains empty.
+        Reads the committed annotations sub-folder (the one the project's
+        ``.ispy`` file points to; the newest sub-folder by name only for
+        stores without a pointer).  If no annotations are found on disk, a
+        warning is issued when ``verbose=True`` and the attribute remains
+        empty.
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1304,21 +1311,14 @@ class InSituData:
         """
         if verbose:
             logger.info("Loading annotations...")
-        # try:
-        #     p = self._metadata["data"]["annotations"]
-        # except KeyError:
-        #     if verbose:
-        #         raise ModalityNotFoundError(modality="annotations")
-        # extract available paths
-        paths = [p for p in (self.path / "annotations").glob("[!.]*") if p.is_dir()]
 
-        if len(paths) == 0:
+        path = resolve_committed_dir(self.path, "annotations")
+
+        if path is None:
             if verbose:
                 # Example usage
                 warn(ModalityNotFoundWarning("annotations"), stacklevel=2)
         else:
-            # extract the latest entry
-            path = sort_paths_by_datetime(paths)[0]
             self._annotations = _read_shapesdata(path=path, mode="annotations")
 
 
@@ -1370,8 +1370,10 @@ class InSituData:
     def load_regions(self, verbose: bool = False):
         """Load regions from the project directory into :attr:`regions`.
 
-        Reads the most recently saved regions sub-folder.  If no regions are
-        found on disk, a warning is issued when ``verbose=True``.
+        Reads the committed regions sub-folder (the one the project's
+        ``.ispy`` file points to; the newest sub-folder by name only for
+        stores without a pointer).  If no regions are found on disk, a
+        warning is issued when ``verbose=True``.
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1379,21 +1381,13 @@ class InSituData:
         """
         if verbose:
             logger.info("Loading regions...")
-        # try:
-        #     p = self._metadata["data"]["regions"]
-        # except KeyError:
-        #     if verbose:
-        #         raise ModalityNotFoundError(modality="regions")
 
-        # extract available paths
-        paths = [p for p in (self.path / "regions").glob("[!.]*") if p.is_dir()]
+        path = resolve_committed_dir(self.path, "regions")
 
-        if len(paths) == 0:
+        if path is None:
             if verbose:
                 warn(ModalityNotFoundWarning("regions"), stacklevel=2)
         else:
-            # extract the latest entry
-            path = sort_paths_by_datetime(paths)[0]
             self._regions = _read_shapesdata(path=path, mode="regions")
 
     def import_regions(self,
@@ -1513,9 +1507,11 @@ class InSituData:
     def load_cells(self, verbose: bool = False):
         """Load cell data from the project directory into :attr:`cells`.
 
-        Reads the most recently saved cells sub-folder, which contains the
-        expression matrix and segmentation boundaries.  Requires the object to
-        have been loaded from a saved project (:attr:`from_insitudata`).
+        Reads the committed cells sub-folder (the one the project's ``.ispy``
+        file points to; the newest sub-folder by name only for stores without
+        a pointer), which contains the expression matrix and segmentation
+        boundaries.  Requires the object to have been loaded from a saved
+        project (:attr:`from_insitudata`).
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no
@@ -1525,21 +1521,12 @@ class InSituData:
             logger.info("Loading cells...")
 
         if self.from_insitudata:
-            # try:
-            #     cells_path = self._metadata["data"]["cells"]
-            # except KeyError:
-            #     if verbose:
-            #         raise ModalityNotFoundError(modality="cells")
+            path = resolve_committed_dir(self.path, "cells")
 
-            # extract available paths
-            paths = [p for p in (self.path / "cells").glob("[!.]*") if p.is_dir()]
-
-            if len(paths) == 0:
+            if path is None:
                 if verbose:
                     warn(ModalityNotFoundWarning("cells"), stacklevel=2)
             else:
-                # extract the latest entry
-                path = sort_paths_by_datetime(paths)[0]
                 self._cells = _read_multicelldata(path=path)
         else:
             NoProjectLoadWarning()
@@ -1804,11 +1791,21 @@ class InSituData:
         annotations, regions) and metadata to ``path``.  Use this method
         when you want to create a new, standalone copy of the dataset.
 
+        The data is written to a staging directory next to ``path`` and only
+        swapped into place once complete, so a failure never leaves ``path``
+        half-written or deletes an existing project.
+
         Args:
             path: Destination directory for the saved project.
-            overwrite: If True, remove ``path`` first if it already exists.
-            zip_output: If True, compress the output directory into a
-                ``.zip`` archive and delete the uncompressed directory.
+            overwrite: If True, replace ``path`` if it already exists (with
+                ``zip_output=True``: replace ``<path>.zip``).  The old data is
+                only removed after the new data is complete, so overwriting
+                temporarily needs disk space for both versions.
+            zip_output: If True, write the project as ``<path>.zip`` instead
+                of a directory.  This is an export: ``path`` itself is never
+                created or deleted, and the object is not re-pointed to the
+                archive (it stays backed by its current project, or in
+                memory).
             images_as_zarr: If True, save images in zarr format.  If False,
                 images are saved as TIFF files.
             images_max_resolution: Maximum spatial resolution for saved images,
@@ -1823,7 +1820,7 @@ class InSituData:
         path = Path(path)
 
         # Guard against destroying the project this object is still (lazily) reading from.
-        # saveas() deletes the target up front; if the target is (or contains, or lies inside)
+        # saveas() replaces the target; if the target is (or contains, or lies inside)
         # the current backing directory, lazy image/transcript reads would then read from a
         # deleted directory and lose data silently. Use .save() to update a project in place.
         if self._path is not None:
@@ -1837,21 +1834,30 @@ class InSituData:
                     f"To write a standalone copy, choose a path outside {src}."
                 )
 
-        # check overwrite
-        check_overwrite_and_remove_if_true(path=path, overwrite=overwrite)
-
-        if zip_output:
-            zippath = path / (path.stem + ".zip")
-            check_overwrite_and_remove_if_true(path=zippath, overwrite=overwrite)
+        # Check the overwrite flag against the file that is actually written. Non-destructive:
+        # the target is only touched by the final swap, once the new data is complete.
+        zip_path = path.with_name(path.name + ".zip")
+        target = zip_path if zip_output else path
+        if target.exists() and not overwrite:
+            raise FileExistsError(
+                f"The output file already exists at {target}. "
+                "To overwrite it, please set the `overwrite` parameter to True."
+            )
 
         if verbose:
-            logger.info("Saving data to %s", path)
+            logger.info("Saving data to %s", target)
 
-        # create output directory if it does not exist yet
-        path.mkdir(parents=True, exist_ok=True)
+        # Everything is written to a sibling staging directory first.
+        staging = path.with_name(path.name + ".__ispy_tmp__")
+        tmp_zip_base = path.with_name(path.name + ".__ispy_tmp__zip")
+        tmp_zip = Path(str(tmp_zip_base) + ".zip")  # what make_archive writes
+        check_overwrite_and_remove_if_true(staging, overwrite=True)  # stale staging from a crash
+        check_overwrite_and_remove_if_true(tmp_zip, overwrite=True)
+        staging.mkdir(parents=True, exist_ok=True)
 
         # Snapshot metadata before mutations so we can restore on write failure
         _saved_meta = deepcopy(self._metadata)
+        existed = path.exists()
         try:
             # store basic information about experiment
             self._metadata["uid"] = self._uid
@@ -1866,7 +1872,7 @@ class InSituData:
                 images = self._images
                 _save_images(
                     imagedata=images,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata,
                     images_as_zarr=images_as_zarr,
                     max_resolution=images_max_resolution,
@@ -1879,7 +1885,7 @@ class InSituData:
                 cells = self._cells
                 _save_cells(
                     cells=cells,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata,
                     max_resolution_boundaries=images_max_resolution
                 )
@@ -1889,7 +1895,7 @@ class InSituData:
                 transcripts = self._transcripts
                 _save_transcripts(
                     transcripts=transcripts,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata
                     )
 
@@ -1898,7 +1904,7 @@ class InSituData:
                 units = self._units
                 _save_units(
                     units=units,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata
                     )
 
@@ -1907,7 +1913,7 @@ class InSituData:
                 annotations = self._annotations
                 _save_annotations(
                     annotations=annotations,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata
                 )
 
@@ -1916,7 +1922,7 @@ class InSituData:
                 regions = self._regions
                 _save_regions(
                     regions=regions,
-                    path=path,
+                    path=staging,
                     metadata=self._metadata
                 )
 
@@ -1928,30 +1934,48 @@ class InSituData:
                 self._metadata["method_params"] = self._metadata.pop("method_params")
 
             # write Xeniumdata metadata to json file
-            xd_metadata_path = path / ISPY_METADATA_FILE
+            xd_metadata_path = staging / ISPY_METADATA_FILE
             write_dict_to_json(dictionary=self._metadata, file=xd_metadata_path)
+
+            if zip_output:
+                # Build the archive next to the target and move it into place only once it
+                # has been verified, so an existing archive is never replaced by a corrupt one.
+                shutil.make_archive(str(tmp_zip_base), "zip", root_dir=staging)
+                with zipfile.ZipFile(tmp_zip) as zf:
+                    bad = zf.testzip()
+                if bad is not None:
+                    raise RuntimeError(
+                        f"Zip archive appears corrupt (first bad entry: {bad!r}). "
+                        f"Nothing was written to {zip_path}."
+                    )
+                os.replace(tmp_zip, zip_path)
+            else:
+                atomic_replace_dir(staging, path, what="saveas")
         except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            if tmp_zip.exists():
+                tmp_zip.unlink()
             self._metadata = _saved_meta
             raise
 
-        # Optionally: zip the resulting directory
         if zip_output:
-            zip_path = Path(str(path) + ".zip")
-            shutil.make_archive(path, 'zip', path, verbose=False)
-            with zipfile.ZipFile(zip_path) as zf:
-                bad = zf.testzip()
-            if bad is not None:
-                raise RuntimeError(
-                    f"Zip archive appears corrupt (first bad entry: {bad!r}). "
-                    f"Uncompressed data is still at {path}."
-                )
-            shutil.rmtree(path)
+            # The archive is an export: the staged directory is not kept and the object is
+            # left exactly as it was (still backed by its previous project, or in memory).
+            shutil.rmtree(staging, ignore_errors=True)
+            self._metadata = _saved_meta
+        else:
+            # change path to the new one
+            self._path = path.resolve()
 
-        # change path to the new one
-        self._path = path.resolve()
-
-        # # reload the modalities
-        # self.reload(verbose=False)
+            # If an existing directory was replaced, modalities that read lazily from it
+            # (the replace() / copy() case) now point at deleted files: re-open them from
+            # the new ones. Eager modalities already hold their data.
+            if existed:
+                skip = ["annotations", "regions", "units"]
+                if not isinstance(self._transcripts, dd.DataFrame):
+                    skip.append("transcripts")  # keep pandas transcripts pandas
+                if any(m not in skip and m in self._metadata["data"] for m in self.get_loaded_modalities()):
+                    self.reload(verbose=False, skip=skip)
 
         if verbose:
             logger.info("Saved.")
@@ -1975,7 +1999,10 @@ class InSituData:
         Args:
             path: Destination directory.  If None, saves to the original project
                 path. Raises ``RuntimeError`` when no project is linked and
-                ``path`` is None.
+                ``path`` is None.  An explicit ``path`` must be the project this
+                object is linked to or a directory that does not exist yet
+                (written via :meth:`saveas`); another existing copy of the
+                dataset raises ``ValueError``.
             verbose: If True, log progress messages.
             keep_history: If True, retain the undo-history snapshots that are
                 normally cleaned up after saving.
@@ -2021,6 +2048,16 @@ class InSituData:
                 project_uid = project_meta["uids"][-1]  # [-1] to select latest uid
                 current_uid = self._metadata["uids"][-1]
                 if current_uid == project_uid:
+                    # Another existing copy of this dataset: writing there while reloading from
+                    # and pruning self._path would leave the object spanning two projects.
+                    if self._path is None or path.resolve() != Path(self._path).resolve():
+                        linked = self._path if self._path is not None else "no project"
+                        raise ValueError(
+                            f"save(path=...) only updates the project this object is linked to "
+                            f"({linked}). {path} is another copy of the same dataset. Use "
+                            f"saveas(path, overwrite=True) to replace it, or InSituData.read(path) "
+                            f"to work on that copy."
+                        )
                     self._update_to_existing_project(path=path,
                                                      verbose=verbose,
                                                      sync_images=sync_images,
@@ -2081,6 +2118,23 @@ class InSituData:
             verbose=verbose,
         )
 
+    def _check_linked_path(self, path: Path, method: str) -> None:
+        """Refuse a partial save into a project other than the linked one.
+
+        A partial save writes into *path* but an object linked to a project keeps
+        reading from (and pruning) that project, so writing elsewhere would leave
+        the object spanning two projects. Objects without a project may write
+        into any *path*.
+
+        Raises:
+            ValueError: If this object is linked to a project other than *path*.
+        """
+        if self._path is not None and path.resolve() != Path(self._path).resolve():
+            raise ValueError(
+                f"{method}(path=...) only writes into the project this object is linked to "
+                f"({self._path}), not {path}. Use saveas(path) to write a copy."
+            )
+
     def save_geometries(
         self,
         path: str | os.PathLike | Path | None = None,
@@ -2095,14 +2149,18 @@ class InSituData:
         Args:
             path: Destination directory.  If ``None``, saves to the original
                 project path.  Raises :exc:`RuntimeError` when no project is
-                linked and ``path`` is ``None``.
+                linked and ``path`` is ``None``.  An object linked to a
+                project only accepts that project's path.
             verbose: If ``True``, log progress messages.
 
         Raises:
             RuntimeError: If no project path is linked and ``path`` is ``None``.
+            ValueError: If the object is linked to a project and ``path`` is a
+                different directory.
         """
         if path is not None:
             path = Path(path)
+            self._check_linked_path(path, "save_geometries")
         else:
             if self.from_insitudata:
                 path = self.path
@@ -2111,30 +2169,37 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
-        self._metadata["uid"] = self._uid
-        self._metadata["slide_id"] = self._slide_id
-        self._metadata["sample_id"] = self._sample_id
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._metadata["uid"] = self._uid
+            self._metadata["slide_id"] = self._slide_id
+            self._metadata["sample_id"] = self._sample_id
 
-        if not self._annotations.is_empty:
-            if verbose:
-                logger.info("Updating annotations...")
-            _save_annotations(
-                annotations=self._annotations,
-                path=path,
-                metadata=self._metadata,
-            )
+            if not self._annotations.is_empty:
+                if verbose:
+                    logger.info("Updating annotations...")
+                _save_annotations(
+                    annotations=self._annotations,
+                    path=path,
+                    metadata=self._metadata,
+                )
 
-        if not self._regions.is_empty:
-            if verbose:
-                logger.info("Updating regions...")
-            _save_regions(
-                regions=self._regions,
-                path=path,
-                metadata=self._metadata,
-            )
+            if not self._regions.is_empty:
+                if verbose:
+                    logger.info("Updating regions...")
+                _save_regions(
+                    regions=self._regions,
+                    path=path,
+                    metadata=self._metadata,
+                )
 
-        self._metadata["version"] = __version__
-        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+            self._metadata["version"] = __version__
+            write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
 
         if verbose:
             logger.info("Geometries saved.")
@@ -2153,14 +2218,18 @@ class InSituData:
         Args:
             path: Destination directory.  If ``None``, saves to the original
                 project path.  Raises :exc:`RuntimeError` when no project is
-                linked and ``path`` is ``None``.
+                linked and ``path`` is ``None``.  An object linked to a
+                project only accepts that project's path.
             verbose: If ``True``, log progress messages.
 
         Raises:
             RuntimeError: If no project path is linked and ``path`` is ``None``.
+            ValueError: If the object is linked to a project and ``path`` is a
+                different directory.
         """
         if path is not None:
             path = Path(path)
+            self._check_linked_path(path, "save_cells")
         else:
             if self.from_insitudata:
                 path = self.path
@@ -2169,22 +2238,29 @@ class InSituData:
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
 
-        self._metadata["uid"] = self._uid
-        self._metadata["slide_id"] = self._slide_id
-        self._metadata["sample_id"] = self._sample_id
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._metadata["uid"] = self._uid
+            self._metadata["slide_id"] = self._slide_id
+            self._metadata["sample_id"] = self._sample_id
 
-        if not self._cells.is_empty:
-            if verbose:
-                logger.info("Updating cells...")
-            _save_cells(
-                cells=self._cells,
-                path=path,
-                metadata=self._metadata,
-                overwrite=True,
-            )
+            if not self._cells.is_empty:
+                if verbose:
+                    logger.info("Updating cells...")
+                _save_cells(
+                    cells=self._cells,
+                    path=path,
+                    metadata=self._metadata,
+                    overwrite=True,
+                )
 
-        self._metadata["version"] = __version__
-        write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+            self._metadata["version"] = __version__
+            write_dict_to_json(dictionary=self._metadata, file=path / ISPY_METADATA_FILE)
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
 
         if verbose:
             logger.info("Cells saved.")
@@ -2675,30 +2751,33 @@ class InSituData:
     def remove_history(self,
                        verbose: bool = True
                        ):
-        """Delete all but the most recent save of each modality from disk.
+        """Delete all but the committed save of each modality from disk.
 
         InSituPy preserves previous saves as time-stamped sub-folders.  This
-        method removes all but the latest entry for ``annotations``, ``cells``,
-        and ``regions``, freeing disk space.
+        method removes every save of ``annotations``, ``cells`` and ``regions``
+        except the one the project's ``.ispy`` file marks as current (not the
+        one with the newest name, which is unreliable under clock skew),
+        freeing disk space.  Sub-folders InSituPy did not create are left
+        alone.  ``history`` entries of deleted saves are dropped as well.
 
         Args:
             verbose: If ``True``, log how many entries were removed per
                 modality. Defaults to ``True``.
+
+        Raises:
+            RuntimeError: If no project is linked.
         """
-        for cat in ["annotations", "cells", "regions"]:
-            dirs_to_remove = []
-            #if hasattr(self, cat):
-            files = sorted((self._path / cat).glob("[!.]*"))
-            if len(files) > 1:
-                dirs_to_remove = files[:-1]
+        if self._path is None:
+            raise RuntimeError(
+                "Cannot remove history: no project is linked. Save the object first."
+            )
 
-                for d in dirs_to_remove:
-                    shutil.rmtree(d)
-
-                if verbose:
-                    logger.info("Removed %d entries from '.%s'.", len(dirs_to_remove), cat)
-            else:
-                if verbose:
+        removed = prune_uncommitted(self._path, metadata=self._metadata)
+        if verbose:
+            for cat, n_removed in removed.items():
+                if n_removed > 0:
+                    logger.info("Removed %d entries from '.%s'.", n_removed, cat)
+                else:
                     logger.info("No history found for '%s'.", cat)
 
     def remove_modality(self,
@@ -2724,6 +2803,36 @@ class InSituData:
             logger.warning("No modality '%s' found. Nothing removed.", modality)
 
     def _update_to_existing_project(
+        self,
+        path: str | os.PathLike | Path | None,
+        verbose: bool = True,
+        sync_images: bool = False,
+        images_only: bool = False,
+        overwrite_images: bool = False
+        ):
+        """Write the changed modalities into the existing project at *path* and commit.
+
+        The ``.ispy`` write is the commit: it is the last step, and it is atomic.
+        If anything fails before it, the save directories written so far are
+        deleted and the in-memory metadata is restored, so the previously
+        committed state stays what loaders read and the object stays consistent.
+        """
+        # Snapshot so a failure before the .ispy commit leaves nothing behind.
+        _saved_meta = deepcopy(self._metadata)
+        try:
+            self._write_project_update(
+                path=path,
+                verbose=verbose,
+                sync_images=sync_images,
+                images_only=images_only,
+                overwrite_images=overwrite_images,
+            )
+        except Exception:
+            discard_new_saves(path, before=_saved_meta, after=self._metadata)
+            self._metadata = _saved_meta
+            raise
+
+    def _write_project_update(
         self,
         path: str | os.PathLike | Path | None,
         verbose: bool = True,
@@ -2775,12 +2884,6 @@ class InSituData:
                     overwrite=True
                 )
 
-            # save units
-            if not self._units.is_empty:
-                if verbose:
-                    logger.info("Updating units...")
-                _save_units(units=self._units, path=path, metadata=self._metadata, overwrite=True)
-
             # save annotations
             if not self._annotations.is_empty:
                 annotations = self._annotations
@@ -2802,6 +2905,15 @@ class InSituData:
                     path=path,
                     metadata=self._metadata
                 )
+
+            # save units - last, so the (unversioned) units swap is the final write before
+            # the .ispy commit. A hard crash between this swap and the .ispy write can still
+            # pair new units with the old cells/geometries; that residual closes only once
+            # units are versioned like the other modalities.
+            if not self._units.is_empty:
+                if verbose:
+                    logger.info("Updating units...")
+                _save_units(units=self._units, path=path, metadata=self._metadata, overwrite=True)
 
         # save version of InSituPy
         self._metadata["version"] = __version__
