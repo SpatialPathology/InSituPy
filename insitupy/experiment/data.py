@@ -3184,11 +3184,13 @@ class InSituExperiment:
                 "Use confirm=False only after verifying the path is set."
             )
 
-        # new_data's _path was relabeled to the slot above for in-memory consistency, but the
-        # object does not lazily read from bad_path (its modalities are held independently).
-        # Clear the label across the write so InSituData.saveas's self-overwrite guard - which
-        # treats _path as the live backing store - does not misfire on this legitimate replace.
-        # saveas restores _path to bad_path after the write completes.
+        # new_data's _path was relabeled to the slot above for in-memory consistency. Clear the
+        # label across the write only so InSituData.saveas's self-overwrite guard - which treats
+        # _path as the live backing store - does not misfire on this legitimate replace.
+        # new_data may still read lazily from bad_path (e.g. new_data = exp.data[i].copy(), whose
+        # dask graphs point into the slot): that is safe, because saveas writes into a staging
+        # directory first (bad_path stays readable until the swap) and re-opens lazily backed
+        # modalities from the new files afterwards. saveas restores _path to bad_path when done.
         new_data._path = None
         new_data.saveas(bad_path, overwrite=True)
 
