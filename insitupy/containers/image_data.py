@@ -5,10 +5,12 @@ import os
 from numbers import Number
 from pathlib import Path
 from typing import Literal
+from warnings import warn
 
 import dask.array as da
 import numpy as np
 
+from insitupy._exceptions import NoImageOverlapError
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.images.axes import (
@@ -465,7 +467,10 @@ class ImageData(DeepCopyMixin):
         Slices each stored image (or pyramid) to the physical-unit region
         defined by *xlim* and *ylim* using
         :func:`~insitupy.images.utils.crop_dask_array_or_pyramid`, and
-        records the crop coordinates in the metadata.
+        records the crop coordinates in the metadata. Images that do not
+        overlap the region are dropped with a warning, since keeping them
+        uncropped would leave them in a different coordinate frame than the
+        cropped ones. If no image overlaps, the result is empty.
 
         Args:
             xlim: ``(x_min, x_max)`` in physical units (e.g. µm).
@@ -484,6 +489,7 @@ class ImageData(DeepCopyMixin):
             _self = self.copy()
         # extract names from metadata
         names = list(_self._metadata.keys())
+        dropped = []
         for n in names:
             # extract the image pyramid
             img_data = _self[n]
@@ -491,12 +497,17 @@ class ImageData(DeepCopyMixin):
             # extract pixel size
             pixel_size = _self._metadata[n]['pixel_size']
 
-            cropped_img_data = crop_dask_array_or_pyramid(
-                data=img_data,
-                xlim=xlim,
-                ylim=ylim,
-                pixel_size=pixel_size
-            )
+            try:
+                cropped_img_data = crop_dask_array_or_pyramid(
+                    data=img_data,
+                    xlim=xlim,
+                    ylim=ylim,
+                    pixel_size=pixel_size
+                )
+            except NoImageOverlapError:
+                del _self[n]
+                dropped.append(n)
+                continue
 
             # save cropping properties in metadata
             _self._metadata[n]["cropping_xlim"] = xlim
@@ -509,6 +520,14 @@ class ImageData(DeepCopyMixin):
 
             # add cropped pyramid to object
             _self._data[n] = cropped_img_data
+
+        if dropped:
+            warn(
+                f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap with "
+                f"image(s) {dropped}. They were removed from the cropped data.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         if not inplace:
             return _self

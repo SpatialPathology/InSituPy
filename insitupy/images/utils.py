@@ -366,7 +366,7 @@ def crop_dask_array_or_pyramid(
             x1_full = xlim[1] / pixel_size
             y0_full = ylim[0] / pixel_size
             y1_full = ylim[1] / pixel_size
-            for img in data:
+            for level, img in enumerate(data):
                 # cumulative downscale of THIS level relative to full resolution,
                 # recomputed from the physical limits each time (no compounded int()).
                 sf_y = data[0].shape[0] / img.shape[0]
@@ -383,8 +383,18 @@ def crop_dask_array_or_pyramid(
                 x1 = min(img_w, xs1)
                 y0 = max(0, ys0)
                 y1 = min(img_h, ys1)
-                if x0 >= x1 or y0 >= y1:
-                    raise NoImageOverlapError(xlim, ylim)
+                if level == 0:
+                    # only the full-resolution level decides whether the region
+                    # overlaps the image at all
+                    if x0 >= x1 or y0 >= y1:
+                        raise NoImageOverlapError(xlim, ylim)
+                else:
+                    # a small region can truncate to 0 px on a coarse level;
+                    # keep at least 1 px so every level stays non-empty
+                    x0 = min(x0, img_w - 1)
+                    y0 = min(y0, img_h - 1)
+                    x1 = max(x1, x0 + 1)
+                    y1 = max(y1, y0 + 1)
 
                 # do the cropping
                 cdata = img[y0:y1, x0:x1]

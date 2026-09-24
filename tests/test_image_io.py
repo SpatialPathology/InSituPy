@@ -226,6 +226,31 @@ class TestCropDaskArrayOrPyramid:
                 pyramid, xlim=(1000, 2000), ylim=(1000, 2000), pixel_size=1.0
             )
 
+    def test_small_region_crops_every_pyramid_level(self):
+        # A 20x20 px region truncates to 0 px on the coarsest levels of a
+        # 7-level pyramid (64x downscale); it overlaps the image, so it must
+        # not raise and every level must stay non-empty.
+        size = 512
+        img = da.from_array(np.zeros((size, size), dtype=np.uint8), chunks=(size, size))
+        pyramid = create_img_pyramid(img, axes="YX", nsubres=6, scale_steps=2)
+        assert len(pyramid) == 7
+
+        cropped = crop_dask_array_or_pyramid(pyramid, xlim=(100, 120), ylim=(100, 120), pixel_size=1.0)
+
+        assert len(cropped) == len(pyramid)
+        assert cropped[0].shape == (20, 20)
+        assert all(level.shape[0] >= 1 and level.shape[1] >= 1 for level in cropped)
+
+    def test_small_region_at_far_edge_stays_in_bounds(self):
+        size = 512
+        img = da.from_array(np.zeros((size, size), dtype=np.uint8), chunks=(size, size))
+        pyramid = create_img_pyramid(img, axes="YX", nsubres=6, scale_steps=2)
+
+        cropped = crop_dask_array_or_pyramid(pyramid, xlim=(505, 512), ylim=(505, 512), pixel_size=1.0)
+
+        assert cropped[0].shape == (7, 7)
+        assert all(level.shape[0] >= 1 and level.shape[1] >= 1 for level in cropped)
+
     def test_pyramid_crop_multilevel_alignment_fractional_bounds(self):
         # Regression test for compounded truncation across pyramid levels (F2).
         # size=201 is not evenly divisible by scale_steps=2, so each level's
