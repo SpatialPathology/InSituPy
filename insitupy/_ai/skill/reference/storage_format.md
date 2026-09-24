@@ -8,7 +8,7 @@
 project_folder/
 ├── .ispy                           # Project metadata (JSON)
 ├── cells/
-│   └── <timestamp>_<uid>/          # Versioned cell data
+│   └── <YYMMDD-HHMMSSffffff-hex8>/ # Versioned cell data
 │       ├── .celldata               # CellData metadata (JSON)
 │       ├── .multicelldata          # MultiCellData metadata (JSON, if multiple layers)
 │       ├── table.h5ad              # AnnData (cells × genes, obs, var, obsm)
@@ -32,10 +32,10 @@ project_folder/
 │       ├── data.h5ad               # Associated AnnData (optional)
 │       └── metadata.json           # Unit type, version
 ├── annotations/
-│   └── <timestamp>_<uid>/
+│   └── <YYMMDD-HHMMSSffffff-hex8>/
 │       └── <key>.geojson           # Annotation polygons/points
 └── regions/
-    └── <timestamp>_<uid>/
+    └── <YYMMDD-HHMMSSffffff-hex8>/
         └── <key>.geojson           # Region polygons
 ```
 
@@ -52,18 +52,18 @@ project_folder/
     "xenium_version": "2.0"
   },
   "data": {
-    "cells": "cells/<timestamp>_<uid>",
+    "cells": "cells/<YYMMDD-HHMMSSffffff-hex8>",
     "images": {
       "morphology_focus": "images/morphology_focus.zarr",
       "DAPI": "images/DAPI.zarr"
     },
     "transcripts": "transcripts/transcripts.parquet",
     "units": "units",
-    "annotations": "annotations/<timestamp>_<uid>",
-    "regions": "regions/<timestamp>_<uid>"
+    "annotations": "annotations/<YYMMDD-HHMMSSffffff-hex8>",
+    "regions": "regions/<YYMMDD-HHMMSSffffff-hex8>"
   },
   "history": {
-    "cells": ["cells/<old_timestamp>_<old_uid>"],
+    "cells": ["cells/<older YYMMDD-HHMMSSffffff-hex8>"],
     "annotations": [],
     "regions": []
   },
@@ -76,10 +76,20 @@ project_folder/
 ```
 
 ## Key Conventions
-- All spatial coordinates are in pixels at the native resolution
+- Coordinates are in µm: cell centroids (`obsm["spatial"]`), transcript
+  positions, annotation/region/unit geometries and the crop limits in
+  `cropping_history`. Only raster data (images, boundary masks) is stored
+  on a pixel grid, converted via its pixel_size
 - pixel_size is in µm/pixel (e.g. 0.2125 for Xenium)
 - Boundaries are stored as label masks (integer arrays where pixel value = cell ID)
 - Images use OME-Zarr with multiscale pyramids for efficient access
-- Timestamps use format YYYYMMDD_HHMMSS for versioning
-- UIDs are short hex strings for uniqueness
+- Versioned save directories (cells/, annotations/, regions/) are named
+  `<YYMMDD-HHMMSSffffff-hex8>` (e.g. `250805-115555000343-2c58ca86`): a
+  microsecond timestamp plus an 8-character hex uid
+- For cells, annotations and regions, `data.<modality>` in .ispy is the
+  committed save; loaders read it and fall back to the newest directory name
+  only when it is absent; `history` lists older saves still on disk (pruned
+  by `save()` unless `keep_history=True`). Images, transcripts and units are
+  read from their fixed paths (`images/*.zarr`,
+  `transcripts/transcripts.parquet`, `units/`), not via `data.<modality>`
 - Paths in .ispy are relative to the project folder
