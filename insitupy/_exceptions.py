@@ -13,6 +13,42 @@ class InSituPyError(ValueError):
     """
 
 
+class ProjectDivergedError(InSituPyError, RuntimeError):
+    """Raised when an object no longer matches the project it was read from.
+
+    After ``crop(inplace=True)`` an :class:`~insitupy.InSituData` object still
+    points at the project it was read from, but its data are the cropped ones.
+    The same holds for any object whose project another object replaced since
+    it was read. Loading from, saving into or unloading against that project
+    would mix data that do not belong together, so these calls refuse. Also a
+    :class:`RuntimeError`, which :meth:`~insitupy.InSituData.save` raised for
+    this case before.
+
+    Args:
+        path: The project the object was read from.
+        action: The refused call, e.g. ``"save()"``.
+    """
+
+    _CONSEQUENCES = {
+        "load": "Loading from it would mix the uncropped data on disk into the cropped object.",
+        "save": "Saving into it would mix the cropped data with the uncropped data on disk.",
+        "unload": "Unloaded data could not be loaded back from it.",
+    }
+
+    def __init__(self, path, action: str):
+        self.path = path
+        self.action = action
+        kind = next((k for k in self._CONSEQUENCES if action.startswith(k)), None)
+        consequence = f" {self._CONSEQUENCES[kind]}" if kind is not None else ""
+        self.message = (
+            f"{action} refused: this object no longer matches the project at '{path}' "
+            f"(it was cropped in place, or the project was replaced since it was read)."
+            f"{consequence} Write the object's data with saveas(<new path>), or replace "
+            f"the project with saveas('{path}', overwrite=True)."
+        )
+        super().__init__(self.message)
+
+
 class ModuleNotFoundOnWindows(ModuleNotFoundError):
     '''
     Code from https://github.com/theislab/scib/blob/main/scib/exceptions.py

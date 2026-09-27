@@ -15,6 +15,7 @@ from insitupy._exceptions import (
     ModuleNotFoundOnWindows,
     NotEnoughFeatureMatchesError,
     NotOneElementError,
+    ProjectDivergedError,
     UnknownOptionError,
     WrongNapariLayerTypeError,
 )
@@ -27,6 +28,14 @@ class TestInSituPyError:
         assert issubclass(InSituPyError, ValueError)
         with pytest.raises(ValueError):
             raise InSituPyError("boom")
+
+
+class TestProjectDivergedError:
+    def test_is_insitupyerror_and_runtimeerror(self):
+        # save() raised a plain RuntimeError for this case before; existing
+        # `except RuntimeError` handlers around save() must keep catching it.
+        assert issubclass(ProjectDivergedError, InSituPyError)
+        assert issubclass(ProjectDivergedError, RuntimeError)
 
 
 class TestModuleNotFoundOnWindows:

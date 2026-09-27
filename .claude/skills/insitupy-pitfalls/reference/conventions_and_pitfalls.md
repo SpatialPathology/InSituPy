@@ -153,6 +153,13 @@ Verified against `release/0.12.x`. These are shapes that look one way and behave
 - **A non-inplace `crop()` returns a detached object with `uid = None`.** It belongs to no
   experiment; persist it standalone with `cropped.saveas(path)` before `save()` can be used, and
   `exp.add(cropped)` mints a fresh uid. (`copy()` and `crop(inplace=True)` keep the uid.)
+- **After `crop(inplace=True)` a saved dataset no longer matches its project on disk.**
+  `load_*()`, `save()`, `save_cells()`, `save_geometries()` and `unload()` then raise
+  `ProjectDivergedError` (they would mix cropped and uncropped data), and `reload()` does nothing.
+  Load every modality you need *before* cropping. Write the result with `saveas(<new path>)`, or
+  replace the original with `saveas(<its own path>, overwrite=True)` (refused if a modality on
+  disk was never loaded, since it would be deleted). For an experiment member, use
+  `exp.replace(i, exp.data[i])`.
 - **`exp.add(xd)` for a dataset already present** warns and returns early; if you pass a
   conflicting `metadata=` for an already-added dataset it raises rather than silently dropping it
   (0.12). Add two distinct datasets rather than the same object twice.

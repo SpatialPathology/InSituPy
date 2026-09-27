@@ -44,6 +44,19 @@ def _read_ispy(project: Path) -> dict | None:
     return meta if isinstance(meta, dict) else None
 
 
+def on_disk_latest_uid(project: str | Path) -> str | None:
+    """Return the latest entry of the ``uids`` list in the project's ``.ispy``.
+
+    ``None`` if the file is missing or unreadable, or if it carries no non-empty
+    ``uids`` list (stores written before uids existed).
+    """
+    meta = _read_ispy(Path(project))
+    uids = meta.get("uids") if meta is not None else None
+    if not isinstance(uids, list) or len(uids) == 0:
+        return None
+    return uids[-1]
+
+
 def resolve_committed_dir(project: str | Path, modality: str) -> Path | None:
     """Return the committed save directory of a versioned modality.
 

@@ -32,7 +32,7 @@ from insitupy._constants import (
 )
 from insitupy._core._commit import resolve_committed_dir
 from insitupy._core.data import InSituData
-from insitupy._exceptions import ModalityNotFoundError
+from insitupy._exceptions import ModalityNotFoundError, ProjectDivergedError
 from insitupy._io.files import (
     atomic_replace_dir,
     check_overwrite_and_remove_if_true,
@@ -3218,7 +3218,8 @@ class InSituExperiment:
         bad_path = self._data[pos].path
         slot_uid = self._metadata.loc[pos, "uid"]
 
-        if new_data.uid is not None:
+        # re-writing a slot's own dataset (e.g. after crop(inplace=True)) keeps its uid: no warning
+        if new_data.uid is not None and new_data.uid != slot_uid:
             warnings.warn(
                 f"new_data already has uid='{new_data.uid}'. "
                 f"It will be overwritten with the slot uid='{slot_uid}'.",
@@ -3462,30 +3463,37 @@ class InSituExperiment:
 
         if collect_warnings_mode:
             with collect_warnings() as collector:
-                for xd in tqdm(self._data):
+                for i, xd in enumerate(tqdm(self._data)):
                     try:
                         _save_one(xd, **kwargs)
                     except Exception as exc:
                         _rollback_assigned_slot(xd)
-                        failures.append((xd.uid, exc))
+                        failures.append((i, xd.uid, exc))
             collector.print_summary()
         else:
-            for xd in tqdm(self._data):
+            for i, xd in enumerate(tqdm(self._data)):
                 try:
                     _save_one(xd, **kwargs)
                 except Exception as exc:
                     _rollback_assigned_slot(xd)
-                    failures.append((xd.uid, exc))
+                    failures.append((i, xd.uid, exc))
 
         if failures:
             summary = "\n".join(
                 f"  - {uid}: {type(exc).__name__}: {exc}"
-                for uid, exc in failures
+                for _, uid, exc in failures
+            )
+            diverged = [i for i, _, exc in failures if isinstance(exc, ProjectDivergedError)]
+            hint = (
+                f"\nDataset(s) at position(s) {diverged} were cropped in place. Write them "
+                "back with exp.replace(i, exp.data[i]), or save the experiment to a new "
+                "location with exp.saveas(path)."
+                if diverged else ""
             )
             raise RuntimeError(
                 f"save() failed for {len(failures)}/{len(self._data)} dataset(s):\n{summary}\n"
                 "Experiment-level files (metadata, colors, filters) were NOT updated. "
-                "Fix the failing datasets and call save() again."
+                f"Fix the failing datasets and call save() again.{hint}"
             )
 
         # Warn about orphan data-* directories that are not part of this experiment
