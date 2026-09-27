@@ -265,8 +265,8 @@ def test_replace_with_lazily_backed_copy(tmp_path):
     # copy() clears _path, but the dask graphs still point into the slot being overwritten
     new = InSituData.read(slot).copy()
     assert isinstance(new.transcripts, dd.DataFrame)
-    with pytest.warns(UserWarning, match="uid"):
-        exp.replace(0, new, confirm=False)
+    # same dataset, same uid as the slot: no "already has uid" warning
+    exp.replace(0, new, confirm=False)
 
     pd.testing.assert_frame_equal(
         InSituData.read(slot).transcripts.compute().reset_index(drop=True), original

@@ -35,6 +35,7 @@ from insitupy._constants import (
 )
 from insitupy._core._commit import (
     discard_new_saves,
+    on_disk_latest_uid,
     prune_uncommitted,
     resolve_committed_dir,
 )
@@ -44,6 +45,7 @@ from insitupy._exceptions import (
     ModalityNotFoundError,
     ModalityNotFoundWarning,
     NoImageOverlapError,
+    ProjectDivergedError,
 )
 from insitupy._io.files import (
     atomic_replace_dir,
@@ -223,6 +225,8 @@ class InSituData:
         self._slide_id = slide_id
         self._sample_id = sample_id
         self._uid: str | None = None
+        # modalities loaded when crop(inplace=True) first detached the object from its project
+        self._loaded_at_crop: set[str] = set()
 
         # Always build the skeleton first, then overlay any caller-provided metadata, so
         # required keys survive even when a partial dict is passed (e.g. from-scratch
@@ -421,6 +425,43 @@ class InSituData:
         if not p.exists():
             logger.warning("Path %s does not exist.", p)
         return False
+
+    def _diverged_from_project(self) -> bool:
+        """Return whether the object no longer matches the project it points at.
+
+        True after ``crop(inplace=True)`` (which appends a uid) until the object is
+        written with ``saveas()``: the latest uid in memory then differs from the
+        latest uid in the project's ``.ispy``. False when there is no project, or
+        when the ``.ispy`` carries no uids (older stores), since nothing can be told.
+        """
+        if self._path is None:
+            return False
+        disk_uid = on_disk_latest_uid(self._path)
+        if disk_uid is None:
+            return False
+        uids = self._metadata.get("uids")
+        if not isinstance(uids, list) or len(uids) == 0:
+            return False
+        return uids[-1] != disk_uid
+
+    def _raise_if_diverged(self, action: str) -> None:
+        """Raise :class:`ProjectDivergedError` for *action* if the object diverged."""
+        if self._diverged_from_project():
+            raise ProjectDivergedError(path=self._path, action=action)
+
+    def _modalities_on_disk(self) -> list[str]:
+        """Return the modalities that have data in the linked project directory.
+
+        A modality counts when its sub-folder holds any non-hidden entry, which
+        errs on the side of reporting too much.
+        """
+        if self._path is None:
+            return []
+        root = Path(self._path)
+        return [
+            m for m in MODALITIES
+            if (root / m).is_dir() and any(not c.name.startswith(".") for c in (root / m).iterdir())
+        ]
 
     @property
     def images(self):
@@ -839,7 +880,11 @@ class InSituData:
                 If the crop raises, the object is left unchanged. The modality containers
                 (``cells``, ``images``, ...) are replaced by cropped ones, so a reference
                 taken before the crop (e.g. ``cells = data.cells``) still holds the uncropped
-                data; access them through the object again after the crop. Otherwise, return
+                data; access them through the object again after the crop. An object read
+                from a saved project no longer matches that project after an in-place crop:
+                ``load_*()``, ``save()``, ``save_cells()``, ``save_geometries()`` and
+                ``unload()`` refuse with :class:`ProjectDivergedError` until it is written
+                with ``saveas(<new path>)`` or ``saveas(<its path>, overwrite=True)``. Otherwise, return
                 a new cropped dataset - a detached copy whose experiment uid is cleared to
                 None; adding it to an InSituExperiment mints a fresh uid.
             materialize_transcripts (bool): If True (default), compute and re-wrap the transcript
@@ -1020,6 +1065,13 @@ class InSituData:
                 _self._regions, shape=shape,
                 xlim=tuple(xlim), ylim=tuple(ylim), verbose=verbose
             )
+
+        # Remember what was loaded when the object first diverged from its project, so that
+        # saveas(<own path>, overwrite=True) can tell a modality that was never loaded (it
+        # would be deleted from disk) from one the crop emptied. Later crops keep the first
+        # record: loading is refused while diverged, so nothing can be added in between.
+        if inplace and not self._diverged_from_project():
+            self._loaded_at_crop = set(self.get_loaded_modalities())
 
         # commit: all checks passed, replace the modalities with their cropped versions
         _self._cells = cropped_cells
@@ -1311,7 +1363,11 @@ class InSituData:
         Args:
             verbose: If ``True``, log progress and emit a warning when no
                 annotations are found. Defaults to ``False``.
+
+        Raises:
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_annotations()")
         if verbose:
             logger.info("Loading annotations...")
 
@@ -1381,7 +1437,11 @@ class InSituData:
         Args:
             verbose: If ``True``, log progress and emit a warning when no
                 regions are found. Defaults to ``False``.
+
+        Raises:
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_regions()")
         if verbose:
             logger.info("Loading regions...")
 
@@ -1519,7 +1579,11 @@ class InSituData:
         Args:
             verbose: If ``True``, log progress and emit a warning when no
                 cell data is found. Defaults to ``False``.
+
+        Raises:
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_cells()")
         if verbose:
             logger.info("Loading cells...")
 
@@ -1557,7 +1621,9 @@ class InSituData:
 
         Raises:
             ValueError: If any name in *names* is not found in the project.
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_images()")
         # load image into ImageData object
         if verbose:
             logger.info("Loading images...")
@@ -1612,7 +1678,9 @@ class InSituData:
 
         Raises:
             ValueError: If *mode* is not ``"pandas"`` or ``"dask"``.
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_transcripts()")
         # read transcripts
         if verbose:
             logger.info("Loading transcripts...")
@@ -1715,7 +1783,11 @@ class InSituData:
         Args:
             verbose: If ``True``, log progress and emit a warning when no
                 units data is found. Defaults to ``False``.
+
+        Raises:
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_diverged("load_units()")
         # read units
         if verbose:
             logger.info("Loading spatial units...")
@@ -1803,7 +1875,9 @@ class InSituData:
             overwrite: If True, replace ``path`` if it already exists (with
                 ``zip_output=True``: replace ``<path>.zip``).  The old data is
                 only removed after the new data is complete, so overwriting
-                temporarily needs disk space for both versions.
+                temporarily needs disk space for both versions.  ``path`` may
+                be the object's own project only after ``crop(inplace=True)``,
+                to replace the original with the cropped dataset.
             zip_output: If True, write the project as ``<path>.zip`` instead
                 of a directory.  This is an export: ``path`` itself is never
                 created or deleted, and the object is not re-pointed to the
@@ -1826,10 +1900,35 @@ class InSituData:
         # saveas() replaces the target; if the target is (or contains, or lies inside)
         # the current backing directory, lazy image/transcript reads would then read from a
         # deleted directory and lose data silently. Use .save() to update a project in place.
+        # Exception: an object cropped in place may replace its own project (save() refuses
+        # it). That is safe because everything is staged before the swap and lazy modalities
+        # are re-opened from the new files afterwards (see the end of this method).
         if self._path is not None:
             src = Path(self._path).resolve()
             tgt = path.resolve()
-            if src.exists() and (tgt == src or tgt in src.parents or src in tgt.parents):
+            replaces_own_crop = tgt == src and not zip_output and self._diverged_from_project()
+            if replaces_own_crop and not overwrite:
+                raise ValueError(
+                    f"Refusing to saveas() into {tgt}: this object was cropped in place after "
+                    f"it was read from there. Pass overwrite=True to replace the original "
+                    f"project with the cropped dataset, or choose a new path."
+                )
+            if replaces_own_crop:
+                # Replacing the project deletes every modality the object does not hold. A
+                # modality that was never loaded before the crop cannot be cropped any more,
+                # so refuse rather than delete it for good.
+                kept = set(self.get_loaded_modalities()) | getattr(self, "_loaded_at_crop", set())
+                never_loaded = [m for m in self._modalities_on_disk() if m not in kept]
+                if never_loaded:
+                    raise ValueError(
+                        f"Refusing to replace {tgt} with the cropped dataset: {never_loaded} "
+                        f"exist in the project but were not loaded when the object was cropped, "
+                        f"so replacing the project would delete them. Write the crop to a new "
+                        f"path with saveas(<new path>) instead."
+                    )
+            if not replaces_own_crop and src.exists() and (
+                tgt == src or tgt in src.parents or src in tgt.parents
+            ):
                 raise ValueError(
                     f"Refusing to saveas() into {tgt}: this overlaps the directory this "
                     f"InSituData is currently backed by ({src}) and would delete the data it "
@@ -2015,6 +2114,10 @@ class InSituData:
                 ``sync_images=True``).  All other modalities are skipped.
             overwrite_images: If True, overwrite existing image files on disk
                 when synchronizing images.
+
+        Raises:
+            ProjectDivergedError: If the object was cropped in place after it was
+                read from the linked project (use :meth:`saveas` instead).
         """
         # check path
         if path is not None:
@@ -2044,6 +2147,11 @@ class InSituData:
             metadata_file = path / ISPY_METADATA_FILE
 
             if metadata_file.exists():
+                # The linked project after crop(inplace=True): explain instead of reporting a
+                # uid mismatch with "a different dataset".
+                if self._path is not None and path.resolve() == Path(self._path).resolve():
+                    self._raise_if_diverged("save()")
+
                 # read metadata file and check uid
                 project_meta = read_json(metadata_file)
 
@@ -2160,6 +2268,7 @@ class InSituData:
             RuntimeError: If no project path is linked and ``path`` is ``None``.
             ValueError: If the object is linked to a project and ``path`` is a
                 different directory.
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
         if path is not None:
             path = Path(path)
@@ -2171,6 +2280,7 @@ class InSituData:
                 raise RuntimeError(
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
+        self._raise_if_diverged("save_geometries()")
 
         # Snapshot so a failure before the .ispy commit leaves nothing behind.
         _saved_meta = deepcopy(self._metadata)
@@ -2229,6 +2339,7 @@ class InSituData:
             RuntimeError: If no project path is linked and ``path`` is ``None``.
             ValueError: If the object is linked to a project and ``path`` is a
                 different directory.
+            ProjectDivergedError: If the object was cropped in place after it was read.
         """
         if path is not None:
             path = Path(path)
@@ -2240,6 +2351,7 @@ class InSituData:
                 raise RuntimeError(
                     "Cannot save: no project is linked. Use .saveas() to save to a new location."
                 )
+        self._raise_if_diverged("save_cells()")
 
         # Snapshot so a failure before the .ispy commit leaves nothing behind.
         _saved_meta = deepcopy(self._metadata)
@@ -2635,9 +2747,21 @@ class InSituData:
         Args:
             skip: Modality name(s) to exclude from reloading (e.g.
                 ``["images"]``). Defaults to ``None``.
-            verbose: If ``True``, log which modalities are being reloaded.
-                Defaults to ``True``.
+            verbose: If ``True``, log which modalities are being reloaded, and
+                warn when nothing is loaded. Defaults to ``True``.
+
+        After ``crop(inplace=True)`` nothing is reloaded (a warning says so): the
+        project on disk holds the uncropped data.
         """
+        if self._diverged_from_project():
+            logger.warning(
+                "Not reloading: this object no longer matches the project at '%s' (it was "
+                "cropped in place, or the project was replaced since it was read); "
+                "reloading would mix in data that do not belong to it. Use saveas() to "
+                "write the object's data.", self._path
+            )
+            return
+
         data_meta = self._metadata["data"]
         loaded_modalities = [elem for elem in self.get_loaded_modalities() if elem in data_meta]
 
@@ -2670,9 +2794,9 @@ class InSituData:
             # cycle, causing memory to accumulate across loop iterations.
             import gc
             gc.collect()
-        else:
+        elif verbose:
             logger.warning(
-                "Nothing currently loaded — nothing to refresh. "
+                "Nothing currently loaded - nothing to refresh. "
                 "Use load_cells(), load_images(), etc. to load modalities from disk."
             )
 
@@ -2729,6 +2853,9 @@ class InSituData:
                 ``from_insitudata`` is ``False``) and at least one target
                 modality is loaded, because unloading would make the
                 in-memory data unrecoverable.
+            ProjectDivergedError: If the object was cropped in place after it was
+                read and at least one target modality is loaded (the cropped data
+                could not be loaded back from the project).
         """
         target_set = set(_RESET_MAP.keys()) if modalities is None else set(convert_to_list(modalities))
 
@@ -2746,6 +2873,7 @@ class InSituData:
                 "permanent data loss. To discard in-memory data intentionally, "
                 "use 'del xd.<modality>'."
             )
+        self._raise_if_diverged("unload()")
 
         cleared = []
         for modality in _RESET_MAP:
