@@ -69,3 +69,23 @@ def test_write_qupath_geojson_preserves_numpy_colors(tmp_path):
     back = read_qupath_geojson(out)
 
     assert [list(c) for c in back["color"]] == [[250, 62, 62], [112, 112, 225]]
+
+
+def test_write_qupath_geojson_does_not_mutate_input(tmp_path):
+    # ShapesData.save() passes its live layers straight to the writer, so a mutation
+    # here would add a "classification" column to the in-memory annotations
+    gdf = GeoDataFrame(
+        {"name": ["A"],
+         "color": [[250, 62, 62]],
+         "geometry": [Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])]},
+        geometry="geometry",
+    )
+    gdf.index = ["id0"]
+    gdf.index.name = "id"
+    before_columns = list(gdf.columns)
+    before_dtypes = gdf.dtypes.copy()
+
+    write_qupath_geojson(gdf, tmp_path / "shapes.geojson")
+
+    assert list(gdf.columns) == before_columns
+    pd.testing.assert_series_equal(gdf.dtypes, before_dtypes)

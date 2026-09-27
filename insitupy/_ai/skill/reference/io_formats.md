@@ -52,7 +52,7 @@
 project_folder/
 ├── .ispy                    # JSON metadata (slide_id, paths, history)
 ├── cells/                   # MultiCellData layers
-│   └── <timestamp>_<uid>/
+│   └── <YYMMDD-HHMMSSffffff-hex8>/
 │       ├── .celldata        # Layer metadata
 │       ├── .multicelldata   # MultiCellData metadata (if multiple layers)
 │       ├── table.h5ad       # AnnData (scanpy format)
@@ -68,8 +68,8 @@ project_folder/
 │       ├── data.h5ad
 │       └── metadata.json
 ├── annotations/             # AnnotationsData
-│   └── <timestamp>_<uid>/
+│   └── <YYMMDD-HHMMSSffffff-hex8>/
 │       └── <key>.geojson
 └── regions/                 # RegionsData
-    └── <timestamp>_<uid>/
+    └── <YYMMDD-HHMMSSffffff-hex8>/
         └── <key>.geojson

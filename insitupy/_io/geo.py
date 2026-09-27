@@ -154,7 +154,11 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
     Parameters:
     - dataframe (geopandas.GeoDataFrame): The input GeoDataFrame containing "name" and "color" columns.
     - file (Union[str, os.PathLike, Path]): The file path (as a string or pathlib.Path) where the GeoJSON data will be saved.
+
+    The input dataframe is not modified; the conversion works on a copy.
     """
+    # work on a copy so the caller's frame (e.g. a live annotation layer) keeps its columns
+    dataframe = dataframe.copy()
     columns_to_move = ["name", "color", "scale"]
     if np.any([elem in dataframe.columns for elem in columns_to_move]):
         existing_columns_to_move = [elem for elem in columns_to_move if elem in dataframe.columns]
