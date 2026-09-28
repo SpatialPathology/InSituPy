@@ -4090,9 +4090,9 @@ class InSituExperiment:
                 celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
                 cat_keys = list(celldata.table.obs.select_dtypes("category").columns)
                 if cat_keys:
-                    self.sync_colors(
+                    self._sync_colors(
                         cat_keys, cells_layer=cells_layer,
-                        overwrite=False, verbose=verbose,
+                        overwrite=False, verbose=verbose, quiet=True,
                     )
             except Exception as exc:
                 logger.warning(f"Automatic color synchronization skipped: {exc}")
@@ -4129,29 +4129,76 @@ class InSituExperiment:
             verbose (bool, optional): Whether to print status messages. Defaults to True.
 
         Note:
+            Keys that are numeric obs columns, genes (found in ``var_names`` but not
+            in obs), or missing entirely are skipped with a warning.
+
             See `InSituExperimentView`'s class docstring for a caveat about calling
             this on a view: colors sync correctly for that call, but the assignment
             does not persist to the parent experiment.
         """
+        self._sync_colors(
+            keys, cells_layer=cells_layer, palette=palette,
+            overwrite=overwrite, verbose=verbose, quiet=False,
+        )
+
+    def _sync_colors(
+        self,
+        keys: str | list[str],
+        cells_layer: str | None = None,
+        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        overwrite: bool = False,
+        verbose: bool = False,
+        quiet: bool = False,
+    ):
+        """Implementation of :meth:`sync_colors`.
+
+        ``quiet=True`` is for internal, opportunistic pre-syncs (``pl.spatial``,
+        ``show``) that pass keys the user never asked to sync: every "nothing to do"
+        case (gene, numeric, missing, already colored) is logged at debug level
+        instead of as a warning. Keys found in ``var_names`` are skipped even if an
+        obs column of the same name exists, because plotting resolves genes first.
+        """
+        # log level for "nothing to do" diagnostics
+        _skip_log = logger.debug if quiet else logger.warning
 
         # Make sure obs_cols is a list
         keys = convert_to_list(keys)
 
         for obs_col in keys:
-            # Skip numeric columns to avoid treating continuous values as categorical
+            # Classify the key across datasets: obs column (numeric or not) and/or gene
+            in_obs = False
             is_numeric = False
+            in_var = False
             for _, xd in self.iterdata():
                 celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
-                if obs_col in celldata.table.obs.columns:
-                    series = celldata.table.obs[obs_col]
+                table = celldata.table
+                if obs_col in table.obs.columns:
+                    in_obs = True
+                    series = table.obs[obs_col]
                     if is_numeric_dtype(series) and not is_bool_dtype(series):
                         is_numeric = True
-                        break
+                if obs_col in table.var_names or (
+                    table.raw is not None and obs_col in table.raw.var_names
+                ):
+                    in_var = True
+
+            if quiet and in_var:
+                # plotting resolves var_names before obs, so this key is drawn as expression
+                logger.debug(f"Skipping '{obs_col}' in color sync: key is a gene.")
+                continue
 
             if is_numeric:
-                logger.warning(
+                # Skip numeric columns to avoid treating continuous values as categorical
+                _skip_log(
                     f"Skipping '{obs_col}': column is numeric. "
                     f"Only categorical columns are supported by `sync_colors`."
+                )
+                continue
+
+            if in_var and not in_obs:
+                _skip_log(
+                    f"Skipping '{obs_col}': key is a gene/feature (found in var_names), "
+                    f"not an obs column. Colors are only synced for categorical obs columns."
                 )
                 continue
 
@@ -4175,14 +4222,14 @@ class InSituExperiment:
                         searched_layer = cells_layer or xd.cells.main_key
                         available_layers = list(xd.cells.keys())
                         break
-                    logger.warning(
+                    _skip_log(
                         f"Key '{obs_col}' not found in obs of any dataset "
                         f"(searched cells_layer='{searched_layer}', "
                         f"available layers: {available_layers}). "
                         f"Did you pass the correct `cells_layer`?"
                     )
             else:
-                logger.warning(
+                _skip_log(
                     f"Key '{obs_col}' already exists in `exp.colors` for cells_layer="
                     f"'{self._resolve_color_layer(cells_layer)}' and was not changed. "
                     f"Pass `overwrite=True` to `sync_colors` to replace it."

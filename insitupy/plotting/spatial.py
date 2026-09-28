@@ -474,12 +474,14 @@ def spatial(
     if _is_experiment(data):
         n_data = len(data)
 
-        # synchronize colors before plotting
-        data.sync_colors(
+        # synchronize colors before plotting; quiet because keys that are genes,
+        # numeric or already colored are expected here and need no sync
+        data._sync_colors(
             keys=keys,
             cells_layer=cells_layer,
             palette=plot_config.palette,
-            overwrite=False
+            overwrite=False,
+            quiet=True,
         )
     else:
         n_data = 1

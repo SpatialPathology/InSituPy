@@ -5,6 +5,8 @@ Note: crop() shifts coordinates by -xlim[0] / -ylim[0] after filtering, and
 returns None when inplace=True.
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -85,6 +87,19 @@ class TestCropInplaceNoBoundaries:
         celldata = _create_celldata_no_boundaries()
         celldata.crop(xlim=(10, 20), ylim=(10, 20), inplace=True)
         assert celldata.table.n_obs == 0
+
+    def test_crop_logs_no_warning(self, caplog):
+        # table-only CellData is valid; cropping it (once per layer per region in
+        # from_regions) must not warn about missing boundaries. `insitupy` loggers
+        # don't propagate, so attach caplog's handler to the source logger.
+        logger = logging.getLogger("insitupy.containers.cell_data")
+        caplog.set_level(logging.WARNING, logger="insitupy.containers.cell_data")
+        logger.addHandler(caplog.handler)
+        try:
+            _create_celldata_no_boundaries().crop(xlim=(0, 2), ylim=(0, 2), inplace=True)
+        finally:
+            logger.removeHandler(caplog.handler)
+        assert [r.message for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 # ── inplace=True with boundaries ─────────────────────────────────────────────

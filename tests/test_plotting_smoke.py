@@ -344,7 +344,7 @@ def test_spatial_reused_layout_config_not_mutated_across_calls(monkeypatch):
         def __len__(self):
             return self._n_data
 
-        def sync_colors(self, **kwargs):
+        def _sync_colors(self, **kwargs):
             pass
 
     class _FakeColorConfig:

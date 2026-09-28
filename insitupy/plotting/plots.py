@@ -631,7 +631,7 @@ def cellular_composition(
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
 
         # Check and convert to category if needed
-        if not pd.api.types.is_categorical_dtype(celldata.table.obs[cell_type_col]):
+        if not isinstance(celldata.table.obs[cell_type_col].dtype, pd.CategoricalDtype):
             celldata.table.obs[cell_type_col] = celldata.table.obs[cell_type_col].astype('category')
             logger.info(f"Key '{cell_type_col}' has been converted to 'category' dtype.")
 
