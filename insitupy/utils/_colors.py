@@ -336,7 +336,7 @@ def continuous_data_to_rgba(
     climits = _determine_climits(color_values=notna_values, upper_climit_pct=upper_climit_pct, lower_climit=lower_climit)
 
     if climits[1] == 0:
-        logger.warning("Upper contrast limit is 0. Recalculating with upper_climit_pct=100.")
+        logger.debug("Upper contrast limit is 0. Recalculating with upper_climit_pct=100.")
         climits = _determine_climits(color_values=notna_values, upper_climit_pct=100, lower_climit=lower_climit)
 
     norm = mpl.colors.Normalize(vmin=climits[0], vmax=climits[1], clip=clip)

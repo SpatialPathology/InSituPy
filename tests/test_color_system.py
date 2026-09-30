@@ -347,6 +347,84 @@ def test_sync_colors_layer_aware_gate(caplog):
     assert any("already exists" in r.message for r in caplog.records)
 
 
+# ── 7b. internal pre-sync (pl.spatial) is quiet; public sync_colors diagnoses ──
+
+
+def _make_plot_experiment(n=2):
+    """Experiment whose samples can be plotted: spatial coords, genes g0..g2, a
+    categorical 'celltype' and a numeric 'total_counts' obs column."""
+    exp = _make_experiment(n=n, categories=("A", "B", "C"))
+    for i, xd in enumerate(exp.data):
+        table = xd.cells["main"].table
+        rng = np.random.default_rng(i)
+        table.obsm["spatial"] = rng.random((table.n_obs, 2)) * 100.0
+        table.obs["total_counts"] = rng.random(table.n_obs) * 50.0
+    return exp
+
+
+def _warning_messages(caplog):
+    return [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize("key", ["g0", "total_counts"])
+def test_spatial_gene_or_numeric_key_no_sync_warning(caplog, key):
+    exp = _make_plot_experiment()
+    plt.close("all")
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        isp.pl.spatial(exp, keys=key, show=False)
+    plt.close("all")
+
+    assert _warning_messages(caplog) == []
+    assert key not in exp.colors.layer("main")
+
+
+def test_spatial_repeated_categorical_key_no_already_exists_warning(caplog):
+    exp = _make_plot_experiment()
+    plt.close("all")
+    isp.pl.spatial(exp, keys="celltype", show=False)
+    colors_before = dict(exp.colors.layer("main")["celltype"])
+
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        isp.pl.spatial(exp, keys="celltype", show=False)
+    plt.close("all")
+
+    assert _warning_messages(caplog) == []
+    assert exp.colors.layer("main")["celltype"] == colors_before
+
+
+def test_spatial_gene_shadowing_obs_column_gets_no_categorical_colors():
+    # obs column and gene share a name: plotting draws the gene, so the pre-sync
+    # must not create a categorical color dict for it
+    exp = _make_plot_experiment()
+    for xd in exp.data:
+        table = xd.cells["main"].table
+        table.obs["g0"] = pd.Categorical(["x", "y", "x"][: table.n_obs])
+    plt.close("all")
+    isp.pl.spatial(exp, keys="g0", show=False)
+    plt.close("all")
+
+    assert "g0" not in exp.colors.layer("main")
+
+
+def test_public_sync_colors_gene_key_warns_accurately(caplog):
+    exp = _make_plot_experiment()
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        exp.sync_colors("g0")
+
+    msgs = _warning_messages(caplog)
+    assert any("var_names" in m for m in msgs)
+    assert not any("not found in obs" in m for m in msgs)
+    assert "g0" not in exp.colors.layer("main")
+
+
+def test_public_sync_colors_missing_key_still_warns(caplog):
+    exp = _make_plot_experiment()
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        exp.sync_colors("does_not_exist")
+
+    assert any("not found in obs" in m for m in _warning_messages(caplog))
+
+
 # ── 8. view save_colors two-level merge ──────────────────────────────────────
 
 
@@ -469,6 +547,21 @@ def test_show_auto_sync_false_skips(monkeypatch):
     for xd in exp._data:
         assert "celltype_colors" not in xd.cells["main"].table.uns
     assert len(exp.colors) == 0
+
+
+def test_show_auto_sync_existing_colors_no_warning(monkeypatch, caplog):
+    # keys already colored are left untouched by the pre-flight sync, without
+    # one "already exists" warning per categorical column on every show()
+    exp = _make_experiment(n=2, categories=("A", "B"))
+    exp.sync_colors("celltype")
+    colors_before = dict(exp.colors.layer("main")["celltype"])
+
+    monkeypatch.setattr(InSituData, "show", lambda self, **kwargs: None)
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        exp.show(0)
+
+    assert _warning_messages(caplog) == []
+    assert exp.colors.layer("main")["celltype"] == colors_before
 
 
 # ── Part 3 — categorical color mapping for non-string categories ───────────────

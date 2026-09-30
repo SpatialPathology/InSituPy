@@ -548,7 +548,8 @@ class CellData(DeepCopyMixin):
         self._table.obsm['spatial'] = cell_coords
 
         if self._boundaries is None:
-            logger.warning('No `boundaries` attribute found in CellData found.')
+            # table-only CellData is valid: nothing else to shift
+            logger.debug('No boundaries present; shifted table coordinates only.')
         else:
             boundaries = self._boundaries
             for n in boundaries.metadata.keys():
