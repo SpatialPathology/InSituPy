@@ -7,8 +7,10 @@ silently mispaired with the wrong metadata row. save() also warns about orphan
 data-* directories that are not part of the experiment.
 """
 
+import json
 import shutil
 import types
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -163,3 +165,247 @@ def test_save_warns_on_orphan_dirs(tmp_path):
         exp.save()
 
     assert (dest / "data-001").exists()
+
+
+# ── 5. remove(delete_from_disk=True): consistent disk state and trash ──────────
+# Report 260929 "remove-delete-disk-consistency": the directory used to be deleted while
+# metadata.parquet / filters.json still listed the dataset until save(), so an interrupted
+# session left an experiment that read() refused.
+
+
+def _make_filtered_experiment(tmp_path):
+    exp, dest, uids = _make_three_sample_experiment(tmp_path)
+    exp._filters["keep"] = {"mask": [True, False, True], "note": ""}
+    exp.save_filters()
+    return exp, dest, uids
+
+
+def _read_recording_warnings(dest):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        exp = InSituExperiment.read(dest)
+    return exp, [str(w.message) for w in caught]
+
+
+def test_remove_delete_from_disk_keeps_store_readable_without_save(tmp_path):
+    exp, dest, (uid_g1, uid_g2, uid_g3) = _make_filtered_experiment(tmp_path)
+
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)  # no save()
+
+    exp2, messages = _read_recording_warnings(dest)
+
+    assert list(exp2._metadata["uid"]) == [uid_g1, uid_g3]
+    assert [d.uid for d in exp2._data] == [uid_g1, uid_g3]
+    assert list(exp2._metadata["label"]) == ["G1", "G3"]
+    assert exp2._filters["keep"]["mask"] == [True, True]
+    assert not [m for m in messages if "does not match metadata length" in m]
+    assert not [m for m in messages if "orphan" in m or "Skipping" in m]
+    assert [m for m in messages if "empty_trash" in m], "read() must report the trash"
+
+
+def test_remove_delete_from_disk_does_not_write_unsaved_add(tmp_path):
+    exp, dest, (uid_g1, uid_g2, uid_g3) = _make_three_sample_experiment(tmp_path)
+    exp.add(_make_xd(seed=9), metadata={"label": "unsaved"})  # in memory only
+
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    assert len(exp) == 3, "the unsaved dataset stays in memory"
+    exp2, _ = _read_recording_warnings(dest)
+    assert list(exp2._metadata["uid"]) == [uid_g1, uid_g3]
+
+
+def test_remove_delete_from_disk_moves_directory_to_trash(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_filtered_experiment(tmp_path)
+
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    assert not (dest / "data-001").exists()
+    folders = [p for p in (dest / ".trash").iterdir() if p.is_dir()]
+    assert len(folders) == 1
+    assert (folders[0] / ".ispy").exists(), "the dataset is moved, not deleted"
+    assert InSituData.read(folders[0]).uid == uid_g2
+
+    (entry,) = json.loads((dest / ".trash" / "manifest.json").read_text())["entries"]
+    assert entry["folder"] == folders[0].name
+    assert entry["uid"] == uid_g2
+    assert entry["sample_id"] == "s"
+    assert entry["original_dir"] == "data-001"
+    assert entry["size_bytes"] > 0
+    assert entry["metadata_row"]["label"] == "G2"
+    assert entry["filters"] == {"keep": False}
+
+
+def test_failed_move_to_trash_leaves_a_readable_store(tmp_path):
+    """If the directory cannot be moved, it stays whole as an orphan and the store reads."""
+    exp, dest, (uid_g1, uid_g2, uid_g3) = _make_three_sample_experiment(tmp_path)
+    (dest / ".trash").write_text("not a directory")  # makes the move fail on every platform
+
+    with pytest.raises(RuntimeError, match="could not be moved to the trash"):
+        exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    assert (dest / "data-001" / ".ispy").exists(), "the directory must be left untouched"
+    assert list(exp._metadata["uid"]) == [uid_g1, uid_g3]
+    exp2, messages = _read_recording_warnings(dest)
+    assert list(exp2._metadata["uid"]) == [uid_g1, uid_g3]
+    assert [m for m in messages if "Skipping" in m], "the directory is reported as an orphan"
+
+
+def test_empty_trash_deletes_listed_and_unlisted_folders(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    unlisted = dest / ".trash" / "leftover"
+    unlisted.mkdir()
+    (unlisted / "file.bin").write_text("x")
+
+    exp.empty_trash(confirm=False)
+
+    assert not (dest / ".trash").exists()
+    exp2, messages = _read_recording_warnings(dest)
+    assert len(exp2) == 2
+    assert not [m for m in messages if "trash" in m]
+
+
+def test_empty_trash_prompt_defaults_to_no(tmp_path, monkeypatch):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    exp.empty_trash()
+
+    assert len([p for p in (dest / ".trash").iterdir() if p.is_dir()]) == 1
+
+
+def test_save_after_remove_delete_from_disk_roundtrips(tmp_path):
+    exp, dest, (uid_g1, uid_g2, uid_g3) = _make_filtered_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        exp.save()
+    messages = [str(w.message) for w in caught]
+    assert not [m for m in messages if "orphan" in m]
+    assert [m for m in messages if "empty_trash" in m], "save() must report the trash"
+
+    exp2, _ = _read_recording_warnings(dest)
+    assert list(exp2._metadata["uid"]) == [uid_g1, uid_g3]
+    assert exp2._filters["keep"]["mask"] == [True, True]
+
+
+def test_remove_delete_from_disk_unprompted_needs_uid(tmp_path, monkeypatch):
+    exp, dest, (uid_g1, uid_g2, uid_g3) = _make_three_sample_experiment(tmp_path)
+
+    with pytest.raises(TypeError, match="uid"):
+        exp.remove(1, confirm=False, delete_from_disk=True)
+    assert len(exp) == 3
+    assert (dest / "data-001").exists() and not (dest / ".trash").exists()
+
+    # with the prompt on, a person sees the summary, so a position is still allowed
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    exp.remove(1, delete_from_disk=True)
+    assert list(exp._metadata["uid"]) == [uid_g1, uid_g3]
+    assert not (dest / "data-001").exists()
+
+
+def test_removed_dataset_is_detached_from_its_directory(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    xd = exp.data[1]
+
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    assert xd.path is None
+    with pytest.raises(RuntimeError, match="no project is linked"):
+        xd.save()
+    assert sorted(p.name for p in dest.glob("data-*")) == ["data-000", "data-002"]
+
+
+def test_remove_delete_from_disk_refuses_pre_uid_store(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    parquet = dest / "metadata.parquet"
+    pd.read_parquet(parquet).drop(columns="uid").to_parquet(parquet, index=False)
+
+    with pytest.raises(ValueError, match="per-dataset uids"):
+        exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+
+    assert len(exp) == 3
+    assert (dest / "data-001").exists() and not (dest / ".trash").exists()
+    assert len(pd.read_parquet(parquet)) == 3
+
+
+def test_saveas_over_own_path_keeps_trash(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    manifest_before = (dest / ".trash" / "manifest.json").read_text()
+
+    exp.saveas(dest, overwrite=True)
+
+    assert (dest / ".trash" / "manifest.json").read_text() == manifest_before
+    (entry,) = json.loads(manifest_before)["entries"]
+    assert (dest / ".trash" / entry["folder"] / ".ispy").exists()
+    assert not (tmp_path / "exp.__ispy_bak__").exists()
+
+
+def _strand_trash_in_backup(tmp_path, dest):
+    """Leave the state of a save that could not carry the trash over: it sits in the backup."""
+    backup = tmp_path / "exp.__ispy_bak__"
+    backup.mkdir()
+    shutil.move(str(dest / ".trash"), str(backup / ".trash"))
+    return backup
+
+
+def test_saveas_recovers_trash_stranded_in_backup(tmp_path):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    manifest = (dest / ".trash" / "manifest.json").read_text()
+    backup = _strand_trash_in_backup(tmp_path, dest)
+
+    exp.saveas(dest, overwrite=True)
+
+    assert (dest / ".trash" / "manifest.json").read_text() == manifest
+    assert not backup.exists()
+
+
+def test_saveas_refuses_to_drop_backup_with_unmergeable_trash(tmp_path):
+    exp, dest, (uid_g1, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    backup = _strand_trash_in_backup(tmp_path, dest)
+    exp.remove(uid_g1, confirm=False, delete_from_disk=True)  # a second trash in the experiment
+
+    with pytest.raises(RuntimeError, match="still holds the trash"):
+        exp.saveas(dest, overwrite=True)
+
+    assert (backup / ".trash" / "manifest.json").exists(), "the stranded trash must survive"
+    assert (dest / ".trash" / "manifest.json").exists()
+
+
+# ── 6. replace(): the prompt defaults to no ────────────────────────────────────
+
+
+def test_replace_prompt_defaults_to_no(tmp_path, monkeypatch):
+    exp, dest, _ = _make_three_sample_experiment(tmp_path)
+    new = _make_xd(seed=7)
+    new.slide_id = "replacement"
+    monkeypatch.setattr("builtins.input", lambda _: "")
+
+    old = exp.data[0]
+
+    exp.replace(0, new)
+
+    assert InSituData.read(dest / "data-000").slide_id == "s", "the directory is unchanged"
+    # no swap in memory either: a later save() must not write `new` into the slot
+    assert exp.data[0] is old
+    assert new.path is None and new.uid is None
+    exp.save()
+    assert InSituData.read(dest / "data-000").slide_id == "s"
+
+
+def test_replace_pathless_slot_raises_without_prompt(monkeypatch):
+    exp = InSituExperiment()
+    exp.add(_make_xd(seed=0))
+
+    def _no_prompt(_):
+        raise AssertionError("replace() must not prompt for a slot without a path")
+
+    monkeypatch.setattr("builtins.input", _no_prompt)
+
+    with pytest.raises(ValueError, match="no path"):
+        exp.replace(0, _make_xd(seed=1))

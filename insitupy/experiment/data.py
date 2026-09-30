@@ -7,6 +7,7 @@ import shutil
 import warnings
 from collections.abc import MutableMapping
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -78,6 +79,13 @@ _EXPECTED_ROOT_FILES = {
     "tables",
 }
 
+# Datasets removed with ``remove(delete_from_disk=True)`` are moved here instead of being
+# deleted. Deliberately not in _EXPECTED_ROOT_FILES: ``concat(mode="move")`` deletes the
+# source root, so a non-empty trash must make it refuse unless ``force=True``.
+_TRASH_DIRNAME = ".trash"
+_TRASH_MANIFEST_FILENAME = "manifest.json"
+_TRASH_MANIFEST_VERSION = 1
+
 _ZIP_OUTPUT_UNSUPPORTED = (
     "zip_output is not supported for experiments: the resulting data-NNN.zip files cannot be "
     "read back by InSituExperiment.read(). Use InSituData.saveas(path, zip_output=True) on an "
@@ -128,6 +136,107 @@ def _list_dataset_dirs(root: Path) -> list[Path]:
             stacklevel=3,
         )
     return [p for p in found if not p.name.endswith(_STAGING_SUFFIXES)]
+
+
+def _confirmed(answer: str) -> bool:
+    """True only for an explicit yes at a ``[y/N]`` prompt."""
+    return answer.strip().lower() in ("y", "yes")
+
+
+def _path_size(path: Path) -> int:
+    """Total size in bytes of a file or of all files below a directory."""
+    path = Path(path)
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for dirpath, _, filenames in os.walk(path):
+        for name in filenames:
+            with contextlib.suppress(OSError):
+                total += os.path.getsize(os.path.join(dirpath, name))
+    return total
+
+
+def _format_size(n_bytes: int | None) -> str:
+    """Human-readable size, e.g. ``'1.5 GB'``."""
+    if n_bytes is None:
+        return "unknown size"
+    size = float(n_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _trash_entries(root: Path) -> list[dict]:
+    """Return what lies in the trash of an experiment root, one dict per item.
+
+    Manifest entries whose folder still exists come first, followed by items in
+    ``.trash/`` that the manifest does not list (flagged ``"unlisted": True``, size
+    computed on the fly). An unreadable manifest is reported with a warning and every
+    item is then treated as unlisted.
+    """
+    trash = Path(root) / _TRASH_DIRNAME
+    if not trash.is_dir():
+        return []
+
+    listed = []
+    manifest_path = trash / _TRASH_MANIFEST_FILENAME
+    if manifest_path.exists():
+        try:
+            listed = [
+                e for e in read_json(manifest_path)["entries"]
+                if isinstance(e, dict) and "folder" in e
+            ]
+        except Exception as err:
+            warnings.warn(
+                f"The trash manifest '{manifest_path}' is unreadable ({err}); falling back "
+                "to the folder listing.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+    on_disk = {p.name for p in trash.iterdir() if p.name != _TRASH_MANIFEST_FILENAME}
+    entries = [e for e in listed if e["folder"] in on_disk]
+    known = {e["folder"] for e in entries}
+    for name in sorted(on_disk - known):
+        entries.append({
+            "folder": name,
+            "uid": None,
+            "sample_id": None,
+            "removed_at": None,
+            "size_bytes": _path_size(trash / name),
+            "unlisted": True,
+        })
+    return entries
+
+
+def _write_trash_manifest(root: Path, entries: list[dict]) -> None:
+    """Write the manifest-listed *entries* to ``<root>/.trash/manifest.json`` (atomic)."""
+    write_dict_to_json(
+        {
+            "version": _TRASH_MANIFEST_VERSION,
+            "entries": [e for e in entries if not e.get("unlisted")],
+        },
+        Path(root) / _TRASH_DIRNAME / _TRASH_MANIFEST_FILENAME,
+    )
+
+
+def _warn_if_trash(root: Path, stacklevel: int = 3) -> None:
+    """Warn when an experiment root holds removed datasets in its trash. Never raises."""
+    try:
+        entries = _trash_entries(root)
+        if not entries:
+            return
+        total = sum(e.get("size_bytes") or 0 for e in entries)
+        names = [e.get("sample_id") or e["folder"] for e in entries]
+        message = (
+            f"{len(entries)} removed dataset(s) in '{Path(root) / _TRASH_DIRNAME}' "
+            f"({_format_size(total)}): {names}. Call exp.empty_trash() to free the space."
+        )
+    except Exception as err:
+        message = f"Could not inspect the trash of '{root}': {err}"
+    warnings.warn(message, UserWarning, stacklevel=stacklevel)
 
 
 class TableAccessor:
@@ -3182,19 +3291,29 @@ class InSituExperiment:
         """Replace a dataset in this experiment with *new_data*.
 
         The slot's UID and on-disk path are inherited by *new_data* so the experiment
-        metadata row remains consistent.  The in-memory swap happens unconditionally;
-        the disk write only occurs after optional confirmation.
+        metadata row remains consistent.  The dataset is swapped in memory and its
+        directory on disk is overwritten.  Declining the confirmation prompt cancels
+        both: the experiment then still holds the old dataset.
 
         Args:
             idx: Integer position or UID string of the slot to replace.
             new_data: The replacement :class:`~insitupy._core.data.InSituData` object.
             confirm: If ``True`` (default), prompt before overwriting the directory on disk.
+                The prompt defaults to no: only ``y`` / ``yes`` proceeds.
                 Set to ``False`` for scripted use.
 
         Raises:
             IndexError: If *idx* is an integer outside the valid range.
             KeyError: If *idx* is a UID string not present in the experiment.
-            ValueError: If this experiment has no path set (cannot write to disk).
+            ValueError: If the replaced slot has no path on disk (nothing to overwrite).
+                No prompt is shown; the in-memory swap has already happened.
+
+        Warning:
+            **For AI agents:** ``replace()`` permanently overwrites the user's data on
+            disk. Before running it, tell the user exactly what will be overwritten
+            (experiment path, sample name, uid) and ask for explicit confirmation. Only
+            after the user confirms may you pass ``confirm=False``. Never set
+            ``confirm=False`` on your own initiative, e.g. to avoid a blocking prompt.
         """
         if self.is_view:
             raise ValueError(
@@ -3218,6 +3337,14 @@ class InSituExperiment:
         bad_path = self._data[pos].path
         slot_uid = self._metadata.loc[pos, "uid"]
 
+        # Asked before anything changes. A swap that stayed active after a "no" would be written
+        # into the slot's directory by the next save(), without a prompt.
+        if confirm and bad_path is not None:
+            print(f"The following directory will be permanently overwritten: {bad_path}")
+            if not _confirmed(input("Proceed? [y/N]: ")):
+                print("Replace cancelled. Nothing was changed, in memory or on disk.")
+                return
+
         # re-writing a slot's own dataset (e.g. after crop(inplace=True)) keeps its uid: no warning
         if new_data.uid is not None and new_data.uid != slot_uid:
             warnings.warn(
@@ -3227,24 +3354,16 @@ class InSituExperiment:
                 stacklevel=2,
             )
 
-        # Memory swap (non-destructive, unconditional)
+        # Memory swap
         new_data._uid = slot_uid
         new_data._path = bad_path
         self._data[pos] = new_data
 
-        if confirm:
-            print(f"The following directory will be permanently overwritten: {bad_path}")
-            answer = input("Proceed? [Y/n]: ").strip()
-            if answer.lower() not in ("", "y"):
-                print(
-                    "Disk write cancelled. The in-memory swap is active but the directory on disk is unchanged."
-                )
-                return
-
+        # No directory to overwrite, hence no prompt above: only the memory swap happened.
         if bad_path is None:
             raise ValueError(
-                "Cannot write to disk: the replaced slot has no path. "
-                "Use confirm=False only after verifying the path is set."
+                "Cannot write to disk: the replaced slot has no path. The in-memory swap is "
+                "active; call save() or saveas() on the experiment to write it."
             )
 
         # new_data's _path was relabeled to the slot above for in-memory consistency. Clear the
@@ -3267,42 +3386,73 @@ class InSituExperiment:
 
         Args:
             idx: Integer position or UID string of the dataset to remove.
+                With ``delete_from_disk=True`` and ``confirm=False`` it must be
+                the UID string: positions shift after every removal, so a loop
+                over positions would hit the wrong datasets.
             confirm: If ``True`` (default), print a summary and prompt for
                 confirmation before proceeding.  Set to ``False`` for scripted use.
-            delete_from_disk: If ``True``, permanently delete the dataset
-                directory from disk using :func:`shutil.rmtree`.  Skipped
-                silently when the dataset has no path set.  Only datasets
-                stored directly inside this experiment's directory can be
-                deleted; a dataset stored elsewhere is not owned by the
-                experiment and is refused.  Default ``False``.
+            delete_from_disk: If ``True``, also take the dataset off the disk:
+                its row is dropped from the on-disk ``metadata.parquet`` /
+                ``metadata.csv`` and its entry from every mask in
+                ``filters.json`` right away, and its directory is moved to
+                ``<experiment>/.trash/``.  Nothing is deleted permanently until
+                :meth:`empty_trash` is called.  Skipped when the dataset has no
+                path set.  Only datasets stored directly inside this
+                experiment's directory can be deleted; a dataset stored
+                elsewhere is not owned by the experiment and is refused.
+                Default ``False``.
 
         Raises:
             IndexError: If *idx* is an integer outside the valid range.
             KeyError: If *idx* is a UID string not present in the experiment.
+            TypeError: If ``delete_from_disk=True`` and ``confirm=False`` are
+                combined with an integer position instead of a UID string.
             ValueError: If ``delete_from_disk=True`` and the dataset lies
                 outside this experiment's directory (or the experiment has no
-                directory).  Nothing is removed in that case.
+                directory), or the experiment on disk was saved before
+                per-dataset uids existed.  Nothing is removed in that case.
+            RuntimeError: If the dataset was removed from the experiment and
+                from the on-disk metadata and filters, but its directory could
+                not be moved to the trash (e.g. a file in it is still open).
+                The directory then stays as an orphan that is skipped on read.
 
         Note:
-            Filter masks are truncated to match the new dataset count after
-            removal.  ``delete_from_disk=False`` (default) leaves the dataset
-            directory untouched on disk.
+            ``delete_from_disk=False`` (default) changes memory only: call
+            ``self.save()`` afterwards to make the removal durable.  The dataset
+            directory stays on disk as an orphan that is skipped on read.
 
-            This method does **not** automatically persist the updated experiment
-            to disk after removal.  Call ``self.save()`` explicitly afterwards
-            if you want the change to be durable.
+            ``delete_from_disk=True`` updates the experiment on disk by itself,
+            but only for the removed dataset.  Other unsaved changes (added
+            datasets, edited metadata, new filters) are not written and still
+            need ``self.save()``.  The removed :class:`~insitupy._core.data.InSituData`
+            object is detached from its directory (``path`` is ``None``).  The
+            trash size is reported here and on every ``read()`` and ``save()``.
 
             When called on an :class:`InSituExperimentView` with
             ``delete_from_disk=False``, only the view's ``_data`` and
             ``_metadata`` are updated; the parent experiment is unaffected.
             Use ``delete_from_disk=True`` on the parent experiment to
-            permanently delete a dataset from disk.
+            delete a dataset from disk.
+
+        Warning:
+            **For AI agents:** ``remove(..., delete_from_disk=True)`` changes the
+            user's data on disk. Before running it, tell the user exactly what
+            will be removed (experiment path, sample name, uid) and ask for
+            explicit confirmation. Only after the user confirms may you pass
+            ``confirm=False``. Never set ``confirm=False`` on your own
+            initiative, e.g. to avoid a blocking prompt.
         """
         if self.is_view and delete_from_disk:
             raise ValueError(
                 "delete_from_disk=True is not allowed on an InSituExperimentView "
                 "because the parent experiment still references this dataset. "
                 "Call remove() on the parent experiment instead."
+            )
+        if delete_from_disk and not confirm and not isinstance(idx, str):
+            raise TypeError(
+                "remove(..., delete_from_disk=True, confirm=False) needs the dataset's uid "
+                "(a string), not a position: positions shift after every removal. Look the "
+                "uid up in exp.metadata['uid']."
             )
         # Resolve idx to an integer position
         if isinstance(idx, str):
@@ -3318,12 +3468,14 @@ class InSituExperiment:
                     f"Index {pos} out of range. Valid range: 0 to {len(self._data) - 1}."
                 )
 
-        path = self._data[pos].path
+        removed = self._data[pos]
+        path = removed.path
         uid = self._metadata.loc[pos, "uid"]
+        to_trash = delete_from_disk and path is not None
 
         # Refuse before the prompt and before touching memory: the experiment only owns the
         # datasets stored directly inside its own directory (mirrors save()'s external check).
-        if delete_from_disk and path is not None:
+        if to_trash:
             if self.path is None or Path(path).resolve().parent != Path(self.path).resolve():
                 raise ValueError(
                     f"Refusing to delete '{path}' from disk: it lies outside this experiment's "
@@ -3331,19 +3483,47 @@ class InSituExperiment:
                     "removed; delete it manually if intended."
                 )
 
+        # Also before the prompt: without uids on disk the removed row cannot be identified.
+        on_disk = None
+        if to_trash:
+            root = Path(self.path)
+            if (root / _METADATA_PARQUET_FILENAME).exists() or (root / "metadata.csv").exists():
+                on_disk = self._read_metadata_with_schema(root)
+                if "uid" not in on_disk.columns:
+                    raise ValueError(
+                        f"Cannot delete from disk: the experiment at '{root}' was saved before "
+                        "per-dataset uids, so the dataset's row in the on-disk metadata cannot "
+                        "be identified. Nothing was removed; call save() first, then remove again."
+                    )
+
         if confirm:
+            print(f"Experiment: {self.path}")
             print(
-                f"Dataset at position {pos} (uid='{uid}', path={path}) will be removed "
-                "from this experiment."
+                f"Dataset at position {pos}: uid='{uid}', sample_id='{removed.sample_id}', "
+                f"slide_id='{removed.slide_id}'"
             )
-            if delete_from_disk and path is not None:
+            print(f"Path: {path}")
+            print("It will be removed from this experiment.")
+            if to_trash:
                 print(
-                    f"The dataset directory will also be permanently deleted from disk: {path}"
+                    f"Its directory will be moved to {Path(self.path) / _TRASH_DIRNAME} "
+                    "(use exp.empty_trash() to delete it permanently)."
                 )
-            answer = input("Proceed? [y/N]: ").strip()
-            if answer.lower() != "y":
+            if not _confirmed(input("Proceed? [y/N]: ")):
                 print("Removal cancelled.")
                 return
+
+        # What the trash manifest records, so the removal can be undone by hand.
+        metadata_row = self._metadata.loc[pos].to_dict()
+        filter_membership = {
+            name: bool(entry["mask"][pos]) for name, entry in self._filters.items()
+        }
+
+        # Disk first, so a failing write leaves memory and disk untouched and in agreement.
+        if to_trash:
+            disk_row, disk_filters = self._drop_uid_from_disk_state(uid, on_disk)
+            if disk_row is not None:
+                metadata_row, filter_membership = disk_row, disk_filters
 
         # Memory removal
         del self._data[pos]
@@ -3351,11 +3531,246 @@ class InSituExperiment:
         for entry in self._filters.values():
             entry["mask"].pop(pos)
 
-        # Disk deletion
-        if delete_from_disk and path is not None:
-            shutil.rmtree(path)
+        if to_trash:
+            # Open cell stores would make the move fail on Windows.
+            with contextlib.suppress(Exception):
+                if removed.cells is not None:
+                    removed.cells.close()
+            trash_path, size = self._move_to_trash(
+                Path(path), uid, removed, metadata_row, filter_membership
+            )
+            # A held reference must not write a new data-* directory from lazy arrays that
+            # still point into the moved folder.
+            removed._path = None
+            print(
+                f"Dataset '{removed.sample_id}' (uid '{uid}') removed. Its directory was moved "
+                f"to {trash_path} ({_format_size(size)}). The on-disk metadata and filters were "
+                "updated. Call exp.empty_trash() to free the space. Other unsaved changes "
+                "still need .save()."
+            )
+        elif self.is_view:
+            print("Dataset removed from this view only. The parent experiment is unchanged.")
+        elif delete_from_disk:
+            print(
+                "Dataset removed. It was never saved, so nothing was deleted from disk. "
+                "Call .save() to persist the removal."
+            )
+        else:
+            orphan = (
+                f"; its directory {path} stays on disk as an orphan (skipped on read)"
+                if path is not None else ""
+            )
+            print(
+                f"Dataset removed in memory only. Call .save() to persist the removal{orphan}."
+            )
 
-        print("Experiment updated in memory but not yet saved to disk. Call .save() to persist the change.")
+    def _drop_uid_from_disk_state(
+        self, uid: str, on_disk: pd.DataFrame | None = None
+    ) -> tuple[dict | None, dict]:
+        """Drop one dataset from the on-disk ``metadata`` and ``filters.json``.
+
+        Only the row and mask entries of *uid* are taken out. The in-memory metadata and
+        filters are never written here: they can hold datasets from ``add()`` that are not
+        on disk yet, and writing their uids without a ``data-*`` directory would make the
+        experiment unreadable.
+
+        Args:
+            uid: UID of the dataset to drop.
+            on_disk: The on-disk metadata if the caller already read it.
+
+        Returns:
+            The dropped metadata row and its ``{filter name: bool}`` membership, or
+            ``(None, {})`` when the uid is not in the on-disk metadata (never saved).
+        """
+        root = Path(self.path)
+        if on_disk is None:
+            if not ((root / _METADATA_PARQUET_FILENAME).exists() or (root / "metadata.csv").exists()):
+                return None, {}
+            on_disk = self._read_metadata_with_schema(root)
+        if "uid" not in on_disk.columns:
+            raise ValueError(
+                f"The on-disk metadata of '{root}' has no 'uid' column; call save() first."
+            )
+
+        on_disk_uids = list(on_disk["uid"])
+        if uid not in on_disk_uids:
+            return None, {}
+        pos_on_disk = on_disk_uids.index(uid)
+        row = on_disk.iloc[pos_on_disk].to_dict()
+        new_metadata = on_disk.drop(index=on_disk.index[pos_on_disk]).reset_index(drop=True)
+
+        membership = {}
+        payload = None
+        filters_path = root / "filters.json"
+        if filters_path.exists():
+            payload = read_json(filters_path)
+            filters = payload.get("filters") if isinstance(payload, dict) else None
+            for name, entry in (filters or {}).items():
+                mask = entry.get("mask") if isinstance(entry, dict) else None
+                # a mask that already mismatches is skipped by read() anyway: leave it alone
+                if isinstance(mask, list) and len(mask) == len(on_disk):
+                    membership[name] = bool(mask.pop(pos_on_disk))
+
+        # The two writes are not one transaction. Filters go first: dying in between leaves
+        # masks one shorter than the metadata, which read() skips with a warning (the filters
+        # are lost, the experiment stays readable).
+        if payload is not None:
+            write_dict_to_json(payload, filters_path)
+        self._write_metadata_files(new_metadata, root)
+        return row, membership
+
+    def _move_to_trash(
+        self,
+        path: Path,
+        uid: str,
+        removed: "InSituData",
+        metadata_row: dict,
+        filter_membership: dict,
+    ) -> tuple[Path, int]:
+        """Move a dataset directory into ``<experiment>/.trash/`` and list it in the manifest.
+
+        The move is a rename inside the experiment root, so the directory is either fully
+        moved or untouched.
+
+        Returns:
+            The new location and the directory size in bytes.
+
+        Raises:
+            RuntimeError: If the directory could not be moved.
+        """
+        root = Path(self.path)
+        trash = root / _TRASH_DIRNAME
+        now = datetime.now()
+        # slot names are reused by save(), so the folder name carries uid and time
+        # (a uid is normally 8 hex characters; anything else is made safe for a folder name)
+        safe_uid = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(uid))
+        target = trash / f"{path.name}__{safe_uid}__{now.strftime('%y%m%d-%H%M%S')}"
+        size = _path_size(path)
+        try:
+            trash.mkdir(exist_ok=True)
+            os.rename(path, target)
+        except OSError as err:
+            raise RuntimeError(
+                f"Dataset (uid '{uid}') was removed from the experiment and from the on-disk "
+                f"metadata/filters, but the directory {path} could not be moved to the trash; "
+                "it stays as an orphan (skipped on read). Close anything using it and delete "
+                "or move it manually."
+            ) from err
+
+        entry = {
+            "folder": target.name,
+            "uid": uid,
+            "sample_id": removed.sample_id,
+            "slide_id": removed.slide_id,
+            "original_dir": path.name,
+            "removed_at": now.isoformat(timespec="seconds"),
+            "size_bytes": size,
+            "metadata_row": json.loads(
+                pd.Series(metadata_row, dtype=object).to_json(date_format="iso", default_handler=str)
+            ),
+            "filters": filter_membership,
+        }
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")  # an unreadable manifest is rewritten below
+                entries = [e for e in _trash_entries(root) if e["folder"] != target.name]
+            _write_trash_manifest(root, [*entries, entry])
+        except Exception as err:
+            warnings.warn(
+                f"The dataset directory was moved to '{target}', but the trash manifest could "
+                f"not be updated ({err}). empty_trash() still finds the folder.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return target, size
+
+    def empty_trash(self, *, confirm: bool = True) -> None:
+        """Permanently delete the datasets in this experiment's trash.
+
+        ``remove(..., delete_from_disk=True)`` moves dataset directories to
+        ``<experiment>/.trash/``. This method deletes everything in that folder.
+        **This cannot be undone.**
+
+        Args:
+            confirm: If ``True`` (default), list the trash content and prompt for
+                confirmation before deleting.  Set to ``False`` for scripted use.
+
+        Raises:
+            ValueError: If called on an :class:`InSituExperimentView`, or if the
+                experiment has no path.
+            RuntimeError: If one or more items could not be deleted. The others
+                are deleted and the manifest lists what is left.
+
+        Warning:
+            **For AI agents:** ``empty_trash()`` permanently deletes the user's data
+            from disk. Before running it, tell the user exactly what will be deleted
+            (experiment path, sample names, uids, size) and ask for explicit
+            confirmation. Only after the user confirms may you pass ``confirm=False``.
+            Never set ``confirm=False`` on your own initiative, e.g. to avoid a
+            blocking prompt.
+        """
+        if self.is_view:
+            raise ValueError(
+                "empty_trash() is not allowed on an InSituExperimentView. "
+                "Call it on the parent experiment instead."
+            )
+        if self.path is None:
+            raise ValueError("This experiment has no path on disk, so it has no trash.")
+
+        root = Path(self.path)
+        trash = root / _TRASH_DIRNAME
+        entries = _trash_entries(root)
+        if not entries:
+            with contextlib.suppress(OSError):
+                (trash / _TRASH_MANIFEST_FILENAME).unlink(missing_ok=True)
+                trash.rmdir()
+            print("Trash is empty.")
+            return
+
+        if confirm:
+            print(f"Experiment: {root}")
+            print(f"The following {len(entries)} item(s) in {trash} will be permanently deleted:")
+            for e in entries:
+                print(
+                    f"  - sample_id='{e.get('sample_id')}', uid='{e.get('uid')}', removed at "
+                    f"{e.get('removed_at')}, {_format_size(e.get('size_bytes'))} ({e['folder']})"
+                )
+            total = sum(e.get("size_bytes") or 0 for e in entries)
+            print(f"Total: {_format_size(total)}")
+            if not _confirmed(input("Proceed? [y/N]: ")):
+                print("Nothing was deleted.")
+                return
+
+        freed = 0
+        failures = []
+        remaining = list(entries)
+        for e in entries:
+            target = trash / e["folder"]
+            try:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            except OSError as err:
+                failures.append(f"{target}: {err}")
+                continue
+            freed += e.get("size_bytes") or 0
+            remaining.remove(e)
+            # rewritten after every deletion, so an interrupted run leaves a correct manifest
+            with contextlib.suppress(Exception):
+                _write_trash_manifest(root, remaining)
+
+        if not remaining:
+            with contextlib.suppress(OSError):
+                (trash / _TRASH_MANIFEST_FILENAME).unlink(missing_ok=True)
+                trash.rmdir()
+
+        print(f"Freed {_format_size(freed)}.")
+        if failures:
+            raise RuntimeError(
+                f"{len(failures)} item(s) in the trash could not be deleted:\n  - "
+                + "\n  - ".join(failures)
+            )
 
     def save(self,
              verbose: bool = False,
@@ -3520,6 +3935,8 @@ class InSituExperiment:
         self.save_colors(overwrite=True)
         self.save_filters(path=self.path)
 
+        _warn_if_trash(Path(self.path))
+
     def save_metadata(
         self,
         path: str | os.PathLike | Path | None = None,
@@ -3558,10 +3975,18 @@ class InSituExperiment:
                 "Set `overwrite=True` to replace them."
             )
 
+        self._write_metadata_files(self._metadata, path)
+
+    @classmethod
+    def _write_metadata_files(cls, metadata: pd.DataFrame, path: Path) -> None:
+        """Write *metadata* to ``metadata.parquet`` and ``metadata.csv`` in directory *path*."""
+        parquet_path = path / _METADATA_PARQUET_FILENAME
+        csv_path = path / "metadata.csv"
+
         # Atomic Parquet write: write to a temp file first, then replace.
         # Path.replace() uses os.replace(), which overwrites the target atomically on all platforms.
         tmp_path = path / "metadata.parquet.tmp"
-        self._metadata.to_parquet(tmp_path, index=False)
+        metadata.to_parquet(tmp_path, index=False)
         tmp_path.replace(parquet_path)
 
         # Regenerate CSV as a human-readable export (not the canonical source).
@@ -3569,11 +3994,11 @@ class InSituExperiment:
         tmp_csv_path = path / "metadata.csv.tmp"
         with open(tmp_csv_path, "w", newline="") as f:
             f.write("# AUTO-GENERATED — human-readable export only; edits are ignored (canonical data is in metadata.parquet)\n")
-            self._metadata.to_csv(f, index=True)
+            metadata.to_csv(f, index=True)
         tmp_csv_path.replace(csv_path)
 
         # Remove stale schema sidecar written by older versions.
-        stale_schema = self._metadata_schema_path(path)
+        stale_schema = cls._metadata_schema_path(path)
         if stale_schema.exists():
             stale_schema.unlink()
 
@@ -3946,7 +4371,23 @@ class InSituExperiment:
         # Handle a backup left behind by a previously interrupted save.
         if backup.exists():
             if path.exists():
-                # Destination is intact, so the backup is genuinely redundant: drop it.
+                # Destination is intact, so the backup is redundant - except for a trash that
+                # an earlier save could not carry over (or was interrupted before doing so).
+                # Bring it back before the backup is dropped.
+                stranded_trash = backup / _TRASH_DIRNAME
+                if stranded_trash.exists():
+                    try:
+                        if (path / _TRASH_DIRNAME).exists():
+                            raise FileExistsError(f"'{path / _TRASH_DIRNAME}' already exists")
+                        os.rename(stranded_trash, path / _TRASH_DIRNAME)
+                    except OSError as err:
+                        raise RuntimeError(
+                            f"'{backup}' is left over from an earlier save and still holds the "
+                            f"trash of removed datasets ('{stranded_trash}'), which could not be "
+                            f"moved back into '{path}': {err}. Nothing was saved. Move that "
+                            "folder's content into the experiment's trash or delete it, then "
+                            "save again."
+                        ) from err
                 check_overwrite_and_remove_if_true(backup, overwrite=True)
             else:
                 # Interrupted swap: `backup` is the ONLY surviving complete copy and
@@ -3962,9 +4403,26 @@ class InSituExperiment:
                         "To overwrite the recovered experiment, set overwrite=True."
                     )
 
+        # The swap below replaces the whole root, its trash included. Overwriting the
+        # experiment's own directory carries the trash over; the trash of a different
+        # experiment is part of what the caller chose to overwrite.
+        own_path = self._path is not None and path.resolve() == Path(self._path).resolve()
+        if path.exists() and not own_path:
+            with contextlib.suppress(Exception):
+                foreign_trash = _trash_entries(path)
+                if foreign_trash:
+                    warnings.warn(
+                        f"Overwriting '{path}' also deletes the {len(foreign_trash)} removed "
+                        f"dataset(s) in its trash "
+                        f"({_format_size(sum(e.get('size_bytes') or 0 for e in foreign_trash))}).",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
         logger.info(f"Saving InSituExperiment to {str(path)}") if verbose else None
 
         destination_backed_up = False
+        keep_backup = False
         try:
             if collect_warnings_mode:
                 with collect_warnings() as collector:
@@ -3987,6 +4445,20 @@ class InSituExperiment:
                 os.rename(path, backup)
                 destination_backed_up = True
             os.rename(staging, path)
+
+            old_trash = backup / _TRASH_DIRNAME
+            if own_path and destination_backed_up and old_trash.exists():
+                try:
+                    os.rename(old_trash, path / _TRASH_DIRNAME)
+                except OSError as err:
+                    keep_backup = True
+                    logger.error(
+                        "The experiment was saved, but its trash could not be carried over "
+                        "(%s). The previous experiment directory, including the trash, is kept "
+                        "at '%s'. The next saveas() to this path moves the trash back; or move "
+                        "its '%s' folder into '%s' manually.",
+                        err, backup, _TRASH_DIRNAME, path,
+                    )
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             if destination_backed_up and not path.exists() and backup.exists():
@@ -4002,7 +4474,7 @@ class InSituExperiment:
         finally:
             # Remove the backup only once the destination is confirmed in place.
             # If neither swap nor restore succeeded, keep it — it is the only surviving copy.
-            if backup.exists() and path.exists():
+            if backup.exists() and path.exists() and not keep_backup:
                 shutil.rmtree(backup, ignore_errors=True)
 
         self._path = path.resolve()
@@ -4382,6 +4854,12 @@ class InSituExperiment:
                             f"source experiment at index {i} ('{obj._path}'): {unexpected}. "
                             "Nothing was moved. Move or back up these items, or pass "
                             "force=True to delete them."
+                            + (
+                                f" '{_TRASH_DIRNAME}' holds datasets removed with "
+                                "remove(delete_from_disk=True): call empty_trash() on that "
+                                "experiment first."
+                                if _TRASH_DIRNAME in unexpected else ""
+                            )
                         )
 
             # Verify same filesystem per dataset (covers subset experiments whose
@@ -4899,6 +5377,8 @@ class InSituExperiment:
                     UserWarning,
                     stacklevel=2,
                 )
+
+        _warn_if_trash(path, stacklevel=4)
 
         if filter_key is not None:
             if filter_key not in experiment._filters and filter_key not in experiment._composites:
