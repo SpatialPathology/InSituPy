@@ -3295,6 +3295,10 @@ class InSituExperiment:
         directory on disk is overwritten.  Declining the confirmation prompt cancels
         both: the experiment then still holds the old dataset.
 
+        A slot that was never saved has no directory to overwrite: the dataset is then
+        only swapped in memory, without a prompt, and is written by the next ``save()``
+        or ``saveas()`` of the experiment.
+
         Args:
             idx: Integer position or UID string of the slot to replace.
             new_data: The replacement :class:`~insitupy._core.data.InSituData` object.
@@ -3305,8 +3309,7 @@ class InSituExperiment:
         Raises:
             IndexError: If *idx* is an integer outside the valid range.
             KeyError: If *idx* is a UID string not present in the experiment.
-            ValueError: If the replaced slot has no path on disk (nothing to overwrite).
-                No prompt is shown; the in-memory swap has already happened.
+            ValueError: If called on an :class:`InSituExperimentView`.
 
         Warning:
             **For AI agents:** ``replace()`` permanently overwrites the user's data on
@@ -3359,12 +3362,13 @@ class InSituExperiment:
         new_data._path = bad_path
         self._data[pos] = new_data
 
-        # No directory to overwrite, hence no prompt above: only the memory swap happened.
+        # No directory to overwrite, hence no prompt above: the memory swap is the whole job.
         if bad_path is None:
-            raise ValueError(
-                "Cannot write to disk: the replaced slot has no path. The in-memory swap is "
-                "active; call save() or saveas() on the experiment to write it."
+            print(
+                "Dataset replaced in memory. The slot has no directory on disk yet; call "
+                ".save() or .saveas() on the experiment to write it."
             )
+            return
 
         # new_data's _path was relabeled to the slot above for in-memory consistency. Clear the
         # label across the write only so InSituData.saveas's self-overwrite guard - which treats
@@ -3688,8 +3692,9 @@ class InSituExperiment:
         """Permanently delete the datasets in this experiment's trash.
 
         ``remove(..., delete_from_disk=True)`` moves dataset directories to
-        ``<experiment>/.trash/``. This method deletes everything in that folder.
-        **This cannot be undone.**
+        ``<experiment>/.trash/``. This method deletes everything in that folder,
+        including items that the trash manifest does not list (the prompt marks
+        them). **This cannot be undone.**
 
         Args:
             confirm: If ``True`` (default), list the trash content and prompt for
@@ -3731,10 +3736,15 @@ class InSituExperiment:
             print(f"Experiment: {root}")
             print(f"The following {len(entries)} item(s) in {trash} will be permanently deleted:")
             for e in entries:
-                print(
-                    f"  - sample_id='{e.get('sample_id')}', uid='{e.get('uid')}', removed at "
-                    f"{e.get('removed_at')}, {_format_size(e.get('size_bytes'))} ({e['folder']})"
-                )
+                size = _format_size(e.get("size_bytes"))
+                if e.get("unlisted"):
+                    # not put there by remove(), or the manifest lost track of it
+                    print(f"  - '{e['folder']}', {size} (not listed in the trash manifest)")
+                else:
+                    print(
+                        f"  - sample_id='{e.get('sample_id')}', uid='{e.get('uid')}', removed "
+                        f"at {e.get('removed_at')}, {size} ({e['folder']})"
+                    )
             total = sum(e.get("size_bytes") or 0 for e in entries)
             print(f"Total: {_format_size(total)}")
             if not _confirmed(input("Proceed? [y/N]: ")):

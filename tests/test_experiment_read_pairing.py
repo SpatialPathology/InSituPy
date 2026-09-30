@@ -398,14 +398,37 @@ def test_replace_prompt_defaults_to_no(tmp_path, monkeypatch):
     assert InSituData.read(dest / "data-000").slide_id == "s"
 
 
-def test_replace_pathless_slot_raises_without_prompt(monkeypatch):
+def test_replace_pathless_slot_swaps_in_memory_without_prompt(tmp_path, monkeypatch):
+    """A never-saved slot has nothing to overwrite: no prompt, no error, written by saveas()."""
     exp = InSituExperiment()
     exp.add(_make_xd(seed=0))
+    slot_uid = exp.metadata.loc[0, "uid"]
+    new = _make_xd(seed=1)
+    new.slide_id = "replacement"
 
     def _no_prompt(_):
         raise AssertionError("replace() must not prompt for a slot without a path")
 
     monkeypatch.setattr("builtins.input", _no_prompt)
 
-    with pytest.raises(ValueError, match="no path"):
-        exp.replace(0, _make_xd(seed=1))
+    exp.replace(0, new)
+
+    assert exp.data[0] is new and new.uid == slot_uid
+    exp.saveas(tmp_path / "exp")
+    reread = InSituExperiment.read(tmp_path / "exp")
+    assert reread.data[0].slide_id == "replacement" and reread.data[0].uid == slot_uid
+
+
+def test_empty_trash_prompt_marks_unlisted_items(tmp_path, monkeypatch, capsys):
+    exp, dest, (_, uid_g2, _) = _make_three_sample_experiment(tmp_path)
+    exp.remove(uid_g2, confirm=False, delete_from_disk=True)
+    (dest / ".trash" / "leftover").mkdir()
+    monkeypatch.setattr("builtins.input", lambda _: "n")
+    capsys.readouterr()
+
+    exp.empty_trash()
+
+    out = capsys.readouterr().out
+    assert "'leftover'" in out and "not listed in the trash manifest" in out
+    assert f"uid='{uid_g2}'" in out
+    assert (dest / ".trash" / "leftover").exists(), "nothing is deleted after a no"
