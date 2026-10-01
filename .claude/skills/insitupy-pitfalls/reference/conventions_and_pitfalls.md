@@ -131,6 +131,40 @@ where to re-verify it if the codebase has moved on.
 - `InSituData.metadata` is a per-sample `dict` (method info, history, uids, cropping history).
   Don't confuse the two when a task says "add metadata".
 
+## Destructive operations and AI agents
+
+Some calls change or delete the user's data on disk:
+
+- `exp.remove(idx, delete_from_disk=True)` - takes a dataset out of the experiment on disk
+- `exp.empty_trash()` - permanently deletes the removed datasets
+- `exp.replace(idx, new_data)` - overwrites a dataset directory
+- any `overwrite=True` (`saveas`, ...) or `force=True` call, and `InSituExperiment.concat(...,
+  mode="move")`, which deletes the source experiment directories
+
+**Rule for AI agents:** before running one of these, tell the user exactly what will be deleted
+or overwritten (experiment path, sample names, uids) and ask for explicit confirmation. Only
+after the user confirms may you pass `confirm=False`. Never set `confirm=False`,
+`overwrite=True` or `force=True` on your own initiative, e.g. to avoid a blocking prompt. The
+prompts default to no (`[y/N]`), so an unanswered prompt cancels the call.
+
+How `remove(..., delete_from_disk=True)` behaves (0.12, verify: `InSituExperiment.remove` in
+`insitupy/experiment/data.py`):
+
+- The dataset's row is dropped from the on-disk metadata and its entry from every filter mask
+  right away, so the experiment stays readable without a `save()`. Nothing else is written:
+  other unsaved changes still need `exp.save()`.
+- The directory is **moved to `<experiment>/.trash/`**, not deleted. `exp.empty_trash()` deletes
+  it permanently. `remove()`, `read()` and `save()` report the trash size. `.trash/manifest.json`
+  lists each removed dataset with its metadata row and filter membership. There is no restore
+  function yet: move the folder back to a free `data-NNN` name, `exp.add(path, metadata=...)`,
+  then `exp.save()`.
+- **With `confirm=False`, `idx` must be the uid string**, not a position (`TypeError`
+  otherwise). Positions shift after every removal: `for i in [6, 7]: exp.remove(i, ...)` removes
+  the original datasets 6 and 8. Look uids up in `exp.metadata["uid"]`.
+- The removed `InSituData` object is detached (`path` is `None`); its `save()` raises.
+- `delete_from_disk=False` (default) only changes memory; the directory stays as an orphan that
+  `read()` skips with a warning.
+
 ## Subscripting, return types, and other 0.12 API-shape gotchas
 
 Verified against `release/0.12.x`. These are shapes that look one way and behave another.

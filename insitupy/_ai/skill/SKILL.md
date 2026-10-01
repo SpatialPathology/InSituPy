@@ -110,6 +110,16 @@ data.saveas("path/to/my_project/")
 This is the typical arc for a single sample. For multi-sample analysis, build an
 `InSituExperiment` instead (see `reference/workflows.md`, section 7).
 
+## Destructive operations: ask the user first
+
+`exp.remove(..., delete_from_disk=True)`, `exp.empty_trash()`, `exp.replace()` and any
+`overwrite=True` / `force=True` call change or delete the user's data on disk. Before running
+one, tell the user exactly what will be deleted or overwritten (experiment path, sample names,
+uids) and ask for explicit confirmation. Only after the user confirms may you pass
+`confirm=False`. Never set `confirm=False`, `overwrite=True` or `force=True` on your own
+initiative, e.g. to avoid a blocking prompt. Details: `reference/conventions_and_pitfalls.md`,
+section "Destructive operations and AI agents".
+
 ## Reference index (progressive disclosure)
 
 Read only what the current task needs:

@@ -385,9 +385,13 @@ def test_remove_disk_deletion(tmp_path):
     dataset_dir = exp.data[0].path
     assert dataset_dir is not None and dataset_dir.exists()
 
-    exp.remove(0, confirm=False, delete_from_disk=True)
+    uid = exp.metadata.loc[0, "uid"]
+    exp.remove(uid, confirm=False, delete_from_disk=True)
 
+    # moved to the experiment's trash, not deleted
     assert not dataset_dir.exists()
+    trashed = [p for p in (save_dir / ".trash").iterdir() if p.is_dir()]
+    assert len(trashed) == 1 and (trashed[0] / ".ispy").exists()
 
 
 def test_remove_no_disk_deletion_by_default(tmp_path):

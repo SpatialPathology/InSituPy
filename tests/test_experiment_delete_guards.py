@@ -73,7 +73,7 @@ def test_remove_delete_outside_root_refused(tmp_path):
     assert len(exp) == 2
 
     with pytest.raises(ValueError, match="outside this experiment's directory"):
-        exp.remove(1, delete_from_disk=True, confirm=False)
+        exp.remove(exp.metadata.loc[1, "uid"], delete_from_disk=True, confirm=False)
 
     assert (external / ".ispy").exists(), "the external dataset must survive"
     assert len(exp) == 2, "the guard fires before the in-memory removal"
@@ -86,7 +86,7 @@ def test_remove_delete_without_experiment_dir_refused(tmp_path):
     exp.add(InSituData.read(external))  # in-memory experiment: it owns no directory
 
     with pytest.raises(ValueError, match="does not own it"):
-        exp.remove(0, delete_from_disk=True, confirm=False)
+        exp.remove(exp.metadata.loc[0, "uid"], delete_from_disk=True, confirm=False)
     assert external.exists() and len(exp) == 1
 
 
@@ -126,6 +126,23 @@ def test_concat_move_force_deletes(tmp_path):
     assert len(merged) == 4
     assert _slot_names(dst) == ["data-000", "data-001", "data-002", "data-003"]
     assert len(InSituExperiment.read(dst)) == 4
+
+
+def test_concat_move_refuses_nonempty_trash(tmp_path):
+    """The trash of a source experiment would be deleted with its root."""
+    a = _saved_experiment(tmp_path, "expA", n=3, offset=0)
+    b = _saved_experiment(tmp_path, "expB", offset=10)
+    a.remove(a.metadata.loc[2, "uid"], delete_from_disk=True, confirm=False)
+
+    with pytest.raises(ValueError, match=r"empty_trash\(\)"):
+        InSituExperiment.concat([a, b], path=tmp_path / "merged", mode="move")
+
+    assert _slot_names(tmp_path / "expA") == ["data-000", "data-001"]
+    assert (tmp_path / "expA" / ".trash" / "manifest.json").exists()
+
+    a.empty_trash(confirm=False)
+    merged = InSituExperiment.concat([a, b], path=tmp_path / "merged", mode="move")
+    assert len(merged) == 4
 
 
 def test_concat_move_staging_leftovers(tmp_path):
