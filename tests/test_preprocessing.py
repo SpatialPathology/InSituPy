@@ -9,6 +9,7 @@ from scipy.sparse import issparse
 
 from insitupy import pp
 from insitupy._core.data import InSituData
+from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.containers.cell_data import CellData
 from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing import (
@@ -152,6 +153,43 @@ class TestFilterCells:
         xd = _make_insitudata()
         with pytest.raises(ValueError):
             filter_cells(xd, min_counts=1, min_genes=1)
+
+
+def _make_insitudata_with_boundaries():
+    """Three cells (c1 has no counts) with boundaries, so table/boundaries sync is observable."""
+    table = AnnData(
+        X=np.array([[0.0, 0.0], [5.0, 5.0], [7.0, 7.0]]),
+        obs=pd.DataFrame(index=pd.Index(["c1", "c2", "c3"], dtype=str)),
+        var=pd.DataFrame(index=["g1", "g2"]),
+    )
+    table.obsm["spatial"] = np.arange(6, dtype=float).reshape(3, 2)
+
+    boundaries = BoundariesData(cell_names=["c1", "c2", "c3"], seg_mask_value=[1, 2, 3])
+    boundaries.add_boundaries(
+        cell_boundaries=np.array([[0, 1, 2], [3, 0, 0]], dtype=np.uint32),
+        nuclei_boundaries=None,
+        pixel_size=1,
+    )
+
+    xd = InSituData(path=None, metadata=None, slide_id="t", sample_id="s", method_name="t", method_params={})
+    xd.cells.add_celldata(cd=CellData(table=table, boundaries=boundaries), key="main", is_main=True)
+    return xd
+
+
+class TestFilterCellsKeepsBoundariesInSync:
+    """Both filter paths must leave the boundaries aligned with the table: the mask path
+    goes through the table setter, the threshold paths filter the AnnData in place and
+    rely on an explicit `sync()`."""
+
+    @pytest.mark.parametrize("kwargs", [{"min_counts": 1}, {"mask": np.array([False, True, True])}])
+    def test_boundaries_follow_table(self, kwargs):
+        xd = _make_insitudata_with_boundaries()
+
+        filter_cells(xd, **kwargs)
+
+        assert list(xd.cells.table.obs_names) == ["c2", "c3"]
+        assert list(xd.cells.boundaries.cell_names.compute()) == ["c2", "c3"]
+        assert list(xd.cells.boundaries.seg_mask_value.compute()) == [2, 3]
 
 
 # ── filter_genes ──────────────────────────────────────────────────────────────
