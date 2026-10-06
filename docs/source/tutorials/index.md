@@ -1,34 +1,21 @@
 # Tutorials
 
-InSituPy is built around two core classes: **`InSituData`** for analyzing individual spatial transcriptomics samples, and **`InSituExperiment`** for managing multi-sample studies. `InSituData` integrates multiple data modalities—cell expression matrices, transcript locations, tissue images, and spatial annotations—into a unified interface that preserves spatial context throughout your analysis. `InSituExperiment` extends this to collections of samples, connecting each sample to its corresponding metadata, enabling cross-sample comparisons, and coordinated workflows across entire datasets. Together, they provide a complete framework for spatial transcriptomics analysis.
+The tutorials show how to work with **InSituPy**'s two core classes: `InSituData` for a single
+tissue section and `InSituExperiment` for a study with many samples. New to InSituPy? Read
+[InSituPy at a glance](../overview.md) first for how the data is organised.
 
-<center><img src="../_static/img/insitupy_data_structure.svg" width="800"/></center>
+## Learn the basics
 
-## Topics
-
-To help you get started with **InSituPy**, you can find a collection of different tutorials here. These are divided into the following five topics:
+Start here. Download the demo data and work through the single-sample tutorials in order, then
+learn how to bring in your own data and how to look at it.
 
 ```{eval-rst}
-.. card:: Data I/O — Saving and Loading
-    :link: 00_io/index
-    :link-type: doc
-    :link-alt: Data I/O tutorials
-
-    How to save and reload ``InSituData`` and ``InSituExperiment`` objects — full saves, modality-specific partial saves, and reloading individual components.
-
 .. card:: Single-sample analysis
     :link: 01_demo_analysis/index
     :link-type: doc
     :link-alt: Analysis demo
 
     Step-by-step demonstration on how to perform data analysis using `InSituPy` and the `InSituData` class.
-
-.. card:: Multi-sample analysis
-    :link: 02_multisample_analysis/index
-    :link-type: doc
-    :link-alt: Multi-sample analysis tutorials
-
-    This set of tutorials focuses on the analysis of multiple samples using the `InSituExperiment` class.
 
 .. card:: Data import
     :link: 03_data_import/index
@@ -37,13 +24,6 @@ To help you get started with **InSituPy**, you can find a collection of differen
 
     Tutorials explaining how to import data from different technologies or tools.
 
-.. card:: SpatialData Integration
-    :link: 07_spatialdata/index
-    :link-type: doc
-    :link-alt: SpatialData conversion tutorials
-
-    Tutorials for converting between InSituPy and SpatialData formats for integration with the scverse ecosystem.
-
 .. card:: Plotting functionalities
     :link: 04_plotting/index
     :link-type: doc
@@ -51,6 +31,39 @@ To help you get started with **InSituPy**, you can find a collection of differen
 
     Tutorials introducing different plotting functionalities.
 
+```
+
+## Go further
+
+Work with many samples, save and reload your data, and exchange data with other tools.
+
+```{eval-rst}
+.. card:: Multi-sample analysis
+    :link: 02_multisample_analysis/index
+    :link-type: doc
+    :link-alt: Multi-sample analysis tutorials
+
+    This set of tutorials focuses on the analysis of multiple samples using the `InSituExperiment` class.
+
+.. card:: Data I/O - Saving and Loading
+    :link: 00_io/index
+    :link-type: doc
+    :link-alt: Data I/O tutorials
+
+    How to save and reload ``InSituData`` and ``InSituExperiment`` objects - full saves, modality-specific partial saves, and reloading individual components.
+
+.. card:: SpatialData Integration
+    :link: 07_spatialdata/index
+    :link-type: doc
+    :link-alt: SpatialData conversion tutorials
+
+    Tutorials for converting between InSituPy and SpatialData formats for integration with the scverse ecosystem.
+
+```
+
+## Reference and manuscript
+
+```{eval-rst}
 .. card:: Manuscript-related analyses
     :link: 05_publication/index
     :link-type: doc
@@ -72,12 +85,12 @@ To help you get started with **InSituPy**, you can find a collection of differen
 :hidden: false
 :maxdepth: 2
 
-00_io/index.md
 01_demo_analysis/index.md
-02_multisample_analysis/index.md
 03_data_import/index.md
-07_spatialdata/index.md
 04_plotting/index.md
+02_multisample_analysis/index.md
+00_io/index.md
+07_spatialdata/index.md
 05_publication/index.md
 06_benchmarkings/index.md
 ```

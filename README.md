@@ -7,7 +7,7 @@
 </p>
 
 InSituPy is a Python package designed to facilitate the analysis of single-cell spatial transcriptomics data. With InSituPy, you can easily load, visualize, and analyze the data, enabling and simplifying the comprehensive exploration of spatial gene expression patterns within tissue sections and across multiple samples.
-Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology but a broader range of reading functions will be implemented in the future.
+Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology. Readers for [Visium](https://www.10xgenomics.com/platforms/visium) and [QuPath](https://qupath.github.io/) data are available as well, as is conversion to and from [SpatialData](https://spatialdata.scverse.org).
 
 ## Latest changes
 
@@ -19,14 +19,68 @@ For the latest developments check out the [releases](https://github.com/SpatialP
 
 ### Overall data structure
 
-A key feature of InSituPy is its hierarchical data structure, centered around the `InSituExperiment` and `InSituData` objects:
-- `InSituData`: Represents and manages at the individual sample level. It integrates all modalities of spatial omics datasets, including cellular readouts, cellular boundaries, images, transcripts, regions, and annotations.
-- `InSituExperiment`: Aggregates multiple `InSituData` instances and links them with associated metadata, enabling cross-sample analysis and organization.
+InSituPy keeps everything that belongs to a tissue section in one place and organises many sections into one study:
+
+- `InSituData`: one sample. It integrates all modalities of a spatial omics dataset: cells (gene counts and boundaries), images, transcripts, annotations, regions and units (e.g. Visium spots or niches).
+- `InSituExperiment`: aggregates multiple `InSituData` instances and links them with a sample table (metadata), enabling cross-sample analysis.
 
 <p align="center">
-   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="800">
+   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_hierarchy.svg?raw=true" width="800">
 </p>
 
+New to InSituPy? Read [InSituPy at a glance](https://insitupy.readthedocs.io/en/latest/overview.html) for a plain-language introduction to this structure.
+
+### Installation
+
+Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
+
+**Create and activate a conda environment:**
+
+When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwise all python version >=3.12 should work.
+
+   ```bash
+   conda create --name insitupy python=3.13
+   conda activate insitupy
+   ```
+
+**Install from PyPi:**
+
+   ```bash
+   pip install insitupy-spatial
+   ```
+
+This base installation includes napari and related visualization dependencies.
+
+InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
+
+**Optional: install with SpatialData support (`spatialdata>=0.8.0,<0.9.0`):**
+
+   ```bash
+   pip install insitupy-spatial[spatialdata]
+   ```
+
+To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
+
+For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
+
+### Quick start
+
+```python
+import insitupy as ispy
+
+xd = ispy.io.read_xenium("path/to/xenium_output")   # read one Xenium run
+ispy.pp.normalize_and_transform(xd)
+ispy.pp.reduce_dimensions(xd)
+ispy.pp.cluster_cells(xd)
+xd.show()                                           # interactive viewer (napari)
+```
+
+The [tutorials](https://insitupy.readthedocs.io/en/latest/tutorials/index.html) walk through this step by step with demo data.
+### Documentation
+
+For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
+
+InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you are not familiar with these platforms, see the documentation of [Project Jupyter](https://jupyter.org/).
 
 <!-- ai-integration-start -->
 
@@ -118,46 +172,6 @@ The easiest way to activate the server in **Claude Desktop** is to add the follo
 See **[MCP_TUTORIAL.md](https://github.com/SpatialPathology/InSituPy/blob/main/MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
 
 <!-- ai-integration-end -->
-
-### Documentation
-
-For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
-
-InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you are not familiar with these platforms, see the documentation of [Project Jupyter](https://jupyter.org/).
-
-## Installation
-
-Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
-
-**Create and activate a conda environment:**
-
-When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwise all python version >=3.12 should work.
-
-   ```bash
-   conda create --name insitupy python=3.13
-   conda activate insitupy
-   ```
-
-**Install from PyPi:**
-
-   ```bash
-   pip install insitupy-spatial
-   ```
-
-This base installation includes napari and related visualization dependencies.
-
-InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
-
-**Optional: install with SpatialData support (`spatialdata>=0.8.0,<0.9.0`):**
-
-   ```bash
-   pip install insitupy-spatial[spatialdata]
-   ```
-
-To ensure that the InSituPy package is available as a kernel in Jupyter notebooks within your conda environment, you can follow the instructions [here](https://ipython.readthedocs.io/en/stable/install/kernel_install.html).
-
-For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
-
 
 ## Features
 
