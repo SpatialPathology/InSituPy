@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dask.array as da
 import zarr
 
 # Detect Zarr version for compatibility
@@ -46,11 +47,13 @@ def _write_dask_array_to_zarr(store, name: str, arr) -> None:
     which raises `TypeError: create_array() got an unexpected keyword argument
     'zarr_array_kwargs'` because no such parameter exists there.
 
-    Passing an existing `zarr.Array` as `to_zarr`'s `url` argument instead
-    sidesteps this entirely: dask detects `isinstance(url, zarr.Array)` before
-    any `zarr_array_kwargs`/`mode`/`**kwargs` handling and writes directly
-    into the given array. That branch is unchanged since 2024, so it is
-    stable across dask versions before, during, and after the broken window.
+    Creating the zarr array ourselves and writing into it with `da.store`
+    sidesteps this entirely: no `zarr_array_kwargs`/`mode`/`**kwargs` handling
+    is involved, so it is stable across dask versions before, during, and
+    after the broken window. The array is rechunked to the zarr chunk grid
+    first, which also avoids the false "risk of data loss" PerformanceWarning
+    that `to_zarr(<zarr.Array>)` raises in dask >= 2025.11 (see the comment at
+    the write below).
     """
     # clamp each chunk edge to >= 1: zarr rejects a zero-length chunk edge, so a
     # zero-length array (an empty nucleus_to_cell_map, or a zero-cell CellData)
@@ -74,4 +77,10 @@ def _write_dask_array_to_zarr(store, name: str, arr) -> None:
             chunks=chunks,
             overwrite=True,
         )
-    arr.to_zarr(z)
+    # One dask chunk per zarr chunk, so no two tasks ever write the same zarr chunk and
+    # `lock=False` is safe. `arr.to_zarr(z)` would instead re-chunk to "auto" sizes: for an
+    # array below `array.chunk-size` that is wider than one zarr chunk (e.g. 3223 x 4427 with
+    # 3223 x 4096 chunks) that is a single chunk not divisible by the zarr chunk, and dask
+    # (>= 2025.11) emits a PerformanceWarning about "risk of data loss" although one chunk
+    # spanning the whole axis cannot race.
+    da.store(arr.rechunk(chunks), z, lock=False)
