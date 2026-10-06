@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dask.array as da
 import zarr
 
 # Detect Zarr version for compatibility
@@ -74,4 +75,10 @@ def _write_dask_array_to_zarr(store, name: str, arr) -> None:
             chunks=chunks,
             overwrite=True,
         )
-    arr.to_zarr(z)
+    # One dask chunk per zarr chunk, so no two tasks ever write the same zarr chunk and
+    # `lock=False` is safe. `arr.to_zarr(z)` would instead re-chunk to "auto" sizes: for an
+    # array below `array.chunk-size` that is wider than one zarr chunk (e.g. 3223 x 4427 with
+    # 3223 x 4096 chunks) that is a single chunk not divisible by the zarr chunk, and dask
+    # (>= 2025.11) emits a PerformanceWarning about "risk of data loss" although one chunk
+    # spanning the whole axis cannot race.
+    da.store(arr.rechunk(chunks), z, lock=False)
