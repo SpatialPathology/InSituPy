@@ -20,7 +20,7 @@ from insitupy.preprocessing import normalize_and_transform
 from insitupy.preprocessing.pseudobulk import neighborhoods_pseudobulk, pseudobulk
 from insitupy.tools.dge import dge
 from insitupy.tools.distance import calc_distance_of_cells_from
-from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors
+from insitupy.tools.neighbors import calculate_gex_diff_to_neighbors, mean_gex_diff_to_neighbors
 from insitupy.tools.pseudobulk import pseudobulk_dge
 from insitupy.utils.dge import create_deg_dataframe
 from insitupy.utils.go import get_up_down_genes
@@ -362,6 +362,53 @@ class TestDgeNanFilter:
             )
 
 
+# ── tl.dge: consider_neighbors ─────────────────────────────────────────────────
+
+class TestDgeConsiderNeighbors:
+    @pytest.mark.parametrize("method", ["wilcoxon", "t-test", "t-test_overestim_var"])
+    def test_neighborhood_results_populated(self, method):
+        # regression: dge() passed the removed `test=` keyword to mean_gex_diff_to_neighbors
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        result = dge(
+            target=xd,
+            target_cell_type_tuple=("celltype", "A"),
+            ref_cell_type_tuple=("celltype", "B"),
+            method=method,
+            consider_neighbors=True,
+            verbose=False,
+        )
+        assert isinstance(result.target_neighborhood, pd.DataFrame)
+        assert isinstance(result.ref_neighborhood, pd.DataFrame)
+
+    def test_rest_reference_neighborhood_covers_all_other_types(self):
+        # "rest" is resolved to a list of cell types, which the neighbor test must accept
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        result = dge(
+            target=xd,
+            target_cell_type_tuple=("celltype", "A"),
+            ref_cell_type_tuple="rest",
+            consider_neighbors=True,
+            verbose=False,
+        )
+        # only celltype B (15 cells) remains as "rest"
+        assert (result.ref_neighborhood["n_target_cells"] == 15).all()
+
+    def test_unsupported_method_raises_before_dge(self):
+        xd = _make_insitudata_with_celltypes()
+        normalize_and_transform(xd, transformation_method="log1p")
+        with pytest.raises(ValueError, match="consider_neighbors"):
+            dge(
+                target=xd,
+                target_cell_type_tuple=("celltype", "A"),
+                ref_cell_type_tuple=("celltype", "B"),
+                method="logreg",
+                consider_neighbors=True,
+                verbose=False,
+            )
+
+
 # ── tl.calc_distance_of_cells_from ───────────────────────────────────────────
 
 class TestCalcDistanceOfCellsFrom:
@@ -506,6 +553,34 @@ class TestCalculateGexDiffToNeighbors:
             calculate_gex_diff_to_neighbors(
                 adata, radius=200.0, strategy="mean", verbose=False
             )
+
+    def test_celltype_list_excludes_each_cells_own_type(self):
+        # A0, A1 and B0 are mutual neighbors; C0 is far away and not a target.
+        # With celltype ["A", "B"], A0 must keep B0 but drop A1 (own type), and
+        # B0 must keep both A cells.
+        adata = AnnData(
+            X=np.ones((4, 2)),
+            obs=pd.DataFrame({"celltype": ["A", "A", "B", "C"]},
+                             index=pd.Index(["A0", "A1", "B0", "C0"])),
+        )
+        adata.obsm["spatial"] = np.array([[0, 0], [1, 0], [0, 1], [500, 500]], dtype=float)
+        _, A, _, qc = calculate_gex_diff_to_neighbors(
+            adata, radius=5.0, celltype_tuple=("celltype", ["A", "B"]),
+            assert_log1p=False, verbose=False,
+        )
+        A = A.toarray()
+        assert qc["n_cells_target"] == 3
+        assert A[0, 1] == 0 and A[0, 2] > 0
+        assert A[2, 0] > 0 and A[2, 1] > 0
+
+    def test_wrapper_accepts_deprecated_test_argument(self):
+        adata = _make_adata_with_spatial(n_cells=20, n_genes=8)
+        adata.X = np.log1p(adata.X)  # the wrapper has no assert_log1p opt-out
+        with pytest.warns(DeprecationWarning, match="'test' is deprecated"):
+            _, _, _, qc = mean_gex_diff_to_neighbors(
+                adata, radius=200.0, test="t-test", verbose=False
+            )
+        assert qc["test_used"] == "t-test"
 
 
 # ── pp.pseudobulk / neighborhoods_pseudobulk (AC-B4, AC-A2, AC-B14) ────────────

@@ -11,10 +11,9 @@
     Calculate the distance of cells from a specified annotation class within a given region.
 
 ## Neighbor Detection
-  calculate_gex_diff_to_neighbors(adata, radius: numbers.Number = 20.0, obs_key: str = 'spatial', celltype_tuple: tuple[str, str] | None = None, exclude_self: bool = True, strategy: Literal['mean', 'max'] = 'mean', method: Literal['wilcoxon', 't-test'] = 'wilcoxon', test: Literal['wilcoxon', 't-test'] = None, correction_method: str = 'fdr_bh', min_cells: numbers.Number = 3, genes_subset: list[str] | None = None, use_distance_weighting: bool = False, exclude_zeros_from_max: bool = True, batch_size: int | None = None, assert_log1p: bool = True, verbose: bool = True) -> tuple[pandas.core.frame.DataFrame, scipy.sparse._csr.csr_matrix, numpy.ndarray, dict]
+  calculate_gex_diff_to_neighbors(adata, radius: numbers.Number = 20.0, obs_key: str = 'spatial', celltype_tuple: tuple[str, str | list[str]] | None = None, exclude_self: bool = True, strategy: Literal['mean', 'max'] = 'mean', method: Literal['wilcoxon', 't-test'] = 'wilcoxon', test: Literal['wilcoxon', 't-test'] = None, correction_method: str = 'fdr_bh', min_cells: numbers.Number = 3, genes_subset: list[str] | None = None, use_distance_weighting: bool = False, exclude_zeros_from_max: bool = True, batch_size: int | None = None, assert_log1p: bool = True, verbose: bool = True) -> tuple[pandas.core.frame.DataFrame, scipy.sparse._csr.csr_matrix, numpy.ndarray, dict]
     Cell-type-specific spatial gene expression contamination analysis.
-  max_gex_diff_to_neighbors(adata, radius: numbers.Number = 20.0, obs_key: str = 'spatial', celltype_tuple: tuple[str, str] | None = None, exclude_self: bool = True, method: Literal['wilcoxon', 't-test'] = 'wilcoxon', correction_method: str = 'fdr_bh', min_cells: numbers.Number = 3, genes_subset: list[str] | None = None, exclude_zeros_from_max: bool = True, batch_size: int | None = None, verbose: bool = True) -> tuple[pandas.core.frame.DataFrame, scipy.sparse._csr.csr_matrix, numpy.ndarray, dict]
-    Wrapper for calculate_gex_diff_to_neighbors with strategy="max".
-  mean_gex_diff_to_neighbors(adata, radius: numbers.Numb
+  max_gex_diff_to_neighbors(adata, radius: numbers.Number = 20.0, obs_key: str = 'spatial', celltype_tuple: tuple[str, str | list[str]] | None = None, exclude_self: bool = True, method: Literal['wilcoxon', 't-test'] = 'wilcoxon', test: Literal['wilcoxon', 't-test'] = None, correction_method: str = 'fdr_bh', min_cells: numbers.Number = 3, genes_subset: list[str] | None = None, exclude_zeros_from_max: bool = True, batch_size: int | None = None, verbose: bool = True) -> tuple[pandas.core.frame.DataFrame, scipy.sparse._csr.csr_matrix, numpy.ndarray, dict]
+    Wrapper for calculate_gex_diff_to_neighbors with stra
 
-... [truncated — full text is 6638 chars]
+... [truncated — full text is 6762 chars]

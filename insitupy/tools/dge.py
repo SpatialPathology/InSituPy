@@ -87,18 +87,19 @@ def dge(
         DiffExprResults: Object containing the differential expression results including the DEG dataframe and analysis parameters.
 
     Raises:
-        ValueError: If `ref_annotation_tuple` is neither 'rest' nor a 2-tuple.
-        AssertionError: If `ref` is provided when `ref_annotation_tuple` is 'rest'.
-        AssertionError: If `target_region_tuple` is provided when `ref` is not None.
-        AssertionError: If the specified region or annotation is not found in the data.
+        ValueError: If a `ref_*_tuple` is neither a tuple, 'rest', 'same' nor None, or is
+            'rest' while `ref` is given.
+        ValueError: If the specified region, annotation or cell type is not found in the data.
+        ValueError: If target and reference select the identical cells.
+        ValueError: If `consider_neighbors=True` with `method='logreg'`.
+        TypeError: If `ref` is a list containing non-`InSituData` elements.
 
     Example:
         >>> result = dge(
                 target=my_data,
                 target_annotation_tuple=("pathologist", "tumor"),
                 ref=my_ref_data,
-                ref_annotation_tuple=("cell_type", "astrocyte"),
-                plot_volcano=True,
+                ref_annotation_tuple=("pathologist", "normal"),
                 method='wilcoxon'
             )
     """
@@ -107,6 +108,16 @@ def dge(
     #     raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
 
     # pre-flight checks
+    if consider_neighbors:
+        # the neighborhood comparison is a paired test that supports only wilcoxon and t-test
+        # (scanpy treats method=None as 't-test')
+        nb_method = "t-test" if method in (None, "t-test_overestim_var") else method
+        if nb_method not in ("wilcoxon", "t-test"):
+            raise ValueError(
+                f"`consider_neighbors=True` requires `method` to be 'wilcoxon', 't-test' or "
+                f"'t-test_overestim_var', got {method!r}."
+            )
+
     if ref_annotation_tuple is not None:
         if ref_annotation_tuple == "rest":
             if ref is not None:
@@ -345,14 +356,16 @@ def dge(
             adata=adata_target_full,
             radius=20,
             celltype_tuple=target_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
 
         nb_results_ref, _, _, _ = mean_gex_diff_to_neighbors(
             adata=adata_ref_full,
             radius=20,
             celltype_tuple=ref_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
     else:
         nb_results_target = nb_results_ref = None
