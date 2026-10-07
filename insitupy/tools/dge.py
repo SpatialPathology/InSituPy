@@ -45,7 +45,7 @@ def dge(
 
     This function compares gene expression between specified annotations within a single
     InSituData object or between two InSituData objects. It supports various statistical
-    methods for differential expression analysis and can generate a volcano plot of the results.
+    methods for differential expression analysis.
 
     Args:
         target (InSituData): The primary in situ data object.
@@ -103,9 +103,6 @@ def dge(
                 method='wilcoxon'
             )
     """
-
-    # if not (show_volcano | return_results):
-    #     raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
 
     # pre-flight checks
     if consider_neighbors:
@@ -283,7 +280,6 @@ def dge(
                 adata_combined = adata_combined[~duplicated_mask].copy()
 
     # add column to .obs for its use in rank_genes_groups()
-    #adata_combined.obs = adata_combined.obs.filter([dge_comparison_column]) # empty obs
 
     # Filter out cells with NaN in .X before rank_genes_groups (NaNs propagate to NaN fold changes).
     # Cheap-detect first so the common no-NaN path never densifies a large sparse matrix: for a
@@ -379,42 +375,3 @@ def dge(
         )
 
     return res
-
-    # if show_volcano:
-    #     cell_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
-    #     data_counts = cell_counts["DATA"]
-    #     ref_counts = cell_counts["REFERENCE"]
-
-    #     n_upreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] > np.log2(foldchange_threshold)))
-    #     n_downreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] < -np.log2(foldchange_threshold)))
-
-    #     config_table = pd.DataFrame({
-    #         "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
-    #         "Reference": [elem[1] if isinstance(elem, tuple) else elem
-    #                       for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
-    #         "Target": [elem[1] if isinstance(elem, tuple) else elem
-    #                    for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
-    #     })
-
-    #     # remove empty rows
-    #     config_table = config_table.set_index("").dropna(how="all").reset_index()
-
-    #     single_volcano(
-    #         data=df,
-    #         significance_threshold=significance_threshold,
-    #         foldchange_threshold=foldchange_threshold,
-    #         title=title,
-    #         savepath = savepath,
-    #         save_only = save_only,
-    #         dpi_save = dpi_save,
-    #         config = config_table,
-    #         adjust_labels=True,
-    #         **volcano_kwargs
-    #         )
-    # if return_results:
-    #     return {
-    #         "results": df,
-    #         "params": adata_combined.uns["rank_genes_groups"]["params"]
-    #     }
-
-
