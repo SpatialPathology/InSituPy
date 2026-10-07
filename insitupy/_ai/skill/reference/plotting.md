@@ -33,7 +33,7 @@
 ## DGE / Volcano
   volcano(results: insitupy.containers.results.DiffExprResults, significance_threshold: numbers.Number = 0.05, foldchange_threshold: numbers.Number = 2, pval_col: str = 'padj', logfoldchanges_col='log2foldchange', label_top_n: int = 20, label_sortby: str = 'log2foldchange', figsize: tuple[numbers.Number, numbers.Number] = (6, 6), show: bool = True, show_config: bool = False, title: str | None = None, savepath: str | os.PathLike | pathlib._local.Path | None = None, save_only: bool = False, dpi_save: int = 300, xlim: tuple[numbers.Number, numbers.Number] | None = None) -> None
     Generate multi-panel volcano plots for differential expression results.
-  dual_foldchange_plot(results: insitupy.containers.results.DiffExprResults, significance_threshold: numbers.Number = 0.05, foldchange_threshold: numbers.Number = 1, logfoldchanges_col: str = 'log2foldchange', pval_col: str = 'padj', patch_colors: list[str] = ['lightgreen', 'lightcoral'], adjust_labels: bool = True, label_top_n: Union[int, Literal['all']] = 'all', label_sortby: str = 'padj', size_by_pvalue: bool = True, size_range: tuple[numbers.Number, numbers.Number] = (10, 40), show_nonsignificant: bool = True, show_config: bool = False, figsize: tuple[numbers.Number, numbers.Number] = (6, 6), savepath: str | os.PathLike | pathlib._local.Path | None = None, save_only: bool = False, dpi_save: int = 300, show: bool = True) -> None
+  dual_foldchange_plot(results: insitupy.containers.results.DiffExprResults, significance_threshold: numbers.Number = 0.05, foldchange_threshold: numbers.Number = 1, logfoldchanges_col: str = 'log2foldchange', pval_col: str = 'padj', patch_colors: list[str] = ['lightgreen', 'lightcoral'], background: Literal['gradient', 'split'] = 'gradient', background_saturation: numbers.Number = 1, reference_lfc: numbers.Number | None = 1, adjust_labels: bool = True, label_top_n: Union[int, Literal['all']] = 'all', label_sortby: str = 'padj', size_by_pvalue: bool = True, size_range: tuple[numbers.Number, numbers.Number] = (10, 40), show_nonsignificant: bool = True, show_config: bool = False, figsize: tuple[numbers.Number, numbers.Number] = (6, 6), savepath: str | os.PathLike | pathlib._local.Path | None = None, save_only: bool = False, dpi_save: int = 300, show: bool = True) -> None
     Create scatter plots comparing log2 fold changes between main DGE results
 
 ## Expression Along Axis
@@ -62,7 +62,6 @@
     Fast t-SNE plot using datashader.
 
 ## FACS
-  facs(data, gene1: str = 'gene1', gene2: str = 'gene2', cluster_key: str = 'None', threshold_gene1: numbers.Number = 1, threshold_gene2: numbers.Number = 1, cells_layer: str = None, layer: str = None)
-    Create a FACS-style scatter plot of two genes and c
+  facs(data, gene1: str = 'gene1', gene2: str = 'gene2', cluster_key: str = 'None', threshold_gene1: numbers.Number =
 
-... [truncated — full text is 10031 chars]
+... [truncated — full text is 10171 chars]

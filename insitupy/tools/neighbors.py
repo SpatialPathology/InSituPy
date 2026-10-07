@@ -46,10 +46,30 @@ def _validate_inputs(
             raise KeyError(f"celltype_col '{celltype_col}' not found in adata.obs")
         if celltype is None:
             raise ValueError("Must specify 'celltype' when 'celltype_col' is provided")
-        if celltype not in adata.obs[celltype_col].values:
+        celltypes = _as_celltype_list(celltype)
+        if len(celltypes) == 0:
+            raise ValueError("'celltype' must not be an empty list")
+        # a list (e.g. dge's "rest") may name types absent from this subset - require at least one
+        if not adata.obs[celltype_col].isin(celltypes).any():
             raise ValueError(f"celltype '{celltype}' not found in adata.obs['{celltype_col}']")
     elif celltype is not None:
         raise ValueError("Cannot specify 'celltype' without 'celltype_col'")
+
+
+def _resolve_deprecated_test(method: str, test: str | None) -> str:
+    """Map the deprecated `test` argument onto `method`, warning at the public caller."""
+    if test is not None:
+        warnings.warn("'test' is deprecated, use 'method' instead.",
+                      DeprecationWarning, stacklevel=3)
+        return test
+    return method
+
+
+def _as_celltype_list(celltype) -> list:
+    """Return `celltype` as a list, accepting a single label or a list-like of labels."""
+    if isinstance(celltype, (list, tuple, set, np.ndarray, pd.Index)):
+        return list(celltype)
+    return [celltype]
 
 
 def _prepare_data(
@@ -101,7 +121,7 @@ def _build_spatial_graph(
 
     # Get target cells mask
     if celltype_col is not None:
-        target_mask = (adata.obs[celltype_col] == celltype).values
+        target_mask = adata.obs[celltype_col].isin(_as_celltype_list(celltype)).values
         n_target_cells = target_mask.sum()
         if verbose:
             logger.info("Selected %d '%s' cells as targets", n_target_cells, celltype)
@@ -444,7 +464,7 @@ def calculate_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: tuple[str, str] | None = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
     strategy: Literal["mean", "max"] = "mean",
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
@@ -471,8 +491,10 @@ def calculate_gex_diff_to_neighbors(
             Default is 20.0.
         obs_key (str): Key in adata.obsm containing spatial coordinates.
             Default is "spatial".
-        celltype_tuple (Tuple[str, str], optional): Tuple specifying (celltype_col,
-            celltype) to filter by cell type.
+        celltype_tuple (Tuple[str, str | List[str]], optional): Tuple specifying
+            (celltype_col, celltype) to filter by cell type. `celltype` can also be a list of
+            cell types; all cells of those types are then targets, and each target cell
+            excludes neighbors of its own type.
         exclude_self (bool): Whether to exclude the cell itself from its neighborhood.
             Default is True.
         strategy (str): Strategy for computing neighbor expression: "mean" (compare to
@@ -523,10 +545,7 @@ def calculate_gex_diff_to_neighbors(
         exclude_zeros_from_max=True
     )
     """
-    if test is not None:
-        warnings.warn("'test' is deprecated, use 'method' instead.",
-                      DeprecationWarning, stacklevel=2)
-        method = test
+    method = _resolve_deprecated_test(method, test)
 
     _assert_log1p_state(adata, assert_log1p=assert_log1p, where="calculate_gex_diff_to_neighbors")
 
@@ -623,9 +642,10 @@ def mean_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: tuple[str, str] | None = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
     genes_subset: list[str] | None = None,
@@ -638,6 +658,7 @@ def mean_gex_diff_to_neighbors(
 
     See calculate_gex_diff_to_neighbors() for full documentation.
     """
+    method = _resolve_deprecated_test(method, test)
     return calculate_gex_diff_to_neighbors(
         adata=adata,
         radius=radius,
@@ -659,9 +680,10 @@ def max_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: tuple[str, str] | None = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
     method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
     genes_subset: list[str] | None = None,
@@ -674,6 +696,7 @@ def max_gex_diff_to_neighbors(
 
     See calculate_gex_diff_to_neighbors() for full documentation.
     """
+    method = _resolve_deprecated_test(method, test)
     return calculate_gex_diff_to_neighbors(
         adata=adata,
         radius=radius,

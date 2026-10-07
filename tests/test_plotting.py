@@ -15,10 +15,12 @@ import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
 from anndata import AnnData
+from matplotlib.colors import to_rgb
 
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
+from insitupy.plotting.dge import BACKGROUND_ALPHA, dual_foldchange_plot
 from insitupy.plotting.facs import facs
 from insitupy.plotting.go import go_plot
 from insitupy.plotting.qc import plot_qc_metrics
@@ -137,6 +139,93 @@ class TestVolcano:
         results = _make_dge_results()
         plt.close("all")
         volcano(results, significance_threshold=0.1, foldchange_threshold=1.5, show=False)
+        plt.close("all")
+
+
+# ── dual_foldchange_plot ──────────────────────────────────────────────────────
+
+def _make_dge_results_with_neighbors(n_genes=20, nb_offset=0.0):
+    """DiffExprResults with target/ref neighborhood frames sharing the main gene index.
+
+    `nb_offset` shifts the neighborhood log2 fold changes, e.g. to put all of them above 0.
+    """
+    main = _make_dge_df(n_genes, seed=0)
+    nb_target = _make_dge_df(n_genes, seed=1)
+    nb_ref = _make_dge_df(n_genes, seed=2)
+    for nb in (nb_target, nb_ref):
+        nb["log2foldchange"] = nb["log2foldchange"] * 0.75 + nb_offset
+    config = DiffExprConfigCollector(mode="single-cell", method_params={})
+    return DiffExprResults(main=main, config=config,
+                           target_neighborhood=nb_target, ref_neighborhood=nb_ref)
+
+
+def _dual_plot_axes(results, **kwargs):
+    """Draw dual_foldchange_plot without showing it and return the two data panels."""
+    plt.close("all")
+    dual_foldchange_plot(results, adjust_labels=False, show=False, **kwargs)
+    return plt.gcf().axes[:2]
+
+
+class TestDualFoldchangePlot:
+    def test_gradient_is_transparent_at_zero_and_below_points(self):
+        ax = _dual_plot_axes(_make_dge_results_with_neighbors())[1]
+        images = ax.get_images()
+        assert len(images) == 1
+        image = images[0]
+        assert all(image.get_zorder() < c.get_zorder() for c in ax.collections)
+
+        ymin, ymax = ax.get_ylim()
+        assert ymin < -1 and ymax > 1  # the fixture must span both saturation points
+        y = np.linspace(ymin, ymax, image.get_array().shape[0])
+        alpha = np.asarray(image.get_array())[:, 0, 3]
+        assert alpha[np.argmin(np.abs(y))] < 0.01
+        np.testing.assert_allclose(alpha[np.abs(y) >= 1], BACKGROUND_ALPHA)
+        plt.close("all")
+
+    def test_background_does_not_change_axis_limits(self):
+        results = _make_dge_results_with_neighbors()
+        limits = {}
+        for mode in ("gradient", "split"):
+            axs = _dual_plot_axes(results, background=mode)
+            limits[mode] = [(ax.get_xlim(), ax.get_ylim()) for ax in axs]
+        assert limits["gradient"] == limits["split"]
+        plt.close("all")
+
+    def test_gradient_with_all_points_above_zero(self):
+        results = _make_dge_results_with_neighbors(nb_offset=5.0)
+        for ax in _dual_plot_axes(results):
+            assert ax.get_ylim()[0] > 0
+            rgba = np.asarray(ax.get_images()[0].get_array())[:, 0, :]
+            np.testing.assert_allclose(rgba[:, :3], np.tile(to_rgb("lightgreen"), (len(rgba), 1)))
+        plt.close("all")
+
+    @pytest.mark.parametrize("reference_lfc, expected", [(1, {-1, 0, 1}), (2.5, {-2.5, 0, 2.5}),
+                                                         (None, {0})])
+    def test_reference_lines_follow_reference_lfc_not_saturation(self, reference_lfc, expected):
+        axs = _dual_plot_axes(_make_dge_results_with_neighbors(),
+                              reference_lfc=reference_lfc, background_saturation=3)
+        for ax in axs:
+            # axhline spans x in axes coordinates [0, 1]; axvline spans y instead
+            hlines = {line.get_ydata()[0] for line in ax.lines if list(line.get_xdata()) == [0, 1]}
+            assert hlines == expected
+        plt.close("all")
+
+    def test_split_mode_draws_no_gradient_image(self):
+        for ax in _dual_plot_axes(_make_dge_results_with_neighbors(), background="split"):
+            assert ax.get_images() == []
+        plt.close("all")
+
+    @pytest.mark.parametrize("kwargs", [
+        {"background": "foo"},
+        {"background_saturation": 0},
+        {"background_saturation": np.inf},
+        {"patch_colors": ["lightgreen"]},
+        {"reference_lfc": 0},
+        {"reference_lfc": -1},
+    ])
+    def test_invalid_background_arguments_raise(self, kwargs):
+        with pytest.raises(ValueError):
+            _dual_plot_axes(_make_dge_results_with_neighbors(), **kwargs)
         plt.close("all")
 
 

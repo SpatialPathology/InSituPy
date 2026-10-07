@@ -45,7 +45,7 @@ def dge(
 
     This function compares gene expression between specified annotations within a single
     InSituData object or between two InSituData objects. It supports various statistical
-    methods for differential expression analysis and can generate a volcano plot of the results.
+    methods for differential expression analysis.
 
     Args:
         target (InSituData): The primary in situ data object.
@@ -69,6 +69,11 @@ def dge(
             and region selection (but spanning all cell types, so that neighbouring types can be
             detected), so cells just outside a drawn annotation or region border are not counted as
             neighbours; the 20 micrometer radius is fixed.
+            With `ref_cell_type_tuple="rest"`, the reference neighbourhood comparison pools all
+            non-target cell types: each reference cell is compared against its neighbours of other
+            types (including target cells), and the per-gene result is an average over this mix.
+            Genes from abundant reference types dominate it and genes from rare types are diluted,
+            so it is less specific than with a single reference cell type.
             Defaults to False.
         method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data.
@@ -87,26 +92,34 @@ def dge(
         DiffExprResults: Object containing the differential expression results including the DEG dataframe and analysis parameters.
 
     Raises:
-        ValueError: If `ref_annotation_tuple` is neither 'rest' nor a 2-tuple.
-        AssertionError: If `ref` is provided when `ref_annotation_tuple` is 'rest'.
-        AssertionError: If `target_region_tuple` is provided when `ref` is not None.
-        AssertionError: If the specified region or annotation is not found in the data.
+        ValueError: If a `ref_*_tuple` is neither a tuple, 'rest', 'same' nor None, or is
+            'rest' while `ref` is given.
+        ValueError: If the specified region, annotation or cell type is not found in the data.
+        ValueError: If target and reference select the identical cells.
+        ValueError: If `consider_neighbors=True` with `method='logreg'`.
+        TypeError: If `ref` is a list containing non-`InSituData` elements.
 
     Example:
         >>> result = dge(
                 target=my_data,
                 target_annotation_tuple=("pathologist", "tumor"),
                 ref=my_ref_data,
-                ref_annotation_tuple=("cell_type", "astrocyte"),
-                plot_volcano=True,
+                ref_annotation_tuple=("pathologist", "normal"),
                 method='wilcoxon'
             )
     """
 
-    # if not (show_volcano | return_results):
-    #     raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
-
     # pre-flight checks
+    if consider_neighbors:
+        # the neighborhood comparison is a paired test that supports only wilcoxon and t-test
+        # (scanpy treats method=None as 't-test')
+        nb_method = "t-test" if method in (None, "t-test_overestim_var") else method
+        if nb_method not in ("wilcoxon", "t-test"):
+            raise ValueError(
+                f"`consider_neighbors=True` requires `method` to be 'wilcoxon', 't-test' or "
+                f"'t-test_overestim_var', got {method!r}."
+            )
+
     if ref_annotation_tuple is not None:
         if ref_annotation_tuple == "rest":
             if ref is not None:
@@ -272,7 +285,6 @@ def dge(
                 adata_combined = adata_combined[~duplicated_mask].copy()
 
     # add column to .obs for its use in rank_genes_groups()
-    #adata_combined.obs = adata_combined.obs.filter([dge_comparison_column]) # empty obs
 
     # Filter out cells with NaN in .X before rank_genes_groups (NaNs propagate to NaN fold changes).
     # Cheap-detect first so the common no-NaN path never densifies a large sparse matrix: for a
@@ -345,14 +357,16 @@ def dge(
             adata=adata_target_full,
             radius=20,
             celltype_tuple=target_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
 
         nb_results_ref, _, _, _ = mean_gex_diff_to_neighbors(
             adata=adata_ref_full,
             radius=20,
             celltype_tuple=ref_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
     else:
         nb_results_target = nb_results_ref = None
@@ -366,42 +380,3 @@ def dge(
         )
 
     return res
-
-    # if show_volcano:
-    #     cell_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
-    #     data_counts = cell_counts["DATA"]
-    #     ref_counts = cell_counts["REFERENCE"]
-
-    #     n_upreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] > np.log2(foldchange_threshold)))
-    #     n_downreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] < -np.log2(foldchange_threshold)))
-
-    #     config_table = pd.DataFrame({
-    #         "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
-    #         "Reference": [elem[1] if isinstance(elem, tuple) else elem
-    #                       for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
-    #         "Target": [elem[1] if isinstance(elem, tuple) else elem
-    #                    for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
-    #     })
-
-    #     # remove empty rows
-    #     config_table = config_table.set_index("").dropna(how="all").reset_index()
-
-    #     single_volcano(
-    #         data=df,
-    #         significance_threshold=significance_threshold,
-    #         foldchange_threshold=foldchange_threshold,
-    #         title=title,
-    #         savepath = savepath,
-    #         save_only = save_only,
-    #         dpi_save = dpi_save,
-    #         config = config_table,
-    #         adjust_labels=True,
-    #         **volcano_kwargs
-    #         )
-    # if return_results:
-    #     return {
-    #         "results": df,
-    #         "params": adata_combined.uns["rank_genes_groups"]["params"]
-    #     }
-
-
