@@ -199,6 +199,17 @@ class TestDualFoldchangePlot:
             np.testing.assert_allclose(rgba[:, :3], np.tile(to_rgb("lightgreen"), (len(rgba), 1)))
         plt.close("all")
 
+    @pytest.mark.parametrize("reference_lfc, expected", [(1, {-1, 0, 1}), (2.5, {-2.5, 0, 2.5}),
+                                                         (None, {0})])
+    def test_reference_lines_follow_reference_lfc_not_saturation(self, reference_lfc, expected):
+        axs = _dual_plot_axes(_make_dge_results_with_neighbors(),
+                              reference_lfc=reference_lfc, background_saturation=3)
+        for ax in axs:
+            # axhline spans x in axes coordinates [0, 1]; axvline spans y instead
+            hlines = {line.get_ydata()[0] for line in ax.lines if list(line.get_xdata()) == [0, 1]}
+            assert hlines == expected
+        plt.close("all")
+
     def test_split_mode_draws_no_gradient_image(self):
         for ax in _dual_plot_axes(_make_dge_results_with_neighbors(), background="split"):
             assert ax.get_images() == []
@@ -209,6 +220,8 @@ class TestDualFoldchangePlot:
         {"background_saturation": 0},
         {"background_saturation": np.inf},
         {"patch_colors": ["lightgreen"]},
+        {"reference_lfc": 0},
+        {"reference_lfc": -1},
     ])
     def test_invalid_background_arguments_raise(self, kwargs):
         with pytest.raises(ValueError):

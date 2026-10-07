@@ -47,6 +47,7 @@ def dual_foldchange_plot(
     patch_colors: list[str] = ["lightgreen", "lightcoral"],
     background: Literal["gradient", "split"] = "gradient",
     background_saturation: Number = 1,
+    reference_lfc: Number | None = 1,
     adjust_labels: bool = True,
     label_top_n: int | Literal["all"] = "all",
     label_sortby: str = "padj",
@@ -88,6 +89,10 @@ def dual_foldchange_plot(
             previous hard-edged bands above and below 0. Default is "gradient".
         background_saturation (Number): Absolute paired log2 fold change at which the
             gradient reaches full color. Ignored if background is "split". Default is 1.
+        reference_lfc (Number, optional): Absolute paired log2 fold change at which dashed
+            horizontal reference lines are drawn (at -reference_lfc and +reference_lfc),
+            independent of background_saturation. None draws no such lines. Default is 1
+            (2-fold).
         adjust_labels (bool): If True, automatically adjust overlapping gene labels using
             adjustText. Default is True.
         label_top_n (int or 'all'): Number of top genes to label based on label_sortby.
@@ -135,9 +140,9 @@ def dual_foldchange_plot(
     - Green (y > 0): genes enriched in cell type vs. neighborhood
     - Red (y < 0): genes depleted in cell type vs. neighborhood
     With background="gradient", the shading fades out toward y = 0, where the direction is
-    uncertain, and reaches full color at |y| = background_saturation (marked by the dashed
-    lines at y = -1 and y = +1 for the default of 1). background="split" gives hard-edged
-    bands that switch color at 0.
+    uncertain, and reaches full color at |y| = background_saturation. background="split"
+    gives hard-edged bands that switch color at 0. Dashed lines mark y = 0 and
+    y = +/-reference_lfc.
 
     When size_by_pvalue is True, point sizes are scaled by -log10(padj):
     - Larger points = more significant (smaller p-values)
@@ -176,6 +181,13 @@ def dual_foldchange_plot(
             and background_saturation > 0):
         raise ValueError(
             f"background_saturation must be a positive finite number, got {background_saturation!r}"
+        )
+
+    if reference_lfc is not None and not (
+        isinstance(reference_lfc, Number) and np.isfinite(reference_lfc) and reference_lfc > 0
+    ):
+        raise ValueError(
+            f"reference_lfc must be None or a positive finite number, got {reference_lfc!r}"
         )
 
     if len(patch_colors) != 2:
@@ -230,6 +242,7 @@ def dual_foldchange_plot(
                 patch_colors=patch_colors,
                 background=background,
                 background_saturation=background_saturation,
+                reference_lfc=reference_lfc,
                 label_top_n=label_top_n,
                 label_sortby=label_sortby,
                 adjust_labels=adjust_labels,
@@ -322,6 +335,7 @@ def _plot_single_nb_plot(
     patch_colors: list[str],
     background: Literal["gradient", "split"],
     background_saturation: Number,
+    reference_lfc: Number | None,
     label_top_n: int | Literal["all"],
     label_sortby: str,
     adjust_labels: bool,
@@ -352,6 +366,8 @@ def _plot_single_nb_plot(
         background (str): Background shading mode, "gradient" or "split".
         background_saturation (Number): Absolute log2 fold change at which the gradient
             reaches full color.
+        reference_lfc (Number, optional): Absolute log2 fold change of the dashed
+            horizontal reference lines, or None for no such lines.
         label_top_n (int or 'all'): Number of top genes to label, or 'all' for all genes.
         label_sortby (str): Column to sort by for selecting top genes.
         adjust_labels (bool): Whether to adjust overlapping labels.
@@ -486,12 +502,11 @@ def _plot_single_nb_plot(
     objects_to_avoid.append(
         ax.axhline(0, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
     )
-    objects_to_avoid.append(
-        ax.axhline(-1, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
-    )
-    objects_to_avoid.append(
-        ax.axhline(1, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
-    )
+    if reference_lfc is not None:
+        for y_ref in (-reference_lfc, reference_lfc):
+            objects_to_avoid.append(
+                ax.axhline(y_ref, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
+            )
     objects_to_avoid.append(
         ax.axvline(
             fold_change_threshold,

@@ -69,6 +69,11 @@ def dge(
             and region selection (but spanning all cell types, so that neighbouring types can be
             detected), so cells just outside a drawn annotation or region border are not counted as
             neighbours; the 20 micrometer radius is fixed.
+            With `ref_cell_type_tuple="rest"`, the reference neighbourhood comparison pools all
+            non-target cell types: each reference cell is compared against its neighbours of other
+            types (including target cells), and the per-gene result is an average over this mix.
+            Genes from abundant reference types dominate it and genes from rare types are diluted,
+            so it is less specific than with a single reference cell type.
             Defaults to False.
         method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
         exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data.
