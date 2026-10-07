@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from adjustText import adjust_text
+from matplotlib.colors import to_rgb
 
 from insitupy._constants import with_insitupy_style
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
@@ -32,6 +33,8 @@ COLOR_NOT_SIGNIFICANT = 'gray'
 AXIS_MARGIN_FACTOR = 0.1
 MIN_PVALUE = 1e-300
 TABLE_ROW_HEIGHT = 0.075
+BACKGROUND_ALPHA = 0.3
+GRADIENT_RESOLUTION = 512
 
 
 @with_insitupy_style
@@ -42,6 +45,8 @@ def dual_foldchange_plot(
     logfoldchanges_col: str = "log2foldchange",
     pval_col: str = "padj",
     patch_colors: list[str] = ["lightgreen", "lightcoral"],
+    background: Literal["gradient", "split"] = "gradient",
+    background_saturation: Number = 1,
     adjust_labels: bool = True,
     label_top_n: int | Literal["all"] = "all",
     label_sortby: str = "padj",
@@ -77,7 +82,12 @@ def dual_foldchange_plot(
         pval_col (str): Column name for adjusted p-values. Default is 'padj'.
         patch_colors (list of str): Background colors for [positive, negative] y-axis
             regions, indicating whether genes are higher or lower in the neighborhood.
-            Default is ['lightgreen', 'lightcoral'].
+            Used by both background modes. Default is ['lightgreen', 'lightcoral'].
+        background (str): Background shading mode. "gradient" fades the color out toward
+            y = 0 and reaches full color at |y| = background_saturation; "split" draws the
+            previous hard-edged bands above and below 0. Default is "gradient".
+        background_saturation (Number): Absolute paired log2 fold change at which the
+            gradient reaches full color. Ignored if background is "split". Default is 1.
         adjust_labels (bool): If True, automatically adjust overlapping gene labels using
             adjustText. Default is True.
         label_top_n (int or 'all'): Number of top genes to label based on label_sortby.
@@ -122,8 +132,12 @@ def dual_foldchange_plot(
     - Negative values: gene is lower in the cell type than in the neighborhood
 
     Background shading helps interpret the biological meaning:
-    - Green region (y > 0): genes enriched in cell type vs. neighborhood
-    - Red region (y < 0): genes depleted in cell type vs. neighborhood
+    - Green (y > 0): genes enriched in cell type vs. neighborhood
+    - Red (y < 0): genes depleted in cell type vs. neighborhood
+    With background="gradient", the shading fades out toward y = 0, where the direction is
+    uncertain, and reaches full color at |y| = background_saturation (marked by the dashed
+    lines at y = -1 and y = +1 for the default of 1). background="split" gives hard-edged
+    bands that switch color at 0.
 
     When size_by_pvalue is True, point sizes are scaled by -log10(padj):
     - Larger points = more significant (smaller p-values)
@@ -154,6 +168,20 @@ def dual_foldchange_plot(
 
     if label_top_n != "all" and (not isinstance(label_top_n, int) or label_top_n < 0):
         raise ValueError(f"label_top_n must be 'all' or a non-negative integer, got {label_top_n}")
+
+    if background not in ("gradient", "split"):
+        raise ValueError(f"background must be 'gradient' or 'split', got {background!r}")
+
+    if not (isinstance(background_saturation, Number) and np.isfinite(background_saturation)
+            and background_saturation > 0):
+        raise ValueError(
+            f"background_saturation must be a positive finite number, got {background_saturation!r}"
+        )
+
+    if len(patch_colors) != 2:
+        raise ValueError(
+            f"patch_colors must contain exactly two colors [positive, negative], got {patch_colors!r}"
+        )
 
     df_main = results.main
     df_nb_target = results.target_neighborhood
@@ -200,6 +228,8 @@ def dual_foldchange_plot(
                 fold_change_threshold=fc,
                 significance_threshold=significance_threshold,
                 patch_colors=patch_colors,
+                background=background,
+                background_saturation=background_saturation,
                 label_top_n=label_top_n,
                 label_sortby=label_sortby,
                 adjust_labels=adjust_labels,
@@ -243,6 +273,45 @@ def dual_foldchange_plot(
     )
 
 
+def _draw_background(
+    ax: plt.Axes,
+    patch_colors: list[str],
+    background: Literal["gradient", "split"],
+    saturation: Number,
+) -> None:
+    """
+    Shade the y > 0 / y < 0 regions of a dual fold change subplot.
+
+    Must be called after the axis limits are set. In "gradient" mode the color is chosen by
+    the sign of y and the alpha grows linearly with |y| from 0 at y = 0 to BACKGROUND_ALPHA at
+    |y| >= saturation, so there is no visible edge at 0 and it also works when 0 lies
+    outside the y-range.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axes to draw on (limits already set).
+        patch_colors (list of str): Colors for [positive, negative] regions.
+        background (str): "gradient" or "split".
+        saturation (Number): Absolute y value at which the gradient reaches full color.
+    """
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+
+    if background == "split":
+        ax.axhspan(0, ylim[1], facecolor=patch_colors[0], alpha=BACKGROUND_ALPHA)
+        ax.axhspan(ylim[0], 0, facecolor=patch_colors[1], alpha=BACKGROUND_ALPHA)
+        return
+
+    y = np.linspace(ylim[0], ylim[1], GRADIENT_RESOLUTION)
+    strength = np.clip(y / saturation, -1, 1)
+    rgba = np.empty((GRADIENT_RESOLUTION, 1, 4))
+    rgba[:, 0, :3] = np.where(strength[:, None] >= 0, to_rgb(patch_colors[0]), to_rgb(patch_colors[1]))
+    rgba[:, 0, 3] = BACKGROUND_ALPHA * np.abs(strength)
+    ax.imshow(rgba, extent=(*xlim, *ylim), origin="lower", aspect="auto",
+              interpolation="bilinear", zorder=0)
+    # imshow re-autoscales the axes - restore the limits
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+
 def _plot_single_nb_plot(
     df_main: pd.DataFrame,
     df_neighbor: pd.DataFrame,
@@ -251,6 +320,8 @@ def _plot_single_nb_plot(
     fold_change_threshold: Number,
     significance_threshold: Number,
     patch_colors: list[str],
+    background: Literal["gradient", "split"],
+    background_saturation: Number,
     label_top_n: int | Literal["all"],
     label_sortby: str,
     adjust_labels: bool,
@@ -278,6 +349,9 @@ def _plot_single_nb_plot(
         fold_change_threshold (Number): Log2 fold change threshold (already transformed).
         significance_threshold (Number): Adjusted p-value threshold for significance.
         patch_colors (list of str): Background colors for [positive, negative] regions.
+        background (str): Background shading mode, "gradient" or "split".
+        background_saturation (Number): Absolute log2 fold change at which the gradient
+            reaches full color.
         label_top_n (int or 'all'): Number of top genes to label, or 'all' for all genes.
         label_sortby (str): Column to sort by for selecting top genes.
         adjust_labels (bool): Whether to adjust overlapping labels.
@@ -374,9 +448,8 @@ def _plot_single_nb_plot(
     ax.set_xlim(xmincorr, xmaxcorr)
     ax.set_ylim(ymincorr, ymaxcorr)
 
-    # Add background patches
-    ax.axhspan(0, ymaxcorr, facecolor=patch_colors[0], alpha=0.3)
-    ax.axhspan(ymincorr, 0, facecolor=patch_colors[1], alpha=0.3)
+    # Add background shading
+    _draw_background(ax, patch_colors, background, background_saturation)
 
     # Scatter significant and non-significant points
     if show_nonsignificant:
@@ -415,6 +488,9 @@ def _plot_single_nb_plot(
     )
     objects_to_avoid.append(
         ax.axhline(-1, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
+    )
+    objects_to_avoid.append(
+        ax.axhline(1, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
     )
     objects_to_avoid.append(
         ax.axvline(
