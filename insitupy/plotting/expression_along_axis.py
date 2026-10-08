@@ -1,43 +1,41 @@
+import logging
 import os
 import textwrap
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
-from warnings import warn
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import pyplot as plt
-from matplotlib.axes._axes import Axes
-from matplotlib.figure import Figure
-from scipy.stats import pearsonr, spearmanr, zscore
 from sklearn.preprocessing import MinMaxScaler
-from tqdm import tqdm
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, _init_mpl_fontsize
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.utils._checks import check_raw, has_valid_labels
 from insitupy.utils._regression import smooth_fit
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils.utils import (
+    convert_to_list,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def cell_expression_along_axis(
     adata,
     axis,
-    genes: List[str],
+    genes: list[str],
     cell_type_column: str,
-    cell_type: Union[str, List[str]],
-    xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
-    min_expression: Union[int, float] = 0,
-    xlabel: Optional[str] = None,
+    cell_type: str | list[str],
+    xlim: tuple[int | float, int | float] = (0, np.inf),
+    min_expression: int | float = 0,
+    xlabel: str | None = None,
     fit_reg: bool = False,
     kde: bool = False,
-    max_cols: bool = 4,
-    savepath: Union[str, os.PathLike, Path] = None,
+    max_cols: int = 4,
+    savepath: str | os.PathLike | Path = None,
     save_only: bool = False,
     dpi_save: int = 300,
     fig_height: Number = 4,
@@ -179,7 +177,7 @@ def cell_expression_along_axis(
 
         # Check if we have enough data after dropping NaNs
         if len(axis_values) == 0:
-            print(f"Warning: No valid data for gene '{gene}' after removing NaNs.")
+            logger.warning(f"No valid data for gene '{gene}' after removing NaNs.")
             continue
 
         axes[row, col].scatter(
@@ -198,10 +196,10 @@ def cell_expression_along_axis(
                     loess_bootstrap=False, nsteps=100
                     )
                 except ValueError as e:
-                    print(f"A ValueError occurred during loess regression: {e}")
+                    logger.warning(f"A ValueError occurred during loess regression: {e}")
                     res = None
             else:
-                print(f"Less than 10 data points left for gene {gene} after filtering. Skipped LOESS regression.")
+                logger.warning(f"Less than 10 data points left for gene {gene} after filtering. Skipped LOESS regression.")
                 res = None
 
             if res is not None:
@@ -258,10 +256,10 @@ def cell_expression_along_axis(
 def _select_data(
     adata,
     axis,
-    genes: List[str],
+    genes: list[str],
     cell_type_column: str,
-    cell_type: Union[str, List[str]],
-    xlim: Tuple[Union[int, float], Union[int, float]] = (0, np.inf),
+    cell_type: str | list[str],
+    xlim: tuple[int | float, int | float] = (0, np.inf),
     min_expression: Number = None,
     sort: bool = True,
     minmax_scale: bool = True,
@@ -273,13 +271,13 @@ def _select_data(
     # Check type of obs_val
     adata_obs = adata.obs.copy()
     if isinstance(axis, tuple):
-        print("Retrieve axis from .obsm.") if verbose else None
+        logger.info("Retrieve axis from .obsm.") if verbose else None
         obsm_key = axis[0]
         obsm_col = axis[1]
         #obs_val = f"distance_from_{obsm_col}"
         adata_obs["axis"] = adata.obsm[obsm_key][obsm_col]
     elif isinstance(axis, str):
-        print("Retrieve axis from .obs.") if verbose else None
+        logger.info("Retrieve axis from .obs.") if verbose else None
         adata_obs["axis"] = adata.obs[axis]
     else:
         raise ValueError(f"Invalid type for `axis`: {type(axis)}. Expected str or tuple.")
@@ -403,7 +401,7 @@ def _bin_qc_plot(
 
         # Check if we have enough data after dropping NaNs
         if not_nan.sum() < 2:
-            print(f"Warning: Insufficient data for gene '{gene}' in QC plot.")
+            logger.warning(f"Insufficient data for gene '{gene}' in QC plot.")
             continue
 
         try:
@@ -414,7 +412,7 @@ def _bin_qc_plot(
             loess_bootstrap=False, nsteps=100
             )
         except ValueError as e:
-            print(f"A ValueError occurred during loess regression: {e}")
+            logger.warning(f"A ValueError occurred during loess regression: {e}")
             res = None
 
         # Plot the original data
@@ -456,11 +454,11 @@ def _bin_qc_plot(
 
 def cell_abundance_along_axis(
     adata: AnnData,
-    axis: Union[str, Tuple[str, str]],
-    groupby: Optional[str] = None,
-    xlim: Tuple = (0, np.inf),
-    savepath: Optional[os.PathLike] = None,
-    figsize: Tuple = (8,6),
+    axis: str | tuple[str, str],
+    groupby: str | None = None,
+    xlim: tuple = (0, np.inf),
+    savepath: os.PathLike | None = None,
+    figsize: tuple = (8,6),
     save_only: bool = False,
     dpi_save: int = 300,
     multiple: Literal["layer", "dodge", "stack", "fill"] = "stack",
@@ -499,13 +497,13 @@ def cell_abundance_along_axis(
     # check type of obs_val
     adata_obs = adata.obs.copy()
     if isinstance(axis, tuple):
-        print("Retrieve axis from `.obsm`.") if verbose else None
+        logger.info("Retrieve axis from `.obsm`.") if verbose else None
         obsm_key = axis[0]
         obsm_col = axis[1]
         axis = f"distance_from_{obsm_col}"
         adata_obs[axis] = adata.obsm[obsm_key][obsm_col]
     elif isinstance(axis, str):
-        print("Retrieve axis from `.obs`.") if verbose else None
+        logger.info("Retrieve axis from `.obs`.") if verbose else None
         adata_obs[axis] = adata.obs[axis]
     else:
         raise ValueError(f"Invalid type for `axis`: {type(axis)}. Expected str or tuple.")

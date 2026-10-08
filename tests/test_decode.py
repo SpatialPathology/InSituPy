@@ -1,5 +1,6 @@
-from insitupy.utils.utils import decode_robust_series
 import pandas as pd
+
+from insitupy.utils.utils import decode_robust_series
 
 s = pd.Series(list("ABCD"))  # string series
 b = pd.Series([b"A", b"B", b"C", b"D"])  # byte series
@@ -10,13 +11,13 @@ mt = pd.Series(["A", "c", 1, "\xa5"]) # test result for mixed series
 
 def test_string_decode():
     assert decode_robust_series(s).equals(s)
-    
+
 def test_byte_decode():
     assert decode_robust_series(b).equals(s)
-    
+
 def test_numeric_decode():
     assert decode_robust_series(n).equals(n)
-    
+
 def test_ascii_decode():
     assert decode_robust_series(a).equals(a)
 

@@ -1,26 +1,42 @@
 import ast
 import json
+import logging
 import os
 import warnings
 from pathlib import Path
-from typing import Union
 
 import geopandas
 import numpy as np
 import pandas as pd
 from geopandas.geodataframe import GeoDataFrame
 
-from ..utils.utils import convert_to_list
+logger = logging.getLogger(__name__)
 
 # force geopandas to use shapely. Default in future versions of geopandas.
 os.environ['USE_PYGEOS'] = '0'
 
 
 def parse_geopandas(
-    data: Union[GeoDataFrame, pd.DataFrame, dict,
-                str, os.PathLike, Path],
+    data: GeoDataFrame | pd.DataFrame | dict | str | os.PathLike | Path,
     uid_col: str = "id"
     ):
+    """Parse geometry data from various input types into a GeoDataFrame.
+
+    Accepts a GeoDataFrame, DataFrame, dict, or a GeoJSON file path and
+    returns a normalised GeoDataFrame with CRS set to EPSG:4326 and
+    *uid_col* as the index.  Returns None if the data is empty.
+
+    Args:
+        data: Geometry data as a GeoDataFrame, pandas DataFrame, dict
+            with a ``"geometry"`` key, or a path to a ``.geojson`` file.
+        uid_col: Column name used as the index.  Defaults to ``"id"``.
+
+    Returns:
+        A :class:`~geopandas.GeoDataFrame` or None if the data is empty.
+
+    Raises:
+        ValueError: If *data* is a file path with an unsupported extension.
+    """
     # check if the input is a path or a GeoDataFrame
     if isinstance(data, GeoDataFrame):
         df = data
@@ -56,10 +72,11 @@ def _read_file_helper(file, engine):
         # convert string representations of dicts to actual dicts
         # only if they are strings (pyogrio may already parse them as dicts)
         def safe_literal_eval(val):
+            """Parse val as JSON or Python literal; return as-is if parsing fails."""
             if isinstance(val, dict):
                 return val
 
-            print(val)
+            logger.debug(val)
             if isinstance(val, str):
                 try:
                     return json.loads(val)
@@ -72,7 +89,7 @@ def _read_file_helper(file, engine):
         dataframe['classification'] = dataframe['classification'].apply(safe_literal_eval)
     return dataframe
 
-def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
+def read_qupath_geojson(file: str | os.PathLike | Path) -> pd.DataFrame:
     """
     Reads a QuPath-compatible GeoJSON file and transforms it into a flat DataFrame.
 
@@ -92,12 +109,12 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
         # Flatten the "classification" column into separate "name" and "color" columns
         if "name" in dataframe.columns:
             warnings.warn(
-                (
-                    f"The geometries contain both a 'name' (set e.g. by 'Set properties' in QuPath) and a 'classification name'.\n"
-                    f"Currently, the `read_qupath_geojson` function overwrites the name with the classification name and saves it in a column named just 'name'.\n"
-                    f"This behavior might change in the future."
-                )
-                )
+                "The geometries contain both a 'name' (set e.g. by 'Set properties' in QuPath) and a 'classification name'.\n"
+                "Currently, the `read_qupath_geojson` function overwrites the name with the classification name and saves it in a column named just 'name'.\n"
+                "This behavior might change in the future.",
+                UserWarning,
+                stacklevel=2,
+            )
         def _extract_classification_value(entry, key, default):
             if isinstance(entry, dict):
                 return entry.get(key, default)
@@ -115,8 +132,19 @@ def read_qupath_geojson(file: Union[str, os.PathLike, Path]) -> pd.DataFrame:
     # Return the transformed DataFrame
     return dataframe
 
+def _to_json_native(entry):
+    """Coerce numpy arrays/scalars (and nested lists/tuples of them) to JSON-native
+    Python types so pyogrio serializes them as real JSON, not a repr string."""
+    if isinstance(entry, np.ndarray):
+        return entry.tolist()
+    if isinstance(entry, (list, tuple)):
+        return [_to_json_native(x) for x in entry]
+    if isinstance(entry, np.generic):
+        return entry.item()
+    return entry
+
 def write_qupath_geojson(dataframe: GeoDataFrame,
-                         file: Union[str, os.PathLike, Path]
+                         file: str | os.PathLike | Path
                          ):
     """
     Converts a GeoDataFrame with "name" and "color" columns into a QuPath-compatible GeoJSON-like format,
@@ -126,7 +154,11 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
     Parameters:
     - dataframe (geopandas.GeoDataFrame): The input GeoDataFrame containing "name" and "color" columns.
     - file (Union[str, os.PathLike, Path]): The file path (as a string or pathlib.Path) where the GeoJSON data will be saved.
+
+    The input dataframe is not modified; the conversion works on a copy.
     """
+    # work on a copy so the caller's frame (e.g. a live annotation layer) keeps its columns
+    dataframe = dataframe.copy()
     columns_to_move = ["name", "color", "scale"]
     if np.any([elem in dataframe.columns for elem in columns_to_move]):
         existing_columns_to_move = [elem for elem in columns_to_move if elem in dataframe.columns]
@@ -140,15 +172,7 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
             classification_dict = {}
 
             for column in existing_columns_to_move:
-                entry = row[column]
-
-                # convert numpy arrays to lists
-                if isinstance(entry, np.ndarray):
-                    entry = convert_to_list(entry)
-                elif isinstance(entry, tuple):
-                    entry = convert_to_list(entry)
-
-                classification_dict[column] = entry
+                classification_dict[column] = _to_json_native(row[column])
             # Append the dictionary to the list
             classification_list.append(classification_dict)
 
@@ -158,6 +182,12 @@ def write_qupath_geojson(dataframe: GeoDataFrame,
         # Remove the original "name" and "color" columns
         dataframe = dataframe.drop(existing_columns_to_move, axis=1)
 
-    # Write the GeoDataFrame to a GeoJSON file
-    dataframe.to_file(file, driver="GeoJSON")
+    # Write the GeoDataFrame to a GeoJSON file (pyogrio emits INFO noise for every layer)
+    _pyogrio_log = logging.getLogger("pyogrio")
+    _prev_level = _pyogrio_log.level
+    _pyogrio_log.setLevel(logging.WARNING)
+    try:
+        dataframe.to_file(file, driver="GeoJSON")
+    finally:
+        _pyogrio_log.setLevel(_prev_level)
 

@@ -1,41 +1,43 @@
-from numbers import Number
-from typing import List, Literal, Optional, Tuple, Union
+import logging
+from typing import Literal
 from warnings import catch_warnings, filterwarnings, warn
 
 import anndata
 import numpy as np
-import pandas as pd
 import scanpy as sc
+from scipy import sparse
 
 from insitupy._core.data import InSituData
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
-from insitupy.plotting.volcano import single_volcano
+from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors
+from insitupy.utils._checks import _assert_log1p_state
 from insitupy.utils._dge import _select_data_for_dge
 from insitupy.utils.dge import create_deg_dataframe
+
+logger = logging.getLogger(__name__)
 
 DGE_COMPARISON_COLUMN = "DGE_COMPARISON_COLUMN"
 
 def dge(
     target: InSituData,
-    target_annotation_tuple: Optional[Tuple[str, str]] = None,
-    target_cell_type_tuple: Optional[Tuple[str, str]] = None,
-    target_region_tuple: Optional[Tuple[str, str]] = None,
-    target_name: Optional[str] = None,
-    target_metadata: Optional[dict] = None,
-    ref: Optional[Union[InSituData, List[InSituData]]] = None,
-    ref_annotation_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-    ref_cell_type_tuple: Optional[Union[Literal["rest", "same"], Tuple[str, str]]] = "same",
-    ref_region_tuple: Optional[Tuple[str, str]] = "same",
-    ref_name: Optional[str] = None,
-    ref_metadata: Optional[dict] = None,
-    cells_layer: Optional[str] = None,
+    target_annotation_tuple: tuple[str, str] | None = None,
+    target_cell_type_tuple: tuple[str, str] | None = None,
+    target_region_tuple: tuple[str, str] | None = None,
+    target_name: str | None = None,
+    target_metadata: dict | None = None,
+    ref: InSituData | list[InSituData] | None = None,
+    ref_annotation_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+    ref_cell_type_tuple: Literal["rest", "same"] | tuple[str, str] | None = "same",
+    ref_region_tuple: tuple[str, str] | None = "same",
+    ref_name: str | None = None,
+    ref_metadata: dict | None = None,
+    cells_layer: str | None = None,
     consider_neighbors: bool = False,
-    method: Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']] = 't-test',
+    method: Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var'] | None = 't-test',
     exclude_ambiguous_assignments: bool = False,
     force_assignment: bool = False,
+    assert_log1p: bool = True,
     verbose: bool = False,
     ) -> DiffExprResults:
     """
@@ -43,50 +45,81 @@ def dge(
 
     This function compares gene expression between specified annotations within a single
     InSituData object or between two InSituData objects. It supports various statistical
-    methods for differential expression analysis and can generate a volcano plot of the results.
+    methods for differential expression analysis.
 
     Args:
         target (InSituData): The primary in situ data object.
         target_annotation_tuple (Optional[Tuple[str, str]]): Tuple containing the annotation key and name for the target data.
         target_cell_type_tuple (Optional[Tuple[str, str]]): Tuple specifying an observation key and value to filter the target data by cell type.
         target_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the target data.
+        target_name (Optional[str]): Label for the target group used in result output. Defaults to None.
+        target_metadata (Optional[dict]): Additional metadata to attach to the target group. Defaults to None.
         ref (Optional[Union[InSituData, List[InSituData]]]): Reference in situ data object(s) for comparison. Defaults to None.
         ref_annotation_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple containing the reference annotation key and name, or "rest" to use the rest of the data as reference, or "same" to use the same annotation as the target. Defaults to "same".
         ref_cell_type_tuple (Optional[Union[Literal["rest", "same"], Tuple[str, str]]]): Tuple specifying an observation key and value to filter the reference data by cell type, or "rest" to use the rest of the data, or "same" to use the same cell type as the target. Defaults to "same".
-        ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to None.
-        significance_threshold (float): P-value threshold for significance (default is 0.05).
-        fold_change_threshold (float): Fold change threshold for up/down regulation (default is 1).
-        show_volcano (bool): Whether to generate a volcano plot of the results. Defaults to True.
-        return_results (bool): Whether to return the results as dictionary including the dataframe differentially expressed genes and the parameters.
-        method (Optional[Literal['logreg', 't-test', 'wilcoxon', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
-        exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data. Defaults to False.
-        force_assignment (bool): Whether to force assignment of annotations and regions even if it has been done before already. Defaults to False.
+        ref_region_tuple (Optional[Tuple[str, str]]): Tuple specifying a region key and name to restrict the analysis to a specific region in the reference data. Defaults to "same".
+        ref_name (Optional[str]): Label for the reference group used in result output. Defaults to None.
+        ref_metadata (Optional[dict]): Additional metadata to attach to the reference group. Defaults to None.
+        cells_layer (Optional[str]): Name of the cell segmentation layer to use. Defaults to None (main layer).
+        consider_neighbors (bool): If True, additionally compute, for the target and reference
+            groups separately, a comparison of each cell against its own spatial neighborhood
+            (within a 20 micrometer radius), returned as `target_neighborhood` and `ref_neighborhood`
+            on the result. This does **not** change the main target-vs-reference comparison.
+            The neighbourhood is restricted to cells inside the same target/reference annotation
+            and region selection (but spanning all cell types, so that neighbouring types can be
+            detected), so cells just outside a drawn annotation or region border are not counted as
+            neighbours; the 20 micrometer radius is fixed.
+            With `ref_cell_type_tuple="rest"`, the reference neighbourhood comparison pools all
+            non-target cell types: each reference cell is compared against its neighbours of other
+            types (including target cells), and the per-gene result is an average over this mix.
+            Genes from abundant reference types dominate it and genes from rare types are diluted,
+            so it is less specific than with a single reference cell type.
+            Defaults to False.
+        method (Optional[Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var']]): Statistical method to use for differential expression analysis. Defaults to 't-test'.
+        exclude_ambiguous_assignments (bool): Whether to exclude ambiguous assignments in the data.
+            Only applies when target and reference are drawn from the same `InSituData` object - a
+            shared `obs_name` across two distinct objects is a coincidental ID collision, not the
+            same physical cell, so it is never dropped. Defaults to False.
+        force_assignment (bool): Whether to force re-assignment of annotations and regions even if already done. Defaults to False.
+        assert_log1p (bool): If True, verify that the expression matrix (`.X`) of both target and
+            reference selections is log1p-normalized before running differential expression, and
+            raise a `ValueError` on data known to be wrong (sqrt/scaled transformation, or
+            marker-less raw integer counts). Warns (does not raise) when the transformation state
+            cannot be determined. Set to False to skip this check. Defaults to True.
         verbose (bool): Whether to print detailed information during the analysis. Defaults to False.
 
     Returns:
-        Union[None, Dict[str, Any]]: If `plot_volcano` is True, returns None. Otherwise, returns a dictionary with the results DataFrame and parameters used for the analysis.
+        DiffExprResults: Object containing the differential expression results including the DEG dataframe and analysis parameters.
 
     Raises:
-        ValueError: If `ref_annotation_tuple` is neither 'rest' nor a 2-tuple.
-        AssertionError: If `ref` is provided when `ref_annotation_tuple` is 'rest'.
-        AssertionError: If `target_region_tuple` is provided when `ref` is not None.
-        AssertionError: If the specified region or annotation is not found in the data.
+        ValueError: If a `ref_*_tuple` is neither a tuple, 'rest', 'same' nor None, or is
+            'rest' while `ref` is given.
+        ValueError: If the specified region, annotation or cell type is not found in the data.
+        ValueError: If target and reference select the identical cells.
+        ValueError: If `consider_neighbors=True` with `method='logreg'`.
+        TypeError: If `ref` is a list containing non-`InSituData` elements.
 
     Example:
-        >>> result = differential_gene_expression(
+        >>> result = dge(
                 target=my_data,
                 target_annotation_tuple=("pathologist", "tumor"),
                 ref=my_ref_data,
-                ref_annotation_tuple=("cell_type", "astrocyte"),
-                plot_volcano=True,
+                ref_annotation_tuple=("pathologist", "normal"),
                 method='wilcoxon'
             )
     """
 
-    # if not (show_volcano | return_results):
-    #     raise ValueError("Both `show_volcano` and `return_results` are False. At least one of them must be True.")
-
     # pre-flight checks
+    if consider_neighbors:
+        # the neighborhood comparison is a paired test that supports only wilcoxon and t-test
+        # (scanpy treats method=None as 't-test')
+        nb_method = "t-test" if method in (None, "t-test_overestim_var") else method
+        if nb_method not in ("wilcoxon", "t-test"):
+            raise ValueError(
+                f"`consider_neighbors=True` requires `method` to be 'wilcoxon', 't-test' or "
+                f"'t-test_overestim_var', got {method!r}."
+            )
+
     if ref_annotation_tuple is not None:
         if ref_annotation_tuple == "rest":
             if ref is not None:
@@ -131,6 +164,7 @@ def dge(
         return_all_celltypes=True,
         verbose=verbose
     )
+    _assert_log1p_state(adata_target, assert_log1p=assert_log1p, where="dge target")
 
     # original tuples for plotting the configuration table
     orig_ref_annotation_tuple = ref_annotation_tuple
@@ -170,9 +204,15 @@ def dge(
         # generate a list from ref_dta
         ref = [ref]
     elif isinstance(ref, list):
-        assert np.all([isinstance(elem, InSituData) for elem in ref]), "Not all elements of list given in `ref` are InSituData objects."
+        if not np.all([isinstance(elem, InSituData) for elem in ref]):
+            raise TypeError("Not all elements of list given in `ref` are InSituData objects.")
     else:
         raise ValueError("`ref` must be an InSituData object or a list of InSituData objects.")
+
+    # The reference is drawn from the same physical cells as the target only when it is the
+    # same InSituData object. A shared obs_name only means "same physical cell" in that case -
+    # across distinct objects it is a coincidental ID collision (AC-B3).
+    same_source = all(rd is target for rd in ref)
 
     adata_ref_list = []
     adata_ref_full_list = []
@@ -188,6 +228,7 @@ def dge(
             return_all_celltypes=True,
             verbose=verbose
         )
+        _assert_log1p_state(ad_ref, assert_log1p=assert_log1p, where="dge reference")
         adata_ref_list.append(ad_ref)
         adata_ref_full_list.append(ad_ref_full)
 
@@ -197,6 +238,13 @@ def dge(
     else:
         adata_ref = adata_ref_list[0]
         adata_ref_full = adata_ref_full_list[0]
+
+    if same_source and set(adata_target.obs_names) == set(adata_ref.obs_names):
+        raise ValueError(
+            "Target and reference select the same cells (identical selection) - there is nothing "
+            "to compare. This happens with the default reference tuples ('same') and ref=None. "
+            "Specify a distinct `ref`, or different ref_*_tuple values (e.g. 'rest')."
+        )
 
     # concatenate and ignore user warning about observations being not unique since we take care of this later by filtering out duplicate values if wanted.
     with catch_warnings():
@@ -209,32 +257,61 @@ def dge(
             label=DGE_COMPARISON_COLUMN
         )
 
-    if not exclude_ambiguous_assignments:
-        # check whether cells with identical names are found in both data and reference and if yes give a warning
-        if not set(adata_target.obs_names).isdisjoint(set(adata_ref.obs_names)):
-            n_duplicated_cells = len(set(adata_target.obs_names).intersection(set(adata_ref.obs_names)))
-            pct_duplicated_cells = round((n_duplicated_cells / 2) / (len(adata_target) + len(adata_target)) * 100, 1)
+    # The ambiguity check only makes sense when target and reference are drawn from the same
+    # InSituData object - a shared obs_name across two distinct objects is a coincidental
+    # hex-ID collision, not the same physical cell (AC-B3): do not warn and do not drop.
+    if same_source:
+        if not exclude_ambiguous_assignments:
+            # check whether cells with identical names are found in both data and reference and if yes give a warning
+            if not set(adata_target.obs_names).isdisjoint(set(adata_ref.obs_names)):
+                n_duplicated_cells = len(set(adata_target.obs_names).intersection(set(adata_ref.obs_names)))
+                n_union = len(set(adata_target.obs_names) | set(adata_ref.obs_names))
+                pct_duplicated_cells = round(n_duplicated_cells / n_union * 100, 1)
 
-            warn(
-                f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells with identical names were found to belong to both data and reference. "
-                "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
-                "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
-                "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
-            )
+                warn(
+                    f"{n_duplicated_cells} ({pct_duplicated_cells}%) cells with identical names were found to belong to both data and reference. "
+                    "This can happen due to overlapping annotations or non-unique cell names in the individual datasets. "
+                    "If you are sure that the same cell cannot be found in both data and reference, you can ignore this warning. "
+                    "To exclude ambiguously assigned cells from the analysis, use `exclude_ambiguous_assignments=True`."
+                )
 
-    else:
-        # check whether some cells are in both data and reference
-        duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
+        else:
+            # check whether some cells are in both data and reference
+            duplicated_mask = adata_combined.obs_names.duplicated(keep=False)
 
-        if np.any(duplicated_mask):
-            print("Exclude ambiguously assigned cells...")
-            # remove duplicated values
-            adata_combined = adata_combined[~duplicated_mask].copy()
+            if np.any(duplicated_mask):
+                logger.info("Exclude ambiguously assigned cells...")
+                # remove duplicated values
+                adata_combined = adata_combined[~duplicated_mask].copy()
 
     # add column to .obs for its use in rank_genes_groups()
-    #adata_combined.obs = adata_combined.obs.filter([dge_comparison_column]) # empty obs
 
-    print(f"Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '{method}'.")
+    # Filter out cells with NaN in .X before rank_genes_groups (NaNs propagate to NaN fold changes).
+    # Cheap-detect first so the common no-NaN path never densifies a large sparse matrix: for a
+    # sparse matrix NaNs can only live in the stored buffer, so testing X.data is O(nnz).
+    X = adata_combined.X
+    if sparse.issparse(X):
+        has_nan = np.isnan(X.data).any()
+    else:
+        has_nan = np.isnan(X).any()
+    if has_nan:
+        X_arr = X.toarray() if sparse.issparse(X) else np.asarray(X)
+        nan_cell_mask = np.isnan(X_arr).any(axis=1)
+        n_nan = int(nan_cell_mask.sum())
+        pct_nan = round(n_nan / adata_combined.n_obs * 100, 1)
+        logger.warning("Removing %d (%s%%) cells containing NaN values before DGE.", n_nan, pct_nan)
+        if pct_nan > 10:
+            warn(f"{pct_nan}% of cells contained NaN values and were removed before DGE - "
+                 "check upstream filtering/normalization.")
+        adata_combined = adata_combined[~nan_cell_mask].copy()
+        group_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
+        if group_counts.get("DATA", 0) == 0 or group_counts.get("REFERENCE", 0) == 0:
+            raise ValueError(
+                "After removing cells with NaN expression values, one of the groups (DATA / "
+                "REFERENCE) is empty. Cannot run differential expression."
+            )
+
+    logger.info("Calculate differentially expressed genes with Scanpy's `rank_genes_groups` using '%s'.", method)
     sc.tl.rank_genes_groups(adata=adata_combined,
                             groupby=DGE_COMPARISON_COLUMN,
                             groups=["DATA"],
@@ -280,14 +357,16 @@ def dge(
             adata=adata_target_full,
             radius=20,
             celltype_tuple=target_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
 
         nb_results_ref, _, _, _ = mean_gex_diff_to_neighbors(
             adata=adata_ref_full,
             radius=20,
             celltype_tuple=ref_cell_type_tuple,
-            test=method,
+            method=nb_method,
+            verbose=verbose,
         )
     else:
         nb_results_target = nb_results_ref = None
@@ -301,42 +380,3 @@ def dge(
         )
 
     return res
-
-    # if show_volcano:
-    #     cell_counts = adata_combined.obs[DGE_COMPARISON_COLUMN].value_counts()
-    #     data_counts = cell_counts["DATA"]
-    #     ref_counts = cell_counts["REFERENCE"]
-
-    #     n_upreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] > np.log2(foldchange_threshold)))
-    #     n_downreg = np.sum((df["pvalue"] <= significance_threshold) & (df["log2foldchange"] < -np.log2(foldchange_threshold)))
-
-    #     config_table = pd.DataFrame({
-    #         "": ["Annotation", "Cell type", "Region", "Cell number", "DEG number"],
-    #         "Reference": [elem[1] if isinstance(elem, tuple) else elem
-    #                       for elem in [orig_ref_annotation_tuple, orig_ref_cell_type_tuple, ref_region_tuple]] + [ref_counts, n_downreg],
-    #         "Target": [elem[1] if isinstance(elem, tuple) else elem
-    #                    for elem in [target_annotation_tuple, target_cell_type_tuple, target_region_tuple]] + [data_counts, n_upreg]
-    #     })
-
-    #     # remove empty rows
-    #     config_table = config_table.set_index("").dropna(how="all").reset_index()
-
-    #     single_volcano(
-    #         data=df,
-    #         significance_threshold=significance_threshold,
-    #         foldchange_threshold=foldchange_threshold,
-    #         title=title,
-    #         savepath = savepath,
-    #         save_only = save_only,
-    #         dpi_save = dpi_save,
-    #         config = config_table,
-    #         adjust_labels=True,
-    #         **volcano_kwargs
-    #         )
-    # if return_results:
-    #     return {
-    #         "results": df,
-    #         "params": adata_combined.uns["rank_genes_groups"]["params"]
-    #     }
-
-

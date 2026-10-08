@@ -6,3 +6,4 @@ ipython
 sphinx_copybutton
 sphinx_design
 sphinx_autodoc_typehints
+sphinxcontrib-mermaid

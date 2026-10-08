@@ -1,4 +1,4 @@
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 if WITH_NAPARI:
     import math
@@ -11,48 +11,67 @@ if WITH_NAPARI:
     from matplotlib.lines import Line2D
     from pandas.api.types import is_numeric_dtype
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL,
-                                     DEFAULT_CATEGORICAL_CMAP,
-                                     DEFAULT_CONTINUOUS_CMAP, POINTS_SYMBOL,
-                                     REGIONS_SYMBOL)
+    from insitupy._constants import (
+        ANNOTATIONS_SYMBOL,
+        DEFAULT_CONTINUOUS_CMAP,
+        POINTS_SYMBOL,
+        REGIONS_SYMBOL,
+    )
     from insitupy.utils._colors import continuous_data_to_rgba
+
+    def _resolve_legend_layer(viewer, layer):
+        if isinstance(layer, napari.layers.labels.labels.Labels):
+            source_layer_name = layer.metadata.get("legend_source_layer")
+            if source_layer_name is not None and source_layer_name in viewer.layers:
+                return viewer.layers[source_layer_name]
+        return layer
+
+    def _get_label_layer_colors(layer):
+        label_ids = layer.properties.get("index")
+        if label_ids is None:
+            return None
+
+        color_dict = getattr(layer.colormap, "color_dict", None)
+        if color_dict is None:
+            return None
+
+        colors = []
+        for label_id in label_ids:
+            color = color_dict.get(int(label_id), color_dict.get(None))
+            if color is None:
+                color = np.array([0.5, 0.5, 0.5, 0.5])
+            colors.append(tuple(color))
+
+        return np.array(colors)
+
+    def _categorical_mapping_without_missing(values, color_values):
+        pairs = [
+            (value, color)
+            for value, color in zip(values, color_values)
+            if not pd.isna(value)
+        ]
+        if len(pairs) == 0:
+            return {}
+
+        mapping = {}
+        for value, color in pairs:
+            mapping.setdefault(str(value), tuple(color))
+
+        return {elem: mapping[elem] for elem in sorted(mapping.keys())}
 
     # show cells widget
     def _update_key_on_type_change(widget, viewer_config):
         current_key_type = widget.key_type.value
-        widget.key.choices = viewer_config.key_dict[current_key_type]
+        choices = list(viewer_config.key_dict[current_key_type])
+        widget.key.choices = choices
 
-    # geometry widget
-    def _update_keys_based_on_geom_type(widget, xdata):
-        # retrieve current value
-        current_geom_type = widget.geom_type.value
-        current_key = widget.key.value
+        # MagicGUI may reset ComboBox choices from its stored defaults.
+        # Keep those defaults aligned with the currently selected key type.
+        if hasattr(widget.key, "_default_choices"):
+            widget.key._default_choices = choices
+        if hasattr(widget, "_param_options") and "key" in widget._param_options:
+            widget._param_options["key"]["choices"] = choices
 
-        # get either regions or annotations object
-        geom_data = getattr(xdata, current_geom_type.lower())
-        widget.key.choices = sorted(geom_data.metadata.keys(), key=str.casefold)
-
-    def _update_classes_on_key_change(widget, xdata):
-        # get current values for geom_type and key
-        current_geom_type = widget.geom_type.value
-        current_key = widget.key.value
-
-        # get either regions or annotations object
-        geom_data = getattr(xdata, current_geom_type.lower())
-
-        # update annot_class choices
-        widget.annot_class.choices = ["all"] + sorted(geom_data.metadata[current_key]['classes'])
-
-    def _set_show_names_based_on_geom_type(widget):
-        # retrieve current value
-        current_geom_type = widget.geom_type.value
-
-        # set the show_names tick box
-        if current_geom_type == "Annotations":
-            widget.show_names.value = False
-
-        if current_geom_type == "Regions":
-            widget.show_names.value = True
 
 
     # Function to update the legend
@@ -112,39 +131,81 @@ if WITH_NAPARI:
     def _update_colorlegend(viewer, viewer_config):
         layer = viewer.layers.selection.active
 
+        if layer is None:
+            return
+
+        layer = _resolve_legend_layer(viewer, layer)
+
         if isinstance(layer, napari.layers.points.points.Points):
-            try:
-                # get values
-                values = layer.properties["value"]
-                color_values = layer.face_color
-            except KeyError:
-                first_char = layer.name[:1]
-                if first_char == POINTS_SYMBOL:
-                    # collect the layer names and edge colors of the respective layer
-                    layer_names = []
-                    face_colors = []
-                    for elem in viewer.layers:
-                        if elem.name.startswith(first_char):
-                            layer_names.append(elem.name.strip(first_char + " "))
-                            face_colors.append(elem.current_face_color)
-
-                    # create mapping from collected values
-                    mapping = dict(zip(layer_names, face_colors))
-
-                    _update_categorical_legend(
-                        static_canvas=viewer_config.static_canvas,
-                        mapping=mapping,
-                        label="Points",
-                        marker="o",
-                        marker_mode="face"
+            first_char = layer.name[:1]
+            if first_char == POINTS_SYMBOL:
+                # Point annotation layer: build legend from features['name'] + face_color
+                # per point, analogous to the Shapes annotation branch below.
+                mapping = {}
+                for elem in viewer.layers:
+                    if not (elem.name.startswith(POINTS_SYMBOL)
+                            and isinstance(elem, napari.layers.Points)):
+                        continue
+                    if 'name' in elem.features.columns:
+                        for name, color in zip(elem.features['name'], elem.face_color):
+                            if name and name != "":
+                                mapping.setdefault(str(name), tuple(color))
+                    else:
+                        mapping.setdefault(
+                            elem.name[len(POINTS_SYMBOL) + 1:],
+                            tuple(elem.current_face_color)
                         )
+                mapping = {k: mapping[k] for k in sorted(mapping.keys())}
+                _update_categorical_legend(
+                    static_canvas=viewer_config.static_canvas,
+                    mapping=mapping,
+                    label="Point annotations",
+                    marker="o",
+                    marker_mode="face"
+                    )
             else:
+                # Non-annotation Points layer (e.g. cell layer with continuous values).
+                try:
+                    values = layer.properties["value"]
+                    color_values = layer.face_color
+                except KeyError:
+                    pass
+                else:
+                    if is_numeric_dtype(values):
+                        rgba_list, mapping = continuous_data_to_rgba(data=values,
+                                                cmap=layer.face_colormap.name,
+                                                return_mapping=True
+                                                )
+                        _update_continuous_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name)
+                    else:
+                        values = pd.Series(values).fillna(np.nan).values
+                        mapping = _categorical_mapping_without_missing(values, color_values)
+                        _update_categorical_legend(
+                            static_canvas=viewer_config.static_canvas,
+                            mapping=mapping,
+                            label=layer.name
+                            )
+
+        elif isinstance(layer, napari.layers.labels.labels.Labels):
+            try:
+                values = layer.properties["value"]
+                color_values = _get_label_layer_colors(layer)
+            except KeyError:
+                pass
+            else:
+                if color_values is None:
+                    return
+
                 if is_numeric_dtype(values):
-                    rgba_list, mapping = continuous_data_to_rgba(data=values,
-                                            cmap=layer.face_colormap.name,
-                                            #upper_climit_pct=upper_climit_pct,
-                                            return_mapping=True
-                                            )
+                    _, mapping = continuous_data_to_rgba(
+                        data=values,
+                        cmap=layer.metadata.get("legend_continuous_cmap", DEFAULT_CONTINUOUS_CMAP),
+                        upper_climit_pct=layer.metadata.get("legend_upper_climit_pct", 99),
+                        return_mapping=True
+                    )
 
                     _update_continuous_legend(
                         static_canvas=viewer_config.static_canvas,
@@ -152,14 +213,8 @@ if WITH_NAPARI:
                         label=layer.name)
 
                 else:
-                    # substitute pd.NA with np.nan
                     values = pd.Series(values).fillna(np.nan).values
-                    # assume the data is categorical
-                    #mapping = {category: tuple(rgba) for category, rgba in zip(values, color_values)}
-                    unique_values = list(set(values))
-                    mapping = {str(v): tuple(color_values[list(values).index(v)]) for v in unique_values}
-                    # sort mapping dict
-                    mapping = {elem: mapping[elem] for elem in sorted(mapping.keys())}
+                    mapping = _categorical_mapping_without_missing(values, color_values)
 
                     _update_categorical_legend(
                         static_canvas=viewer_config.static_canvas,
@@ -171,16 +226,15 @@ if WITH_NAPARI:
             # check if the layer is a annotations or regions layer
             first_char = layer.name[:1]
             if first_char in [ANNOTATIONS_SYMBOL, REGIONS_SYMBOL]:
-                # collect the layer names and edge colors of the respective layer
-                layer_names = []
-                face_colors = []
+                mapping = {}
                 for elem in viewer.layers:
-                    if elem.name.startswith(first_char):
-                        layer_names.append(elem.name.strip(first_char + " "))
-                        face_colors.append(elem.current_edge_color)
-
-                # create mapping from collected values
-                mapping = dict(zip(layer_names, face_colors))
+                    if elem.name.startswith(first_char) and isinstance(elem, napari.layers.shapes.shapes.Shapes):
+                        if 'name' in elem.features.columns:
+                            for name, color in zip(elem.features['name'], elem.edge_color):
+                                mapping.setdefault(str(name), tuple(color))
+                        else:
+                            mapping.setdefault(elem.name.strip(first_char + " "), tuple(elem.current_edge_color))
+                mapping = {k: mapping[k] for k in sorted(mapping.keys())}
 
                 _update_categorical_legend(
                     static_canvas=viewer_config.static_canvas,
@@ -246,7 +300,7 @@ if WITH_NAPARI:
             show_cells_widget.key.value = None
 
             # update choices for key
-            show_cells_widget.key.choices = viewer_config.key_dict[show_cells_widget.key_type.value]
+            _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
 
             # add last addition to recent
             show_cells_widget.recent.choices = sorted(viewer_config.recent_selections)
@@ -256,17 +310,3 @@ if WITH_NAPARI:
             # update obs in filter widget
             filter_widget.obs_key.choices = viewer_config.key_dict["obs"]
 
-        # # set only the last cell layer visible
-        # cell_layers = []
-        # for elem in viewer.layers:
-        #     if isinstance(elem, napari.layers.points.points.Points):
-        #         if not elem.name.startswith(POINTS_SYMBOL):
-        #             # only if the layer is not a point annotation layer, it is added
-        #             cell_layers.append(elem)
-        # #point_layers = [elem for elem in xdata.viewer.layers if isinstance(elem, napari.layers.points.points.Points)]
-        # n_cell_layers = len(cell_layers)
-
-        # # make only last cell layer visible
-        # for i, l in enumerate(cell_layers):
-        #     if i < n_cell_layers-1:
-        #         l.visible = False

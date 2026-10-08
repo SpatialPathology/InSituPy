@@ -1,14 +1,16 @@
 import json
+import logging
 from math import ceil
 from pathlib import Path
 
 import anndata
 import pandas as pd
 
-from insitupy import __version__
 from insitupy._io.geo import parse_geopandas
 from insitupy.utils._helpers import _convert_to_float_coords, _generate_mask
 from insitupy.utils.utils import convert_int_to_xenium_hex
+
+logger = logging.getLogger(__name__)
 
 
 def _get_pixel_size_from_qupath_metadata(metadata, name):
@@ -26,7 +28,7 @@ def _list_insitupy_data_folders(
 
     # Check if the 'insitupy' folder exists
     if not data_path.exists():
-        print(f"No 'insitupy' folder found at {data_path}")
+        logger.warning(f"No 'insitupy' folder found at {data_path}")
         return dataset_paths
 
     # Iterate through the contents of the 'insitupy' folder
@@ -40,9 +42,9 @@ def _list_insitupy_data_folders(
                 dataset_paths[item.name] = subdirs
 
     # Print summary of folders and datasets found
-    print(f"Data folders found:")
+    logger.info("Data folders found:")
     for name, paths in dataset_paths.items():
-        print(f"\t- '{name}': {len(paths)} dataset(s)")
+        logger.info(f"\t- '{name}': {len(paths)} dataset(s)")
     return dataset_paths
 
 def _read_measurements_qupath(
@@ -120,7 +122,7 @@ def _read_boundaries_qupath(
     xshift, yshift,
     pixel_size
     ):
-    from insitupy.dataclasses.dataclasses import BoundariesData
+    from insitupy.containers.boundaries_data import BoundariesData
 
     bound_path = Path(bound_path)
 
@@ -129,7 +131,7 @@ def _read_boundaries_qupath(
 
     # --- Read the nuclear geometries ---
     # Load the GeoJSON file
-    with open(bound_path, 'r') as f:
+    with open(bound_path) as f:
         data = json.load(f)
 
     nucleus_geom = []

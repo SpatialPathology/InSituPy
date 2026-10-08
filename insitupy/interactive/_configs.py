@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional
 from uuid import uuid4
 
 import dask
@@ -8,7 +7,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.figure import Figure
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
 
 
 def _get_viewer_uid(viewer):
@@ -55,6 +54,7 @@ if WITH_NAPARI:
             'layer_name',
             'has_cells',
             'has_units',
+            'units_key',
             'static_canvas',
             'recent_selections',
             'verbose',
@@ -62,14 +62,23 @@ if WITH_NAPARI:
             '_auto_set_uid',
             'key_dict',
             'masks',
-            'pixel_size'
+            'pixel_size',
+            'annot_point_colors',
+            'region_colors',
+            '_annot_point_color_idx',
+            '_region_color_idx',
         ]
 
-        def __init__(self, data):
+        def __init__(self, data, cells_layer=None):
             self.data = data
 
             if not data.cells.is_empty:
-                self.data_name = data.cells.main_key
+                if cells_layer is not None:
+                    from insitupy.containers._utils import _get_cell_layer
+                    _, resolved = _get_cell_layer(data.cells, cells_layer=cells_layer, return_layer_name=True)
+                    self.data_name = resolved
+                else:
+                    self.data_name = data.cells.main_key
                 self.layer_name = "main"
                 self.has_cells = True
             else:
@@ -78,7 +87,8 @@ if WITH_NAPARI:
                 self.has_cells = False
 
             # Check if units are available
-            self.has_units = not data.units is None
+            self.has_units = not data.units.is_empty
+            self.units_key = data.units.main_key if self.has_units else None
 
             # canvas for static elements like color legends
             self.static_canvas = FigureCanvas(Figure(figsize=(5, 5))) # static canvas for color legend
@@ -88,6 +98,12 @@ if WITH_NAPARI:
             self.recent_selections = []
             self.verbose = False
             self._auto_set_uid = True
+
+            # colour registries for geometry layers: (key, name) -> hex colour
+            self.annot_point_colors: dict = {}
+            self.region_colors: dict = {}
+            self._annot_point_color_idx: int = 0
+            self._region_color_idx: int = 0
 
             # Initialize masks, key_dict, and pixel_size
             self.refresh_variables()
@@ -109,21 +125,21 @@ if WITH_NAPARI:
             return None
 
         @property
-        def genes(self) -> List[str]:
+        def genes(self) -> list[str]:
             """Return sorted list of gene names."""
             if self.adata is not None:
                 return sorted(self.adata.var_names.tolist())
             return []
 
         @property
-        def observations(self) -> List[str]:
+        def observations(self) -> list[str]:
             """Return sorted list of observation column names."""
             if self.adata is not None:
                 return sorted(self.adata.obs.columns.tolist())
             return []
 
         @property
-        def obsm(self) -> List[str]:
+        def obsm(self) -> list[str]:
             """Return list of obsm keys with subcategories in format 'key#column'."""
             if self.adata is None:
                 return []
@@ -140,14 +156,14 @@ if WITH_NAPARI:
             return obsm_cats
 
         @property
-        def points(self) -> Optional[np.ndarray]:
+        def points(self) -> np.ndarray | None:
             """Return spatial coordinates with flipped axes for napari display."""
             if self.adata is not None:
                 return np.flip(self.adata.obsm["spatial"].copy(), axis=1)
             return None
 
         @property
-        def X(self) -> Optional[np.ndarray]:
+        def X(self) -> np.ndarray | None:
             """Return the data matrix as a dense array."""
             if self.adata is None:
                 return None
@@ -156,53 +172,36 @@ if WITH_NAPARI:
             return X.toarray() if issparse(X) else X
 
         @property
-        def X(self):
-            if not self.adata is None:
-                """Return the data matrix as a dense array."""
-                if self.layer_name == "main":
-                    X = self.adata.X
-                else:
-                    X = self.adata.layers[self.layer_name]
-
-                # converting it to non-sparse array in this step might cause memory problems!
-                # if issparse(X):
-                #     return X.toarray()
-                return X
-            else:
-                None
-
-        @property
         def units(self):
-            """Return SpatialUnitsData object if available."""
-            if self.has_units:
-                return self.data.units
-            else:
-                return None
+            """Return the selected SpatialUnitsData layer, if available."""
+            if self.has_units and self.units_key is not None:
+                return self.data.units[self.units_key]
+            return None
 
         @property
         def unit_vars(self):
             """Return variable names of spatial unit."""
-            if self.has_units and self.units.data is not None:
-                return sorted(self.units.data.var_names.tolist())
+            if self.has_units and self.units.table is not None:
+                return sorted(self.units.table.var_names.tolist())
             else:
                 return []
 
         @property
         def unit_obs(self):
             """Return observation names of spatial unit."""
-            if self.has_units and self.units.data is not None:
-                return sorted(self.units.data.obs.columns.tolist())
+            if self.has_units and self.units.table is not None:
+                return sorted(self.units.table.obs.columns.tolist())
             else:
                 return []
 
         @property
         def unit_obsm(self):
             """Return units obsm keys."""
-            if self.has_units and self.units.data is not None:
-                obsm_keys = list(self.units.data.obsm.keys())
+            if self.has_units and self.units.table is not None:
+                obsm_keys = list(self.units.table.obsm.keys())
                 obsm_cats = []
                 for k in sorted(obsm_keys):
-                    fdata = self.units.data.obsm[k]
+                    fdata = self.units.table.obsm[k]
                     if isinstance(fdata, pd.DataFrame):
                         obsm_cats.extend([f"{k}#{col}" for col in fdata.columns])
                     elif isinstance(fdata, np.ndarray):
@@ -216,6 +215,10 @@ if WITH_NAPARI:
             self.masks = self._extract_masks()
             self.pixel_size = self._get_pixel_size()
             self.recent_selections = []
+
+        def refresh_unit_variables(self):
+            """Rebuild only the key dictionary after switching the units layer."""
+            self.key_dict = self._build_key_dict()
 
         # def update_data_name(self, new_data_name):
         #     self.data_name = new_data_name
@@ -251,9 +254,6 @@ if WITH_NAPARI:
                 return self.data.images.metadata[first_key]["pixel_size"]
             return None
 
-            first_key = metadata_keys[0]
-            return self.data.images.metadata[first_key].get("pixel_size")
-
     class ViewerConfigManager:
         """
         Manages multiple ViewerConfig instances, each associated with a unique identifier.
@@ -278,19 +278,19 @@ if WITH_NAPARI:
         __slots__ = ['_configs']
 
         def __init__(self):
-            self._configs: Dict[str, ViewerConfig] = {}
+            self._configs: dict[str, ViewerConfig] = {}
 
-        def add_config(self, data) -> str:
+        def add_config(self, data, cells_layer=None) -> str:
             """Create and store a new ViewerConfig instance with a unique ID."""
             uid = str(uuid4()).split("-")[0]
-            self._configs[uid] = ViewerConfig(data)
+            self._configs[uid] = ViewerConfig(data, cells_layer=cells_layer)
             return uid
 
         def __getitem__(self, config_id: str) -> ViewerConfig:
             """Allow dictionary-like access to ViewerConfig instances."""
             return self._configs[config_id]
 
-        def list_configs(self) -> Dict[str, ViewerConfig]:
+        def list_configs(self) -> dict[str, ViewerConfig]:
             """Return all stored ViewerConfig instances with their IDs."""
             return self._configs
 
@@ -301,5 +301,4 @@ if WITH_NAPARI:
                 config_ids += ', ...'
             return f"<ViewerConfigManager with {config_count} configs: [{config_ids}]>"
 
-    if 'config_manager' not in globals():
-        config_manager = ViewerConfigManager()
+    config_manager = ViewerConfigManager()

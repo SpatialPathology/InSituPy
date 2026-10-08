@@ -41,6 +41,17 @@ class ImageAxes:
         self.T = None if self.T == -1 else self.T
 
 def get_height_and_width(image, axes_config: ImageAxes):
+    """Return the height and width of an image using an axis configuration.
+
+    Args:
+        image: Image array (numpy or dask) with at least Y and X dimensions.
+        axes_config: :class:`ImageAxes` instance describing the axis order of
+            *image*.  The ``Y`` and ``X`` attributes are used to index into
+            ``image.shape``.
+
+    Returns:
+        A tuple ``(height, width)`` where both values are integers.
+    """
     h_image = image.shape[axes_config.Y] # height of image
     w_image = image.shape[axes_config.X] # width of image
     return (h_image, w_image)

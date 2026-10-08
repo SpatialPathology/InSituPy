@@ -1,3 +1,17 @@
+# check if napari is available
+try:
+    import napari
+    WITH_NAPARI = True
+except ImportError:
+    import warnings
+    warnings.warn(
+        "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
+        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`).",
+        ImportWarning,
+        stacklevel=1,
+    )
+    WITH_NAPARI = False
+
 import functools
 import string
 from pathlib import Path
@@ -17,8 +31,8 @@ SHRT_MIN = -(2**15-1) # -32767
 CACHE = Path.home() / ".cache/InSituPy/"
 
 # modalities
-MODALITIES = ["cells", "images", "transcripts", "annotations", "regions"]
-MODALITIES_ABBR = "CITAR"
+MODALITIES = ["cells", "units", "images", "transcripts", "annotations", "regions"]
+MODALITIES_ABBR = "CUITAR"
 LOAD_FUNCS = [
     'load_annotations',
     'load_cells',
@@ -40,6 +54,10 @@ MODALITIES_COLOR_DICT = {
 SAMPLE_STR = "SAMPLE"
 DEFAULT_CHUNK_SIZE_X = 4096
 DEFAULT_CHUNK_SIZE_Y = 4096
+SPATIALDATA_DIALECT_VERSION = 3
+# SpatialData-export-only modalities with no corresponding InSituData attribute (kept out of
+# MODALITIES so InSituData.get_loaded_modalities()'s getattr(self, m) isn't affected).
+SPATIALDATA_DERIVED_MODALITIES = ["tables"]
 
 # naming
 ISPY_METADATA_FILE = ".ispy"
@@ -49,11 +67,11 @@ XENIUM_INT_TO_HEX_CONV_DICT = {k:v for k,v in zip(NORMAL_HEX_RANGE, XENIUM_HEX_R
 XENIUM_HEX_TO_INT_CONV_DICT = {v:k for k,v in zip(NORMAL_HEX_RANGE, XENIUM_HEX_RANGE)}
 
 # napari layer symbols
-# SHAPES_SYMBOL = "\u2605" # Star: ★
-# POINTS_SYMBOL = "\u2022" # Bullet: •
-ANNOTATIONS_SYMBOL = "\U0001F52C" # 🔬
-POINTS_SYMBOL = "\U0001F4CD" # 📍
-REGIONS_SYMBOL = "\U0001F30D" # 🌍
+# SHAPES_SYMBOL = "\u2605" # star
+# POINTS_SYMBOL = "\u2022" # bullet
+ANNOTATIONS_SYMBOL = "\U0001F52C" # microscope
+POINTS_SYMBOL = "\U0001F4CD" # pin
+REGIONS_SYMBOL = "\U0001F30D" # earth
 
 # annotations
 FORBIDDEN_ANNOTATION_NAMES = ["rest"]
@@ -64,6 +82,9 @@ palettes = CustomPalettes()
 DEFAULT_CATEGORICAL_CMAP = palettes.tab20_mod
 REGION_CMAP = matplotlib.colormaps["tab10"]
 DEFAULT_CONTINUOUS_CMAP = "viridis"
+
+# Legend label for missing (NaN) categorical values in categorical plots.
+NA_CATEGORY = "NaN"
 
 ## fluorescence colormaps
 FLUO_CMAP = [

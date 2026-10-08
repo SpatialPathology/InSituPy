@@ -20,12 +20,12 @@ Two loading modes:
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 import numpy as np
-from matplotlib import colormaps
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
+from insitupy.palettes import TRANSCRIPTS_PALETTE
 
 if TYPE_CHECKING:
     import dask.dataframe as dd
@@ -98,8 +98,8 @@ class TranscriptViewerConfig:
 
 def prepare_gene_data(
     df: Union["pd.DataFrame", "dd.DataFrame"],
-    config: Optional[TranscriptViewerConfig] = None,
-) -> Tuple[Dict[str, np.ndarray], Dict[str, Tuple[float, float, float]]]:
+    config: TranscriptViewerConfig | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, tuple[float, float, float]]]:
     """Prepare gene data from a DataFrame (in-memory mode).
 
     Loads all gene coordinates into memory upfront for fast spatial queries.
@@ -137,7 +137,7 @@ def prepare_gene_data(
     gene_colors = _assign_gene_colors(genes)
 
     # Build per-gene coordinate arrays
-    gene_data: Dict[str, np.ndarray] = {}
+    gene_data: dict[str, np.ndarray] = {}
     grouped = df.groupby(config.gene_column)
     for gene, group in grouped:
         gene_data[gene] = group[[config.x_column, config.y_column]].values
@@ -147,8 +147,8 @@ def prepare_gene_data(
 
 def prepare_gene_colors(
     dask_df: "dd.DataFrame",
-    config: Optional[TranscriptViewerConfig] = None,
-) -> Tuple[List[str], Dict[str, Tuple[float, float, float]]]:
+    config: TranscriptViewerConfig | None = None,
+) -> tuple[list[str], dict[str, tuple[float, float, float]]]:
     """Prepare gene list and colors from a Dask DataFrame (lazy mode).
 
     Only loads unique gene names, not coordinates. Coordinates are loaded
@@ -180,12 +180,9 @@ def prepare_gene_colors(
 
 
 def _assign_gene_colors(
-    genes: List[str],
-) -> Dict[str, Tuple[float, float, float]]:
-    """Assign distinct colors to genes using shuffled HSV colormap.
-
-    Colors are shuffled so that alphabetically adjacent genes get
-    visually distinct colors.
+    genes: list[str],
+) -> dict[str, tuple[float, float, float]]:
+    """Assign distinct colors to genes using the static TRANSCRIPTS_PALETTE.
 
     Args:
         genes: List of gene names to assign colors to.
@@ -193,24 +190,19 @@ def _assign_gene_colors(
     Returns:
         Dict mapping gene names to RGB color tuples (values 0-1).
     """
-    n_genes = len(genes)
-    if n_genes == 0:
+    if not genes:
         return {}
 
-    # Use HSV colormap for maximum color distinction
-    cmap = colormaps["hsv"]
-
-    # Create shuffled color indices so neighboring genes get different colors
-    color_indices = np.arange(n_genes)
-    rng = np.random.default_rng(42)  # reproducible shuffle
-    rng.shuffle(color_indices)
-
-    gene_colors = {
-        gene: cmap(color_indices[i] / n_genes)[:3]
+    return {
+        gene: _hex_to_rgb(TRANSCRIPTS_PALETTE[i % len(TRANSCRIPTS_PALETTE)])
         for i, gene in enumerate(genes)
     }
 
-    return gene_colors
+
+def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
+    """Convert a hex colour string to an (R, G, B) tuple with values in 0–1."""
+    h = hex_color.lstrip('#')
+    return tuple(int(h[i:i+2], 16) / 255.0 for i in (0, 2, 4))
 
 
 if WITH_NAPARI:
@@ -218,9 +210,17 @@ if WITH_NAPARI:
     from matplotlib.lines import Line2D
     from napari.utils.notifications import show_info, show_warning
     from qtpy.QtCore import Qt, QTimer
-    from qtpy.QtWidgets import (QCompleter, QHBoxLayout, QLabel, QLineEdit,
-                                QListWidget, QListWidgetItem, QPushButton,
-                                QVBoxLayout, QWidget)
+    from qtpy.QtWidgets import (
+        QCompleter,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QListWidget,
+        QListWidgetItem,
+        QPushButton,
+        QVBoxLayout,
+        QWidget,
+    )
 
     from insitupy.interactive._configs import ViewerConfig
 
@@ -261,12 +261,12 @@ if WITH_NAPARI:
         def __init__(
             self,
             viewer: napari.Viewer,
-            gene_data_or_list: Union[Dict[str, np.ndarray], List[str]],
-            gene_colors: Dict[str, Tuple[float, float, float]],
+            gene_data_or_list: dict[str, np.ndarray] | list[str],
+            gene_colors: dict[str, tuple[float, float, float]],
             lazy_loading: bool = False,
             dask_df: Optional["dd.DataFrame"] = None,
-            config: Optional[TranscriptViewerConfig] = None,
-            viewer_config: Optional[ViewerConfig] = None,
+            config: TranscriptViewerConfig | None = None,
+            viewer_config: ViewerConfig | None = None,
         ):
             """Initialize the transcript viewer widget.
 
@@ -291,7 +291,7 @@ if WITH_NAPARI:
             self.lazy_loading = lazy_loading
             self.config = config or TranscriptViewerConfig()
             self.viewer_config = viewer_config
-            self.active_genes: Dict[str, Optional[np.ndarray]] = {}
+            self.active_genes: dict[str, np.ndarray | None] = {}
             self._gene_query_mode: str = "str"
 
             if lazy_loading:
@@ -299,7 +299,7 @@ if WITH_NAPARI:
                     raise ValueError("dask_df is required when lazy_loading=True")
                 self.dask_df = dask_df
                 self.gene_list = gene_data_or_list  # list of gene names
-                self.gene_data: Dict[str, np.ndarray] = {}  # cache for loaded coords
+                self.gene_data: dict[str, np.ndarray] = {}  # cache for loaded coords
                 self._init_gene_query_mode()
             else:
                 self.dask_df = None
@@ -307,9 +307,9 @@ if WITH_NAPARI:
                 self.gene_list = sorted(gene_data_or_list.keys())
 
             # Cache for reference layer info (bbox optimization)
-            self._ref_layer: Optional[napari.layers.Image] = None
+            self._ref_layer: napari.layers.Image | None = None
             self._ref_layer_multiscale: bool = False
-            self._ref_layer_scale: Optional[Tuple[float, float]] = None
+            self._ref_layer_scale: tuple[float, float] | None = None
 
             self._setup_ui()
             self._setup_debounce()
@@ -430,7 +430,7 @@ if WITH_NAPARI:
                 self._ref_layer_multiscale = False
                 self._ref_layer_scale = None
 
-        def _get_bbox(self) -> Optional[Tuple[float, float, float, float]]:
+        def _get_bbox(self) -> tuple[float, float, float, float] | None:
             """Get current visible bounding box from the cached reference layer.
 
             The bounding box is returned in world coordinates (physical units),
@@ -721,7 +721,47 @@ if WITH_NAPARI:
                 face_color="white",
                 size=self.config.point_size,
                 border_width=0,
+                # napari>=0.7 clamps rendered marker size to a minimum of 2px when
+                # zoomed out, and forces a visible edge in border_color while doing
+                # so regardless of border_width=0. min=0 disables that floor so no
+                # border ever appears (see report Addendum B).
+                canvas_size_limits=(0, 10000),
             )
+            self._install_get_value_guard(self.viewer.layers[self.LAYER_NAME])
+
+        @staticmethod
+        def _install_get_value_guard(layer) -> None:
+            """Make the layer's hover-value lookup tolerant of napari's thread race.
+
+            napari's ``StatusChecker`` runs ``Points._get_value`` on a background
+            thread while the main thread reassigns ``layer.data`` on every camera
+            move. ``_get_value`` reads internal view-state several times without a
+            consistent snapshot (napari is not threadsafe here), so a shrink between
+            reads raises ``IndexError``. A transient miss simply means "no point
+            under the cursor", so swallow it and return ``None``.
+
+            Wrapping (rather than reimplementing ``_get_value``) keeps this robust
+            across napari versions: it makes no assumption about napari's slicing
+            algorithm. Guarded so that a future napari which renames or reshapes
+            ``_get_value`` falls back to napari's own try/except with no behavioural
+            change.
+            """
+            original = getattr(layer, "_get_value", None)
+            if original is None:
+                return
+
+            def _safe_get_value(position):
+                try:
+                    return original(position)
+                except IndexError:
+                    return None
+
+            try:
+                layer._get_value = _safe_get_value
+            except (AttributeError, TypeError):
+                # Layer does not permit attribute override; rely on napari's own
+                # StatusChecker try/except.
+                pass
 
         def _update_layer(self) -> None:
             """Update the Transcripts points layer if it exists.
@@ -754,7 +794,8 @@ if WITH_NAPARI:
 
             if not all_coords:
                 self.status_label.setText("Points: 0 (none in view)")
-                self.viewer.layers[self.LAYER_NAME].data = np.empty((0, 2))
+                layer = self.viewer.layers[self.LAYER_NAME]
+                layer.data = np.empty((0, 2))
                 return
 
             combined = np.vstack(all_coords)
@@ -777,12 +818,20 @@ if WITH_NAPARI:
             # Swap x,y to y,x for napari (napari uses row, column order)
             points_yx = combined[:, ::-1]
 
-            # Update layer
+            # Update the layer. Fully replacing layer.data on every camera move makes
+            # napari re-pad the internal size array — newly added points inherit
+            # current_size while existing points keep their old sizes — which drifts
+            # into inconsistent point sizes once the user changes the size slider.
+            # Reassign size after data so every point stays uniform at the user's
+            # current size. (The stale-_indices_view poke that used to sit here was
+            # removed: it did not fix napari's non-threadsafe _get_value race and was
+            # itself the likely trigger of the "size 0" IndexError; the layer is now
+            # guarded via _install_get_value_guard instead.)
             layer = self.viewer.layers[self.LAYER_NAME]
-            properties = {"gene": gene_names}
             layer.data = points_yx
             layer.face_color = colors
-            layer.properties = properties
+            layer.properties = {"gene": gene_names}
+            layer.size = layer.current_size
 
             # Update status
             if subsampled:
@@ -800,7 +849,7 @@ if WITH_NAPARI:
         viewer: napari.Viewer,
         transcripts: Union["pd.DataFrame", "dd.DataFrame"],
         lazy_loading: bool = True,
-        config: Optional[TranscriptViewerConfig] = None,
+        config: TranscriptViewerConfig | None = None,
         viewer_config: Optional["ViewerConfig"] = None,
     ) -> TranscriptViewerWidget:
         """Create a TranscriptViewerWidget from transcript data.

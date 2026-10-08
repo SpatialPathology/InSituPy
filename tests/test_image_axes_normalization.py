@@ -2,8 +2,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
-from insitupy.images.axes import (_transpose_to_standard_axes,
-                                  normalize_axes_and_shape)
+from insitupy.images.axes import _transpose_to_standard_axes, normalize_axes_and_shape
 
 
 def test_normalize_legacy_cyx_for_2d_image():

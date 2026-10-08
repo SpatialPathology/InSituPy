@@ -2,7 +2,6 @@ import os
 import warnings
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Union
 
 import dask.array as da
 import numpy as np
@@ -14,12 +13,10 @@ from pandas.api.types import is_numeric_dtype
 from scipy.sparse import csr_matrix
 from zarr.errors import ArrayNotFoundError
 
-from insitupy._exceptions import InvalidFileTypeError
-from insitupy.dataclasses.dataclasses import BoundariesData
+from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.images.io import _get_zarr_store
 from insitupy.images.utils import _efficiently_resize_array
-from insitupy.utils.utils import (convert_int_to_xenium_hex,
-                                  decode_robust_series)
+from insitupy.utils.utils import convert_int_to_xenium_hex, decode_robust_series
 
 
 def _read_nucleus_to_cell_map_from_store(
@@ -39,27 +36,26 @@ def _read_nucleus_to_cell_map_from_store(
     Returns
     -------
     dict
-        Mapping from nucleus index (0-indexed) to cell index (0-indexed).
+        Mapping from nucleus index (0-indexed) to the parent cell's name.
         For v2.0+ data with multinucleated cells, reads from polygon_sets.
-        For v1.x data, creates 1:1 mapping.
+        For v1.x data, creates a 1:1 mapping.
     """
     try:
         nucleus_cell_index = da.from_zarr(store, component="polygon_sets/0/cell_index").compute()
-        # v2.0+: nucleus_cell_index[i] gives the cell index for nucleus polygon i
-        # To look up a mask value N, use: nucleus_to_cell_map[N - 1]
+        # v2.0+: nucleus_cell_index[i] gives the cell row position for nucleus polygon i
         nucleus_to_cell_map = {
-            i: int(nucleus_cell_index[i]) for i in range(len(nucleus_cell_index))
+            i: str(cell_names[int(nucleus_cell_index[i])]) for i in range(len(nucleus_cell_index))
         }
     except (ArrayNotFoundError, TypeError):
         # v1.x fallback: assume 1:1 mapping (nucleus index = cell index)
-        nucleus_to_cell_map = {i: i for i in range(len(cell_names))}
+        nucleus_to_cell_map = {i: str(cell_names[i]) for i in range(len(cell_names))}
 
     return nucleus_to_cell_map
 
 
 def _read_nucleus_count_from_store(
     store
-) -> Union[np.ndarray, None]:
+) -> np.ndarray | None:
     """
     Read nucleus count per cell from Xenium zarr store.
 
@@ -118,7 +114,7 @@ def _read_table_from_xenium(path) -> AnnData:
 
 
 def _read_boundaries_from_xenium(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     pixel_size: Number,
     downscale: bool = False
     # mode: Literal["dataframe", "mask"] = "mask"
@@ -182,8 +178,8 @@ def _read_boundaries_from_xenium(
 
 
 def _read_binned_expression(
-    path: Union[str, os.PathLike, Path],
-    gene_names_to_select = List
+    path: str | os.PathLike | Path,
+    gene_names_to_select = list
 ):
     path = Path(path)
     # add binned expression data to .varm

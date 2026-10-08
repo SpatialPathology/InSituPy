@@ -1,5 +1,7 @@
+import logging
+import warnings
 from numbers import Number
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -7,6 +9,10 @@ from scipy import sparse, stats
 from sklearn.neighbors import radius_neighbors_graph
 from statsmodels.stats import multitest
 from tqdm import tqdm
+
+from insitupy.utils._checks import _assert_log1p_state
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -16,9 +22,9 @@ def _validate_inputs(
     adata,
     radius: Number,
     obs_key: str,
-    celltype_col: Optional[str],
-    celltype: Optional[str],
-    test: str,
+    celltype_col: str | None,
+    celltype: str | None,
+    method: str,
     min_cells: Number,
     strategy: str,
 ) -> None:
@@ -27,8 +33,8 @@ def _validate_inputs(
         raise ValueError("radius must be positive")
     if min_cells < 2:
         raise ValueError("min_cells must be at least 2")
-    if test not in ["wilcoxon", "t-test"]:
-        raise ValueError("test must be 'wilcoxon' or 't-test'")
+    if method not in ["wilcoxon", "t-test"]:
+        raise ValueError("method must be 'wilcoxon' or 't-test'")
     if strategy not in ["mean", "max"]:
         raise ValueError("strategy must be 'mean' or 'max'")
     if obs_key not in adata.obsm:
@@ -40,17 +46,37 @@ def _validate_inputs(
             raise KeyError(f"celltype_col '{celltype_col}' not found in adata.obs")
         if celltype is None:
             raise ValueError("Must specify 'celltype' when 'celltype_col' is provided")
-        if celltype not in adata.obs[celltype_col].values:
+        celltypes = _as_celltype_list(celltype)
+        if len(celltypes) == 0:
+            raise ValueError("'celltype' must not be an empty list")
+        # a list (e.g. dge's "rest") may name types absent from this subset - require at least one
+        if not adata.obs[celltype_col].isin(celltypes).any():
             raise ValueError(f"celltype '{celltype}' not found in adata.obs['{celltype_col}']")
     elif celltype is not None:
         raise ValueError("Cannot specify 'celltype' without 'celltype_col'")
 
 
+def _resolve_deprecated_test(method: str, test: str | None) -> str:
+    """Map the deprecated `test` argument onto `method`, warning at the public caller."""
+    if test is not None:
+        warnings.warn("'test' is deprecated, use 'method' instead.",
+                      DeprecationWarning, stacklevel=3)
+        return test
+    return method
+
+
+def _as_celltype_list(celltype) -> list:
+    """Return `celltype` as a list, accepting a single label or a list-like of labels."""
+    if isinstance(celltype, (list, tuple, set, np.ndarray, pd.Index)):
+        return list(celltype)
+    return [celltype]
+
+
 def _prepare_data(
     adata,
-    genes_subset: Optional[List[str]],
+    genes_subset: list[str] | None,
     verbose: bool
-) -> Tuple[List[str], np.ndarray, int]:
+) -> tuple[list[str], np.ndarray, int]:
     """Prepare gene data and indices."""
     all_genes = adata.var_names.tolist()
 
@@ -61,7 +87,7 @@ def _prepare_data(
         genes = [g for g in all_genes if g in genes_subset]
         gene_indices = np.where(gene_mask)[0]
         if verbose:
-            print(f"Testing subset of {len(genes)} genes (out of {len(all_genes)} total)")
+            logger.info("Testing subset of %d genes (out of %d total)", len(genes), len(all_genes))
     else:
         genes = all_genes
         gene_indices = np.arange(len(all_genes))
@@ -73,20 +99,20 @@ def _prepare_data(
 def _build_spatial_graph(
     coords: np.ndarray,
     radius: float,
-    celltype_col: Optional[str],
-    celltype: Optional[str],
+    celltype_col: str | None,
+    celltype: str | None,
     adata,
     exclude_self: bool,
     use_distance_weighting: bool,
     strategy: str,
     verbose: bool
-) -> Tuple[sparse.csr_matrix, np.ndarray, np.ndarray, int]:
+) -> tuple[sparse.csr_matrix, np.ndarray, np.ndarray, int]:
     """Build spatial adjacency graph with optional cell type filtering."""
     n_cells = coords.shape[0]
 
     if verbose:
         weighted_str = f", weighted={use_distance_weighting}" if strategy == "mean" else ""
-        print(f"Building spatial graph (radius={radius}{weighted_str})...")
+        logger.info("Building spatial graph (radius=%s%s)...", radius, weighted_str)
 
     # Build radius-based adjacency
     # For mean with distance weighting, use distance mode; otherwise connectivity
@@ -95,14 +121,14 @@ def _build_spatial_graph(
 
     # Get target cells mask
     if celltype_col is not None:
-        target_mask = (adata.obs[celltype_col] == celltype).values
+        target_mask = adata.obs[celltype_col].isin(_as_celltype_list(celltype)).values
         n_target_cells = target_mask.sum()
         if verbose:
-            print(f"Selected {n_target_cells} '{celltype}' cells as targets")
+            logger.info("Selected %d '%s' cells as targets", n_target_cells, celltype)
 
         # Exclude same-type neighbors
         if verbose:
-            print("Excluding same-celltype neighbors from adjacency matrix...")
+            logger.info("Excluding same-celltype neighbors from adjacency matrix...")
         A_ct = A.copy()
         A_ct = A_ct.tocoo()
 
@@ -156,7 +182,7 @@ def _compute_neighbor_mean(
     will have all-zero rows even after normalization.
     """
     if verbose:
-        print("Computing mean neighbor expression...")
+        logger.info("Computing mean neighbor expression...")
 
     is_sparse = sparse.issparse(X)
     if gene_indices is not None and len(gene_indices) < X.shape[1]:
@@ -193,7 +219,7 @@ def _compute_neighbor_max(
     n_genes = len(gene_indices) if gene_indices is not None else X.shape[1]
 
     if verbose:
-        print("Computing max neighbor expression (per-gene maximum)...")
+        logger.info("Computing max neighbor expression (per-gene maximum)...")
 
     is_sparse = sparse.issparse(X)
     neighbor_expr = np.full((n_cells, n_genes), np.nan)
@@ -236,19 +262,19 @@ def _run_statistical_tests(
     target_expr: np.ndarray,
     neighbor_expr: np.ndarray,
     target_mask: np.ndarray,
-    genes: List[str],
-    test: str,
+    genes: list[str],
+    method: str,
     min_cells: int,
-    batch_size: Optional[int],
+    batch_size: int | None,
     verbose: bool
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
     """Run per-gene statistical tests and compute fold changes."""
     n_genes = len(genes)
 
     if verbose:
-        print(f"Running paired tests ({test}) per gene and computing effect sizes...")
+        logger.info("Running paired tests (%s) per gene and computing effect sizes...", method)
 
-    min_samples_needed = max(min_cells, 2 if test == "wilcoxon" else 1)
+    min_samples_needed = max(min_cells, 2 if method == "wilcoxon" else 1)
 
     # Initialize result arrays
     results = {
@@ -272,7 +298,7 @@ def _run_statistical_tests(
 
     for batch_start, batch_end in batch_ranges:
         if verbose and len(batch_ranges) > 1:
-            print(f"Processing batch {batch_start}-{batch_end} of {n_genes} genes...")
+            logger.info("Processing batch %d-%d of %d genes...", batch_start, batch_end, n_genes)
 
         iterator = tqdm(range(batch_start, batch_end), desc="genes") if verbose else range(batch_start, batch_end)
 
@@ -320,7 +346,7 @@ def _run_statistical_tests(
             results['log2_fold_change'][g] = np.log2(fc)
 
             try:
-                if test == "t-test":
+                if method == "t-test":
                     tstat, pval = stats.ttest_1samp(
                         d, 0.0,
                         alternative="two-sided",
@@ -328,7 +354,7 @@ def _run_statistical_tests(
                     )
                     results['stat_vals'][g], results['pvals'][g] = tstat, pval
 
-                elif test == "wilcoxon":
+                elif method == "wilcoxon":
                     if n >= 2:
                         wstat, pval = stats.wilcoxon(
                             d, zero_method="wilcox",
@@ -338,7 +364,7 @@ def _run_statistical_tests(
 
             except Exception as e:
                 if verbose:
-                    print(f"Warning: Test failed for gene {genes[g]}: {e}")
+                    logger.warning("Test failed for gene %s: %s", genes[g], e)
                 pass
 
     return results
@@ -351,7 +377,7 @@ def _apply_multiple_testing_correction(
 ) -> np.ndarray:
     """Apply multiple testing correction."""
     if verbose:
-        print("Applying multiple-testing correction...")
+        logger.info("Applying multiple-testing correction...")
 
     finite = np.isfinite(pvals)
     p_adj = np.full_like(pvals, np.nan)
@@ -366,21 +392,21 @@ def _apply_multiple_testing_correction(
 def _create_qc_stats(
     n_cells: int,
     n_target_cells: int,
-    celltype: Optional[str],
-    celltype_col: Optional[str],
+    celltype: str | None,
+    celltype_col: str | None,
     n_genes: int,
     n_genes_total: int,
     deg: np.ndarray,
     target_mask: np.ndarray,
     finite_pvals: int,
-    test: str,
+    method: str,
     correction_method: str,
     radius: float,
     min_cells: int,
     use_distance_weighting: bool,
     strategy: str,
-    exclude_zeros_from_max: Optional[bool] = None
-) -> Dict:
+    exclude_zeros_from_max: bool | None = None
+) -> dict:
     """Create QC statistics dictionary."""
     target_deg = deg[target_mask]
 
@@ -396,7 +422,7 @@ def _create_qc_stats(
         "mean_neighbors_target": float(target_deg.mean()),
         "max_neighbors_target": int(target_deg.max()) if len(target_deg) > 0 else 0,
         "fraction_testable_genes": float(finite_pvals / n_genes),
-        "test_used": test,
+        "test_used": method,
         "correction_method": correction_method,
         "radius": float(radius),
         "min_cells": int(min_cells),
@@ -406,26 +432,28 @@ def _create_qc_stats(
     }
 
 
-def _print_summary(qc_stats: Dict, verbose: bool) -> None:
+def _print_summary(qc_stats: dict, verbose: bool) -> None:
     """Print analysis summary."""
     if not verbose:
         return
 
-    print(f"\n{'='*60}")
-    print("ANALYSIS SUMMARY")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("ANALYSIS SUMMARY")
+    logger.info("=" * 60)
     if qc_stats['target_celltype'] is not None:
-        print(f"Target cell type: '{qc_stats['target_celltype']}'")
-        print(f"Target cells: {qc_stats['n_cells_target']}/{qc_stats['n_cells_total']} "
-              f"({qc_stats['n_cells_target']/qc_stats['n_cells_total']:.1%})")
+        logger.info("Target cell type: '%s'", qc_stats['target_celltype'])
+        logger.info("Target cells: %d/%d (%.1f%%)",
+                     qc_stats['n_cells_target'], qc_stats['n_cells_total'],
+                     qc_stats['n_cells_target'] / qc_stats['n_cells_total'] * 100)
     else:
-        print(f"Cells analyzed: {qc_stats['n_cells_total']}")
-    print(f"Strategy: {qc_stats['strategy']}")
-    print(f"Genes tested: {qc_stats['n_genes_tested']}")
-    print(f"Target cells without neighbors: {qc_stats['target_cells_without_neighbors']} "
-          f"({qc_stats['fraction_target_cells_without_neighbors']:.1%})")
-    print(f"Median neighbors per target cell: {qc_stats['median_neighbors_target']:.1f}")
-    print(f"{'='*60}\n")
+        logger.info("Cells analyzed: %d", qc_stats['n_cells_total'])
+    logger.info("Strategy: %s", qc_stats['strategy'])
+    logger.info("Genes tested: %d", qc_stats['n_genes_tested'])
+    logger.info("Target cells without neighbors: %d (%.1f%%)",
+                 qc_stats['target_cells_without_neighbors'],
+                 qc_stats['fraction_target_cells_without_neighbors'] * 100)
+    logger.info("Median neighbors per target cell: %.1f", qc_stats['median_neighbors_target'])
+    logger.info("=" * 60)
 
 
 # ============================================================================
@@ -436,74 +464,72 @@ def calculate_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
     strategy: Literal["mean", "max"] = "mean",
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     use_distance_weighting: bool = False,
     exclude_zeros_from_max: bool = True,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
+    assert_log1p: bool = True,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Cell-type-specific spatial gene expression contamination analysis.
 
     Identifies potential spatial contamination by comparing each cell's gene expression
     to its spatial neighborhood using either mean or maximum neighbor expression.
 
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data object containing spatial coordinates and gene expression.
-    radius : Number, default=20.0
-        Radius in coordinate units for defining spatial neighbors.
-    obs_key : str, default="spatial"
-        Key in adata.obsm containing spatial coordinates.
-    celltype_tuple : Tuple[str, str], optional
-        Tuple specifying (celltype_col, celltype) to filter by cell type.
-    exclude_self : bool, default=True
-        Whether to exclude the cell itself from its neighborhood.
-    strategy : {"mean", "max"}, default="mean"
-        Strategy for computing neighbor expression:
-        - "mean": Compare to mean of all neighbors
-        - "max": Compare to maximum expression across neighbors per gene
-    test : {"wilcoxon", "t-test"}, default="wilcoxon"
-        Statistical test to use.
-    correction_method : str, default="fdr_bh"
-        Multiple testing correction method.
-    min_cells : Number, default=3
-        Minimum number of cells required for a valid test.
-    genes_subset : List[str], optional
-        List of gene names to analyze.
-    use_distance_weighting : bool, default=False
-        Weight neighbor contributions by inverse distance (only for mean strategy).
-    exclude_zeros_from_max : bool, default=True
-        Exclude zero values when computing maximum (only for max strategy).
-        Zeros cannot be contamination sources.
-    batch_size : int, optional
-        Process genes in batches to reduce memory usage.
-    verbose : bool, default=True
-        Print progress messages.
+    Args:
+        adata (AnnData): Annotated data object containing spatial coordinates and gene
+            expression.
+        radius (Number): Radius in coordinate units for defining spatial neighbors.
+            Default is 20.0.
+        obs_key (str): Key in adata.obsm containing spatial coordinates.
+            Default is "spatial".
+        celltype_tuple (Tuple[str, str | List[str]], optional): Tuple specifying
+            (celltype_col, celltype) to filter by cell type. `celltype` can also be a list of
+            cell types; all cells of those types are then targets, and each target cell
+            excludes neighbors of its own type.
+        exclude_self (bool): Whether to exclude the cell itself from its neighborhood.
+            Default is True.
+        strategy (str): Strategy for computing neighbor expression: "mean" (compare to
+            mean of all neighbors) or "max" (compare to maximum expression across
+            neighbors per gene). Default is "mean".
+        method (str): Statistical test to use: "wilcoxon" or "t-test".
+            Default is "wilcoxon".
+        test (str, optional): Deprecated. Use ``method`` instead.
+        correction_method (str): Multiple testing correction method. Default is "fdr_bh".
+        min_cells (Number): Minimum number of cells required for a valid test.
+            Default is 3.
+        genes_subset (List[str], optional): List of gene names to analyze.
+        use_distance_weighting (bool): Weight neighbor contributions by inverse distance
+            (only for mean strategy). Default is False.
+        exclude_zeros_from_max (bool): Exclude zero values when computing maximum (only
+            for max strategy). Zeros cannot be contamination sources. Default is True.
+        batch_size (int, optional): Process genes in batches to reduce memory usage.
+        assert_log1p (bool): If True, verify that the expression matrix (`.X`) is
+            log1p-normalized before running the analysis, and raise a `ValueError` on data
+            known to be wrong (sqrt/scaled transformation, or marker-less raw integer counts).
+            Warns (does not raise) when the transformation state cannot be determined. Set to
+            False to skip this check. Default is True.
+        verbose (bool): Print progress messages. Default is True.
 
-    Returns
-    -------
-    results : pd.DataFrame
-        Per-gene statistics with contamination metrics.
-        Columns depend on strategy:
-        - For "mean": mean_neighbor, log2foldchange, log2foldchange_unpaired
-        - For "max": mean_neighbor_max, log2foldchange, log2foldchange_unpaired
-    adjacency_matrix : sparse.csr_matrix
-        Neighbor adjacency matrix.
-    diff_matrix : np.ndarray
-        Per-cell gene expression differences.
-    qc_stats : dict
-        Quality control statistics.
+    Returns:
+        tuple: A tuple containing:
+            - results (pd.DataFrame): Per-gene statistics with contamination metrics.
+              Columns depend on strategy: for "mean" includes mean_neighbor,
+              log2foldchange, log2foldchange_unpaired; for "max" includes
+              mean_neighbor_max, log2foldchange, log2foldchange_unpaired.
+            - adjacency_matrix (sparse.csr_matrix): Neighbor adjacency matrix.
+            - diff_matrix (np.ndarray): Per-cell gene expression differences.
+            - qc_stats (dict): Quality control statistics.
 
-    Examples
-    --------
+    Examples:
     # Mean strategy (default)
     results, A, diffs, qc = calculate_gex_diff_to_neighbors(
         adata,
@@ -519,9 +545,13 @@ def calculate_gex_diff_to_neighbors(
         exclude_zeros_from_max=True
     )
     """
+    method = _resolve_deprecated_test(method, test)
+
+    _assert_log1p_state(adata, assert_log1p=assert_log1p, where="calculate_gex_diff_to_neighbors")
+
     # Validate inputs
     celltype_col, celltype = celltype_tuple if celltype_tuple is not None else (None, None)
-    _validate_inputs(adata, radius, obs_key, celltype_col, celltype, test, min_cells, strategy)
+    _validate_inputs(adata, radius, obs_key, celltype_col, celltype, method, min_cells, strategy)
 
     # Prepare data
     coords = np.asarray(adata.obsm[obs_key])
@@ -547,7 +577,7 @@ def calculate_gex_diff_to_neighbors(
     # Compute differences
     if verbose:
         suffix = "_max" if strategy == "max" else ""
-        print(f"Computing gex_diff = gex_target - gex_neighbor{suffix} ...")
+        logger.info("Computing gex_diff = gex_target - gex_neighbor%s ...", suffix)
 
     X_dense = X.toarray() if sparse.issparse(X) else X
     if gene_indices is not None and len(gene_indices) < X.shape[1]:
@@ -560,7 +590,7 @@ def calculate_gex_diff_to_neighbors(
     # Run statistical tests
     test_results = _run_statistical_tests(
         gex_diff, target_expr, neighbor_expr, target_mask,
-        genes, test, min_cells, batch_size, verbose
+        genes, method, min_cells, batch_size, verbose
     )
 
     # Apply correction
@@ -594,7 +624,7 @@ def calculate_gex_diff_to_neighbors(
         n_cells, n_target_cells, celltype, celltype_col,
         n_genes, n_genes_total, deg, target_mask,
         np.isfinite(test_results['pvals']).sum(),
-        test, correction_method, radius, min_cells,
+        method, correction_method, radius, min_cells,
         use_distance_weighting, strategy,
         exclude_zeros_from_max=exclude_zeros_from_max if strategy == "max" else None
     )
@@ -612,21 +642,23 @@ def mean_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     use_distance_weighting: bool = False,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Wrapper for calculate_gex_diff_to_neighbors with strategy="mean".
 
     See calculate_gex_diff_to_neighbors() for full documentation.
     """
+    method = _resolve_deprecated_test(method, test)
     return calculate_gex_diff_to_neighbors(
         adata=adata,
         radius=radius,
@@ -634,7 +666,7 @@ def mean_gex_diff_to_neighbors(
         celltype_tuple=celltype_tuple,
         exclude_self=exclude_self,
         strategy="mean",
-        test=test,
+        method=method,
         correction_method=correction_method,
         min_cells=min_cells,
         genes_subset=genes_subset,
@@ -648,21 +680,23 @@ def max_gex_diff_to_neighbors(
     adata,
     radius: Number = 20.0,
     obs_key: str = "spatial",
-    celltype_tuple: Optional[Tuple[str, str]] = None,
+    celltype_tuple: tuple[str, str | list[str]] | None = None,
     exclude_self: bool = True,
-    test: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    method: Literal["wilcoxon", "t-test"] = "wilcoxon",
+    test: Literal["wilcoxon", "t-test"] = None,
     correction_method: str = "fdr_bh",
     min_cells: Number = 3,
-    genes_subset: Optional[List[str]] = None,
+    genes_subset: list[str] | None = None,
     exclude_zeros_from_max: bool = True,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     verbose: bool = True,
-) -> Tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, Dict]:
+) -> tuple[pd.DataFrame, sparse.csr_matrix, np.ndarray, dict]:
     """
     Wrapper for calculate_gex_diff_to_neighbors with strategy="max".
 
     See calculate_gex_diff_to_neighbors() for full documentation.
     """
+    method = _resolve_deprecated_test(method, test)
     return calculate_gex_diff_to_neighbors(
         adata=adata,
         radius=radius,
@@ -670,7 +704,7 @@ def max_gex_diff_to_neighbors(
         celltype_tuple=celltype_tuple,
         exclude_self=exclude_self,
         strategy="max",
-        test=test,
+        method=method,
         correction_method=correction_method,
         min_cells=min_cells,
         genes_subset=genes_subset,

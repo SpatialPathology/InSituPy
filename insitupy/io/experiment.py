@@ -1,18 +1,22 @@
 import json
+import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Optional, Union
 
-from insitupy._io._qupath import (_get_pixel_size_from_qupath_metadata,
-                                  _list_insitupy_data_folders)
+from insitupy._io._qupath import (
+    _get_pixel_size_from_qupath_metadata,
+    _list_insitupy_data_folders,
+)
 from insitupy.experiment.data import InSituExperiment
 from insitupy.io.data import read_qupath
 
+logger = logging.getLogger(__name__)
+
 
 def read_qupath_project(
-    path: Union[str, os.PathLike, Path],
-    pixel_size: Optional[Number] = None,
+    path: str | os.PathLike | Path,
+    pixel_size: Number | None = None,
     export_folder: str = "insitupy",
     method_name: str = "mIF"
 ):
@@ -38,6 +42,7 @@ def read_qupath_project(
     Notes:
         Each sample folder within the project directory is expected to follow the structure
         described in `read_qupath`, including:
+
             - `annotation.geojson`
             - `measurements.tsv`
             - `cells.geojson`
@@ -57,13 +62,13 @@ def read_qupath_project(
     qp_project_file = path / "project.qpproj"
     if qp_project_file.exists():
         data_path = Path(path) / export_folder
-        print(f"QuPath project file 'project.qpproj' found in directory. Searching for data in:\n'{data_path}'")
+        logger.info(f"QuPath project file 'project.qpproj' found in directory. Searching for data in:\n'{data_path}'")
 
         if pixel_size is None:
-            print("Will try to automatically infer pixel sizes.")
+            logger.info("Will try to automatically infer pixel sizes.")
 
             # Replace 'your_file.json' with the path to your JSON file
-            with open(qp_project_file, 'r') as file:
+            with open(qp_project_file) as file:
                 metadata = json.load(file)
     else:
         if pixel_size is None:
@@ -75,7 +80,7 @@ def read_qupath_project(
 
     exp = InSituExperiment()
     for dataset_name, path_list in data_dict.items():
-        print(f"Reading '{dataset_name}'...")
+        logger.info(f"Reading '{dataset_name}'...")
         for p in path_list:
             sample_name = p.name
 

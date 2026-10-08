@@ -1,5 +1,8 @@
-import warnings
-from typing import Callable, List, Literal, Optional, Tuple, Union
+import logging
+from collections.abc import Callable
+from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 import dask.array as da
 import numpy as np
@@ -12,7 +15,7 @@ from tqdm.auto import tqdm
 
 
 def _calc_kernel_density(
-    data: Union[np.ndarray, List],
+    data: np.ndarray | list,
     mode: Literal["gauss", "mellon"] = "gauss",
     verbose: bool = False
     ):
@@ -42,13 +45,13 @@ def _calc_kernel_density(
         except:
             raise ImportError("To calculate densities with the mellon package, please install it with `pip install mellon`.")
         if verbose:
-            print("Using Mellon density estimator.")
+            logger.info("Using Mellon density estimator.")
         # Fit and predict log density
         model = mellon.DensityEstimator()
         density = model.fit_predict(data)
     elif mode == "gauss":
         if verbose:
-            print("Using Gaussian KDE.")
+            logger.info("Using Gaussian KDE.")
         try:
             kde = gaussian_kde(data.T, bw_method="scott")
             density = kde(data.T)
@@ -58,8 +61,7 @@ def _calc_kernel_density(
             density[:] = np.nan
 
     else:
-        warnings.warn(f"Invalid mode '{mode}' provided. Please use 'gauss' or 'mellon'.")
-        return None
+        raise ValueError(f"Invalid mode '{mode}' provided. Please use 'gauss' or 'mellon'.")
 
     return density
 
@@ -80,7 +82,9 @@ def calc_density(
         mode (Literal["gauss", "mellon"], optional): The mode of density estimation.
             "gauss" for Gaussian KDE using scipy, "mellon" for Mellon density estimator.
             Defaults to "gauss".
-        clip (bool, optional): If True, clip the density values to the 5th and 95th percentile.
+        clip (bool, optional): If True, clip the lower tail of the density values at the
+            5th percentile. The upper bound is the per-group maximum, so no upper
+            clipping is applied.
         inplace (bool, optional): If True, modify `adata` in place. If False, return a copy of `adata` with the modifications.
             Defaults to False.
 
@@ -169,7 +173,8 @@ def cohens_d(a, b, paired=False, correct_small_sample_size=True):
             d *= corr_factor
 
     else:
-        assert len(a) == len(b), "For paired testing the size of both samples needs to be equal."
+        if len(a) != len(b):
+            raise ValueError("For paired testing the size of both samples needs to be equal.")
         diff = np.array(a) - np.array(b)
         d = np.mean(diff) / np.std(diff)
 
@@ -182,10 +187,10 @@ def intensity_median(region_mask, intensity_image):
 def quantify_fluorescence(
     image_dask: da.Array,
     mask_dask: da.Array,
-    method: Union[Literal["mean", "median"], str, Callable] = "median",
-    downsample_factor: Optional[int] = None,
+    method: Literal["mean", "median"] | str | Callable = "median",
+    downsample_factor: int | None = None,
     return_area: bool = False
-) -> Union[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Memory-efficient quantification for greyscale images.
 
@@ -354,7 +359,7 @@ def create_tiles(
     dask_array: da.Array,
     tile_size: int = 2000,
     overlap: int = 100
-) -> List[Tuple[da.Array, Tuple[slice, slice], Tuple[slice, slice]]]:
+) -> list[tuple[da.Array, tuple[slice, slice], tuple[slice, slice]]]:
     """
     Split a 2D dask array into overlapping tiles.
 
@@ -425,14 +430,13 @@ def create_tiles(
 
     return tiles
 
-from typing import List, Tuple
 
 import numpy as np
 
 
 def summarize_tile_measurements(
-    quant_results: List[Tuple[np.ndarray, np.ndarray, np.ndarray]]
-) -> Tuple[np.ndarray, np.ndarray]:
+    quant_results: list[tuple[np.ndarray, np.ndarray, np.ndarray]]
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Consolidate measurements from overlapping tiles.
 

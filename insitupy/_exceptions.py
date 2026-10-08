@@ -1,7 +1,52 @@
 from pathlib import Path
-from typing import List, Optional, Type
 
+from ._constants import ISPY_METADATA_FILE
 from .utils.utils import convert_to_list
+
+
+class InSituPyError(ValueError):
+    """Base class for InSituPy-specific errors.
+
+    Subclasses :class:`ValueError` so that existing ``except ValueError`` handlers
+    around InSituPy input-validation calls keep working. Catch ``InSituPyError`` to
+    catch InSituPy's own raised errors specifically.
+    """
+
+
+class ProjectDivergedError(InSituPyError, RuntimeError):
+    """Raised when an object no longer matches the project it was read from.
+
+    After ``crop(inplace=True)`` an :class:`~insitupy.InSituData` object still
+    points at the project it was read from, but its data are the cropped ones.
+    The same holds for any object whose project another object replaced since
+    it was read. Loading from, saving into or unloading against that project
+    would mix data that do not belong together, so these calls refuse. Also a
+    :class:`RuntimeError`, which :meth:`~insitupy.InSituData.save` raised for
+    this case before.
+
+    Args:
+        path: The project the object was read from.
+        action: The refused call, e.g. ``"save()"``.
+    """
+
+    _CONSEQUENCES = {
+        "load": "Loading from it would mix the uncropped data on disk into the cropped object.",
+        "save": "Saving into it would mix the cropped data with the uncropped data on disk.",
+        "unload": "Unloaded data could not be loaded back from it.",
+    }
+
+    def __init__(self, path, action: str):
+        self.path = path
+        self.action = action
+        kind = next((k for k in self._CONSEQUENCES if action.startswith(k)), None)
+        consequence = f" {self._CONSEQUENCES[kind]}" if kind is not None else ""
+        self.message = (
+            f"{action} refused: this object no longer matches the project at '{path}' "
+            f"(it was cropped in place, or the project was replaced since it was read)."
+            f"{consequence} Write the object's data with saveas(<new path>), or replace "
+            f"the project with saveas('{path}', overwrite=True)."
+        )
+        super().__init__(self.message)
 
 
 class ModuleNotFoundOnWindows(ModuleNotFoundError):
@@ -18,6 +63,24 @@ class ModuleNotFoundOnWindows(ModuleNotFoundError):
         self.message = f"\n{exception.name} is not installed. " \
                        "This package could be problematic to install on Windows."
         super().__init__(self.message)
+
+class NoImageOverlapError(Exception):
+    """Raised when a crop region does not overlap with the image at all.
+
+    Args:
+        xlim: x-axis limits of the crop region.
+        ylim: y-axis limits of the crop region.
+    """
+
+    def __init__(self, xlim, ylim):
+        self.xlim = xlim
+        self.ylim = ylim
+        self.message = (
+            f"The crop region (xlim={xlim}, ylim={ylim}) does not overlap "
+            f"with the image extent. No image data can be cropped."
+        )
+        super().__init__(self.message)
+
 
 class InSituDataRepeatedCropError(Exception):
     """Exception raised if it is attempted to crop a
@@ -101,12 +164,16 @@ class NotEnoughFeatureMatchesError(Exception):
             Number of feature matches that were found.
         threshold:
             Threshold of number of feature matches.
+        partial_result:
+            Best FeatureMatchResult found before failure (for QC output). May be None.
     """
 
     def __init__(self,
                  number: str,
-                 threshold: str
+                 threshold: str,
+                 partial_result=None,
                  ):
+        self.partial_result = partial_result
         self.message = f"A maximum of {number} matched features were found. This was below the threshold of {threshold}."
         super().__init__(self.message)
 
@@ -124,7 +191,6 @@ class ModalityNotFoundError(Exception):
         self.message = f"No '{modality}' modality found."
         super().__init__(self.message)
 
-import warnings
 
 
 class ModalityNotFoundWarning(UserWarning):
@@ -139,10 +205,11 @@ class ModalityNotFoundWarning(UserWarning):
         super().__init__(message)
 
 class InvalidFileTypeError(Exception):
+    """Raised when a file path has an extension that is not in the allowed set."""
     def __init__(self,
-                 allowed_types: List[Type],
-                 received_type: Type,
-                 message: Optional[str] = None
+                 allowed_types: list[type],
+                 received_type: type,
+                 message: str | None = None
                  ):
         # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
@@ -154,10 +221,11 @@ class InvalidFileTypeError(Exception):
         super().__init__(self.message)
 
 class InvalidDataTypeError(Exception):
+    """Raised when a data object has a type that is not in the allowed set."""
     def __init__(self,
-                 allowed_types: List[Type],
-                 received_type: Type,
-                 message: Optional[str] = None
+                 allowed_types: list[type],
+                 received_type: type,
+                 message: str | None = None
                  ):
         # allowed_types = [allowed_types] if isinstance(allowed_types, str) else list(allowed_types)
         allowed_types = convert_to_list(allowed_types)
@@ -169,6 +237,7 @@ class InvalidDataTypeError(Exception):
         super().__init__(self.message)
 
 class InvalidXeniumDirectory(Exception):
+    """Raised when a path is not a valid Xenium output directory."""
     def __init__(self, directory):
         directory = Path(directory)
         if (directory / ".ispy").exists():
@@ -178,8 +247,20 @@ class InvalidXeniumDirectory(Exception):
         super().__init__(self.message)
 
 
+class InSituDataConstructorPathError(ValueError):
+    """Raised when a saved InSituPy project path is passed to ``InSituData()``
+    instead of ``InSituData.read()``."""
+    def __init__(self, path):
+        super().__init__(
+            f"'{path}' is already a saved InSituPy project (contains "
+            f"'{ISPY_METADATA_FILE}'). Load it with `InSituData.read(path)` "
+            f"instead of `InSituData(path)`."
+        )
+
+
 class MissingPackageError(ImportError):
-    def __init__(self, package_name: str, installation_command: Optional[str]):
+    """Raised when an optional dependency is required but not installed."""
+    def __init__(self, package_name: str, installation_command: str | None):
         if installation_command is None:
             installation_command = f"pip install {package_name}"
 

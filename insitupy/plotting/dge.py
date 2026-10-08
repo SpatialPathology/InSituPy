@@ -8,17 +8,17 @@ between main DGE results and neighborhood-based comparisons.
 import os
 from numbers import Number
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 from warnings import warn
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from adjustText import adjust_text
+from matplotlib.colors import to_rgb
 
 from insitupy._constants import with_insitupy_style
-from insitupy.dataclasses.results import (DiffExprConfigCollector,
-                                          DiffExprResults)
+from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.config import _add_config_table
 from insitupy.plotting.save import save_and_show_figure
 
@@ -33,6 +33,8 @@ COLOR_NOT_SIGNIFICANT = 'gray'
 AXIS_MARGIN_FACTOR = 0.1
 MIN_PVALUE = 1e-300
 TABLE_ROW_HEIGHT = 0.075
+BACKGROUND_ALPHA = 0.3
+GRADIENT_RESOLUTION = 512
 
 
 @with_insitupy_style
@@ -42,16 +44,19 @@ def dual_foldchange_plot(
     foldchange_threshold: Number = 1,
     logfoldchanges_col: str = "log2foldchange",
     pval_col: str = "padj",
-    patch_colors: List[str] = ["lightgreen", "lightcoral"],
+    patch_colors: list[str] = ["lightgreen", "lightcoral"],
+    background: Literal["gradient", "split"] = "gradient",
+    background_saturation: Number = 1,
+    reference_lfc: Number | None = 1,
     adjust_labels: bool = True,
-    label_top_n: Union[int, Literal["all"]] = "all",
+    label_top_n: int | Literal["all"] = "all",
     label_sortby: str = "padj",
     size_by_pvalue: bool = True,
-    size_range: Tuple[Number, Number] = (10, 40),
+    size_range: tuple[Number, Number] = (10, 40),
     show_nonsignificant: bool = True,
     show_config: bool = False,
-    figsize: Tuple[Number, Number] = (6, 6),
-    savepath: Union[str, os.PathLike, Path, None] = None,
+    figsize: tuple[Number, Number] = (6, 6),
+    savepath: str | os.PathLike | Path | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
@@ -64,70 +69,65 @@ def dual_foldchange_plot(
     or downregulated in the main comparison behave in their respective neighborhood
     comparisons.
 
-    Parameters
-    ----------
-    results : DiffExprResults
-        Result container holding main and neighborhood differential expression data.
-        Must include both target_neighborhood and ref_neighborhood.
-    significance_threshold : Number, default=0.05
-        Adjusted p-value threshold for significance in the main comparison.
-    foldchange_threshold : Number, default=1
-        Minimum absolute fold change (not log-transformed) to include genes in the plot.
-        Genes must exceed this threshold in the main comparison to be plotted.
-    logfc_col : str, default='log2foldchange'
-        Column name for log2 fold change values.
-    pval_col : str, default='padj'
-        Column name for adjusted p-values.
-    patch_colors : list of str, default=['lightgreen', 'lightcoral']
-        Background colors for [positive, negative] y-axis regions, indicating
-        whether genes are higher or lower in the neighborhood.
-    adjust_labels : bool, default=True
-        If True, automatically adjust overlapping gene labels using adjustText.
-    label_top_n : int or 'all', default='all'
-        Number of top genes to label based on label_sortby.
-        If 'all', labels all genes in the plot.
-        If int, labels the top N most significant genes.
-    label_sortby : str, default='padj'
-        Column name to use for ranking genes when label_top_n is an integer.
-        Typically 'padj' (ascending) or 'log2foldchange' (absolute value).
-    size_by_pvalue : bool, default=False
-        If True, scale point sizes based on -log10(padj) values.
-        More significant genes (lower p-values) will have larger points.
-    size_range : tuple of Number, default=(10, 40)
-        Range of point sizes (min, max) when size_by_pvalue is True.
-        Ignored if size_by_pvalue is False.
-    show_nonsignificant : bool, default=True
-        If True, plots both significant and non-significant genes.
-        If False, only plots significant genes (padj < significance_threshold).
-    show_config : bool, default=False
-        If True, displays a configuration table below the plots showing analysis
-        parameters and DEG counts.
-    figsize : tuple of Number, default=(6, 6)
-        Size of each subplot in inches (width, height).
-        Total figure width will be figsize[0] * 2.
-    savepath : str, os.PathLike, Path, optional
-        Path to save the plot. If None, plot is not saved.
-    save_only : bool, default=False
-        If True, saves plot without displaying it.
-    dpi_save : int, default=300
-        Resolution in dots per inch for saved figure.
-    show : bool, default=True
-        If True, displays the plot after creation.
+    Args:
+        results (DiffExprResults): Result container holding main and neighborhood
+            differential expression data. Must include both target_neighborhood and
+            ref_neighborhood.
+        significance_threshold (Number): Adjusted p-value threshold for significance in
+            the main comparison. Default is 0.05.
+        foldchange_threshold (Number): Minimum absolute fold change (not log-transformed)
+            to include genes in the plot. Genes must exceed this threshold in the main
+            comparison to be plotted. Default is 1.
+        logfoldchanges_col (str): Column name for log2 fold change values.
+            Default is 'log2foldchange'.
+        pval_col (str): Column name for adjusted p-values. Default is 'padj'.
+        patch_colors (list of str): Background colors for [positive, negative] y-axis
+            regions, indicating whether genes are higher or lower in the neighborhood.
+            Used by both background modes. Default is ['lightgreen', 'lightcoral'].
+        background (str): Background shading mode. "gradient" fades the color out toward
+            y = 0 and reaches full color at |y| = background_saturation; "split" draws the
+            previous hard-edged bands above and below 0. Default is "gradient".
+        background_saturation (Number): Absolute paired log2 fold change at which the
+            gradient reaches full color. Ignored if background is "split". Default is 1.
+        reference_lfc (Number, optional): Absolute paired log2 fold change at which dashed
+            horizontal reference lines are drawn (at -reference_lfc and +reference_lfc),
+            independent of background_saturation. None draws no such lines. Default is 1
+            (2-fold).
+        adjust_labels (bool): If True, automatically adjust overlapping gene labels using
+            adjustText. Default is True.
+        label_top_n (int or 'all'): Number of top genes to label based on label_sortby.
+            If 'all', labels all genes in the plot. If int, labels the top N most
+            significant genes. Default is 'all'.
+        label_sortby (str): Column name to use for ranking genes when label_top_n is an
+            integer. Typically 'padj' (ascending) or 'log2foldchange' (absolute value).
+            Default is 'padj'.
+        size_by_pvalue (bool): If True, scale point sizes based on -log10(padj) values.
+            More significant genes (lower p-values) will have larger points.
+            Default is True.
+        size_range (tuple of Number): Range of point sizes (min, max) when size_by_pvalue
+            is True. Ignored if size_by_pvalue is False. Default is (10, 40).
+        show_nonsignificant (bool): If True, plots both significant and non-significant
+            genes. If False, only plots significant genes (padj < significance_threshold).
+            Default is True.
+        show_config (bool): If True, displays a configuration table below the plots showing
+            analysis parameters and DEG counts. Default is False.
+        figsize (tuple of Number): Size of each subplot in inches (width, height). Total
+            figure width will be figsize[0] * 2. Default is (6, 6).
+        savepath (str, os.PathLike, Path, optional): Path to save the plot. If None, plot
+            is not saved.
+        save_only (bool): If True, saves plot without displaying it. Default is False.
+        dpi_save (int): Resolution in dots per inch for saved figure. Default is 300.
+        show (bool): If True, displays the plot after creation. Default is True.
 
-    Returns
-    -------
-    None
-        Displays and/or saves the plot as specified.
+    Returns:
+        None: Displays and/or saves the plot as specified.
 
-    Raises
-    ------
-    ValueError
-        If results object has no neighborhood comparisons or if parameters are invalid.
-    KeyError
-        If required columns are missing from the DataFrames.
+    Raises:
+        ValueError: If results object has no neighborhood comparisons or if parameters
+            are invalid.
+        KeyError: If required columns are missing from the DataFrames.
 
-    Notes
-    -----
+    Notes:
     The function creates two subplots:
     - Left: Downregulated genes in main comparison vs. their neighborhood behavior
     - Right: Upregulated genes in main comparison vs. their neighborhood behavior
@@ -137,8 +137,12 @@ def dual_foldchange_plot(
     - Negative values: gene is lower in the cell type than in the neighborhood
 
     Background shading helps interpret the biological meaning:
-    - Green region (y > 0): genes enriched in cell type vs. neighborhood
-    - Red region (y < 0): genes depleted in cell type vs. neighborhood
+    - Green (y > 0): genes enriched in cell type vs. neighborhood
+    - Red (y < 0): genes depleted in cell type vs. neighborhood
+    With background="gradient", the shading fades out toward y = 0, where the direction is
+    uncertain, and reaches full color at |y| = background_saturation. background="split"
+    gives hard-edged bands that switch color at 0. Dashed lines mark y = 0 and
+    y = +/-reference_lfc.
 
     When size_by_pvalue is True, point sizes are scaled by -log10(padj):
     - Larger points = more significant (smaller p-values)
@@ -169,6 +173,27 @@ def dual_foldchange_plot(
 
     if label_top_n != "all" and (not isinstance(label_top_n, int) or label_top_n < 0):
         raise ValueError(f"label_top_n must be 'all' or a non-negative integer, got {label_top_n}")
+
+    if background not in ("gradient", "split"):
+        raise ValueError(f"background must be 'gradient' or 'split', got {background!r}")
+
+    if not (isinstance(background_saturation, Number) and np.isfinite(background_saturation)
+            and background_saturation > 0):
+        raise ValueError(
+            f"background_saturation must be a positive finite number, got {background_saturation!r}"
+        )
+
+    if reference_lfc is not None and not (
+        isinstance(reference_lfc, Number) and np.isfinite(reference_lfc) and reference_lfc > 0
+    ):
+        raise ValueError(
+            f"reference_lfc must be None or a positive finite number, got {reference_lfc!r}"
+        )
+
+    if len(patch_colors) != 2:
+        raise ValueError(
+            f"patch_colors must contain exactly two colors [positive, negative], got {patch_colors!r}"
+        )
 
     df_main = results.main
     df_nb_target = results.target_neighborhood
@@ -215,6 +240,9 @@ def dual_foldchange_plot(
                 fold_change_threshold=fc,
                 significance_threshold=significance_threshold,
                 patch_colors=patch_colors,
+                background=background,
+                background_saturation=background_saturation,
+                reference_lfc=reference_lfc,
                 label_top_n=label_top_n,
                 label_sortby=label_sortby,
                 adjust_labels=adjust_labels,
@@ -258,6 +286,45 @@ def dual_foldchange_plot(
     )
 
 
+def _draw_background(
+    ax: plt.Axes,
+    patch_colors: list[str],
+    background: Literal["gradient", "split"],
+    saturation: Number,
+) -> None:
+    """
+    Shade the y > 0 / y < 0 regions of a dual fold change subplot.
+
+    Must be called after the axis limits are set. In "gradient" mode the color is chosen by
+    the sign of y and the alpha grows linearly with |y| from 0 at y = 0 to BACKGROUND_ALPHA at
+    |y| >= saturation, so there is no visible edge at 0 and it also works when 0 lies
+    outside the y-range.
+
+    Args:
+        ax (matplotlib.axes.Axes): Axes to draw on (limits already set).
+        patch_colors (list of str): Colors for [positive, negative] regions.
+        background (str): "gradient" or "split".
+        saturation (Number): Absolute y value at which the gradient reaches full color.
+    """
+    xlim, ylim = ax.get_xlim(), ax.get_ylim()
+
+    if background == "split":
+        ax.axhspan(0, ylim[1], facecolor=patch_colors[0], alpha=BACKGROUND_ALPHA)
+        ax.axhspan(ylim[0], 0, facecolor=patch_colors[1], alpha=BACKGROUND_ALPHA)
+        return
+
+    y = np.linspace(ylim[0], ylim[1], GRADIENT_RESOLUTION)
+    strength = np.clip(y / saturation, -1, 1)
+    rgba = np.empty((GRADIENT_RESOLUTION, 1, 4))
+    rgba[:, 0, :3] = np.where(strength[:, None] >= 0, to_rgb(patch_colors[0]), to_rgb(patch_colors[1]))
+    rgba[:, 0, 3] = BACKGROUND_ALPHA * np.abs(strength)
+    ax.imshow(rgba, extent=(*xlim, *ylim), origin="lower", aspect="auto",
+              interpolation="bilinear", zorder=0)
+    # imshow re-autoscales the axes - restore the limits
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+
 def _plot_single_nb_plot(
     df_main: pd.DataFrame,
     df_neighbor: pd.DataFrame,
@@ -265,70 +332,62 @@ def _plot_single_nb_plot(
     pval_col: str,
     fold_change_threshold: Number,
     significance_threshold: Number,
-    patch_colors: List[str],
-    label_top_n: Union[int, Literal["all"]],
+    patch_colors: list[str],
+    background: Literal["gradient", "split"],
+    background_saturation: Number,
+    reference_lfc: Number | None,
+    label_top_n: int | Literal["all"],
     label_sortby: str,
     adjust_labels: bool,
     size_by_pvalue: bool,
-    size_range: Tuple[Number, Number],
+    size_range: tuple[Number, Number],
     show_nonsignificant: bool,
-    config: Optional[DiffExprConfigCollector],
-    n_upreg: Optional[int],
-    n_downreg: Optional[int],
+    config: DiffExprConfigCollector | None,
+    n_upreg: int | None,
+    n_downreg: int | None,
     ax: plt.Axes,
     show_legend: bool,
-    xlabel: Optional[str] = "Log2FoldChange",
-    ylabel: Optional[str] = "Log2FoldChange (with neighborhood)",
-    title: Optional[str] = None
+    xlabel: str | None = "Log2FoldChange",
+    ylabel: str | None = "Log2FoldChange (with neighborhood)",
+    title: str | None = None
 ) -> None:
     """
     Helper function for plotting one dual fold change comparison subplot.
 
-    Parameters
-    ----------
-    df_main : pd.DataFrame
-        Main comparison data (already filtered by fold change threshold).
-    df_neighbor : pd.DataFrame
-        Neighborhood comparison data for the same genes.
-    logfc_col : str
-        Column name for log2 fold change values.
-    pval_col : str
-        Column name for adjusted p-values.
-    fold_change_threshold : Number
-        Log2 fold change threshold (already transformed).
-    significance_threshold : Number
-        Adjusted p-value threshold for significance.
-    patch_colors : list of str
-        Background colors for [positive, negative] regions.
-    label_top_n : int or 'all'
-        Number of top genes to label, or 'all' for all genes.
-    label_sortby : str
-        Column to sort by for selecting top genes.
-    adjust_labels : bool
-        Whether to adjust overlapping labels.
-    size_by_pvalue : bool
-        Whether to scale point sizes by -log10(padj).
-    size_range : tuple of Number
-        Range of point sizes (min, max) when size_by_pvalue is True.
-    show_nonsignificant : bool
-        Whether to plot non-significant genes.
-    config : DiffExprConfigCollector, optional
-        Configuration object containing analysis metadata to display in table below plot.
-    n_upreg : int, optional
-        Number of significantly upregulated genes.
-    n_downreg : int, optional
-        Number of significantly downregulated genes.
-    ax : matplotlib.axes.Axes
-        Axes to plot on.
-    show_legend : bool
-        Whether to show the legend.
-    show_ylabel : bool
-        Whether to show the y-axis label.
+    Args:
+        df_main (pd.DataFrame): Main comparison data (already filtered by fold change
+            threshold).
+        df_neighbor (pd.DataFrame): Neighborhood comparison data for the same genes.
+        logfc_col (str): Column name for log2 fold change values.
+        pval_col (str): Column name for adjusted p-values.
+        fold_change_threshold (Number): Log2 fold change threshold (already transformed).
+        significance_threshold (Number): Adjusted p-value threshold for significance.
+        patch_colors (list of str): Background colors for [positive, negative] regions.
+        background (str): Background shading mode, "gradient" or "split".
+        background_saturation (Number): Absolute log2 fold change at which the gradient
+            reaches full color.
+        reference_lfc (Number, optional): Absolute log2 fold change of the dashed
+            horizontal reference lines, or None for no such lines.
+        label_top_n (int or 'all'): Number of top genes to label, or 'all' for all genes.
+        label_sortby (str): Column to sort by for selecting top genes.
+        adjust_labels (bool): Whether to adjust overlapping labels.
+        size_by_pvalue (bool): Whether to scale point sizes by -log10(padj).
+        size_range (tuple of Number): Range of point sizes (min, max) when size_by_pvalue
+            is True.
+        show_nonsignificant (bool): Whether to plot non-significant genes.
+        config (DiffExprConfigCollector, optional): Configuration object containing
+            analysis metadata to display in table below plot.
+        n_upreg (int, optional): Number of significantly upregulated genes.
+        n_downreg (int, optional): Number of significantly downregulated genes.
+        ax (matplotlib.axes.Axes): Axes to plot on.
+        show_legend (bool): Whether to show the legend.
+        xlabel (str, optional): X-axis label. Default is "Log2FoldChange".
+        ylabel (str, optional): Y-axis label. Default is "Log2FoldChange (with
+            neighborhood)".
+        title (str, optional): Title for the subplot.
 
-    Returns
-    -------
-    None
-        Plots on the provided axes.
+    Returns:
+        None: Plots on the provided axes.
     """
     # CRITICAL: Merge dataframes to ensure x and y values are aligned by gene
     # Keep only genes present in both dataframes
@@ -405,9 +464,8 @@ def _plot_single_nb_plot(
     ax.set_xlim(xmincorr, xmaxcorr)
     ax.set_ylim(ymincorr, ymaxcorr)
 
-    # Add background patches
-    ax.axhspan(0, ymaxcorr, facecolor=patch_colors[0], alpha=0.3)
-    ax.axhspan(ymincorr, 0, facecolor=patch_colors[1], alpha=0.3)
+    # Add background shading
+    _draw_background(ax, patch_colors, background, background_saturation)
 
     # Scatter significant and non-significant points
     if show_nonsignificant:
@@ -444,9 +502,11 @@ def _plot_single_nb_plot(
     objects_to_avoid.append(
         ax.axhline(0, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
     )
-    objects_to_avoid.append(
-        ax.axhline(-1, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
-    )
+    if reference_lfc is not None:
+        for y_ref in (-reference_lfc, reference_lfc):
+            objects_to_avoid.append(
+                ax.axhline(y_ref, color=COLOR_NOT_SIGNIFICANT, linestyle="--", linewidth=1)
+            )
     objects_to_avoid.append(
         ax.axvline(
             fold_change_threshold,
@@ -539,10 +599,10 @@ def _plot_single_nb_plot(
                 legend_elements.extend([
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=8,
-                       label=f'high'),
+                       label='high'),
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=5,
-                       label=f'low'),
+                       label='low'),
                     Line2D([0], [0], marker='o', color='w',
                            markerfacecolor=COLOR_NOT_SIGNIFICANT, markersize=5,
                            label='none')
@@ -551,10 +611,10 @@ def _plot_single_nb_plot(
                 legend_elements.extend([
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=8,
-                       label=f'high'),
+                       label='high'),
                     Line2D([0], [0], marker='o', color='w',
                        markerfacecolor=COLOR_SIGNIFICANT, markersize=5,
-                       label=f'low')
+                       label='low')
                 ])
 
             # # Add size information
@@ -570,7 +630,7 @@ def _plot_single_nb_plot(
 
             ax.legend(
                 handles=legend_elements,
-                title=f"significance",
+                title="significance",
                 loc="center left",
                 bbox_to_anchor=(1, 0.5)
             )

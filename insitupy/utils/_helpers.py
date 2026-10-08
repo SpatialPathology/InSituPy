@@ -1,5 +1,7 @@
 import contextlib
+import logging
 import os
+import re
 import sys
 from datetime import datetime
 from warnings import warn
@@ -9,6 +11,8 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import issparse
 from shapely import MultiPolygon, Polygon
+
+logger = logging.getLogger(__name__)
 
 
 def _get_expression_values(adata, X, key_type, key):
@@ -39,7 +43,7 @@ def _get_expression_values(adata, X, key_type, key):
             warn("Data in `obsm` needs to be either pandas DataFrame or numpy array to be parsed.")
         pass
     else:
-        print("Unknown key selected.", flush=True)
+        logger.warning("Unknown key selected.")
 
     return color_value
 
@@ -93,26 +97,76 @@ def _generate_mask(values, xmax, ymax, seg_mask_value):
     return boundaries_mask
 
 
+_SAVE_DIR_NAME = re.compile(r"(\d{6})-(\d{12})(?:-|$)")
+
+
+def parse_save_dir_datetime(name: str) -> datetime | None:
+    """Parse the datetime encoded in the name of an InSituPy save directory.
+
+    Save directories are named ``YYMMDD-HHMMSSffffff-<hash>``
+    (e.g. ``250805-115555000343-2c58ca86``).
+
+    Args:
+        name: Directory name (not a full path).
+
+    Returns:
+        The encoded datetime, or ``None`` if *name* does not follow the pattern
+        (e.g. a folder the user created by hand).
+    """
+    match = _SAVE_DIR_NAME.match(name)
+    if match is None:
+        return None
+    try:
+        # YYMMDD + HHMMSSffffff
+        return datetime.strptime(match.group(1) + match.group(2), "%y%m%d%H%M%S%f")
+    except ValueError:
+        return None
+
+
 def sort_paths_by_datetime(paths):
-    def extract_datetime(path):
-        # Assumes ID format: "250805-115555000343-2c58ca86"
-        parts = path.name.split("-")
-        date_part = parts[0]  # "250805"
-        time_part = parts[1]  # "115555000343"
+    """Sort a list of paths by the datetime encoded in their names, newest first.
 
-        # Combine into full datetime string: "250805115555000343"
-        full_dt_str = date_part + time_part
+    Assumes directory names follow the pattern ``YYMMDD-HHMMSSffffff-<hash>``
+    (e.g. ``250805-115555000343-2c58ca86``). Paths whose name does not follow
+    it are not InSituPy save directories: they are left out of the result and
+    reported in a single warning.
 
-        # Parse as datetime: YYMMDDHHMMSSffffff
-        return datetime.strptime(full_dt_str, "%y%m%d%H%M%S%f")
+    Args:
+        paths: Iterable of :class:`~pathlib.Path` objects to sort.
 
-    return sorted(paths, key=extract_datetime, reverse=True)
+    Returns:
+        A new list of the recognised paths sorted from most-recent to oldest.
+    """
+    parsed = []
+    skipped = []
+    for p in paths:
+        dt = parse_save_dir_datetime(p.name)
+        if dt is None:
+            skipped.append(p.name)
+        else:
+            parsed.append((dt, p))
+
+    if skipped:
+        warn(
+            f"Ignoring {len(skipped)} entr{'y' if len(skipped) == 1 else 'ies'} that "
+            f"{'is' if len(skipped) == 1 else 'are'} not an InSituPy save directory: "
+            f"{sorted(skipped)}.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return [p for _, p in sorted(parsed, key=lambda item: item[0], reverse=True)]
 
 
 
 
 @contextlib.contextmanager
 def suppress_output():
+    """Context manager that silences all stdout and stderr output.
+
+    Redirects both ``sys.stdout`` and ``sys.stderr`` to ``/dev/null`` for the
+    duration of the ``with`` block, then restores them unconditionally.
+    """
     with open(os.devnull, 'w') as devnull:
         old_stdout = sys.stdout
         old_stderr = sys.stderr

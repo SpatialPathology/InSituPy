@@ -1,9 +1,10 @@
 import gc
+import logging
 import os
 import time
 import tracemalloc
+import warnings
 from pathlib import Path
-from typing import List, Literal, Optional, Union
 
 try:
     import cv2
@@ -13,569 +14,132 @@ except ImportError:
     cv2 = None
 
 import dask.array as da
-import matplotlib.pyplot as plt
 import numpy as np
-from dask_image.imread import imread
 
-from insitupy import __version__
-from insitupy._constants import CACHE, SHRT_MAX
 from insitupy._core.data import InSituData
 from insitupy._exceptions import NotEnoughFeatureMatchesError
-from insitupy._textformat import textformat as tf
 from insitupy.images.axes import ImageAxes, get_height_and_width
-from insitupy.images.io import write_ome_tiff
-from insitupy.images.utils import (clip_image_histogram, convert_to_8bit_func,
-                                   deconvolve_he, fit_image_to_size_limit,
-                                   otsu_thresholding, resize_image,
-                                   scale_to_max_width)
-from insitupy.utils.utils import convert_to_list, remove_last_line_from_csv
+from insitupy.images.io import read_image
+from insitupy.images.registration import (
+    register_images_standalone,
+    save_registered_image_tiff,
+)
+from insitupy.images.warp import apply_warp
+from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 
 class ImageRegistration:
-    '''
-    Object to perform image registration.
-    '''
-    # Tree drawing characters
-    _TSIGN = "\u251c"   # ├
-    _LSIGN = "\u2514"   # └
-    _VLINE = "\u2502"   # │
-    _HLINE = "\u2500"   # ─
-    _TICK  = "\u2714"   # ✔
+    """Deprecated: Use ``insitupy.im.register_images_standalone()`` instead.
+
+    This class will be removed in a future release.
+
+    The typical workflow is:
+
+    1. Instantiate with ``image`` (the image to align) and ``template`` (the fixed reference).
+    2. Call :meth:`run` to execute the full pipeline (load, feature extraction, transformation
+       matrix estimation, warping).
+    3. Access results via instance attributes:
+
+    Attributes:
+        T (np.ndarray): Estimated transformation matrix. Shape ``(2, 3)`` for affine
+            transforms or ``(3, 3)`` for perspective (homography) transforms.
+        T_to_register (np.ndarray): Transformation matrix actually applied during warping
+            (may differ from ``T`` when the image was resized before registration).
+        registered (np.ndarray): The warped (registered) image array with shape matching
+            the template dimensions.
+        kpsA (list): Detected keypoints in the source image.
+        kpsB (list): Detected keypoints in the template image.
+        good_matches (list): Feature matches that passed the ratio test and RANSAC.
+        inlier_mask (np.ndarray or None): Boolean mask of RANSAC inliers aligned with
+            ``good_matches``.
+    """
 
     def __init__(self,
-                 image: Union[np.ndarray, da.Array],
-                 template: Union[np.ndarray, da.Array],
-                 axes_image: str = "YXS", ## channel axes - other examples: 'TCYXS'. S for RGB channels.
-                 axes_template: str = "YX",  # channel axes of template. Normally it is just a grayscale image - therefore YX.
-                 max_width: Optional[int] = 4000,
-                 convert_to_grayscale: bool = False,
-                 deconvolve_image: bool = False,  # whether to apply HE deconvolution to the image
-                 deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
-                 decon_scale_factor: float = 0.2,  # scale factor for deconvolution to save memory
-                 perspective_transform: bool = False,
-                 feature_detection_method: Literal["sift", "surf"] = "sift",
-                 flann: bool = True,
-                 ratio_test: bool = True,
-                 keepFraction: float = 0.2,
-                 min_good_matches: int = 20,  # minimum number of good feature matches
-                 maxFeatures: int = 500,
-                 verbose: bool = True,
-                 print_prefix: str = "  ",
+                 image: np.ndarray | da.Array,
+                 template: np.ndarray | da.Array,
+                 **kwargs,
                  ):
 
-        # check verbose mode
-        self.verboseprint = print if verbose else lambda *a, **k: None
-        self.print_prefix = print_prefix
-
-        # add arguments to object
-        self.image = image
-        self.template = template
-        self.axes_image = axes_image
-        self.axes_template = axes_template
-        self.axes_config_image = ImageAxes(self.axes_image)
-        self.axes_config_template = ImageAxes(self.axes_template)
-        self.max_width = max_width
-        self.convert_to_grayscale = convert_to_grayscale
-        self.deconvolve_image = deconvolve_image
-        self.deconvolve_template = deconvolve_template
-        self.decon_scale_factor = decon_scale_factor
-        self.perspective_transform = perspective_transform
-        self.feature_detection_method = feature_detection_method
-        self.flann = flann
-        self.ratio_test = ratio_test
-        self.keepFraction = keepFraction
-        self.min_good_matches = min_good_matches
-        self.maxFeatures = maxFeatures
-        self.verbose = verbose
-
-    def _log(self, message: str, is_last: bool = False, detail: bool = False, flush: bool = True):
-        """Print a log message with tree-style prefix."""
-        if detail:
-            prefix = f"{self.print_prefix}{self._VLINE}     "
-        elif is_last:
-            prefix = f"{self.print_prefix}{self._LSIGN}{self._HLINE}{self._HLINE} "
-        else:
-            prefix = f"{self.print_prefix}{self._TSIGN}{self._HLINE}{self._HLINE} "
-        self.verboseprint(f"{prefix}{message}", flush=flush)
-
-    def _deconvolve_he_image(self, img: np.ndarray, axes: str, name: str = "image") -> np.ndarray:
-        """
-        Apply HE color deconvolution to extract nuclei channel from an H&E stained image.
-
-        Args:
-            img: Input H&E RGB image
-            axes: Axes configuration of the image (e.g., "YXS")
-            name: Name for logging purposes ("image" or "template")
-
-        Returns:
-            Grayscale nuclei image after deconvolution
-        """
-        self._log(f"Color deconvolution ({name}, scale factor: {self.decon_scale_factor})")
-
-        # deconvolve HE - performed on resized image to save memory
-        nuclei_img, _, _ = deconvolve_he(
-            img=resize_image(img, scale_factor=self.decon_scale_factor, axes=axes),
-            return_type="grayscale",
-            convert=True
+        import warnings as _warnings
+        _warnings.warn(
+            "ImageRegistration is deprecated and will be removed in a future release. "
+            "Use insitupy.im.register_images_standalone() instead.",
+            DeprecationWarning,
+            stacklevel=2,
         )
-
-        # bring back to original size
-        nuclei_img = resize_image(nuclei_img, scale_factor=1/self.decon_scale_factor, axes="YX")
-
-        return nuclei_img
-
-    def load_and_scale_images(self):
-        if not HAS_OPENCV:
-            raise ImportError("OpenCV (cv2) is required for image registration. Install it with: pip install opencv-python")
-
-        detail_prefix = f"{self.print_prefix}{self._VLINE}     "
-
-        # load images into memory if they are dask arrays
-        if isinstance(self.image, da.Array):
-            self._log("Loading images into memory")
-            self.image = self.image.compute()  # load into memory
-
-        if isinstance(self.template, da.Array):
-            self.template = self.template.compute()  # load into memory
-
-        # Apply HE deconvolution if requested (before grayscale conversion)
-        if self.deconvolve_image:
-            if self.axes_image not in ["YXS", "SYX"]:
-                raise ValueError(f"HE deconvolution requires RGB image with axes 'YXS' or 'SYX', got '{self.axes_image}'")
-            self.image = self._deconvolve_he_image(self.image, self.axes_image, "image")
-            self.axes_image = "YX"  # update axes after deconvolution
-            self.axes_config_image = ImageAxes(self.axes_image)
-
-        if self.deconvolve_template:
-            if self.axes_template not in ["YXS", "SYX"]:
-                raise ValueError(f"HE deconvolution requires RGB template with axes 'YXS' or 'SYX', got '{self.axes_template}'")
-            self.template = self._deconvolve_he_image(self.template, self.axes_template, "template")
-            self.axes_template = "YX"  # update axes after deconvolution
-            self.axes_config_template = ImageAxes(self.axes_template)
-
-        if self.convert_to_grayscale:
-            # check format
-            if len(self.image.shape) == 3:
-                self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
-
-            if len(self.template.shape) == 3:
-                self.template = cv2.cvtColor(self.template, cv2.COLOR_BGR2GRAY)
-
-        if self.max_width is not None:
-            self._log("Scaling")
-            self.image_scaled = scale_to_max_width(self.image,
-                                                   axes=self.axes_image,
-                                                   max_width=self.max_width,
-                                                   use_square_area=True,
-                                                   verbose=self.verbose,
-                                                   print_spacer=f"{detail_prefix}Image:    "
-                                                   )
-            self.template_scaled = scale_to_max_width(self.template,
-                                                      axes=self.axes_template,
-                                                      max_width=self.max_width,
-                                                      use_square_area=True,
-                                                      verbose=self.verbose,
-                                                      print_spacer=f"{detail_prefix}Template: "
-                                                      )
-        else:
-            self.image_scaled = self.image
-            self.template_scaled = self.template
-
-        # convert and normalize images to 8bit for registration
-        self.image_scaled = convert_to_8bit_func(self.image_scaled)
-        self.template_scaled = convert_to_8bit_func(self.template_scaled)
-
-        # calculate scale factors for x and y dimension for image and template
-        self.x_sf_image = self.image_scaled.shape[1] / self.image.shape[1]
-        self.y_sf_image = self.image_scaled.shape[0] / self.image.shape[0]
-        self.x_sf_template = self.template_scaled.shape[1] / self.template.shape[1]
-        self.y_sf_template = self.template_scaled.shape[0] / self.template.shape[0]
-
-        # Store shapes and template dimensions for later use
-        self.image_shape = self.image.shape
-        self.template_shape = self.template.shape
-        self.template_h, self.template_w = get_height_and_width(image=self.template, axes_config=self.axes_config_template)
-
-        # resize image if necessary (warpAffine has a size limit for the image that is transformed)
-        # get width and height of image
-        h_image, w_image = get_height_and_width(image=self.image, axes_config=self.axes_config_image)
-        if np.any([elem > SHRT_MAX for elem in (h_image, w_image)]):
-            self._log(
-                f"Warning: Dimensions {self.image_shape} exceed SHRT_MAX ({SHRT_MAX}). Resizing.")
-
-            # fit image
-            self.image_resized, self.resize_factor_image = fit_image_to_size_limit(
-                self.image, size_limit=SHRT_MAX, return_scale_factor=True, axes=self.axes_image
-                )
-            self._log(f"Resized to {self.image_resized.shape} (factor: {self.resize_factor_image:.3f})", detail=True)
-        else:
-            self.image_resized = None
-            self.resize_factor_image = 1
-
-        # free memory - delete full-resolution image if resized version exists
-        if self.image_resized is not None:
-            del self.image  # free memory - keep only resized version
-
-    def extract_features(
-        self,
-        test_flipping: bool = True,
-        adjust_contrast_method: Optional[Literal["otsu", "clip"]] = "clip",
-        debugging: bool = False,
-        save_matched_vis: bool = True
-        ):
-        '''
-        Function to extract paired features from image and template.
-        '''
-
-        method_name = self.feature_detection_method.upper()
-        contrast_info = f", contrast: {adjust_contrast_method}" if adjust_contrast_method else ""
-        self._log(f"Feature extraction ({method_name}{contrast_info})")
-
-        if test_flipping:
-            # Test different flip transformations starting with no flip, then vertical, then horizontal.
-            flip_axis_list = [None, 0] # before: [None, 0, 1]
-        else:
-            # do not test flipping of the axis
-            flip_axis_list = [None]
-        matches_list = [] # list to collect number of matches
-        for flip_axis in flip_axis_list:
-            flipped = False
-            if flip_axis is not None:
-                # flip image
-                flip_dir = 'vertical' if flip_axis == 0 else 'horizontal'
-                self._log(f"Testing {flip_dir} flip", detail=True)
-                self.image_scaled = np.flip(self.image_scaled, axis=flip_axis)
-                flipped = True # set flipped flag to True
-
-            # Get features
-            # adjust contrast of both image and template
-            if adjust_contrast_method is not None:
-                if adjust_contrast_method == "otsu":
-                    image_contrast_adj = otsu_thresholding(image=convert_to_8bit_func(self.image_scaled))
-                    template_contrast_adj = otsu_thresholding(image=convert_to_8bit_func(self.template_scaled))
-                elif adjust_contrast_method == "clip":
-                    image_contrast_adj = clip_image_histogram(image=self.image_scaled, lower_perc=20, upper_perc=99)
-                    template_contrast_adj = clip_image_histogram(image=self.template_scaled, lower_perc=20, upper_perc=99)
-                else:
-                    raise ValueError(f"Invalid method {adjust_contrast_method} for `adjust_contrast_method`.")
-            else:
-                image_contrast_adj = self.image_scaled
-                template_contrast_adj = self.template_scaled
-
-            if debugging:
-                outpath = CACHE
-                plt.imshow(self.image_scaled)
-                plt.savefig(outpath / f"image.png")
-                plt.close()
-
-                plt.imshow(image_contrast_adj)
-                plt.savefig(outpath / f"image_{adjust_contrast_method}.png")
-                plt.close()
-
-                plt.imshow(self.template_scaled)
-                plt.savefig(outpath / f"template.png")
-                plt.close()
-
-                plt.imshow(template_contrast_adj)
-                plt.savefig(outpath / f"template_{adjust_contrast_method}.png")
-                plt.close()
-
-            if self.feature_detection_method == "sift":
-                # sift
-                sift = cv2.SIFT_create()
-
-                (kpsA, descsA) = sift.detectAndCompute(image_contrast_adj, None)
-                (kpsB, descsB) = sift.detectAndCompute(template_contrast_adj, None)
-
-            elif self.feature_detection_method == "surf":
-                surf = cv2.xfeatures2d.SURF_create(400)
-
-                (kpsA, descsA) = surf.detectAndCompute(image_contrast_adj, None)
-                (kpsB, descsB) = surf.detectAndCompute(template_contrast_adj, None)
-
-            else:
-                self._log(f"Unknown method '{self.feature_detection_method}'. Aborted.", detail=True)
-                return
-
-            if self.flann:
-                # FLANN parameters
-                FLANN_INDEX_KDTREE = 1
-                index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-                search_params = dict(checks=50)   # or pass empty dictionary
-
-                # runn Flann matcher
-                fl = cv2.FlannBasedMatcher(index_params, search_params)
-                matches = fl.knnMatch(descsA, descsB, k=2)
-
-            else:
-                # feature matching
-                bf = cv2.BFMatcher()
-                matches = bf.knnMatch(descsA, descsB, k=2)
-
-            if self.ratio_test:
-                # store all the good matches as per Lowe's ratio test.
-                good_matches = []
-                for m, n in matches:
-                    if m.distance < 0.7*n.distance:
-                        good_matches.append(m)
-            else:
-                # sort the matches by their distance (the smaller the distance, the "more similar" the features are)
-                matches = sorted(matches, key=lambda x: x.distance)
-                # keep only the top matches
-                keep = int(len(matches) * self.keepFraction)
-                good_matches = matches[:keep][:self.maxFeatures]
-
-            # check if a sufficient number of good matches was found
-            matches_list.append(len(good_matches))
-            if len(good_matches) >= self.min_good_matches:
-                self._log(f"Good matches: {len(good_matches)} / {self.min_good_matches} required  {self._TICK}", detail=True)
-                self.flip_axis = flip_axis
-                break
-            else:
-                self._log(f"Good matches: {len(good_matches)} / {self.min_good_matches} required (insufficient, testing flip)", detail=True)
-                if flipped:
-                    # flip back
-                    self.image_scaled = np.flip(self.image_scaled, axis=flip_axis)
-
-        if not hasattr(self, "flip_axis"):
-            raise NotEnoughFeatureMatchesError(number=np.max(matches_list), threshold=self.min_good_matches)
-
-        # check to see if we should visualize the matched keypoints
-        if save_matched_vis:
-            self.matchedVis = cv2.drawMatches(self.image_scaled, kpsA, self.template_scaled, kpsB,
-                                            good_matches, None)
-
-        # Get keypoints
-        # allocate memory for the keypoints (x, y)-coordinates of the top matches
-        self.ptsA = np.zeros((len(good_matches), 2), dtype="float")
-        self.ptsB = np.zeros((len(good_matches), 2), dtype="float")
-        # loop over the top matches
-        for (i, m) in enumerate(good_matches):
-            # indicate that the two keypoints in the respective images map to each other
-            self.ptsA[i] = kpsA[m.queryIdx].pt
-            self.ptsB[i] = kpsB[m.trainIdx].pt
-
-        # apply scale factors to points - separately for each dimension
-        self.ptsA[:, 0] = self.ptsA[:, 0] / self.x_sf_image
-        self.ptsA[:, 1] = self.ptsA[:, 1] / self.y_sf_image
-        self.ptsB[:, 0] = self.ptsB[:, 0] / self.x_sf_template
-        self.ptsB[:, 1] = self.ptsB[:, 1] / self.y_sf_template
-
-    def calculate_transformation_matrix(self):
-        '''
-        Function to calculate the transformation matrix.
-        '''
-        if not HAS_OPENCV:
-            raise ImportError("OpenCV (cv2) is required for calculating transformation matrix. Install it with: pip install opencv-python")
-
-        transform_type = "perspective" if self.perspective_transform else "affine"
-        self._log(f"Transformation matrix ({transform_type})")
-
-        if self.perspective_transform:
-            (self.T, mask) = cv2.findHomography(self.ptsA, self.ptsB, method=cv2.RANSAC)
-        else:
-            (self.T, mask) = cv2.estimateAffine2D(self.ptsA, self.ptsB)
-
-        if self.resize_factor_image != 1:
-            self.ptsA *= self.resize_factor_image # scale images features in case it was originally larger than the warpAffine limits
-            if self.perspective_transform:
-                (self.T_resized, mask) = cv2.findHomography(self.ptsA, self.ptsB, method=cv2.RANSAC)
-            else:
-                (self.T_resized, mask) = cv2.estimateAffine2D(self.ptsA, self.ptsB)
-
-    def perform_registration(self):
-
-        # determine which image to be registered here
-        if self.image_resized is None:
-            self.image_to_register = self.image
-            self.T_to_register = self.T
-        else:
-            self.image_to_register = self.image_resized
-            self.T_to_register = self.T_resized
-
-        # determine the kind of transformation
-        warp_func, warp_name = (cv2.warpPerspective, "perspective") if self.perspective_transform else (cv2.warpAffine, "affine")
-
-        if self.flip_axis is not None:
-            flip_dir = 'vertically' if self.flip_axis == 0 else 'horizontally'
-            self._log(f"Applying {flip_dir} flip", detail=True)
-            self.image_to_register = np.flip(self.image_to_register, axis=self.flip_axis)
-
-        # use the transformation matrix to register the images
-        (h, w) = (self.template_h, self.template_w)
-        # warping
-        self._log("Registration")
-        self.registered = warp_func(self.image_to_register, self.T_to_register, (w, h))
+        from insitupy.images.registration import RegistrationConfig as _RC
+        self._config = _RC(
+            axes_moving=kwargs.get("axes_image", "YXS"),
+            axes_fixed=kwargs.get("axes_template", "YX"),
+            max_width=kwargs.get("max_width", 4000),
+            convert_to_grayscale=kwargs.get("convert_to_grayscale", False),
+            deconvolve_moving=kwargs.get("deconvolve_image", False),
+            deconvolve_fixed=kwargs.get("deconvolve_template", False),
+            decon_scale_factor=kwargs.get("decon_scale_factor", 0.2),
+            perspective_transform=kwargs.get("perspective_transform", False),
+            feature_detection_method=kwargs.get("feature_detection_method", "sift"),
+            flann=kwargs.get("flann", True),
+            mutual_nearest_neighbor=kwargs.get("mutual_nearest_neighbor", False),
+            ratio_test=kwargs.get("ratio_test", True),
+            keep_fraction=kwargs.get("keepFraction", 0.2),
+            max_features=kwargs.get("maxFeatures", 500),
+            min_good_matches=kwargs.get("min_good_matches", 20),
+            verbose=kwargs.get("verbose", True),
+        )
+        self._moving = image
+        self._fixed = template
 
     def run(self):
-        '''
-        Run the complete registration pipeline including following steps:
-            1. Loading of images
-            2. Feature extraction
-            3. Calculation of transformation matrix
-            4. Registration of images based on transformation matrix
-        '''
-        # load and scale images
-        self.load_and_scale_images()
+        """Run the registration pipeline and store results on self.
 
-        # run feature extraction
-        self.extract_features()
-
-        # calculate transformation matrix
-        self.calculate_transformation_matrix()
-
-        # perform registration
-        self.perform_registration()
-
-    def save_registered_image(
-        self,
-        output_dir: Union[str, os.PathLike, Path],
-        identifier: str,
-        axes: str,  # string describing the channel axes, e.g. YXS or CYX
-        photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb',
-        ome_metadata: dict = {},
-        registered: Optional[np.ndarray] = None,  # registered image
-        ):
+        Delegates to :func:`insitupy.im.register_images_standalone`.
+        Results are stored as ``self.registered`` (warped image array) and
+        ``self.T`` (transformation matrix).
         """
-        Save the registered image as OME-TIFF.
-
-        Args:
-            output_dir: Directory to save the registered image.
-            identifier: Identifier string for the output filename.
-            axes: String describing the channel axes, e.g. 'YXS' or 'CYX'.
-            photometric: Photometric interpretation ('rgb', 'minisblack', 'maxisblack').
-            ome_metadata: OME metadata dictionary to include in the TIFF.
-            registered: Registered image array. If None, uses self.registered.
-        """
-        if registered is None:
-            registered = self.registered
-
-        # save registered image as OME-TIFF
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        self.outfile = output_dir / f"{identifier}__registered.ome.tif"
-        self._log(f"Saving")
-        self._log(f"Image: {self.outfile}", detail=True)
-        write_ome_tiff(
-            file=self.outfile,
-            image=registered,
-            axes=axes,
-            photometric=photometric,
-            overwrite=True,
-            metadata=ome_metadata
-            )
-
-    def save_qc(
-        self,
-        output_dir: Union[str, os.PathLike, Path],
-        identifier: str,
-        _T: Optional[np.ndarray] = None,  # transformation matrix
-        matchedVis: Optional[np.ndarray] = None  # image showing the matched visualization
-        ):
-        """
-        Save registration QC files (transformation matrix and feature matches visualization).
-
-        Args:
-            output_dir: Directory to save QC files (will create 'registration_qc' subdirectory).
-            identifier: Identifier string for the output filenames.
-            _T: Transformation matrix. If None, uses the appropriate matrix from self.
-            matchedVis: Image showing matched features. If None, uses self.matchedVis.
-        """
-        if _T is None:
-            if self.resize_factor_image == 1:
-                # if the image was not resized the transformation matrix to save is identical to the one used for registration
-                T_to_save = self.T_to_register
-            else:
-                # if the image WAS resized the transformation matrix to save is not identical to the one used for registration
-                # instead the transformation matrix before resizing needs to be used
-                T_to_save = self.T
-        else:
-            T_to_save = _T
-
-        if matchedVis is None:
-            matchedVis = self.matchedVis
-
-        # save registration QC files
-        output_dir = Path(output_dir)
-        reg_dir = output_dir / "registration_qc"
-        reg_dir.mkdir(parents=True, exist_ok=True)
-        self._log(f"QC:    {reg_dir}", detail=True)
-
-        # save transformation matrix
-        T_to_save = np.vstack([T_to_save, [0,0,1]])  # add last line of affine transformation matrix
-        T_csv = reg_dir / f"{identifier}__T.csv"
-        np.savetxt(T_csv, T_to_save, delimiter=",")
-
-        # remove last line break from csv since this gives error when importing to Xenium Explorer
-        remove_last_line_from_csv(T_csv)
-
-        # save image showing the number of key points found in both images during registration
-        matchedVis_file = reg_dir / f"{identifier}__common_features.pdf"
-        plt.imshow(matchedVis)
-        plt.savefig(matchedVis_file, dpi=400)
-        plt.close()
-
-    def save(
-        self,
-        output_dir: Union[str, os.PathLike, Path],
-        identifier: str,
-        axes: str,  # string describing the channel axes, e.g. YXS or CYX
-        photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb',
-        ome_metadata: dict = {},
-        registered: Optional[np.ndarray] = None,  # registered image
-        _T: Optional[np.ndarray] = None,  # transformation matrix
-        matchedVis: Optional[np.ndarray] = None  # image showing the matched visualization
-        ):
-        """
-        Save both the registered image and QC files.
-
-        This is a convenience method that calls both save_registered_image() and save_qc().
-
-        Args:
-            output_dir: Directory to save output files.
-            identifier: Identifier string for the output filenames.
-            axes: String describing the channel axes, e.g. 'YXS' or 'CYX'.
-            photometric: Photometric interpretation ('rgb', 'minisblack', 'maxisblack').
-            ome_metadata: OME metadata dictionary to include in the TIFF.
-            registered: Registered image array. If None, uses self.registered.
-            _T: Transformation matrix. If None, uses the appropriate matrix from self.
-            matchedVis: Image showing matched features. If None, uses self.matchedVis.
-        """
-        # Save registered image
-        self.save_registered_image(
-            output_dir=output_dir,
-            identifier=identifier,
-            axes=axes,
-            photometric=photometric,
-            ome_metadata=ome_metadata,
-            registered=registered
+        registered, T = register_images_standalone(
+            self._moving, self._fixed,
+            axes_moving=self._config.axes_moving,
+            axes_fixed=self._config.axes_fixed,
+            max_width=self._config.max_width,
+            convert_to_grayscale=self._config.convert_to_grayscale,
+            deconvolve_moving=self._config.deconvolve_moving,
+            deconvolve_fixed=self._config.deconvolve_fixed,
+            decon_scale_factor=self._config.decon_scale_factor,
+            perspective_transform=self._config.perspective_transform,
+            feature_detection_method=self._config.feature_detection_method,
+            flann=self._config.flann,
+            mutual_nearest_neighbor=self._config.mutual_nearest_neighbor,
+            ratio_test=self._config.ratio_test,
+            keep_fraction=self._config.keep_fraction,
+            min_good_matches=self._config.min_good_matches,
+            verbose=self._config.verbose,
         )
-
-        # Save QC files
-        self.save_qc(
-            output_dir=output_dir,
-            identifier=identifier,
-            _T=_T,
-            matchedVis=matchedVis
-        )
+        self.registered = registered
+        self.T = T
 
 
 def register_images(
-    data: InSituData, # type: ignore
-    image_to_be_registered: Union[str, os.PathLike, Path],
-    axes_image: Literal["CYX", "YXC", "YXS"],  # axes of the image to be registered, e.g. YXS for RGB images, CYX/YXC for IF images
-    axes_template: Literal["YX", "CYX", "YXS"],  # axes of the template image, e.g. YX for grayscale images
-    channel_names: Union[str, List[str]],
-    channel_name_for_registration: Optional[str] = None,  # name used for the nuclei image. Only required for IF images.
+    data: InSituData,  # type: ignore
+    image_path: str | os.PathLike | Path | None = None,
+    channel_names: str | list[str] | None = None,
+    channel_name_for_registration: str | None = None,
     template_image_name: str = "nuclei",
     save_registered_images: bool = True,
-    output_dir: Union[str, os.PathLike, Path] = None,
-    min_good_matches_per_area: int = 5, # unit: 1/mm²
+    output_dir: str | os.PathLike | Path = None,
+    min_good_matches_per_area: int = 5,  # unit: 1/mm²
     test_flipping: bool = True,
     decon_scale_factor: float = 0.2,
-    deconvolve_template: bool = False,  # whether to apply HE deconvolution to the template
+    deconvolve_template: bool = False,
     physicalsize: str = 'µm',
-    identifier: Optional[str] = None,
+    debug: bool = False,
+    rank_matches_for_qc: bool = True,
+    identifier: str | None = None,
+    force_failure_qc: bool = False,
+    *,
+    image_to_be_registered: str | os.PathLike | Path | None = None,
+    raise_on_insufficient_matches: bool = False,
     ):
     """
     Register images stored in an InSituData object.
@@ -583,47 +147,81 @@ def register_images(
     Args:
         data (InSituData): The InSituData object containing the images.
         image_to_be_registered (Union[str, os.PathLike, Path]): Path to the image to be registered.
-        axes_image (Literal["CYX", "YXC", "YXS"]): Axes of the image to be registered, e.g. YXS for RGB images, CYX/YXC for IF images.
-        axes_template (Literal["YX", "CYX", "YXS"]): Axes of the template image, e.g. YX for grayscale images, YXS for HE images.
+            Axes for this image are inferred from file metadata.
+        image_path (Optional[Union[str, os.PathLike, Path]], optional): Alias for
+            ``image_to_be_registered``. Prefer this name for new code.
         channel_names (Union[str, List[str]]): Names of the channels in the image.
         channel_name_for_registration (Optional[str], optional): Name of the channel used for registration. Required for IF images. Defaults to None.
         template_image_name (str, optional): Name of the template image. Defaults to "nuclei".
         save_registered_images (bool, optional): Whether to save the registered images. Defaults to True.
+        output_dir (Union[str, os.PathLike, Path], optional): Directory where registered
+            images and QC files are saved when ``save_registered_images=True``.
+            Defaults to None (saves next to the InSituData project directory).
         min_good_matches_per_area (int, optional): Minimum number of good matches per mm² required for registration. Defaults to 5.
         test_flipping (bool): Whether to test flipping of images during registration. Defaults to True.
         decon_scale_factor (float, optional): Scale factor for deconvolution. Defaults to 0.2.
         deconvolve_template (bool, optional): Whether to apply HE color deconvolution to the template image.
             Set to True when the template is an H&E RGB image. Defaults to False.
         physicalsize (str, optional): Unit of physical size. Defaults to 'µm'.
+        debug (bool, optional): If True, save registration QC/diagnostic files for successful runs.
+            For histology registrations, also saves the deconvolved target image to
+            ``registered_images/registration_qc``.
+            If ``deconvolve_template=True``, also saves the deconvolved template image there.
+            If False, skip routine QC file generation to speed up processing. Defaults to False.
+        rank_matches_for_qc (bool, optional): If True, apply additional QC ranking before
+            plotting matches. If False, keep original match order from feature extraction.
+            Defaults to False.
         identifier (Optional[str], optional): An identifier string printed as a header to distinguish
             output when running in a loop. Defaults to None (auto-generated from slide/sample ID).
+        force_failure_qc (bool, optional): If True, simulate a "not enough matches" failure even when
+            sufficient matches are found. The QC images are saved and NotEnoughFeatureMatchesError is
+            raised. Useful for testing the failure-path output without needing a bad image pair. Defaults to False.
+        raise_on_insufficient_matches (bool, optional): Controls behavior when registration
+            fails due to insufficient feature matches. If True, re-raises
+            NotEnoughFeatureMatchesError. If False (default), emits a warning and aborts registration
+            for the current image, allowing outer loops to continue.
 
     Raises:
-        ValueError: If `axes_image` is "CYX"/"YXC" and `channel_name_for_registration` is None.
+        ValueError: If neither `image_to_be_registered` nor `image_path` is provided,
+            or if both are provided at the same time.
+        ValueError: If inferred `axes_image` is "CYX"/"YXC" and `channel_name_for_registration` is None.
         FileNotFoundError: If the image to be registered is not found.
         ValueError: If more than one image name is retrieved for histo images.
         ValueError: If no image name is found in the file.
-        ValueError: If an unknown axes configuration is provided.
+        ValueError: If inferred `axes_image` has an unknown configuration.
         ValueError: If no channel indicator `C` is found in the image axes for IF images.
-        ValueError: If deconvolve_template is True but axes_template is not RGB (YXS/SYX).
+        ValueError: If inferred template axes metadata is missing.
+        ValueError: If deconvolve_template is True but inferred `axes_template` is not RGB (YXS/SYX).
         ValueError: If IF channel metadata is inconsistent (channel count mismatch, duplicates,
             missing registration channel, or no channels left to register).
         ValueError: If decon_scale_factor is not strictly positive.
 
     Returns:
-        None
+        None: The registered image(s) are added directly to ``data.images`` in place.
+            If ``save_registered_images=True``, OME-TIFF files are also written to
+            ``output_dir``.
     """
     # Tree drawing characters
     _TSIGN = "\u251c"   # ├
     _LSIGN = "\u2514"   # └
     _VLINE = "\u2502"   # │
     _HLINE = "\u2500"   # ─
-    _TICK  = "\u2714"   # ✔
     _SEP   = "\u2501"   # ━
-    _prefix = "  "  # consistent print prefix
 
     _t_start = time.time()
-    tracemalloc.start()
+
+    def _unwrap_first_level_image(img_obj, image_name: str):
+        """Return the highest-resolution level when image-like input is nested as list/tuple."""
+        if isinstance(img_obj, (list, tuple)):
+            if len(img_obj) == 0:
+                raise ValueError(f"Image '{image_name}' is empty.")
+            level0 = img_obj[0]
+            while isinstance(level0, (list, tuple)):
+                if len(level0) == 0:
+                    raise ValueError(f"Image '{image_name}' has an empty nested pyramid level.")
+                level0 = level0[0]
+            return level0
+        return img_obj
 
     if decon_scale_factor <= 0:
         raise ValueError(
@@ -631,69 +229,37 @@ def register_images(
             f"got {decon_scale_factor}."
         )
 
+    if image_path is not None and image_to_be_registered is not None:
+        raise ValueError("Provide only one of `image_to_be_registered` or `image_path`, not both.")
+
+    if image_path is not None:
+        image_to_be_registered = image_path
+    elif image_to_be_registered is not None:
+        warnings.warn(
+            "`image_to_be_registered` is deprecated and will be removed in a future release. "
+            "Use `image_path` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    else:
+        raise ValueError("Either `image_path` or `image_to_be_registered` must be provided.")
+
+    if channel_names is None:
+        raise ValueError("`channel_names` must be provided.")
+
     # make sure the given image names are in a list
     channel_names = convert_to_list(channel_names)
 
-    # determine the structure of the image axes and check other things
-    if axes_image == "YXS":
-        image_type = "histo"
-
-        # make sure that there is only one image name given
-        if len(channel_names) > 1:
-            raise ValueError(f"More than one image name retrieved ({channel_names})")
-
-        if len(channel_names) == 0:
-            raise ValueError(f"No image name found in file {image_to_be_registered}")
-    elif axes_image in ["CYX", "YXC"]:
-        image_type = "IF"
-    else:
-        raise ValueError(f"Unknown axes configuration {axes_image} for target image. Please use 'YXS' for histo images or 'CYX'/'YXC' for IF images.")
-        raise ValueError(
-            f"For IF images (`axes_image` in {{'CYX', 'YXC'}}), "
-            f"`channel_name_for_registration` must be provided. "
-            f"Available channels: {channel_names}"
-        )
-    # if image type is IF, the channel name for registration needs to be given
-    if image_type == "IF" and channel_name_for_registration is None:
-        raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")
-
     if output_dir is None:
-        # define output directory
         output_dir = data.path.parent / "registered_images"
     else:
         output_dir = Path(output_dir) / "registered_images"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    # if output_dir.is_dir() and not force:
-    #     raise FileExistsError(f"Output directory {output_dir} exists already. If you still want to run the registration, set `force=True`.")
-
     # check if image path exists
     image_to_be_registered = Path(image_to_be_registered)
     if not image_to_be_registered.is_file():
         raise FileNotFoundError(f"No such file found: {str(image_to_be_registered)}")
-
-    # axes_template = "YX"
-    # if image_type == "histo":
-    #     axes_image = "YXS"
-
-    #     # make sure that there is only one image name given
-    #     if len(channel_names) > 1:
-    #         raise ValueError(f"More than one image name retrieved ({channel_names})")
-
-    #     if len(channel_names) == 0:
-    #         raise ValueError(f"No image name found in file {image_to_be_registered}")
-
-    # elif image_type == "IF":
-    #     axes_image = "CYX"
-    # else:
-    #     raise UnknownOptionError(image_type, available=["histo", "IF"])
-
-    # Print header
-    _header_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
-    _header_channels = ", ".join(channel_names)
-    print(f"{_SEP * 80}", flush=True)
-    print(f"Registration: {tf.Bold}{_header_id}{tf.ResetAll} {_HLINE}{_HLINE} {_header_channels} ({image_type})", flush=True)
-    print(f"{_SEP * 80}", flush=True)
 
     # check that images are loaded
     if data.images.is_empty or template_image_name not in data.images:
@@ -704,11 +270,47 @@ def register_images(
         )
 
     # read images
-    print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Loading images", flush=True)
-    image = imread(image_to_be_registered) # e.g. HE image
+    logger.info("%s%s%s Loading images", _TSIGN, _HLINE, _HLINE)
+    image, ome_meta, axes_image, pixel_size_image = read_image(image_to_be_registered)
+    image = _unwrap_first_level_image(image, str(image_to_be_registered))
 
-    # sometimes images are read with an empty time dimension in the first axis.
-    # If this is the case, it is removed here.
+    # infer template axes from loaded image metadata
+    axes_template = data.images.metadata[template_image_name].get("axes")
+    if axes_template is None:
+        raise ValueError(
+            f"Template image '{template_image_name}' has no 'axes' metadata. "
+            "Please ensure image metadata includes axes information."
+        )
+
+    if axes_image == "YXS":
+        image_type = "histo"
+    elif axes_image in ["CYX", "YXC"]:
+        image_type = "IF"
+    else:
+        raise ValueError(
+            f"Unknown inferred axes configuration '{axes_image}' for target image. "
+            "Expected 'YXS' for histology RGB or 'CYX'/'YXC' for IF images."
+        )
+
+    # make sure channel naming is consistent with image type
+    if image_type == "histo":
+        if len(channel_names) > 1:
+            raise ValueError(f"More than one image name retrieved ({channel_names})")
+        if len(channel_names) == 0:
+            raise ValueError(f"No image name found in file {image_to_be_registered}")
+
+    # Print header
+    _header_id = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}"
+    _header_channels = ", ".join(channel_names)
+    logger.info("%s", _SEP * 80)
+    logger.info("Registration: %s %s%s %s (%s)", _header_id, _HLINE, _HLINE, _header_channels, image_type)
+    logger.info("%s", _SEP * 80)
+
+    # if image type is IF, the channel name for registration needs to be given
+    if image_type == "IF" and channel_name_for_registration is None:
+        raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")
+
+    # sometimes images are read with an empty time dimension in the first axis
     if len(image.shape) == 4:
         image = image[0]
 
@@ -741,203 +343,236 @@ def register_images(
                 "`channel_name_for_registration`. Provide at least one additional channel."
             )
 
-    # # read images in InSituData object
-    template = data.images[template_image_name][0] # usually the nuclei/DAPI image is the template. Use highest resolution of pyramid.
-    print(f"{_prefix}{_VLINE}     Image:    {image.shape}", flush=True)
-    print(f"{_prefix}{_VLINE}     Template: {template.shape}", flush=True)
+    # Load template
+    template = data.images[template_image_name][0]
+    template = _unwrap_first_level_image(template, template_image_name)
+    logger.info("%s     Image:    %s", _VLINE, image.shape)
+    logger.info("%s     Template: %s", _VLINE, template.shape)
 
-    # extract OME metadata
-    #ome_metadata_template = data.images.metadata[template_image_name]["OME"]
-
-    # get pixel size from image metadata
-    pixel_size = data.images.metadata[template_image_name]["pixel_size"]
-
-    # extract pixel size for x and y from OME metadata
-    #pixelsizes = {key: ome_metadata_template['Image']['Pixels'][key] for key in ['PhysicalSizeX', 'PhysicalSizeY']}
+    # get pixel size from template image metadata
+    pixel_size_template = data.images.metadata[template_image_name]["pixel_size"]
 
     # generate OME metadata for saving
     ome_metadata = {
         'SignificantBits': 8,
         'PhysicalSizeXUnit': physicalsize,
         'PhysicalSizeYUnit': physicalsize,
-        'PhysicalSizeX': pixel_size,
-        'PhysicalSizeY': pixel_size
-        }
+        'PhysicalSizeX': pixel_size_template,
+        'PhysicalSizeY': pixel_size_template,
+    }
 
-    # determine minimum number of good matches that are necessary for the registration to be performed
+    # determine minimum number of good matches required
     h, w = template.shape[:2]
-    image_area = h * w * pixel_size**2 / 1000**2 # in mm²
+    image_area = h * w * pixel_size_template ** 2 / 1000 ** 2  # in mm²
     min_good_matches = int(min_good_matches_per_area * image_area)
 
     # Validate deconvolve_template parameter
     if deconvolve_template and axes_template not in ["YXS", "SYX"]:
-        raise ValueError(f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', got '{axes_template}'")
-
-    # the selected image will be a grayscale image in both cases (nuclei image or deconvolved hematoxylin staining)
-    if image_type == "histo":
-        print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Color deconvolution (scale factor: {decon_scale_factor})", flush=True)
-        # deconvolve HE - performed on resized image to save memory
-        # TODO: Scale to max width instead of using a fixed scale factor before deconvolution (`scale_to_max_width`)
-        nuclei_img, eo, dab = deconvolve_he(img=resize_image(image, scale_factor=decon_scale_factor, axes="YXS"),
-                                    return_type="grayscale", convert=True)
-
-        # bring back to original size
-        nuclei_img = resize_image(nuclei_img, scale_factor=1/decon_scale_factor, axes="YX")
-        del eo, dab  # free memory - deconvolution intermediates no longer needed
-
-        # set nuclei_channel and nuclei_axis to None
-        channel_name_for_registration = channel_axis = None
-    else:
-        # image_type is "IF" then
-        # get index of nuclei channel
-        channel_id_for_registration = channel_names.index(channel_name_for_registration)
-
-        print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Selecting nuclei channel (index: {channel_id_for_registration})", flush=True)
-        # # select nuclei channel from IF image
-        # if channel_name_for_registration is None:
-        #     raise TypeError("Argument `nuclei_channel` should be an integer and not NoneType.")
-
-        # select dapi channel for registration and convert to numpy array
-        nuclei_img = np.take(image, channel_id_for_registration, channel_axis).compute()
-
-    # Setup image registration objects - is important to load and scale the images.
-    # The reason for this are limits in C++, not allowing to perform certain OpenCV functions on big images.
-
-    # First: Setup the ImageRegistration object for the whole image (before deconvolution in histo images and multi-channel in IF)
-    imreg_complete = ImageRegistration(
-        image=image,
-        template=template,
-        axes_image=axes_image,
-        axes_template=axes_template,
-        deconvolve_template=deconvolve_template,
-        decon_scale_factor=decon_scale_factor,
-        verbose=True,
-        print_prefix=_prefix
+        raise ValueError(
+            f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', "
+            f"got '{axes_template}'"
         )
-    # load and scale the whole image
-    imreg_complete.load_and_scale_images()
 
-    # Determine the axes_template for the selected registration object
-    # If template was deconvolved, it's now grayscale (YX)
-    axes_template_selected = "YX" if deconvolve_template else axes_template
+    # QC directory (used for both debug and failure QC)
+    qc_dir_resolved = Path(output_dir) / "registration_qc"
+    if debug:
+        logger.info("%s%s%s QC directory: %s", _TSIGN, _HLINE, _HLINE, qc_dir_resolved)
 
-    # setup ImageRegistration object with the nucleus image (either from deconvolution or just selected from IF image)
-    imreg_selected = ImageRegistration(
-        image=nuclei_img,
-        template=imreg_complete.template,  # use the (potentially deconvolved) template
-        axes_image="YX", # at this point the nuclei image was extracted and therefore the axes are always "YX"
-        axes_template=axes_template_selected,
-        max_width=4000,
-        convert_to_grayscale=False,
-        perspective_transform=False,
-        min_good_matches=min_good_matches,
-        print_prefix=_prefix
-    )
+    tracemalloc.start()
+    try:
+        if image_type == "histo":
+            save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
 
-    # run all steps to extract features and get transformation matrix
-    imreg_selected.load_and_scale_images()
-    del imreg_selected.template  # free memory - h/w already stored
-    del imreg_complete.image_scaled, imreg_complete.template_scaled  # free memory
-
-    # perform registration to extract the common features ptsA and ptsB
-    imreg_selected.extract_features(test_flipping=test_flipping)
-    imreg_selected.calculate_transformation_matrix()
-    del nuclei_img  # free memory - features and transformation matrix already extracted
-
-    if image_type == "histo":
-        # in case of histo RGB images, the channels are in the third axis and OpenCV can transform them
-        if imreg_complete.image_resized is None:
-            imreg_selected.image = imreg_complete.image  # use original image
-            del imreg_complete.image  # free memory - avoid holding two references
-        else:
-            imreg_selected.image_resized = imreg_complete.image_resized  # use resized original image
-            del imreg_complete.image_resized  # free memory - avoid holding two references
-
-        # perform registration
-        imreg_selected.perform_registration()
-
-        if save_registered_images:
-            # save files
-            save_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
-            imreg_selected.save(
-                output_dir=output_dir,
-                identifier = save_identifier,
-                axes=axes_image,
-                photometric='rgb',
-                ome_metadata=ome_metadata
+            try:
+                registered, T = register_images_standalone(
+                    moving=image,
+                    fixed=template,
+                    axes_moving=axes_image,
+                    axes_fixed=axes_template,
+                    deconvolve_moving=True,
+                    deconvolve_fixed=deconvolve_template,
+                    decon_scale_factor=decon_scale_factor,
+                    min_good_matches=min_good_matches,
+                    test_flipping=test_flipping,
+                    debug=debug,
+                    qc_dir=qc_dir_resolved,
+                    qc_identifier=save_identifier,
+                    rank_matches_for_qc=rank_matches_for_qc,
+                    pixel_size_moving=pixel_size_image,
+                    pixel_size_fixed=pixel_size_template,
+                    physical_size_unit=physicalsize,
+                    force_failure=force_failure_qc,
                 )
+            except NotEnoughFeatureMatchesError as exc:
+                # Preserve failure QC even when debug=False (debug=True already handled by standalone)
+                if not debug and output_dir is not None:
+                    _failed_identifier = f"{data.slide_id}__{data.sample_id}__{channel_names[0]}__FAILED"
+                    partial = exc.partial_result
+                    if partial is not None and partial.matchedVis is not None:
+                        logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
+                        qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                        import matplotlib.pyplot as plt
+                        plt.imshow(partial.matchedVis)
+                        plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                        plt.close()
+                if raise_on_insufficient_matches:
+                    raise
 
-            # # save metadata
-            # data.metadata["method_params"]['images'][f'registered_{channel_names[0]}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
-            # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
-            # #self._save_metadata_after_registration()
-
-        data.images.add_image(
-            image=imreg_selected.registered,
-            channel_names=channel_names[0],
-            axes=axes_image,
-            pixel_size=pixel_size,
-            ome_meta=ome_metadata,
-            overwrite=True
-            )
-
-        del imreg_complete, imreg_selected, image, template
-    else:
-        # image_type is IF
-        # In case of IF images the channels are normally in the first axis and each channel is registered separately
-        # Further, each channel is then saved separately as grayscale image.
-
-        # iterate over channels
-        for i, n in enumerate(channel_names):
-            # skip the DAPI image
-            if n == channel_name_for_registration:
-                continue
-
-            print(f"{_prefix}{_TSIGN}{_HLINE}{_HLINE} Registering channel: {n}", flush=True)
-            if imreg_complete.image_resized is None:
-                # select one channel from non-resized original image
-                imreg_selected.image = np.take(imreg_complete.image, i, channel_axis)
-            else:
-                # select one channel from resized original image
-                imreg_selected.image_resized = np.take(imreg_complete.image_resized, i, channel_axis)
-
-            # perform registration
-            imreg_selected.perform_registration()
+                warnings.warn(
+                    (
+                        f"Registration skipped for {data.slide_id}/{data.sample_id} ({channel_names[0]}): "
+                        f"{exc}"
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
+                logger.warning(
+                    "%s%s%s Registration skipped for %s/%s (%s): %s",
+                    _LSIGN,
+                    _HLINE,
+                    _HLINE,
+                    data.slide_id,
+                    data.sample_id,
+                    channel_names[0],
+                    exc,
+                )
+                return
 
             if save_registered_images:
-                # save files
-                save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
-
-                imreg_selected.save(
+                _outfile = save_registered_image_tiff(
                     output_dir=output_dir,
                     identifier=save_identifier,
-                    axes='YX',
-                    photometric='minisblack',
-                    ome_metadata=ome_metadata
-                    )
+                    registered=registered,
+                    axes=axes_image,
+                    photometric='rgb',
+                    ome_metadata=ome_metadata,
+                )
+                logger.info("%s     Saved: %s", _VLINE, _outfile)
 
-                # # save metadata
-                # data.metadata["method_params"]['images'][f'registered_{n}_filepath'] = os.path.relpath(imreg_selected.outfile, data.path).replace("\\", "/")
-                # write_dict_to_json(data.metadata["method_params"], data.path / "experiment_modified.xenium")
-                # #self._save_metadata_after_registration()
-            # if add_registered_image:
             data.images.add_image(
-                image=imreg_selected.registered,
-                channel_names=n,
-                axes="YX", # currently the images are added channel wise and therefore it is always "YX"
-                pixel_size=pixel_size,
+                image=registered,
+                channel_names=channel_names[0],
+                axes=axes_image,
+                pixel_size=pixel_size_template,
                 ome_meta=ome_metadata,
-                overwrite=True
+                overwrite=True,
+            )
+
+        else:
+            # image_type is IF
+            channel_id_for_registration = channel_names.index(channel_name_for_registration)
+            logger.info("%s%s%s Selecting registration channel (index: %s)", _TSIGN, _HLINE, _HLINE, channel_id_for_registration)
+
+            nuclei_img = np.take(image, channel_id_for_registration, channel_axis)
+            if hasattr(nuclei_img, "compute"):
+                nuclei_img = nuclei_img.compute()
+
+            _qc_ref_name = channel_name_for_registration
+            qc_identifier_if = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}"
+
+            try:
+                _, T = register_images_standalone(
+                    moving=nuclei_img,
+                    fixed=template,
+                    axes_moving="YX",
+                    axes_fixed=axes_template,
+                    deconvolve_fixed=deconvolve_template,
+                    decon_scale_factor=decon_scale_factor,
+                    min_good_matches=min_good_matches,
+                    test_flipping=test_flipping,
+                    debug=debug,
+                    qc_dir=qc_dir_resolved,
+                    qc_identifier=qc_identifier_if,
+                    rank_matches_for_qc=rank_matches_for_qc,
+                    pixel_size_moving=pixel_size_image,
+                    pixel_size_fixed=pixel_size_template,
+                    physical_size_unit=physicalsize,
+                    force_failure=force_failure_qc,
+                )
+            except NotEnoughFeatureMatchesError as exc:
+                # Preserve failure QC even when debug=False
+                if not debug and output_dir is not None:
+                    _failed_identifier = f"{data.slide_id}__{data.sample_id}__{_qc_ref_name}__FAILED"
+                    partial = exc.partial_result
+                    if partial is not None and partial.matchedVis is not None:
+                        logger.info("%s%s%s Saving failure QC images", _TSIGN, _HLINE, _HLINE)
+                        qc_dir_resolved.mkdir(parents=True, exist_ok=True)
+                        import matplotlib.pyplot as plt
+                        plt.imshow(partial.matchedVis)
+                        plt.savefig(qc_dir_resolved / f"{_failed_identifier}__matches_overview.png", dpi=400)
+                        plt.close()
+                if raise_on_insufficient_matches:
+                    raise
+
+                warnings.warn(
+                    (
+                        f"Registration skipped for {data.slide_id}/{data.sample_id} ({_qc_ref_name}): "
+                        f"{exc}"
+                    ),
+                    UserWarning,
+                    stacklevel=2,
+                )
+                logger.warning(
+                    "%s%s%s Registration skipped for %s/%s (%s): %s",
+                    _LSIGN,
+                    _HLINE,
+                    _HLINE,
+                    data.slide_id,
+                    data.sample_id,
+                    _qc_ref_name,
+                    exc,
+                )
+                return
+
+            del nuclei_img
+
+            # Compute output dimensions from template
+            ref_h, ref_w = get_height_and_width(
+                template if not hasattr(template, "compute") else template.compute(),
+                ImageAxes(axes_template),
+            )
+
+            # Warp each non-registration channel using the shared transformation matrix
+            for i, n in enumerate(channel_names):
+                if n == channel_name_for_registration:
+                    continue
+
+                logger.info("%s%s%s Registering channel: %s", _TSIGN, _HLINE, _HLINE, n)
+                channel = np.take(image, i, channel_axis)
+                if hasattr(channel, "compute"):
+                    channel = channel.compute()
+                channel = np.asarray(channel)
+
+                registered_channel = apply_warp(channel, T, (ref_w, ref_h), "YX")
+
+                if save_registered_images:
+                    save_identifier = f"{data.slide_id}__{data.sample_id}__{n}"
+                    _outfile = save_registered_image_tiff(
+                        output_dir=output_dir,
+                        identifier=save_identifier,
+                        registered=registered_channel,
+                        axes='YX',
+                        photometric='minisblack',
+                        ome_metadata=ome_metadata,
+                    )
+                    logger.info("%s     Saved: %s", _VLINE, _outfile)
+
+                data.images.add_image(
+                    image=registered_channel,
+                    channel_names=n,
+                    axes="YX",
+                    pixel_size=pixel_size_template,
+                    ome_meta=ome_metadata,
+                    overwrite=True,
                 )
 
-        # free RAM
-        del imreg_complete, imreg_selected, image, template
-
-    _elapsed = time.time() - _t_start
-    _, _peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
-    print(f"{_prefix}{_LSIGN}{_HLINE}{_HLINE} Done ({_elapsed:.1f} s, peak memory: {_peak_mem_str})", flush=True)
-    gc.collect()
+        _elapsed = time.time() - _t_start
+        _, _peak_mem = tracemalloc.get_traced_memory()
+        _peak_mem_str = f"{_peak_mem / 1024**3:.2f} GB" if _peak_mem >= 1024**3 else f"{_peak_mem / 1024**2:.1f} MB"
+        logger.info("%s%s%s Done (%.1f s, peak memory: %s)", _LSIGN, _HLINE, _HLINE, _elapsed, _peak_mem_str)
+        gc.collect()
+    finally:
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
 
 

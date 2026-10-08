@@ -7,13 +7,9 @@
 </p>
 
 InSituPy is a Python package designed to facilitate the analysis of single-cell spatial transcriptomics data. With InSituPy, you can easily load, visualize, and analyze the data, enabling and simplifying the comprehensive exploration of spatial gene expression patterns within tissue sections and across multiple samples.
-Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology but a broader range of reading functions will be implemented in the future.
+Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology. Readers for [Visium](https://www.10xgenomics.com/platforms/visium) and [QuPath](https://qupath.github.io/) data are available as well, as is conversion to and from [SpatialData](https://spatialdata.scverse.org).
 
 ## Latest changes
-
-> **Pre-release available: [0.12.0b6](https://github.com/SpatialPathology/InSituPy/releases/tag/0.12.0b6)**
-> Try it with `pip install insitupy-spatial==0.12.0b6`.
-> Highlights: filter layers for `InSituExperiment`, cross-sample table workflow (`build_table`), embedding `highlight`/`dim`, QC redesign, and major save-pipeline hardening.
 
 *!!!Warning: This repository is under very active development and it cannot be ruled out that changes might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!*
 
@@ -23,22 +19,18 @@ For the latest developments check out the [releases](https://github.com/SpatialP
 
 ### Overall data structure
 
-A key feature of InSituPy is its hierarchical data structure, centered around the `InSituExperiment` and `InSituData` objects:
-- `InSituData`: Represents and manages at the individual sample level. It integrates all modalities of spatial omics datasets, including cellular readouts, cellular boundaries, images, transcripts, regions, and annotations.
-- `InSituExperiment`: Aggregates multiple `InSituData` instances and links them with associated metadata, enabling cross-sample analysis and organization.
+InSituPy keeps everything that belongs to a tissue section in one place and organises many sections into one study:
+
+- `InSituData`: one sample. It integrates all modalities of a spatial omics dataset: cells (gene counts and boundaries), images, transcripts, annotations, regions and units (e.g. Visium spots or niches).
+- `InSituExperiment`: aggregates multiple `InSituData` instances and links them with a sample table (metadata), enabling cross-sample analysis.
 
 <p align="center">
-   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="800">
+   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_hierarchy.svg?raw=true" width="800">
 </p>
 
+New to InSituPy? Read [InSituPy at a glance](https://insitupy.readthedocs.io/en/latest/overview.html) for a plain-language introduction to this structure.
 
-### Documentation
-
-For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
-
-InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you are not familiar with these platforms, see the documentation of [Project Jupyter](https://jupyter.org/).
-
-## Installation
+### Installation
 
 Make sure you have Conda installed on your system before proceeding with these steps. If not, you can install Miniconda or Anaconda from [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 
@@ -61,7 +53,7 @@ This base installation includes napari and related visualization dependencies.
 
 InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
 
-**Optional: install with SpatialData support (`spatialdata>=0.7.2`):**
+**Optional: install with SpatialData support (`spatialdata>=0.8.0,<0.9.0`):**
 
    ```bash
    pip install insitupy-spatial[spatialdata]
@@ -71,6 +63,115 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
 
 For alternative installation strategies see the [documentation](https://insitupy.readthedocs.io/en/latest/installation.html).
 
+### Quick start
+
+```python
+import insitupy as ispy
+
+xd = ispy.io.read_xenium("path/to/xenium_output")   # read one Xenium run
+ispy.pp.normalize_and_transform(xd)
+ispy.pp.reduce_dimensions(xd)
+ispy.pp.cluster_cells(xd)
+xd.show()                                           # interactive viewer (napari)
+```
+
+The [tutorials](https://insitupy.readthedocs.io/en/latest/tutorials/index.html) walk through this step by step with demo data.
+### Documentation
+
+For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
+
+InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you are not familiar with these platforms, see the documentation of [Project Jupyter](https://jupyter.org/).
+
+<!-- ai-integration-start -->
+
+### AI Assistent Integration
+
+#### Which integration should I use?
+
+InSituPy ships two complementary integrations: a **skill** (a static reference any assistant can
+load, versioned per release) and an **MCP server** (live introspection against the installed
+source). Pick by how you work - they cooperate rather than compete.
+
+```mermaid
+flowchart LR
+    Q{"How are you working?"}
+
+    A["Code agent<br>Claude Code, Codex, Cursor, ..."]
+    B["Plain web chat<br>ChatGPT, Claude.ai"]
+    C["Want always-current<br>API introspection"]
+
+    A1["pip install insitupy-spatial<br>then: insitupy install-skill"]
+    B1["upload the release ZIP<br>or paste llms.txt"]
+    C1["add the MCP server<br>uvx insitupy-mcp"]
+
+    R1["insitupy-api skill<br>in your agent's skills dir"]
+    R2["insitupy-api skill<br>loaded into the chat"]
+    R3["live tools that<br>never go stale"]
+
+    Q --> A
+    Q --> B
+    Q --> C
+    A --> A1
+    A1 --> R1
+    B --> B1
+    B1 --> R2
+    C --> C1
+    C1 --> R3
+    R3 -.->|skill defers to MCP| R1
+```
+
+#### Skill
+
+**Easiest option:** install the InSituPy skill (`insitupy-api`). It teaches any AI assistant - a coding agent or
+plain web chat - the data model, the typical read -> preprocess -> tools -> plot -> save
+workflow, and where to look for detailed API references, so it writes correct InSituPy code
+without guessing from memory. No server, no setup beyond installing the package.
+
+- **Code agents** (Claude Code, Codex, Cursor, ...): after `pip install insitupy-spatial`, run
+
+  ```bash
+  insitupy install-skill
+  ```
+
+  This copies the skill to `./.agents/skills/insitupy-api/` by default; pass `--target
+  {claude,codex,cursor}` or `--path DIR` to install elsewhere, and `--force` to upgrade an
+  existing copy.
+- **Plain web chat** (ChatGPT, Claude.ai, no skill loader): either paste the contents of the
+  repo-root [`llms.txt`](https://github.com/SpatialPathology/InSituPy/blob/main/llms.txt) (or its
+  raw URL) into the chat/project knowledge, or upload
+  the `insitupy-api-<version>.zip` asset attached to the
+  [latest release](https://github.com/SpatialPathology/InSituPy/releases/latest).
+
+The skill is versioned and self-upgrading: if it's missing something you expect, check your
+installed `insitupy.__version__` against the skill's stamped version and re-run `insitupy
+install-skill --force` (or re-fetch the ZIP/`llms.txt`) if it's out of date.
+
+If the `insitupy` MCP server (below) is also available in your session, an agent following the
+skill will prefer its live tools automatically - the skill is a fallback, not a competing source.
+
+#### MCP Server
+
+For power users who want live, always-current introspection (not just a static reference),
+InSituPy also ships an [MCP](https://modelcontextprotocol.io) server that gives AI assistants live access to the API, source code, and workflow examples. Because it is a standard MCP server (stdio), it works with any MCP-compatible client, such as **Claude Desktop**, **Claude Code**, **Cursor**, **Codex**, **Windsurf**, **Continue.dev**, or **Cline**. Setup has mainly been exercised with Claude Desktop and Claude Code; if you use it with another client, feedback is welcome.
+
+The easiest way to activate the server in **Claude Desktop** is to add the following to your `claude_desktop_config.json` - no separate installation or repository clone required:
+
+```json
+{
+  "mcpServers": {
+    "insitupy": {
+      "command": "uvx",
+      "args": ["--python", "3.12", "--from", "insitupy-spatial[mcp]", "insitupy-mcp"]
+    }
+  }
+}
+```
+
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
+
+See **[MCP_TUTORIAL.md](https://github.com/SpatialPathology/InSituPy/blob/main/MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
+
+<!-- ai-integration-end -->
 
 ## Features
 
@@ -90,6 +191,8 @@ We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https:/
 ## Contributing
 
 Contributions are welcome! If you find any issues or have suggestions for new features, please open an [issue](https://github.com/SpatialPathology/InSituPy/issues), submit a pull request or contact us via our [zulip chat](https://insitupy.zulipchat.com).
+
+Before opening a pull request, please read the [Contributing Guide](CONTRIBUTING.md) and, if you used an AI assistant, the [AI Policy](AI_POLICY.md). The repo also ships an [in-repo AI dev-workflow](CONTRIBUTING.md#in-repo-ai-dev-workflow) (`/review`, `/plan`/`/plan-opus`/`/plan-fable`, `/implement`) usable across common AI coding agents.
 
 ## Citation
 

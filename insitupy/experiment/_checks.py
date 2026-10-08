@@ -1,12 +1,11 @@
-from typing import Optional
 
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.utils._checks import _is_list_unique
 
 
 def _all_obs_names_unique(
     exp,
-    cells_layer: Optional[str],
+    cells_layer: str | None,
     ):
 
     all_obs_names = []

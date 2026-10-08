@@ -1,25 +1,26 @@
 import logging
 import os
+import warnings
 from numbers import Number
 from pathlib import Path
-from typing import Dict, Literal, Optional, Union
+from typing import Literal
 
 import dask.dataframe as dd
 import pandas as pd
 from shapely import affinity
 
-from insitupy import __version__
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidXeniumDirectory
-from insitupy._io._qupath import (_read_boundaries_qupath,
-                                  _read_measurements_qupath)
+from insitupy._io._qupath import _read_boundaries_qupath, _read_measurements_qupath
 from insitupy._io._read import _read_boundaries, _read_measurements
-from insitupy._io._xenium import (_read_boundaries_from_xenium,
-                                  _read_table_from_xenium,
-                                  _restructure_transcripts_dataframe)
+from insitupy._io._xenium import (
+    _read_boundaries_from_xenium,
+    _read_table_from_xenium,
+    _restructure_transcripts_dataframe,
+)
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
-from insitupy.dataclasses.dataclasses import CellData
+from insitupy.containers.cell_data import CellData
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,56 @@ def _handle_xenium_image_names(im_path):
 
     return ch, ch_name
 
+def _warn_ignored_spatialdata_params(
+    nuclei_type: str,
+    load_cell_segmentation_images: bool,
+    load_background_images: bool,
+    transcript_mode: str,
+    restructure_transcripts: bool,
+) -> None:
+    """Warn once, naming every ``read_xenium`` parameter the spatialdata backend ignores (SD-B18).
+
+    The spatialdata backend delegates reading to ``spatialdata_io.xenium()``, which has no
+    equivalent knob for any of these five insitupy-backend parameters - honoring them is
+    deferred to a follow-up (0.12.x reader-audit item), so this only makes the gap loud
+    instead of silently ignoring a value the caller explicitly asked for.
+    """
+    defaults = {
+        "nuclei_type": "focus",
+        "load_cell_segmentation_images": False,
+        "load_background_images": False,
+        "transcript_mode": "dask",
+        "restructure_transcripts": False,
+    }
+    passed = {
+        "nuclei_type": nuclei_type,
+        "load_cell_segmentation_images": load_cell_segmentation_images,
+        "load_background_images": load_background_images,
+        "transcript_mode": transcript_mode,
+        "restructure_transcripts": restructure_transcripts,
+    }
+    ignored = [name for name, value in passed.items() if value != defaults[name]]
+    if ignored:
+        warnings.warn(
+            f"The spatialdata backend does not honor the following parameter(s), which were "
+            f"passed with a non-default value: {', '.join(ignored)}. spatialdata_io.xenium() "
+            "has no equivalent knobs for these - the read proceeds with its own defaults "
+            "regardless of the value passed.",
+            UserWarning, stacklevel=3
+        )
+
 def read_xenium(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     nuclei_type: Literal["focus", "mip", ""] = "focus",
     load_cell_segmentation_images: bool = False,
     load_background_images: bool = False,
     verbose: bool = True,
     transcript_mode: Literal["pandas", "dask"] = "dask",
     restructure_transcripts: bool = False,
-    slide_id: str = "slide_id",
-    sample_id: str = "sample_id",
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    slide_id: str | None = None,
+    sample_id: str | None = None,
     backend: Literal["insitupy", "spatialdata"] = "insitupy",
     ) -> InSituData:
     """
@@ -70,8 +111,15 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
-        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id". Only used with spatialdata backend.
-        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id". Only used with spatialdata backend.
+        dataset_name (str, optional): Name for the overarching dataset/slide. For the insitupy
+            backend this is overridden by the value in the Xenium metadata file. For the spatialdata
+            backend it is not used (``spatialdata_io.xenium()`` has no equivalent parameter).
+            Defaults to None.
+        sample_name (str, optional): Name for the individual sample/ROI within the slide. For the
+            insitupy backend this is overridden by the value in the Xenium metadata file. For the
+            spatialdata backend it is not used. Defaults to None.
+        slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
+        sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         backend (Literal["insitupy", "spatialdata"], optional): Backend to use for loading data. Defaults to "insitupy".
             - "insitupy": Uses the native InSituPy loader.
             - "spatialdata": Uses spatialdata-io to load the data and converts to InSituData format.
@@ -92,6 +140,15 @@ def read_xenium(
         - Transcript data can be loaded using either pandas or Dask, depending on the `transcript_mode` parameter.
         - The spatialdata backend provides interoperability with the SpatialData ecosystem.
     """
+    if slide_id is not None:
+        warnings.warn("'slide_id' is deprecated, use 'dataset_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        dataset_name = slide_id
+    if sample_id is not None:
+        warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        sample_name = sample_id
+
     path = Path(path) # make sure the path is a pathlib path
 
     metadata_filename: str = "experiment.xenium"
@@ -117,24 +174,39 @@ def read_xenium(
     if backend == "spatialdata":
         from spatialdata_io import xenium
 
-        from insitupy.spatialdata.convert import convert_from_spatialdata
+        from insitupy.spatialdata.convert import convert_from_foreign_spatialdata
 
+        if dataset_name is not None or sample_name is not None:
+            warnings.warn(
+                "dataset_name and sample_name are not used by the spatialdata backend "
+                "(spatialdata_io.xenium() has no equivalent parameters).",
+                UserWarning, stacklevel=2
+            )
+        _warn_ignored_spatialdata_params(
+            nuclei_type=nuclei_type,
+            load_cell_segmentation_images=load_cell_segmentation_images,
+            load_background_images=load_background_images,
+            transcript_mode=transcript_mode,
+            restructure_transcripts=restructure_transcripts,
+        )
         if verbose:
             logger.info("Reading Xenium data with spatialdata-io backend...")
         sdata = xenium(path)
-        data = convert_from_spatialdata(
+        data = convert_from_foreign_spatialdata(
             sdata=sdata,
-            image_data={
-                "nuclei": ("morphology_focus", pixel_size),
-                "mip": ("morphology_mip", pixel_size)
+            images={
+                "nuclei": {"key": "morphology_focus", "pixel_size": pixel_size},
+                "mip":    {"key": "morphology_mip",   "pixel_size": pixel_size},
             },
-            cells_key="cell_circles",
-            table_key="table",
-            cell_boundaries_data=("cell_labels", pixel_size),
-            nucleus_boundaries_data=("nucleus_labels", pixel_size),
-            transcripts_key="transcripts",
-            slide_id=slide_id,
-            sample_id=sample_id,
+            cells={"main": {
+                "table_key": "table",
+                "cell_boundaries_data": ("cell_labels", pixel_size),
+                "nucleus_boundaries_data": ("nucleus_labels", pixel_size),
+                "label_map": "nucleus_boundaries",
+            }},
+            transcripts="transcripts",
+            slide_id=dataset_name,
+            sample_id=sample_name,
             method_name="Xenium"
             )
 
@@ -142,22 +214,22 @@ def read_xenium(
         if verbose:
             logger.info("Reading Xenium data with InSituPy backend...")
 
-        # get slide id and sample id from metadata
-        slide_id = xenium_metadata["slide_id"]
-        sample_id = xenium_metadata["region_name"]
+        # get dataset_name and sample_name from metadata (overrides function parameters)
+        _dataset_name = xenium_metadata["slide_id"]
+        _sample_name = xenium_metadata["region_name"]
 
         data = InSituData(
             path=path,
             metadata=None, # initializes new metadata
-            slide_id=slide_id,
-            sample_id=sample_id,
+            slide_id=_dataset_name,
+            sample_id=_sample_name,
             method_name="Xenium",
             method_params=xenium_metadata,
             )
 
         # LOAD CELLS
         if verbose:
-            print("Loading cells...", flush=True)
+            logger.info("Loading cells...")
 
         # read celldata
         table = _read_table_from_xenium(path=data.path)
@@ -168,7 +240,7 @@ def read_xenium(
 
         # LOAD IMAGES
         if verbose:
-            print("Loading images...", flush=True)
+            logger.info("Loading images...")
         nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
         # In v2.0 the "mip" image was removed due to better focusing of the machine.
@@ -213,7 +285,7 @@ def read_xenium(
         # LOAD TRANSCRIPTS
         transcript_filename = "transcripts.parquet"
         if verbose:
-            print("Loading transcripts...", flush=True)
+            logger.info("Loading transcripts...")
 
         if transcript_mode == "pandas":
             transcript_dataframe = pd.read_parquet(data.path / transcript_filename)
@@ -234,12 +306,13 @@ def read_xenium(
 
 
 def read_visium(
-    path: Union[str, os.PathLike, Path],
-    dataset_id: Optional[str] = None,
-    slide_id: str = "slide_id",
-    sample_id: str = "sample_id",
+    path: str | os.PathLike | Path,
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    slide_id: str | None = None,
+    sample_id: str | None = None,
     verbose: bool = True,
-    fullres_pixel_size: Optional[Number] = None, # microns per pixel
+    fullres_pixel_size: Number | None = None, # microns per pixel
     **kwargs,
 ) -> InSituData:
     """
@@ -248,11 +321,25 @@ def read_visium(
 
     Args:
         path (Union[str, os.PathLike, Path]): Path to the Visium data bundle.
-        dataset_id (Optional[str], optional): Dataset ID for the Visium data. Defaults to "visium".
-        slide_id (str, optional): Identifier for the slide. Defaults to "slide_id".
-        sample_id (str, optional): Identifier for the sample. Defaults to "sample_id".
+        dataset_name (Optional[str], optional): Name for the overarching dataset/slide. Also used
+            internally as ``dataset_id`` for spatialdata-io element naming (shapes, images, table keys).
+            Defaults to None (falls back to ``"visium"``).
+        sample_name (Optional[str], optional): Name for the individual sample/ROI within the slide.
+            Defaults to None.
+        slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
+        sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
-        **kwargs: Additional keyword arguments passed to spatialdata-io's visium loader.
+        fullres_pixel_size (Number): Physical size of one full-resolution
+            pixel in micrometers. Used to convert spot geometries to micron coordinates.
+            Required - there is no reliable default; omitting it raises ``ValueError``.
+        **kwargs: Additional keyword arguments forwarded to ``spatialdata_io.visium()``.
+            Commonly used arguments include:
+
+            - ``counts_file`` (str): Name of the counts file (e.g.
+              ``'filtered_feature_bc_matrix.h5'``). Defaults to
+              ``'filtered_feature_bc_matrix.h5'``.
+            - ``fullres_image_file`` (Optional[str]): Path to the full-resolution
+              tissue image. Auto-detected if None.
 
     Returns:
         InSituData: An object containing the processed Visium experiment data, including metadata, cells, and images.
@@ -266,14 +353,22 @@ def read_visium(
         - The function loads spatial coordinates, gene expression counts, and optional histology images.
         - Spot positions are stored as features in the InSituData object.
     """
+    if slide_id is not None:
+        warnings.warn("'slide_id' is deprecated, use 'dataset_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        dataset_name = slide_id
+    if sample_id is not None:
+        warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
+                      DeprecationWarning, stacklevel=2)
+        sample_name = sample_id
+
     from spatialdata_io import visium
 
-    from insitupy.spatialdata.convert import convert_from_spatialdata
+    from insitupy.spatialdata.convert import convert_from_foreign_spatialdata
 
     path = Path(path)
 
-    if dataset_id is None:
-        dataset_id = "visium"
+    dataset_id = dataset_name if dataset_name is not None else "visium"
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
@@ -282,10 +377,11 @@ def read_visium(
         logger.info("Reading Visium data with spatialdata-io...")
 
     if fullres_pixel_size is None:
-        logger.warning(f"No `fullres_pixel_size` provided. Setting to 1.0 by default. "
-                       f"For downstream analysis setting the correct pixel size might be important. "
-                       f"If possible, try to find out the resolution of the fullres image")
-        fullres_pixel_size = 1.0 # microns per pixel
+        raise ValueError(
+            "`fullres_pixel_size` is required (microns per full-resolution pixel). "
+            "Without it, spot geometries would be left in pixel coordinates. "
+            "Please determine the resolution of the full-resolution image and pass it explicitly."
+        )
 
     sf_file = path / "spatial" / "scalefactors_json.json"
     scale_factors = read_json(sf_file)
@@ -313,37 +409,33 @@ def read_visium(
             sdata[dataset_id]['radius'] = sdata[dataset_id]['radius'] * fullres_pixel_size
 
     # Convert to InSituData format
-    data = convert_from_spatialdata(
+    data = convert_from_foreign_spatialdata(
         sdata=sdata,
-        image_data={
-            "hires": (f"{dataset_id}_hires_image", hires_pixel_size, True),
-            "lowres": (f"{dataset_id}_lowres_image", lowres_pixel_size, True)
+        images={
+            "hires":  {"key": f"{dataset_id}_hires_image",  "pixel_size": hires_pixel_size,  "is_rgb": True},
+            "lowres": {"key": f"{dataset_id}_lowres_image", "pixel_size": lowres_pixel_size, "is_rgb": True},
         },
-        units_key=dataset_id,
-        unit_type="visium",
-        cells_key=None,  # No cells available in Visium data
-        table_key="table",
-        cell_boundaries_data=None,  # Visium uses spots, not boundaries
-        nucleus_boundaries_data=None,
-        transcripts_key=None,  # Visium doesn't have single-molecule transcripts
-        slide_id=slide_id,
-        sample_id=sample_id,
+        units={"visium": {"table_key": "table", "units_key": dataset_id, "unit_type": "visium"}},
+        transcripts=None,           # Visium has no single-molecule transcripts
+        slide_id=dataset_name,
+        sample_id=sample_name,
         method_name="visium",
+        verbose=verbose,
     )
 
     return data
 
 
 def read_any(
-    cellular_measurements: Dict[str, Union[str, Path, os.PathLike]],
-    cellular_coordinates: Union[str, Path],
-    cellular_metadata: Optional[Union[str, Path]] = None,
-    cell_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
-    nucleus_boundaries: Optional[Union[str, Path, os.PathLike]] = None,
-    images: Optional[Dict[str, Union[str, Path, os.PathLike]]] = None,
-    pixel_size: Optional[Number] = None,
-    dataset_name: Optional[str] = "Data 1",
-    sample_name: Optional[str] = "Sample 1",
+    cellular_measurements: dict[str, str | Path | os.PathLike],
+    cellular_coordinates: str | Path,
+    cellular_metadata: str | Path | None = None,
+    cell_boundaries: str | Path | os.PathLike | None = None,
+    nucleus_boundaries: str | Path | os.PathLike | None = None,
+    images: dict[str, str | Path | os.PathLike] | None = None,
+    pixel_size: Number | None = None,
+    dataset_name: str | None = "Data 1",
+    sample_name: str | None = "Sample 1",
     method_name: str = "Any",
     xshift: Number = 0,
     yshift: Number = 0,
@@ -425,10 +517,10 @@ def read_any(
     nucleus_boundaries = Path(nucleus_boundaries) if nucleus_boundaries is not None else nucleus_boundaries
 
     if nucleus_boundaries is not None and cell_boundaries is None:
-        raise ValueError((
-            f"If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
-            f"If you only have nucleus boundaries, add them as cell boundaries."
-            ))
+        raise ValueError(
+            "If `nucleus_boundaries` is given, `cell_boundaries` must be given as well. "
+            "If you only have nucleus boundaries, add them as cell boundaries."
+            )
 
     if cell_boundaries is not None:
         if pixel_size is None:
@@ -471,7 +563,7 @@ def read_any(
 
 
 def read_qupath(
-    path: Union[str, os.PathLike, Path],
+    path: str | os.PathLike | Path,
     pixel_size: Number,
     dataset_name: str,
     sample_name: str,

@@ -1,7 +1,6 @@
 import logging
 import math
-from typing import Literal, Optional, Union
-from warnings import warn
+from typing import Literal
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -11,8 +10,7 @@ from matplotlib import cm
 from matplotlib.colors import ListedColormap, rgb2hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP)
+from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, DEFAULT_CONTINUOUS_CMAP, NA_CATEGORY
 from insitupy.palettes import CustomPalettes
 from insitupy.utils._checks import check_raw
 
@@ -76,7 +74,7 @@ def _add_colorlegend_to_axis(
     max_per_col: int = 10,
     loc: str = 'center',
     bbox_to_anchor: tuple = (0.5, 0.5),
-    title: Optional[str] = None,
+    title: str | None = None,
     #marker: Optional[str] = 'o',
     mode: Literal["circle", "rectangle"] = "circle",
     remove_axis: bool = True
@@ -114,32 +112,77 @@ def _add_colorlegend_to_axis(
         ax.set_axis_off()
 
 def _parse_unique_categories(data):
-    # retrieve data
+    # pandas categorical Series -> declared categories (never include NaN)
     try:
-        unique_categories = data.cat.categories # in case of categorical pandas series
+        return data.cat.categories
     except AttributeError:
-        try:
-            unique_categories = data.categories # in case of numpy categories
-        except AttributeError:
-            data = np.array(data)
-            try:
-                unique_categories = np.sort(data[~data.isna()].unique())
-            except AttributeError:
-                try:
-                    unique_categories = np.sort(np.unique(data[~np.isnan(data)]))
-                except TypeError:
-                    #unique_categories = np.sort(np.unique(data))
-                    # Convert all elements to strings before sorting
-                    unique_categories = np.sort(np.unique(data.astype(str)))
+        pass
+    # numpy Categorical -> its categories
+    try:
+        return data.categories
+    except AttributeError:
+        pass
+    # array-like (object/numeric): drop NaN, then sort unique native values
+    s = pd.Series(data)
+    s = s[s.notna()]
+    return np.sort(np.unique(s.to_numpy()))
 
-    return unique_categories
+
+def _coerce_na_for_plot(series, na_label=NA_CATEGORY):
+    """Replace NaN in a categorical hue series with ``na_label``.
+
+    Real (non-NA) values are left untouched so they keep matching the
+    color-dict keys; only NaN is rewritten so the renderer draws those
+    points using the ``na_label`` palette entry instead of dropping them.
+    """
+    s = pd.Series(series)
+    if isinstance(s.dtype, pd.CategoricalDtype):
+        if na_label not in s.cat.categories:
+            s = s.cat.add_categories([na_label])
+        return s.fillna(na_label)
+    return s.astype(object).where(s.notna(), na_label)
+
+
+def _warn_na_cells_hidden(n_hidden, keys):
+    """Emit a UserWarning that NaN cells were not displayed.
+
+    ``keys`` may be a single key (str) or a sequence of keys.
+    """
+    import warnings
+    if isinstance(keys, str):
+        keys_str = f"'{keys}'"
+    else:
+        keys_str = ", ".join(f"'{k}'" for k in keys)
+    warnings.warn(
+        f"{n_hidden} cell(s) with missing values for {keys_str} are not displayed "
+        f"because nan_color=None. Pass nan_color (e.g. nan_color='lightgray') to "
+        f"show them in that color.",
+        UserWarning,
+        stacklevel=2,
+    )
 
 
 def create_cmap_mapping(
     data,
-    cmap: Optional[Union[str, ListedColormap]] = None,
-    rgba_values: Optional[np.ndarray] = None
+    cmap: str | ListedColormap | None = None,
+    rgba_values: np.ndarray | None = None
     ):
+    """Build a mapping from unique category labels to RGBA colour tuples.
+
+    When *rgba_values* is provided, each category is matched to its
+    corresponding pre-computed RGBA colour in *data*.  Otherwise a
+    matplotlib colourmap (*cmap*) is cycled over sorted unique categories.
+
+    Args:
+        data: Array-like of category labels.
+        cmap: Matplotlib colourmap name or :class:`~matplotlib.colors.ListedColormap`.
+            Defaults to the internal ``tab20_mod`` palette when ``None``.
+        rgba_values: Pre-computed RGBA array aligned to *data*.  When
+            supplied, *cmap* is ignored.
+
+    Returns:
+        A dict mapping each unique category label to an RGBA tuple.
+    """
     unique_categories = _parse_unique_categories(data)
 
     if rgba_values is None:
@@ -163,12 +206,31 @@ def create_cmap_mapping(
 
 
 def categorical_data_to_rgba(data,
-                             cmap: Union[str, ListedColormap],
+                             cmap: str | ListedColormap,
                              return_mapping: bool = False,
                              nan_val: tuple = (1,1,1,0),
-                             rgba_values: Optional[np.ndarray] = None
+                             rgba_values: np.ndarray | None = None
                              ):
+    """Convert a categorical array to a NumPy array of RGBA colours.
 
+    Each unique category is assigned an RGBA colour via *cmap* (or a
+    pre-built mapping when *cmap* is a ``dict``).  NaN values are assigned
+    *nan_val*.
+
+    Args:
+        data: Array-like of category labels (may include NaN as string).
+        cmap: Colourmap name, :class:`~matplotlib.colors.ListedColormap`, or
+            a ``dict`` mapping category labels to RGBA tuples.
+        return_mapping: If True, return the category-to-RGBA mapping alongside
+            the colour array.
+        nan_val: RGBA tuple used for NaN entries.  ``None`` to skip NaN
+            handling.
+        rgba_values: Pre-computed RGBA array aligned to *data*.
+
+    Returns:
+        An ``(N, 4)`` float array of RGBA colours, or a tuple
+        ``(colours, mapping)`` when *return_mapping* is True.
+    """
     # len_colormap = cmap.N
     # category_to_rgba = {category: cmap(i % len_colormap) for i, category in enumerate(unique_categories)}
 
@@ -176,6 +238,11 @@ def categorical_data_to_rgba(data,
         category_to_rgba = create_cmap_mapping(data, cmap, rgba_values)
     else:
         category_to_rgba = cmap
+
+    # Normalize keys to str so the str-keyed lookups below also work for
+    # non-string categories (e.g. an int64 pd.Categorical whose keys are 0, 1, 2).
+    # Copying into a fresh dict also avoids mutating a caller-supplied ``cmap`` dict.
+    category_to_rgba = {str(k): v for k, v in category_to_rgba.items()}
 
     if nan_val is not None:
         # add key for nan
@@ -216,13 +283,34 @@ def _determine_climits(
 
 def continuous_data_to_rgba(
     data,
-    cmap: Union[str, ListedColormap],
+    cmap: str | ListedColormap,
     upper_climit_pct: int = 99,
-    lower_climit: Optional[int] = None,
+    lower_climit: int | None = None,
     clip = False,
     nan_val: tuple = (1,1,1,0),
     return_mapping: bool = False
     ):
+    """Map a continuous numeric array to RGBA colours using a matplotlib colourmap.
+
+    Colour limits are determined from percentiles of non-NaN values.  NaN
+    entries receive *nan_val*.
+
+    Args:
+        data: 1-D numeric array to colourise.
+        cmap: Matplotlib colourmap name or :class:`~matplotlib.colors.ListedColormap`.
+        upper_climit_pct: Percentile of non-NaN values used as the upper
+            colour limit.
+        lower_climit: Explicit lower colour limit.  Defaults to the data
+            minimum when ``None``.
+        clip: If True, clip values outside the colour limits before mapping.
+        nan_val: RGBA tuple assigned to NaN entries.
+        return_mapping: If True, also return the
+            :class:`~matplotlib.cm.ScalarMappable` used for the mapping.
+
+    Returns:
+        An ``(N, 4)`` float array of RGBA colours, or a tuple
+        ``(colours, scalar_mappable)`` when *return_mapping* is True.
+    """
     if np.any(pd.isna(data)):
         contains_nans = True
         # Convert the numpy array to a pandas Series
@@ -248,7 +336,7 @@ def continuous_data_to_rgba(
     climits = _determine_climits(color_values=notna_values, upper_climit_pct=upper_climit_pct, lower_climit=lower_climit)
 
     if climits[1] == 0:
-        logger.warning("Upper contrast limit is 0. Recalculating with upper_climit_pct=100.")
+        logger.debug("Upper contrast limit is 0. Recalculating with upper_climit_pct=100.")
         climits = _determine_climits(color_values=notna_values, upper_climit_pct=100, lower_climit=lower_climit)
 
     norm = mpl.colors.Normalize(vmin=climits[0], vmax=climits[1], clip=clip)
@@ -272,12 +360,12 @@ def continuous_data_to_rgba(
 
 def _data_to_rgba(
     data: np.ndarray,
-    continuous_cmap: Union[str, ListedColormap] = DEFAULT_CONTINUOUS_CMAP,
-    categorical_cmap: Union[str, ListedColormap] = None,
+    continuous_cmap: str | ListedColormap = DEFAULT_CONTINUOUS_CMAP,
+    categorical_cmap: str | ListedColormap = None,
     upper_climit_pct: int = 99,
     #return_all: bool = False,
     nan_val: tuple = (1,1,1,0),
-    rgba_values: Optional[np.ndarray] = None
+    rgba_values: np.ndarray | None = None
     ):
     if isinstance(data, list):
         data = np.array(data) # make sure the data is not a list but a numpy array

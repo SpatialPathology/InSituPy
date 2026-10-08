@@ -1,27 +1,33 @@
+import logging
 from numbers import Number
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from joblib import Parallel, delayed
-from scipy.stats import pearsonr, spearmanr, zscore
-from sklearn.preprocessing import MinMaxScaler
+from scipy.stats import pearsonr, spearmanr
 from statsmodels.stats.multitest import fdrcorrection
 from tqdm.autonotebook import tqdm
 
 from insitupy._constants import _init_mpl_fontsize
 from insitupy.plotting.expression_along_axis import _bin_data, _select_data
 from insitupy.utils._regression import smooth_fit
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+
+logger = logging.getLogger(__name__)
+from insitupy.utils.utils import (
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
 
 
 # Functions
 def total_variation(values):
+    """Compute the total variation (sum of absolute first differences) of *values*."""
     return np.sum(np.abs(np.diff(values)))
 
 def random_permutation_tv(expr):
+    """Return the total variation of *expr* after a random permutation of its elements."""
     random_order = np.random.permutation(np.arange(len(expr)))
     expr_random = expr[random_order]
 
@@ -54,17 +60,14 @@ def filter_outliers(data, threshold=1.5):
 
     return filtered_data
 
-from typing import List, Optional, Union
 
-import numpy as np
-import pandas as pd
-from joblib import Parallel, delayed
-from scipy.stats import pearsonr, spearmanr
 from tqdm import tqdm
 
 
 class EvaluateExpressionObject:
-    def __init__(self, raw_data: Optional[pd.DataFrame] = None, binned_data: Optional[pd.DataFrame] = None, result: Optional[pd.DataFrame] = None):
+    """Container for spatial expression evaluation results, including raw data, binned data, and regression output."""
+
+    def __init__(self, raw_data: pd.DataFrame | None = None, binned_data: pd.DataFrame | None = None, result: pd.DataFrame | None = None):
         """
         EvaluateExpressionObject holds the results of the expression evaluation.
 
@@ -99,15 +102,15 @@ class EvaluateExpressionObject:
 def evaluate_expression_along_axis(
     adata: pd.DataFrame,
     obs_val: str,
-    genes: Union[str, List[str]],
+    genes: str | list[str],
     cell_type_column: str,
     cell_type: str,
-    xlim: List[float],
+    xlim: list[float],
     parallel: bool,
     bin_data: bool = False,
-    resolution: Union[int, float] = 5,
+    resolution: int | float = 5,
     n_sim: int = 10000,
-    min_expression: Optional[Union[int, float]] = None,
+    min_expression: int | float | None = None,
     n_jobs: int = 8,
     # plot_qc: bool = False
 ) -> EvaluateExpressionObject:
@@ -237,13 +240,28 @@ def evaluate_expression_along_axis(
 
 def plot_evaluation(
     eval_object: EvaluateExpressionObject,
-    genes: Optional[List[str]] = None,
+    genes: list[str] | None = None,
     # raw_data: pd.DataFrame,
     # binned_data: Optional[pd.DataFrame],
     xlabel='x',
     maxcols=4,
-    font_scale_factor: Optional[Number] = None
+    font_scale_factor: Number | None = None
 ):
+    """Plot gene expression along a spatial axis with optional LOESS regression overlays.
+
+    For each gene in *genes*, draws raw or binned expression values and
+    overlays a LOESS regression curve with a shaded confidence band.
+
+    Args:
+        eval_object: :class:`EvaluateExpressionObject` holding raw and/or
+            binned expression data and pre-computed regression results.
+        genes: List of gene names to plot.  Defaults to all columns in the
+            raw data.
+        xlabel: Label for the spatial x-axis.
+        maxcols: Maximum number of subplot columns.
+        font_scale_factor: Scaling factor applied to global matplotlib font
+            sizes.  ``None`` leaves fonts unchanged.
+    """
     # extract data from object
     binned_data = eval_object.binned_data
     raw_data = eval_object.raw_data
@@ -302,10 +320,10 @@ def plot_evaluation(
                 loess_bootstrap=False, nsteps=100
                 )
             except ValueError as e:
-                print(f"A ValueError occurred during loess regression: {e}")
+                logger.warning(f"A ValueError occurred during loess regression: {e}")
                 res = None
         else:
-            print(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
+            logger.warning(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
             res = None
 
         # Plot the original data
@@ -337,7 +355,7 @@ def plot_evaluation(
 
         # Add labels and legend
         axs[i].set_xlabel(xlabel)
-        axs[i].set_ylabel(f"Gene expression'")
+        axs[i].set_ylabel("Gene expression'")
         axs[i].set_title(f"{gene}")
 
 
@@ -361,8 +379,22 @@ def plot_evaluation(
 
 def loess_regress(
     eval_object: EvaluateExpressionObject,
-    genes: Optional[List[str]] = None,
+    genes: list[str] | None = None,
 ):
+    """Run LOESS regression for each gene in an :class:`EvaluateExpressionObject`.
+
+    Fits a LOESS curve to binned data (if available) or raw data for each
+    gene and returns the regression results keyed by gene name.
+
+    Args:
+        eval_object: :class:`EvaluateExpressionObject` with raw and/or binned
+            expression data.
+        genes: Gene names to regress.  Defaults to all columns in raw data.
+
+    Returns:
+        A dict mapping gene name to a :class:`~insitupy.utils._regression.lowess_prediction`
+        result object.
+    """
     # extract data from object
     binned_data = eval_object.binned_data
     raw_data = eval_object.raw_data
@@ -404,10 +436,10 @@ def loess_regress(
                 loess_bootstrap=False, nsteps=100
                 )
             except ValueError as e:
-                print(f"A ValueError occurred during loess regression: {e}")
+                logger.warning(f"A ValueError occurred during loess regression: {e}")
                 res = None
         else:
-            print(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
+            logger.warning(f"Only one datapoint left for gene {gene} after filtering. Skipped LOESS regression.")
             res = None
 
         # collect results

@@ -1,0 +1,447 @@
+"""Tests for InSituData.uid, InSituExperiment.replace(), and metadata reclassification."""
+
+import json
+
+import dask.dataframe as dd
+import numpy as np
+import pandas as pd
+import pytest
+from anndata import AnnData
+
+from insitupy._core.data import InSituData
+from insitupy.containers.cell_data import CellData
+from insitupy.experiment.data import InSituExperiment
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _make_insitudata(slide_id="slide1", sample_id="s1"):
+    rng = np.random.default_rng(0)
+    X = rng.integers(0, 20, size=(5, 3)).astype(float)
+    obs = pd.DataFrame(index=pd.Index([f"c{i}" for i in range(5)]))
+    var = pd.DataFrame(index=pd.Index([f"g{j}" for j in range(3)]))
+    table = AnnData(X=X, obs=obs, var=var)
+    table.obsm["spatial"] = rng.random((5, 2)) * 100
+    cd = CellData(table=table, boundaries=None)
+    xd = InSituData(
+        path=None, metadata=None,
+        slide_id=slide_id, sample_id=sample_id,
+        method_name="test", method_params={},
+    )
+    xd.cells.add_celldata(cd=cd, key="main", is_main=True)
+    return xd
+
+
+def _make_saved_experiment(tmp_path):
+    """Return (exp, save_dir) with one saved+reloaded dataset."""
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    exp = InSituExperiment.read(save_dir)
+    return exp, save_dir
+
+
+# ── Phase 1: InSituData.uid ───────────────────────────────────────────────────
+
+def test_uid_is_none_before_add():
+    xd = _make_insitudata()
+    assert xd.uid is None
+
+
+def test_uid_assigned_after_add():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    assert xd.uid is not None
+    assert isinstance(xd.uid, str)
+
+
+def test_uid_matches_experiment_metadata():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    assert xd.uid == exp.metadata.loc[0, "uid"]
+
+
+def test_uid_persists_on_save_and_load(tmp_path):
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    uid_before = xd.uid
+
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    loaded = InSituData.read(save_dir / "data-000")
+    assert loaded.uid == uid_before
+
+
+def test_cross_experiment_add_assigns_fresh_uid():
+    exp1 = InSituExperiment()
+    exp2 = InSituExperiment()
+    xd = _make_insitudata()
+    exp1.add(xd)
+    uid1 = xd.uid
+
+    exp2.add(xd)
+    uid2 = xd.uid
+
+    # New experiment gets a fresh uid
+    assert uid2 != uid1
+    assert uid2 == exp2.metadata.loc[0, "uid"]
+
+
+def test_idempotent_readd_same_experiment():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    uid_first = xd.uid
+
+    exp.add(xd)  # re-add: same uid, same slot
+    assert xd.uid == uid_first
+    assert len(exp.data) == 1  # no duplicate appended
+
+
+# ── U-B7: re-add must not silently drop metadata ────────────────────────────
+
+def test_readd_same_dataset_warns():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd)
+    assert len(exp) == 1
+
+
+def test_readd_with_conflicting_metadata_raises():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd, metadata={"condition": "control"})
+
+    with pytest.raises(ValueError, match="condition"):
+        exp.add(xd, metadata={"condition": "treated"})
+    # the conflicting add must not have mutated existing metadata
+    assert exp.metadata.loc[0, "condition"] == "control"
+
+
+def test_readd_with_matching_metadata_warns_not_raises():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd, metadata={"condition": "control"})
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd, metadata={"condition": "control"})
+    assert len(exp) == 1
+    assert exp.metadata.loc[0, "condition"] == "control"
+
+
+def test_readd_via_copy_still_warns_and_stays_one_sample():
+    """copy() preserves _uid by design, so re-adding a copy of an already-present
+    dataset hits the same idempotent re-add path as re-adding the original object:
+    it warns and does not create a second sample."""
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+
+    with pytest.warns(UserWarning, match="already present"):
+        exp.add(xd.copy())
+    assert len(exp) == 1
+
+
+def test_add_distinct_dataset_creates_two_samples():
+    exp = InSituExperiment()
+    xd1 = _make_insitudata(slide_id="slide1", sample_id="s1")
+    xd2 = _make_insitudata(slide_id="slide2", sample_id="s2")
+    exp.add(xd1)
+    exp.add(xd2)
+    assert len(exp) == 2
+
+
+# ── Phase 2: metadata reclassification ──────────────────────────────────────
+
+def test_experiment_metadata_has_no_slide_sample_columns():
+    exp = InSituExperiment()
+    xd = _make_insitudata(slide_id="sl1", sample_id="s1")
+    exp.add(xd)
+    assert "slide_id" not in exp.metadata.columns
+    assert "sample_id" not in exp.metadata.columns
+    assert "uid" in exp.metadata.columns
+
+
+def test_update_metadata_emits_futurewarning():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    with pytest.warns(FutureWarning, match="deprecated"):
+        exp.update_metadata()
+
+
+def test_add_metadata_column_reserved_name_warns():
+    exp = InSituExperiment()
+    xd = _make_insitudata()
+    exp.add(xd)
+    with pytest.warns(UserWarning, match="intrinsic attribute"):
+        exp.add_metadata_column("slide_id", ["myslide"])
+
+
+# ── Phase 4: legacy load-path migration ─────────────────────────────────────
+
+def test_legacy_metadata_csv_with_slide_sample_loads_without_error(tmp_path):
+    """Old metadata.csv with slide_id/sample_id columns loads and drops them."""
+    metadata = pd.DataFrame({
+        "uid": ["abc", "def"],
+        "slide_id": ["sl1", "sl2"],
+        "sample_id": ["s1", "s2"],
+        "n_cells": [10, 20],
+    })
+    metadata.to_csv(tmp_path / "metadata.csv")
+
+    loaded = InSituExperiment._read_insitupy(tmp_path)
+    out = loaded.metadata
+    assert "slide_id" not in out.columns
+    assert "sample_id" not in out.columns
+    assert "uid" in out.columns
+    assert "n_cells" in out.columns
+
+
+# ── Phase 3: replace() ───────────────────────────────────────────────────────
+
+def test_replace_swaps_memory_by_int(tmp_path):
+    exp, _ = _make_saved_experiment(tmp_path)
+    slot_uid = exp.metadata.loc[0, "uid"]
+
+    xd_new = _make_insitudata(slide_id="new", sample_id="n1")
+    exp.replace(0, xd_new, confirm=False)
+
+    assert exp.data[0] is xd_new
+    assert xd_new.uid == slot_uid
+
+
+def test_replace_swaps_memory_by_uid(tmp_path):
+    exp, _ = _make_saved_experiment(tmp_path)
+    uid = exp.metadata.loc[0, "uid"]
+
+    xd_new = _make_insitudata(slide_id="new", sample_id="n2")
+    exp.replace(uid, xd_new, confirm=False)
+
+    assert exp.data[0] is xd_new
+    assert xd_new.uid == uid
+
+
+def test_replace_writes_to_disk(tmp_path):
+    exp, save_dir = _make_saved_experiment(tmp_path)
+
+    xd_new = _make_insitudata(slide_id="replacement")
+    exp.replace(0, xd_new, confirm=False)
+
+    # Reload and verify the replacement is on disk
+    reloaded = InSituData.read(save_dir / "data-000")
+    assert reloaded.slide_id == "replacement"
+
+
+def test_replace_with_lazily_backed_copy(tmp_path):
+    """Replacing a dataset with a lazy copy of itself must not lose the data it reads from."""
+    rng = np.random.default_rng(0)
+    xd = _make_insitudata()
+    xd._transcripts = dd.from_pandas(
+        pd.DataFrame({
+            "x": rng.random(40) * 100,
+            "y": rng.random(40) * 100,
+            "feature_name": [f"g{i % 3}" for i in range(40)],
+        }),
+        npartitions=2,
+    )
+    exp = InSituExperiment()
+    exp.add(xd)
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    exp = InSituExperiment.read(save_dir)
+
+    slot = save_dir / "data-000"
+    original = InSituData.read(slot).transcripts.compute().reset_index(drop=True)
+
+    # copy() clears _path, but the dask graphs still point into the slot being overwritten
+    new = InSituData.read(slot).copy()
+    assert isinstance(new.transcripts, dd.DataFrame)
+    # same dataset, same uid as the slot: no "already has uid" warning
+    exp.replace(0, new, confirm=False)
+
+    pd.testing.assert_frame_equal(
+        InSituData.read(slot).transcripts.compute().reset_index(drop=True), original
+    )
+    pd.testing.assert_frame_equal(new.transcripts.compute().reset_index(drop=True), original)
+    assert sorted(p.name for p in save_dir.glob("data-*")) == ["data-000"]
+
+
+def test_replace_warns_if_new_data_has_uid(tmp_path):
+    exp, _ = _make_saved_experiment(tmp_path)
+
+    exp2 = InSituExperiment()
+    xd2 = _make_insitudata()
+    exp2.add(xd2)  # gives xd2 a uid
+
+    with pytest.warns(UserWarning, match="uid"):
+        exp.replace(0, xd2, confirm=False)
+
+
+def test_replace_bad_int_index_raises(tmp_path):
+    exp, _ = _make_saved_experiment(tmp_path)
+
+    with pytest.raises(IndexError):
+        exp.replace(99, _make_insitudata(), confirm=False)
+
+
+def test_replace_bad_uid_raises(tmp_path):
+    exp, _ = _make_saved_experiment(tmp_path)
+
+    with pytest.raises(KeyError):
+        exp.replace("nonexistent-uid", _make_insitudata(), confirm=False)
+
+
+# ── Phase 4: remove() ────────────────────────────────────────────────────────
+
+def _make_experiment_n(n: int = 3) -> "InSituExperiment":
+    """Return an in-memory experiment with *n* datasets (no disk path)."""
+    exp = InSituExperiment()
+    for i in range(n):
+        exp.add(_make_insitudata(slide_id=f"slide{i}", sample_id=f"s{i}"))
+    return exp
+
+
+def test_remove_by_int_decrements_length():
+    exp = _make_experiment_n(3)
+    exp.remove(1, confirm=False)
+    assert len(exp) == 2
+
+
+def test_remove_by_int_updates_data_list():
+    exp = _make_experiment_n(3)
+    uid_0 = exp.metadata.loc[0, "uid"]
+    uid_2 = exp.metadata.loc[2, "uid"]
+    exp.remove(1, confirm=False)
+    assert exp.metadata.loc[0, "uid"] == uid_0
+    assert exp.metadata.loc[1, "uid"] == uid_2
+
+
+def test_remove_by_uid():
+    exp = _make_experiment_n(3)
+    uid_to_remove = exp.metadata.loc[1, "uid"]
+    exp.remove(uid_to_remove, confirm=False)
+    assert uid_to_remove not in exp.metadata["uid"].values
+    assert len(exp) == 2
+
+
+def test_remove_bad_uid_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(KeyError):
+        exp.remove("nonexistent-uid", confirm=False)
+
+
+def test_remove_out_of_range_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(IndexError):
+        exp.remove(99, confirm=False)
+
+
+def test_remove_negative_index_raises():
+    exp = _make_experiment_n(2)
+    with pytest.raises(IndexError):
+        exp.remove(-1, confirm=False)
+
+
+def test_remove_truncates_filter_mask():
+    exp = _make_experiment_n(3)
+    exp._filters["test_filter"] = {"mask": [True, False, True], "note": ""}
+    exp.remove(1, confirm=False)
+    assert len(exp._filters["test_filter"]["mask"]) == 2
+    assert exp._filters["test_filter"]["mask"] == [True, True]
+
+
+def test_remove_no_filter_state_unchanged():
+    exp = _make_experiment_n(3)
+    exp.remove(0, confirm=False)
+    assert exp._filters == {}
+
+
+def test_remove_by_int_metadata_reindexed():
+    exp = _make_experiment_n(3)
+    exp.remove(0, confirm=False)
+    assert list(exp.metadata.index) == [0, 1]
+
+
+def test_remove_confirm_false_no_prompt(monkeypatch):
+    exp = _make_experiment_n(2)
+    called = []
+    monkeypatch.setattr("builtins.input", lambda _: called.append(1) or "y")
+    exp.remove(0, confirm=False)
+    assert called == []
+    assert len(exp) == 1
+
+
+def test_remove_disk_deletion(tmp_path):
+    exp, save_dir = _make_saved_experiment(tmp_path)
+    dataset_dir = exp.data[0].path
+    assert dataset_dir is not None and dataset_dir.exists()
+
+    uid = exp.metadata.loc[0, "uid"]
+    exp.remove(uid, confirm=False, delete_from_disk=True)
+
+    # moved to the experiment's trash, not deleted
+    assert not dataset_dir.exists()
+    trashed = [p for p in (save_dir / ".trash").iterdir() if p.is_dir()]
+    assert len(trashed) == 1 and (trashed[0] / ".ispy").exists()
+
+
+def test_remove_no_disk_deletion_by_default(tmp_path):
+    exp, save_dir = _make_saved_experiment(tmp_path)
+    dataset_dir = exp.data[0].path
+    assert dataset_dir is not None and dataset_dir.exists()
+
+    exp.remove(0, confirm=False, delete_from_disk=False)
+
+    assert dataset_dir.exists()
+
+
+# ── Phase 5: uid backfill for legacy datasets ─────────────────────────────────
+
+def _strip_uid_from_ispy(save_dir):
+    """Remove the 'uid' key from each dataset's .ispy file to simulate a legacy save."""
+    for ds_dir in sorted(save_dir.glob("data-*")):
+        ispy_path = ds_dir / ".ispy"
+        meta = json.loads(ispy_path.read_text())
+        meta.pop("uid", None)
+        ispy_path.write_text(json.dumps(meta))
+
+
+def test_uid_backfilled_from_metadata_on_load(tmp_path):
+    exp = InSituExperiment()
+    xd1 = _make_insitudata(slide_id="slide1", sample_id="s1")
+    xd2 = _make_insitudata(slide_id="slide2", sample_id="s2")
+    exp.add(xd1)
+    exp.add(xd2)
+    uid0 = exp.metadata.loc[0, "uid"]
+    uid1 = exp.metadata.loc[1, "uid"]
+
+    save_dir = tmp_path / "exp"
+    exp.saveas(save_dir)
+    _strip_uid_from_ispy(save_dir)
+
+    with pytest.warns(UserWarning, match="backfilled"):
+        loaded = InSituExperiment._read_insitupy(save_dir)
+
+    assert loaded.data[0].uid == uid0
+    assert loaded.data[1].uid == uid1
+
+
+def test_no_warning_when_uids_present_on_disk(tmp_path):
+    import warnings as _warnings
+    exp, save_dir = _make_saved_experiment(tmp_path)
+
+    with _warnings.catch_warnings(record=True) as record:
+        _warnings.simplefilter("always")
+        InSituExperiment._read_insitupy(save_dir)
+
+    uid_warnings = [w for w in record if "backfilled" in str(w.message).lower()]
+    assert uid_warnings == []

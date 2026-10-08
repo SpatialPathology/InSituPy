@@ -1,44 +1,258 @@
-from insitupy import WITH_NAPARI
+import logging
+
+from insitupy._constants import WITH_NAPARI
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
-    from typing import List, Optional
 
     import matplotlib.pyplot as plt
     import napari
     import numpy as np
     import pandas as pd
-    from magicgui import magic_factory, magicgui
+    from magicgui import magicgui
     from magicgui.widgets import FunctionGui
-    from matplotlib.colors import ListedColormap
+    from matplotlib.colors import ListedColormap, to_rgb
     from napari.utils import DirectLabelColormap
     from napari.utils.notifications import show_info, show_warning
+    from pandas.api.types import is_numeric_dtype
     from qtpy.QtCore import QSize, Qt
-    from qtpy.QtGui import QFontMetrics, QIcon
-    from qtpy.QtWidgets import (QComboBox, QCompleter, QFileDialog,
-                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                                QVBoxLayout, QWidget)
-    from scipy.sparse import issparse
+    from qtpy.QtGui import QFontMetrics
+    from qtpy.QtWidgets import (
+        QComboBox,
+        QCompleter,
+        QFileDialog,
+        QHBoxLayout,
+        QInputDialog,
+        QLabel,
+        QLineEdit,
+        QPushButton,
+        QVBoxLayout,
+        QWidget,
+    )
 
-    from insitupy._constants import (ANNOTATIONS_SYMBOL, POINTS_SYMBOL,
-                                     REGION_CMAP, REGIONS_SYMBOL)
+    from insitupy._constants import (
+        ANNOTATIONS_SYMBOL,
+        DEFAULT_CATEGORICAL_CMAP,
+        POINTS_SYMBOL,
+        REGIONS_SYMBOL,
+    )
     from insitupy.images.utils import create_img_pyramid
     from insitupy.interactive._callbacks import (
-        _refresh_widgets_after_data_change, _set_show_names_based_on_geom_type,
-        _update_classes_on_key_change, _update_colorlegend,
-        _update_key_on_type_change, _update_keys_based_on_geom_type)
-    from insitupy.interactive._configs import (ViewerConfig, _get_viewer_uid,
-                                               config_manager)
-    from insitupy.interactive._layers import (_create_points_layer,
-                                              _create_units_layer,
-                                              _update_points_layer,
-                                              _update_units_layer)
+        _refresh_widgets_after_data_change,
+        _update_colorlegend,
+        _update_key_on_type_change,
+    )
+    from insitupy.interactive._configs import (
+        ViewerConfig,
+        _get_viewer_uid,
+        config_manager,
+    )
+    from insitupy.interactive._label_alignment import compute_label_cell_indices
+    from insitupy.interactive._layers import (
+        _create_points_layer,
+        _create_units_layer,
+        _update_points_layer,
+        _update_units_layer,
+    )
     from insitupy.interactive.viewer import save_colorlegends, sync_geometries
+    from insitupy.palettes import ANNOTATIONS_PALETTE, REGIONS_PALETTE
+    from insitupy.utils._adata import _layer_names
     from insitupy.utils._helpers import _get_expression_values
+    from insitupy.utils.utils import is_valid_boundary_index
 
-    from ._layers import _add_geometries_as_layer
+    from ._layers import (
+        _add_geometries_as_layer,
+        _apply_colors_from_features,
+        _connect_color_propagation,
+        _get_or_assign_color,
+    )
 
     # Maximum number of unique colors for labels (napari limitation)
     MAX_LABEL_COLORS = 500
+    # Number of quantization bins for continuous (viridis) label coloring. Keeps the
+    # DirectLabelColormap's distinct-color count well under napari's ~1024 render
+    # ceiling and matches viridis's own default LUT resolution.
+    N_CONTINUOUS_COLOR_BINS = 256
+
+    def _as_positional_array(values) -> np.ndarray:
+        """Convert array-like input to a NumPy array for position-based indexing."""
+        if isinstance(values, np.ndarray):
+            return values
+        return np.asarray(values)
+
+    def _is_missing_label_value(value) -> bool:
+        """Return True for missing values used in cell coloring."""
+        try:
+            return bool(pd.isna(value))
+        except TypeError:
+            return False
+
+    def _unique_non_missing_categories(values: np.ndarray) -> list:
+        """Collect categorical values without sorting mixed Python types."""
+        valid_values = [value for value in values if not _is_missing_label_value(value)]
+        if len(valid_values) == 0:
+            return []
+        return list(pd.unique(np.asarray(valid_values, dtype=object)))
+
+    def _has_non_missing_label_values(values: np.ndarray) -> bool:
+        """Return True if at least one value is present for coloring."""
+        return any(not _is_missing_label_value(value) for value in values)
+
+    def _resolve_categorical_colormap(color_value, uns, key):
+        """Resolve (color_value, colormap) so "cells" and "points" modes agree.
+
+        Ensures both render paths derive the same category->color assignment:
+
+        * If ``uns`` has saved ``"{key}_colors"``, build the ListedColormap from
+          those hex colors (unchanged behavior, used by sync_colors / scanpy).
+        * Otherwise, normalize any non-numeric column to a ``categorical`` dtype so
+          both modes read the same ``.cat.categories`` order, and build a
+          deterministic fallback ListedColormap from DEFAULT_CATEGORICAL_CMAP.
+          Colors are RGB tuples (NOT hex) so the labels renderer's
+          ``np.array(colormap.colors[i])`` yields a length-3 array.
+        * Otherwise (numeric / continuous) return ``colormap=None``.
+
+        Returns the possibly-converted ``color_value`` and the colormap (or None).
+        """
+        # Normalize object/string columns to categorical (genes/continuous untouched;
+        # bool is treated as numeric by is_numeric_dtype and is intentionally left as-is).
+        if (color_value is not None
+                and not is_numeric_dtype(color_value)
+                and not hasattr(color_value, "cat")):
+            color_value = pd.Series(color_value).astype("category")
+
+        colors_key = f"{key}_colors"
+        if colors_key in uns:
+            def _hex_to_rgb(hex_color):
+                hex_color = hex_color.lstrip("#")
+                return tuple(int(hex_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+            colormap = ListedColormap([_hex_to_rgb(c) for c in uns[colors_key]])
+        elif hasattr(color_value, "cat"):
+            n = DEFAULT_CATEGORICAL_CMAP.N
+            cats = color_value.cat.categories
+            colormap = ListedColormap(
+                [to_rgb(DEFAULT_CATEGORICAL_CMAP.colors[i % n]) for i in range(len(cats))]
+            )
+        else:
+            colormap = None
+
+        return color_value, colormap
+
+    def _build_labels_properties(
+        viewer_config: "ViewerConfig",
+        label_ids: np.ndarray,
+        cell_names_boundary: np.ndarray,
+        mask_key: str,
+        key: str | None = None,
+        color_values: np.ndarray | None = None,
+        label_indices: tuple[list, list] | None = None,
+    ) -> dict:
+        """Build per-label properties used by napari status and tooltips.
+
+        label_indices, if given, is the (boundary_indices, adata_indices) pair
+        already computed by a caller (e.g. _create_colored_labels_layer), to
+        avoid recomputing the name-based alignment a second time.
+        """
+        boundaries = viewer_config.boundaries
+        prop_names = ["cell_area", "surface_area"]
+        cell_names_boundary = _as_positional_array(cell_names_boundary)
+
+        if color_values is not None:
+            color_values = _as_positional_array(color_values)
+
+        if label_indices is not None:
+            boundary_indices, adata_indices = label_indices
+        else:
+            # boundary_indices index cell_names_boundary (boundary order); adata_indices
+            # index the adata-order arrays (obs columns, color_values) by cell name, so
+            # coloring stays correct even when the table was filtered without a
+            # following sync() (see insitupy.interactive._label_alignment).
+            boundary_indices, adata_indices = compute_label_cell_indices(
+                label_ids=label_ids,
+                cell_names_boundary=cell_names_boundary,
+                obs_names=viewer_config.adata.obs_names.values,
+                nucleus_to_cell_map=boundaries.nucleus_to_cell_map,
+                mask_key=mask_key,
+            )
+
+        names = [
+            cell_names_boundary[b]
+            if is_valid_boundary_index(b, len(cell_names_boundary))
+            else "unmapped"
+            for b in boundary_indices
+        ]
+
+        properties = {
+            'index': label_ids,
+            'name': names,
+        }
+
+        for prop_name in prop_names:
+            if prop_name in viewer_config.adata.obs.columns:
+                prop_values = viewer_config.adata.obs[prop_name].values
+                properties[prop_name] = [
+                    prop_values[cell_idx] if cell_idx is not None and cell_idx < len(prop_values) else None
+                    for cell_idx in adata_indices
+                ]
+
+        if key is not None and color_values is not None:
+            # Use np.nan (not None) as the missing-value sentinel: mixing None into a
+            # list of numpy floats forces an object-dtype properties array, which makes
+            # `_update_colorlegend`'s is_numeric_dtype(values) check misclassify a
+            # continuous key as categorical -- building a categorical legend with one
+            # entry per distinct real value is what actually hangs the GUI on large
+            # datasets, not the label coloring itself. np.nan keeps the array float64
+            # for numeric keys while still satisfying pd.isna() checks downstream.
+            value_list = [
+                color_values[cell_idx] if cell_idx is not None and cell_idx < len(color_values) and not _is_missing_label_value(color_values[cell_idx]) else np.nan
+                for cell_idx in adata_indices
+            ]
+            properties['value'] = value_list
+            properties[key] = value_list
+
+        return properties
+
+    def _create_outline_colormap(
+        label_ids: np.ndarray,
+        hidden_label_ids: set[int] | None = None,
+    ) -> DirectLabelColormap:
+        """Create a direct colormap that renders every non-background label in black."""
+        if hidden_label_ids is None:
+            hidden_label_ids = set()
+
+        color_dict = {
+            None: np.array([0.0, 0.0, 0.0, 1.0]),
+            0: np.array([0.0, 0.0, 0.0, 0.0]),
+        }
+        color_dict.update({
+            int(label_id): np.array([0.0, 0.0, 0.0, 0.0]) if int(label_id) in hidden_label_ids else np.array([0.0, 0.0, 0.0, 1.0])
+            for label_id in label_ids
+        })
+        return DirectLabelColormap(color_dict=color_dict)
+
+    def _find_layer_by_scope(viewer, scope, outline: bool = False):
+        """Return the most recently added reusable layer for a display scope, or None.
+
+        Layers created by the Show widget are tagged in metadata with
+        ``display_scope`` = (data_name, layer_name, kind), where ``kind`` is
+        "points" for point layers or the mask_key ("cells"/"nuclei") for labels
+        layers; contour layers additionally carry ``is_outline_layer`` = True.
+        This finds the reusable layer for a given scope regardless of which ``key``
+        it was last coloured by.
+
+        Returns the last matching layer (mirrors the prior points-mode ``[-1]``
+        choice when duplicates from earlier "Add new layer" calls exist), or None.
+        """
+        match = None
+        for layer in viewer.layers:
+            meta = getattr(layer, "metadata", None) or {}
+            if meta.get("display_scope") != scope:
+                continue
+            if bool(meta.get("is_outline_layer", False)) != outline:
+                continue
+            match = layer
+        return match
 
     def _create_colored_labels_layer(
         viewer: napari.Viewer,
@@ -47,7 +261,7 @@ if WITH_NAPARI:
         layer_name: str,
         mask_key: str,
         key: str,
-        colormap: Optional[ListedColormap] = None,
+        colormap: ListedColormap | None = None,
         add_new_layer: bool = False,
     ) -> None:
         """Create or update a labels layer with colors based on expression values.
@@ -92,17 +306,29 @@ if WITH_NAPARI:
             mask_pyramid = mask
 
         # Get label IDs and cell names
-        label_ids = boundaries.seg_mask_value.compute()
+        label_ids = boundaries.label_ids_for(mask_key)
         cell_names_boundary = boundaries.cell_names.compute()
+        # Preserve categorical order before _as_positional_array drops the dtype.
+        # adata.obs[key] arrives as a Categorical Series whose .cat.categories
+        # matches the index order of adata.uns["{key}_colors"].  np.asarray()
+        # strips that ordering, so we save it here for the colormap lookup below.
+        categorical_order = list(color_values.cat.categories) if hasattr(color_values, 'cat') else None
+        color_values = _as_positional_array(color_values)
 
-        # Handle nuclei mapping if needed
-        if mask_key == "nuclei" and boundaries.nucleus_to_cell_map is not None:
-            nucleus_to_cell_map = boundaries.nucleus_to_cell_map
-            # Map nucleus label_ids to cell indices for color lookup
-            cell_indices = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
-        else:
-            # Direct mapping: label_id corresponds to cell index
-            cell_indices = [i for i in range(len(label_ids))]
+        if not _has_non_missing_label_values(color_values):
+            show_warning(f"All values for '{key}' are missing. No labels layer was added.")
+            return None
+
+        # Map each label to its adata position by cell name, so coloring is correct
+        # even when the table was filtered without a following sync(). Computed once
+        # here and reused below for _build_labels_properties instead of recomputing.
+        boundary_indices, cell_indices = compute_label_cell_indices(
+            label_ids=label_ids,
+            cell_names_boundary=cell_names_boundary,
+            obs_names=viewer_config.adata.obs_names.values,
+            nucleus_to_cell_map=boundaries.nucleus_to_cell_map,
+            mask_key=mask_key,
+        )
 
         # Determine if values are categorical or continuous
         is_categorical = (
@@ -116,18 +342,27 @@ if WITH_NAPARI:
             None: np.array([0.5, 0.5, 0.5, 0.5]),  # Default for unmapped labels
             0: np.array([0.0, 0.0, 0.0, 0.0]),      # Background transparent
         }
+        hidden_label_ids = set()
 
         if is_categorical:
             # Categorical coloring
             if colormap is not None:
-                # Use provided colormap
-                unique_categories = np.unique(color_values)
-                n_categories = len(unique_categories)
-                cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
+                # Build category→index mapping aligned to adata.uns["{key}_colors"].
+                # Use the preserved categorical order when available; fall back to
+                # first-occurrence order for non-categorical inputs.
+                if categorical_order is not None:
+                    cat_to_idx = {cat: i for i, cat in enumerate(categorical_order)}
+                else:
+                    unique_categories = _unique_non_missing_categories(color_values)
+                    cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
 
                 for label_id, cell_idx in zip(label_ids, cell_indices):
                     if cell_idx is not None and cell_idx < len(color_values):
                         cat = color_values[cell_idx]
+                        if _is_missing_label_value(cat):
+                            hidden_label_ids.add(int(label_id))
+                            color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
+                            continue
                         cat_idx = cat_to_idx.get(cat, 0)
                         # Limit color index to avoid exceeding colormap
                         color_idx = cat_idx % min(len(colormap.colors), MAX_LABEL_COLORS)
@@ -136,16 +371,19 @@ if WITH_NAPARI:
                             color = np.append(color, 1.0)  # Add alpha
                         color_dict[int(label_id)] = color
             else:
-                # Use default categorical colormap (tab20)
-                unique_categories = np.unique(color_values)
-                n_categories = min(len(unique_categories), MAX_LABEL_COLORS)
+                # Use the same default categorical colormap as points mode.
+                unique_categories = _unique_non_missing_categories(color_values)
                 cat_to_idx = {cat: i for i, cat in enumerate(unique_categories)}
-                cmap_mpl = plt.cm.get_cmap("tab20")
+                cmap_mpl = DEFAULT_CATEGORICAL_CMAP
                 n_colors = cmap_mpl.N if hasattr(cmap_mpl, 'N') else 20
 
                 for label_id, cell_idx in zip(label_ids, cell_indices):
                     if cell_idx is not None and cell_idx < len(color_values):
                         cat = color_values[cell_idx]
+                        if _is_missing_label_value(cat):
+                            hidden_label_ids.add(int(label_id))
+                            color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
+                            continue
                         cat_idx = cat_to_idx.get(cat, 0)
                         color_idx = cat_idx % n_colors
                         norm_idx = color_idx / (n_colors - 1) if n_colors > 1 else 0
@@ -161,37 +399,72 @@ if WITH_NAPARI:
                 vmax = vmin + 1  # Avoid division by zero
 
             cmap_mpl = plt.cm.viridis
+            # napari's DirectLabelColormap renders incorrectly beyond ~1024 distinct
+            # colors. A per-cell continuous colormap call produces a near-unique color
+            # per cell, which can freeze the viewer on large datasets. Quantize into a
+            # fixed LUT instead (mirrors MAX_LABEL_COLORS capping for the categorical
+            # branch above).
+            n_bins = N_CONTINUOUS_COLOR_BINS
+            lut = cmap_mpl(np.linspace(0, 1, n_bins))
 
             for label_id, cell_idx in zip(label_ids, cell_indices):
                 if cell_idx is not None and cell_idx < len(color_values):
                     value = color_values[cell_idx]
-                    if np.isnan(value):
-                        color_dict[int(label_id)] = np.array([0.5, 0.5, 0.5, 0.5])
+                    if _is_missing_label_value(value):
+                        hidden_label_ids.add(int(label_id))
+                        color_dict[int(label_id)] = np.array([0.0, 0.0, 0.0, 0.0])
                     else:
                         norm_val = np.clip((value - vmin) / (vmax - vmin), 0, 1)
-                        color_dict[int(label_id)] = np.array(cmap_mpl(norm_val))
+                        bin_idx = min(int(norm_val * (n_bins - 1)), n_bins - 1)
+                        color_dict[int(label_id)] = lut[bin_idx]
 
         # Create DirectLabelColormap
         direct_cmap = DirectLabelColormap(color_dict=color_dict)
 
         # Determine layer name with mask type suffix
         full_layer_name = f"{layer_name} ({mask_key})"
+        outline_layer_name = f"{full_layer_name} outline"
 
         # Build properties
-        properties = {
-            'index': label_ids,
-            'name': list(cell_names_boundary),
+        properties = _build_labels_properties(
+            viewer_config=viewer_config,
+            label_ids=label_ids,
+            cell_names_boundary=cell_names_boundary,
+            mask_key=mask_key,
+            key=key,
+            color_values=color_values,
+            label_indices=(boundary_indices, cell_indices),
+        )
+        outline_cmap = _create_outline_colormap(label_ids, hidden_label_ids=hidden_label_ids)
+        scope = (viewer_config.data_name, viewer_config.layer_name, mask_key)
+        legend_metadata = {
+            "legend_key": key,
+            "legend_is_categorical": is_categorical,
+            "legend_continuous_cmap": "viridis",
+            "legend_upper_climit_pct": 99,
+            "display_scope": scope,
+        }
+        outline_metadata = {
+            "legend_source_layer": full_layer_name,
+            "is_outline_layer": True,
+            "display_scope": scope,
         }
 
-        # Check if layer exists and handle accordingly
-        if full_layer_name in viewer.layers and not add_new_layer:
+        # Check if a reusable layer exists for this scope and handle accordingly
+        existing_main = None if add_new_layer else _find_layer_by_scope(viewer, scope, outline=False)
+        if existing_main is not None:
             # Update existing layer's colormap
-            layer = viewer.layers[full_layer_name]
-            layer.colormap = direct_cmap
+            existing_main.name = full_layer_name
+            existing_main.colormap = direct_cmap
+            existing_main.properties = properties
+            existing_main.metadata.update(legend_metadata)
+            # re-show in case the user had hidden it — displaying a new value
+            # means the layer should be visible again
+            existing_main.visible = True
             # Move to top
-            viewer.layers.move(viewer.layers.index(full_layer_name), len(viewer.layers))
+            viewer.layers.move(viewer.layers.index(existing_main), len(viewer.layers))
         else:
-            if full_layer_name in viewer.layers:
+            if add_new_layer and full_layer_name in viewer.layers:
                 show_warning(f"Layer '{full_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
                 return None
 
@@ -201,8 +474,34 @@ if WITH_NAPARI:
                 name=full_layer_name,
                 scale=(pixel_size, pixel_size),
                 properties=properties,
+                metadata=legend_metadata,
                 colormap=direct_cmap,
             )
+
+        existing_outline = None if add_new_layer else _find_layer_by_scope(viewer, scope, outline=True)
+        if existing_outline is not None:
+            existing_outline.name = outline_layer_name
+            existing_outline.colormap = outline_cmap
+            existing_outline.properties = properties
+            existing_outline.metadata.update(outline_metadata)
+            existing_outline.contour = 1
+            existing_outline.visible = True
+            viewer.layers.move(viewer.layers.index(existing_outline), len(viewer.layers))
+        else:
+            if add_new_layer and outline_layer_name in viewer.layers:
+                show_warning(f"Layer '{outline_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                return None
+
+            outline_layer = viewer.add_labels(
+                mask_pyramid,
+                name=outline_layer_name,
+                scale=(pixel_size, pixel_size),
+                properties=properties,
+                metadata=outline_metadata,
+                colormap=outline_cmap,
+                opacity=1.0,
+            )
+            outline_layer.contour = 1
 
         return None
 
@@ -210,19 +509,11 @@ if WITH_NAPARI:
         viewer: napari.Viewer,
         viewer_config: ViewerConfig
         #xdata # InSituData object
-        ) -> List[FunctionGui]:
+        ) -> list[FunctionGui]:
 
         # access viewer from InSituData
         #viewer = xdata.viewer
         data = viewer_config.data
-
-        # Initialize cell-related widgets only if cells are present
-        # if not viewer_config.has_cells:
-        #     show_cells_widget = None
-        #     move_to_cell_widget = None
-        #     show_boundaries_widget = None
-        #     filter_cells_widget = None
-        #     select_data_widget = None
 
         show_cells_widget = None
         move_to_cell_widget = None
@@ -240,7 +531,7 @@ if WITH_NAPARI:
         # else:
         if viewer_config.has_cells:
             data_names = data.cells.keys()
-            layer_names = ["main"] + list(data.cells.table.layers)
+            layer_names = ["main"] + _layer_names(data.cells.table)
 
             @magicgui(
                 call_button=False,
@@ -286,48 +577,19 @@ if WITH_NAPARI:
                             mask_pyramid = mask
 
                         # Create properties DataFrame with label IDs as index
-                        label_ids = viewer_config.boundaries.seg_mask_value.compute()
+                        label_ids = viewer_config.boundaries.label_ids_for(key)
                         cell_names = viewer_config.boundaries.cell_names.compute()
 
-                        # Determine cell names for properties
-                        props_dict = {}
-                        prop_names = ["cell_area", "surface_area"]
-                        if key == "nuclei" and viewer_config.boundaries.nucleus_to_cell_map is not None:
-                            nucleus_to_cell_map = viewer_config.boundaries.nucleus_to_cell_map
-                            # Use list comprehension with dict.get() for efficiency
-                            cell_ids = [nucleus_to_cell_map.get(label_id - 1, None) for label_id in label_ids]
-                            names = [cell_names[ci] if ci is not None else "unmapped" for ci in cell_ids]
-                            # names = [cell_names[nucleus_to_cell_map[label_id - 1]] if (label_id - 1) in nucleus_to_cell_map else "unmapped" for label_id in label_ids]
-                            # names = [cell_names[nucleus_to_cell_map.get(label_id - 1, "unmapped")] for label_id in label_ids]
-                            for prop_name in prop_names:
-                                if prop_name in viewer_config.adata.obs.columns:
-                                    prop_values = viewer_config.adata.obs[prop_name].values
-                                    props_dict[prop_name] = [prop_values[ci] if ci is not None else None for ci in cell_ids]
-
-                        elif key == "cells":
-                            names = cell_names
-                            cell_ids = label_ids
-
-                            for prop_name in prop_names:
-                                if prop_name in viewer_config.adata.obs.columns:
-                                    props_dict[prop_name] = viewer_config.adata.obs[prop_name].values
-
-                        else:
+                        if key not in {"cells", "nuclei"}:
                             show_warning(f"Unknown key for boundaries: {key}.")
                             return
 
-                        # properties = pd.DataFrame({'name': names}, index=label_ids)
-                        properties = {
-                            'index': label_ids,
-                            'name': names
-                            }
-
-                        for prop_name, prop_values in props_dict.items():
-                            properties[prop_name] = prop_values
-
-                        # for prop in ["cell_area", "surface_area"]:
-                        #     if prop in viewer_config.adata.obs.columns:
-                        #         properties[prop] = viewer_config.adata.obs[prop].values
+                        properties = _build_labels_properties(
+                            viewer_config=viewer_config,
+                            label_ids=label_ids,
+                            cell_names_boundary=cell_names,
+                            mask_key=key,
+                        )
 
                         # Add masks as labels to napari viewer
                         layer = viewer.add_labels(
@@ -340,7 +602,7 @@ if WITH_NAPARI:
                         if key == "cells":
                             viewer.layers[layer_name].contour = 1
                     else:
-                        print(f"Layer '{layer_name}' already in layer list.", flush=True)
+                        logger.info(f"Layer '{layer_name}' already in layer list.")
             else:
                 show_boundaries_widget = None
 
@@ -380,6 +642,13 @@ if WITH_NAPARI:
                         key_type = recent.split(":", maxsplit=1)[0]
                         key = recent.split(":", maxsplit=1)[1]
 
+                    # The Key combo is now editable (substring type-ahead), so a typed
+                    # value may not correspond to any real key -- validate before use.
+                    valid_keys = viewer_config.key_dict.get(key_type, [])
+                    if key not in valid_keys:
+                        show_warning(f"'{key}' is not a valid {key_type} key.")
+                        return None
+
                     # get expression values
                     color_value = _get_expression_values(
                         adata=viewer_config.adata,
@@ -400,17 +669,9 @@ if WITH_NAPARI:
                     # save last addition to add it to recent in the callback
                     viewer_config.recent_selections.append(f"{key_type}:{key}")
 
-                    if f"{key}_colors" in viewer_config.adata.uns.keys():
-                        # Convert hex colors to RGB format
-                        def hex_to_rgb(hex_color):
-                            hex_color = hex_color.lstrip('#')
-                            return tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
-                        rgb_colors = [hex_to_rgb(color) for color in viewer_config.adata.uns[f"{key}_colors"]]
-
-                        # Transform to ListedColormap
-                        colormap = ListedColormap(rgb_colors)
-                    else:
-                        colormap = None
+                    color_value, colormap = _resolve_categorical_colormap(
+                        color_value, viewer_config.adata.uns, key
+                    )
 
                     # Handle display as labels (cells or nuclei boundaries)
                     if display_mode in ["cells", "nuclei"]:
@@ -426,16 +687,25 @@ if WITH_NAPARI:
                         )
 
                     # Display as points (default behavior)
-                    # get layer names from the current data
-                    if viewer_config.layer_name == "main":
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and not elem.name.endswith(f"[{viewer_config.layer_name}]")]
+                    points_scope = (viewer_config.data_name, viewer_config.layer_name, "points")
+                    existing_points = None if add_new_layer else _find_layer_by_scope(viewer, points_scope, outline=False)
+
+                    if existing_points is not None:
+                        # update the existing points layer
+                        _update_points_layer(
+                            layer=existing_points,
+                            new_color_values=color_value,
+                            new_name=new_layer_name,
+                            categorical_cmap = colormap
+                        )
+                        # move new layer to the top
+                        viewer.layers.move(viewer.layers.index(existing_points), len(viewer.layers))
+
                     else:
-                        layer_names_for_current_data = [elem.name for elem in viewer.layers if elem.name.startswith(viewer_config.data_name) and elem.name.endswith(f"[{viewer_config.layer_name}]")]
-
-                    # select only point layers
-                    layer_names_for_current_data = [elem for elem in layer_names_for_current_data if isinstance(viewer.layers[elem], napari.layers.points.points.Points)]
-
-                    if len(layer_names_for_current_data) == 0:
+                        # Check if layer with this name already exists
+                        if add_new_layer and new_layer_name in viewer.layers:
+                            show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
+                            return None
 
                         # create points layer for genes
                         gene_layer = _create_points_layer(
@@ -446,42 +716,41 @@ if WITH_NAPARI:
                             point_names=cell_names,
                             point_size=size,
                             upper_climit_pct=99,
-                            categorical_cmap = colormap
+                            categorical_cmap = colormap,
+                            display_scope=points_scope,
                         )
                         return gene_layer
-                        #layers_to_add.append(gene_layer)
-                    else:
-                        if not add_new_layer:
-                            #print(f"Key '{gene}' already in layer list.", flush=True)
-                            # update the existing points layer
-                            layer = viewer.layers[layer_names_for_current_data[-1]]
-                            _update_points_layer(
-                                layer=layer,
-                                new_color_values=color_value,
-                                new_name=new_layer_name,
-                                categorical_cmap = colormap
-                            )
-                            # move new layer to the top
-                            was_moved = viewer.layers.move(viewer.layers.index(new_layer_name), len(viewer.layers))
 
-                        else:
-                            # Check if layer with this name already exists
-                            if new_layer_name in viewer.layers:
-                                show_warning(f"Layer '{new_layer_name}' already exists. Uncheck 'Add new layer' to update it instead.")
-                                return None
+            # Make the cells "Key" combo searchable with a substring, case-insensitive
+            # completer (mirrors the Transcript Viewer / units "Gene" field behavior).
+            def _make_combo_searchable(widget, choices):
+                native = getattr(widget, 'native', None)
+                if isinstance(native, QComboBox):
+                    native.setEditable(True)
+                    native.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+                    completer = QCompleter([str(c) for c in choices])
+                    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
+                    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+                    native.setCompleter(completer)
 
-                            # create new points layer for genes
-                            gene_layer = _create_points_layer(
-                                points=viewer_config.points,
-                                color_values=color_value,
-                                #name=f"{config.current_data_name}-{gene}",
-                                name=new_layer_name,
-                                point_names=cell_names,
-                                point_size=size,
-                                upper_climit_pct=99,
-                                categorical_cmap = colormap
-                            )
-                            return gene_layer
+            _make_combo_searchable(show_cells_widget.key, viewer_config.genes)
+
+            # Disabled until a valid "Key" or "Recent" selection makes "Show" actionable
+            def _cells_show_enabled():
+                key_type = show_cells_widget.key_type.value
+                valid_keys = viewer_config.key_dict.get(key_type, [])
+                return bool(show_cells_widget.key.value in valid_keys or show_cells_widget.recent.value)
+
+            show_cells_widget.call_button.enabled = _cells_show_enabled()
+
+            @show_cells_widget.key.changed.connect
+            def _on_cells_key_changed(event=None):
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
+
+            @show_cells_widget.recent.changed.connect
+            def _on_cells_recent_changed(event=None):
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             if len(viewer_config.key_dict["obs"]) > 0:
                 obs_choices = viewer_config.key_dict["obs"]
@@ -546,7 +815,7 @@ if WITH_NAPARI:
                 cell="",
                 zoom=5,
                 highlight=True,
-                ) -> Optional[napari.types.LayerDataTuple]:
+                ) -> napari.types.LayerDataTuple | None:
                 if cell in viewer_config.adata.obs_names.astype(str):
                     # get location of selected cell
                     cell_loc = viewer_config.adata.obs_names.get_loc(cell)
@@ -569,16 +838,12 @@ if WITH_NAPARI:
                                 border_width=0.1
                             )
                 else:
-                    print(f"Cell '{cell}' not found.")
+                    logger.warning(f"Cell '{cell}' not found.")
 
             # ---CALLBACKS---
             # connect key change with update function
             @select_data_widget.data_name.changed.connect
             @select_data_widget.layer_name.changed.connect
-            @show_cells_widget.key_type.changed.connect
-            @show_cells_widget.call_button.changed.connect
-            @viewer.layers.events.removed.connect
-            @viewer.layers.events.inserted.connect
             def update_widgets_on_data_change(event=None):
                 # update data name in config and refresh the variables in the config class
                 viewer_config.data_name = select_data_widget.data_name.value
@@ -594,6 +859,15 @@ if WITH_NAPARI:
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
                     )
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
+
+            @show_cells_widget.key_type.changed.connect
+            def update_show_cells_key_choices(event=None):
+                show_cells_widget.key.value = None
+                _update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             def callback_refresh(event=None):
                 # after the points widget is run, the widgets have to be refreshed to current data layer
@@ -606,6 +880,8 @@ if WITH_NAPARI:
                     boundaries_widget=show_boundaries_widget,
                     filter_widget=filter_cells_widget
                     )
+                _make_combo_searchable(show_cells_widget.key, viewer_config.key_dict[show_cells_widget.key_type.value])
+                show_cells_widget.call_button.enabled = _cells_show_enabled()
 
             if show_cells_widget is not None:
                 show_cells_widget.call_button.clicked.connect(callback_refresh)
@@ -626,12 +902,14 @@ if WITH_NAPARI:
 
             @magicgui(
                 call_button='Show',
+                units_key={'choices': list(data.units.keys()), 'label': 'Units layer:'},
                 gene={'label': "Gene (search):"},
                 obs={'choices': obs_choices, 'label': 'Obs:'},
                 obsm={'choices': obsm_choices, 'label': 'Obsm:'},
                 add_new_layer={'label': 'Add new layer'}
             )
             def show_units_widget(
+                units_key=viewer_config.units_key,
                 gene="",
                 obs="",
                 obsm="",
@@ -664,16 +942,18 @@ if WITH_NAPARI:
 
                 # get expression values
                 color_values = _get_expression_values(
-                    adata=viewer_config.units.data,
-                    X=viewer_config.units.data.X,
+                    adata=viewer_config.units.table,
+                    X=viewer_config.units.table.X,
                     key_type=key_type, key=key
                 )
 
-                # Create layer name
-                layer_name = f"units-{key}"
+                # Create layer name, scoped to the selected units layer so switching
+                # units layers doesn't clobber a previously drawn one
+                layer_name = f"units-{viewer_config.units_key}-{key}"
 
-                # Get existing spatial unit layers
-                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith("units-") and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
+                # Get existing spatial unit layers for this units layer
+                unit_layer_prefix = f"units-{viewer_config.units_key}-"
+                unit_layer_names = [elem.name for elem in viewer.layers if elem.name.startswith(unit_layer_prefix) and isinstance(elem, napari.layers.shapes.shapes.Shapes)]
 
                 if len(unit_layer_names) == 0:
                     # Create new spatial units layer
@@ -716,6 +996,9 @@ if WITH_NAPARI:
                         )
                         return unit_layer
 
+            # Disabled until a gene/obs/obsm selection makes "Show" actionable
+            show_units_widget.call_button.enabled = False
+
             # Make the gene text field searchable with completer
             def _setup_searchable_textfield(widget, full_choices):
                 """Configure QLineEdit to be searchable with QCompleter."""
@@ -724,10 +1007,26 @@ if WITH_NAPARI:
                     completer = QCompleter(full_choices)
                     completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
                     completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
                     widget.native.setCompleter(completer)
 
             # Setup searchable text field for genes
             _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
+
+            @show_units_widget.units_key.changed.connect
+            def _on_units_key_changed(event=None):
+                viewer_config.units_key = show_units_widget.units_key.value
+                viewer_config.refresh_unit_variables()
+                # set choices before resetting values -- assigning choices resets the
+                # combo to its first entry "", so the mutual-exclusivity callbacks
+                # below see value == "" and no-op
+                show_units_widget.obs.choices = [""] + sorted(viewer_config.unit_obs)
+                show_units_widget.obsm.choices = [""] + sorted(viewer_config.unit_obsm)
+                show_units_widget.gene.value = ""
+                show_units_widget.obs.value = ""
+                show_units_widget.obsm.value = ""
+                _setup_searchable_textfield(show_units_widget.gene, viewer_config.unit_vars)
+                show_units_widget.call_button.enabled = False
 
             # Connect callbacks to ensure mutual exclusivity
             @show_units_widget.gene.changed.connect
@@ -735,293 +1034,489 @@ if WITH_NAPARI:
                 if show_units_widget.gene.value != "":
                     show_units_widget.obs.value = ""
                     show_units_widget.obsm.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             @show_units_widget.obs.changed.connect
             def _on_obs_changed(event=None):
                 if show_units_widget.obs.value != "":
                     show_units_widget.gene.value = ""
                     show_units_widget.obsm.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             @show_units_widget.obsm.changed.connect
             def _on_obsm_changed(event=None):
                 if show_units_widget.obsm.value != "":
                     show_units_widget.gene.value = ""
                     show_units_widget.obs.value = ""
+                show_units_widget.call_button.enabled = bool(
+                    show_units_widget.gene.value or show_units_widget.obs.value or show_units_widget.obsm.value
+                )
 
             show_units_widget.call_button.clicked.connect(callback_update_legend)
 
-        # if data.annotations.is_empty and data.regions.is_empty:
-        #     show_geometries_widget = None
-        # else:
-        if not (data.annotations.is_empty and data.regions.is_empty):
-            #TODO: The following section is weirdly complicated and should be simplified.
-            # check which geometries are available
-            if not data.annotations.is_empty:
-                if not data.regions.is_empty:
-                    choices = ["Annotations", "Regions"]
-                else:
-                    choices = ["Annotations"]
-            else:
-                choices = ["Regions"]
-
-            for c in choices:
-                if len(getattr(data, c.lower()).keys()) == 0:
-                    choices.remove(c)
-
-            if len(choices) == 0:
-                show_geometries_widget = None
-            else:
-
-                # extract geometry object
-                geom = getattr(data, choices[0].lower())
-
-                # extract annotations keys
-                annot_keys = list(geom.keys())
-                try:
-                    first_annot_key = list(annot_keys)[0] # for dropdown menu
-                except IndexError:
-                    show_geometries_widget = None
-                else:
-                    first_classes = ["all"] + sorted(geom.metadata[first_annot_key]['classes'])
-
-                    @magicgui(
-                        call_button='Show',
-                        geom_type={"choices": choices, "label": "Type:"},
-                        key={"choices": annot_keys, "label": "Key:"},
-                        annot_class={"choices": first_classes, "label": "Class:"},
-                        edge_width={'min': 1, 'max': 40, 'step': 1, 'label': 'Edge width:'},
-                        # opacity={'min': 0.0, 'max': 1.0, 'step': 0.1, 'label': 'Opacity:'},
-                        # tolerance={'min': 0, 'step': 1, 'label': 'Tolerance:'},
-                        show_names={'label': 'Show names'}
-                    )
-                    def show_geometries_widget(
-                        geom_type,
-                        key,
-                        annot_class,
-                        edge_width: int = 4,
-                        # opacity: float = 1,
-                        # tolerance: int = 1,
-                        show_names: bool = False
-                        ):
-                        opacity = 1
-                        tolerance = 1
-
-                        if geom_type == "Annotations":
-                            # get annotation dataframe
-                            annot_df = data.annotations[key]
-                            all_keys = list(data.annotations.metadata.keys())
-                        elif geom_type == "Regions":
-                            # get regions dataframe
-                            annot_df = data.regions[key]
-                            all_keys = list(data.regions.metadata.keys())
-                        else:
-                            TypeError(f"Unknown geometry type: {geom_type}")
-
-                        if annot_class == "all":
-                            # get classes
-                            classes = annot_df['name'].unique()
-                        else:
-                            classes = [annot_class]
-
-                        # iterate through classes
-                        for cl in classes:
-                            layer_name = f"{cl} ({key})"
-                            #if layer_name not in viewer.layers: # this cannot be checked here because the symbol is missing which is added in the adding process below
-                            # get dataframe for this class
-                            class_df = annot_df[annot_df["name"] == cl].copy()
-
-                            # simplify polygons for visualization
-                            # class_df["geometry"] = class_df["geometry"].simplify(tolerance)
-
-                            if not "color" in class_df.columns:
-                                # create a RGB color with range 0-255 for this key
-                                rgb_color = [elem * 255 for elem in REGION_CMAP(all_keys.index(key))][:3]
-                            else:
-                                rgb_color = None
-
-                            # add layer to viewer
-                            _add_geometries_as_layer(
-                                dataframe=class_df,
-                                viewer=viewer,
-                                layer_name=layer_name,
-                                #scale_factor=scale_factor,
-                                edge_width=edge_width,
-                                opacity=opacity,
-                                rgb_color=rgb_color,
-                                show_names=show_names,
-                                mode=geom_type,
-                                tolerance=tolerance
-                            )
-
-                    # connect key change with update function
-                    @show_geometries_widget.geom_type.changed.connect
-                    @show_geometries_widget.key.changed.connect
-                    @show_geometries_widget.call_button.clicked.connect
-                    @viewer.layers.events.removed.connect # somehow the values change when layers are inserted
-                    @viewer.layers.events.inserted.connect # or removed. Therefore, this update is necessary
-                    def update_annotation_widget_after_changes(event=None):
-                        _update_keys_based_on_geom_type(show_geometries_widget, xdata=data)
-                        _update_classes_on_key_change(show_geometries_widget, xdata=data)
-                        _set_show_names_based_on_geom_type(show_geometries_widget)
-                        #_update_key_on_type_change(show_cells_widget, viewer_config=viewer_config)
+        geometries_widget = GeometriesWidget(viewer=viewer, viewer_config=viewer_config)
 
         return (
             show_cells_widget,
             move_to_cell_widget,
-            show_geometries_widget,
+            geometries_widget,
             show_boundaries_widget,
             select_data_widget,
             filter_cells_widget,
             show_units_widget,
             )
 
-    # Difference between magicgui and magic_factory decorators:
-    # - the magicgui decorator directly returns the widget
-    # - the magic_factory decorator returns a factory function that can be called to generate the widget
-    @magic_factory(
-        call_button='Add geometry layer',
-        key={"choices": ["Geometric annotations", "Point annotations", "Regions"], "label": "Type:"},
-        annot_key={'label': 'Key:'},
-        class_name={'label': 'Class:'}
-        )
-    def add_new_geometries_widget(
-        key: str = "Geometric annotations",
-        annot_key: str = "TestKey",
-        class_name: str = "TestClass",
-    ) -> napari.types.LayerDataTuple:
-        # name pattern of layer name
-        name_pattern: str = "{type_symbol} {class_name} ({annot_key})"
+    _ALL = "(all)"
+    _NO_KEY = "-----"
 
-        # get current viewer and config
-        viewer = napari.current_viewer()
-        viewer_config = config_manager[_get_viewer_uid(viewer)]
+    # NOTE: must remain inside the `if WITH_NAPARI:` block — napari types are
+    # referenced in the signature and body.
+    def _get_next_region_name_for_layer(viewer: napari.Viewer, key: str, viewer_config) -> str:
+        """Return the next auto-incremented region name for *key* across viewer + InSituData."""
+        import re
+        existing: set = set()
+        layer_name = f"{REGIONS_SYMBOL} {key}"
+        if layer_name in viewer.layers:
+            layer = viewer.layers[layer_name]
+            for n in layer.features.get('name', []):
+                if isinstance(n, str):
+                    existing.add(n)
+        data = viewer_config.data
+        if not data.regions.is_empty and key in data.regions.keys():
+            df = data.regions[key]
+            if 'name' in df.columns:
+                for n in df['name'].dropna():
+                    if isinstance(n, str):
+                        existing.add(n)
+        max_n = 0
+        for n in existing:
+            m = re.match(r'^Region (\d+)$', n)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+        return f"Region {max_n + 1}"
 
-        if (class_name != "") & (annot_key != ""):
-            if key == "Geometric annotations":
-                _test_existance(viewer_config, annot_key, class_name, modality="annotations")
-                # generate name
-                name = name_pattern.format(
-                    type_symbol=ANNOTATIONS_SYMBOL,
-                    class_name=class_name,
-                    annot_key=annot_key
-                    )
+    class GeometriesWidget(QWidget):
+        """Unified widget for showing and adding geometry layers (annotations/regions)."""
 
-                # generate shapes layer for geometric annotation
-                layer = (
-                    [],
-                    {
-                        'name': name,
-                        'shape_type': 'polygon',
-                        'edge_width': 4,
-                        'edge_color': 'red',
-                        'face_color': 'transparent',
-                        #'scale': (config.pixel_size, config.pixel_size),
-                        'properties': {
-                            'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
-                            }
-                        },
-                    'shapes'
-                    )
-            elif key == "Point annotations":
-                _test_existance(viewer_config, annot_key, class_name, modality="annotations")
-                # generate name
-                name = name_pattern.format(
-                    type_symbol=POINTS_SYMBOL,
-                    class_name=class_name,
-                    annot_key=annot_key
-                    )
-
-                # generate points layer for point annotation
-                layer = (
-                    [],
-                    {
-                        'name': name,
-                        'size': 10,
-                        'border_color': 'black',
-                        'face_color': 'blue',
-                        #'scale': (config.pixel_size, config.pixel_size),
-                        'properties': {
-                            'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
-                        }
-                        },
-                    'points'
-                    )
-
-            elif key == "Regions":
-                _test_existance(viewer_config, annot_key, class_name, modality="regions")
-                # generate name
-                name = name_pattern.format(
-                    type_symbol=REGIONS_SYMBOL,
-                    class_name=class_name,
-                    annot_key=annot_key
-                    )
-
-                # generate shapes layer for region
-                layer = (
-                    [],
-                    {
-                        'name': name,
-                        'shape_type': 'polygon',
-                        'edge_width': 10,
-                        'edge_color': '#ffaa00ff',
-                        'face_color': 'transparent',
-                        #'scale': (config.pixel_size, config.pixel_size),
-                        'properties': {
-                            'uid': np.array([], dtype='object'),
-                            'type': np.array([], dtype='object')
-                        }
-                        },
-                    'shapes'
-                    )
-
-            else:
-                layer = None
-
-            if name in viewer.layers:
-                return None
-
-            # reset class name to nothing
-            add_new_geometries_widget.class_name.value = ""
-
-            return layer
-
-        else:
-            show_warning("Please provide a class name and an annotation key.")
-            return None
-
-
-    def _test_existance(viewer_config, annot_key, class_name, modality):
-        try:
-            geom_df = getattr(viewer_config.data, modality)
-
-            if geom_df is not None:
-                exists = (geom_df[annot_key]["name"] == class_name).any()
-            else:
-                exists = False
-        except KeyError:
-            exists = False
-
-        if exists:
-            show_warning((
-                    f"Data contains already {modality} with key '{annot_key}' and class '{class_name}'. "
-                    f"To show them use the 'Show geometries' widget."
-                    ))
-
-    class SyncButton(QWidget):
-        def __init__(self):
+        def __init__(self, viewer: napari.Viewer, viewer_config: "ViewerConfig",
+                     max_width: int = 500):
             super().__init__()
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
+            self.viewer = viewer
+            self.viewer_config = viewer_config
+            self.setMaximumWidth(max_width)
 
-            # create the sync button
-            self.sync_button = QPushButton("Sync Geometries")
-            self.sync_button.clicked.connect(self._sync_geometries)
-            self.layout.addWidget(self.sync_button)
+            layout = QVBoxLayout()
+            self.setLayout(layout)
 
-        def _sync_geometries(self):
-            sync_geometries()
+            # Type row — Annotations vs Regions only; shapes/points is an Add-time choice
+            type_row = QHBoxLayout()
+            type_row.addWidget(QLabel("Type:"))
+            self.type_combo = QComboBox()
+            self.type_combo.addItems(["Annotations", "Regions"])
+            type_row.addWidget(self.type_combo)
+            layout.addLayout(type_row)
+
+            # Key row
+            key_row = QHBoxLayout()
+            key_row.addWidget(QLabel("Key:"))
+            self.key_combo = QComboBox()
+            self.key_combo.setEditable(True)
+            key_row.addWidget(self.key_combo)
+            layout.addLayout(key_row)
+
+            # Name row
+            name_row = QHBoxLayout()
+            name_row.addWidget(QLabel("Name:"))
+            self.name_combo = QComboBox()
+            self.name_combo.setEditable(False)
+            self.name_combo.setToolTip(
+                "Filter by name. '(all)' loads all shapes for this key."
+            )
+            name_row.addWidget(self.name_combo)
+            layout.addLayout(name_row)
+
+            # Show button (geometry type handled internally)
+            self.show_btn = QPushButton("Show")
+            self.show_btn.setToolTip("Load geometries from InSituData into the viewer")
+            self.show_btn.clicked.connect(self._on_show)
+            layout.addWidget(self.show_btn)
+
+            # Add buttons — shapes always available; points only for Annotations
+            add_row = QHBoxLayout()
+            self.add_shapes_btn = QPushButton("Add shapes")
+            self.add_shapes_btn.setToolTip("Create a new empty shapes layer for drawing")
+            self.add_shapes_btn.clicked.connect(self._on_add_shapes)
+            add_row.addWidget(self.add_shapes_btn)
+            self.add_points_btn = QPushButton("Add points")
+            self.add_points_btn.setToolTip("Create a new empty points layer for drawing")
+            self.add_points_btn.clicked.connect(self._on_add_points)
+            add_row.addWidget(self.add_points_btn)
+            layout.addLayout(add_row)
+
+            # Features Table button
+            self.features_btn = QPushButton("Open Features Table")
+            self.features_btn.clicked.connect(self._open_features_table)
+            layout.addWidget(self.features_btn)
+
+            # Connect signals
+            self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+            self.key_combo.currentIndexChanged.connect(self._refresh_name_combo)
+            self.key_combo.editTextChanged.connect(self._refresh_name_combo)
+            viewer.layers.events.inserted.connect(self._refresh_key_combo)
+            viewer.layers.events.removed.connect(self._refresh_key_combo)
+
+            # Initial population
+            self._refresh_key_combo()
+
+        def closeEvent(self, event):
+            self.viewer.layers.events.inserted.disconnect(self._refresh_key_combo)
+            self.viewer.layers.events.removed.disconnect(self._refresh_key_combo)
+            super().closeEvent(event)
+
+        def _get_geom_container(self):
+            data = self.viewer_config.data
+            if self.type_combo.currentText() == "Annotations":
+                return data.annotations
+            return data.regions
+
+        def _on_type_changed(self, event=None):
+            """Reset Key/Name and update Add points availability on type change."""
+            self.key_combo.blockSignals(True)
+            self.key_combo.setCurrentIndex(-1)
+            self.key_combo.clearEditText()
+            self.key_combo.blockSignals(False)
+            self.name_combo.blockSignals(True)
+            self.name_combo.setCurrentIndex(0)  # (all)
+            self.name_combo.blockSignals(False)
+            is_annotations = self.type_combo.currentText() == "Annotations"
+            self.add_points_btn.setEnabled(is_annotations)
+            self._refresh_key_combo()
+
+        def _refresh_key_combo(self, event=None):
+            geom = self._get_geom_container()
+            keys = (sorted(geom.keys(), key=str.casefold)
+                    if not geom.is_empty else [])
+            self.key_combo.blockSignals(True)
+            current = self.key_combo.currentText()
+            self.key_combo.clear()
+            self.key_combo.addItem(_NO_KEY)
+            self.key_combo.addItem(_ALL)
+            self.key_combo.addItems(keys)
+            idx = self.key_combo.findText(current)
+            if idx >= 0:
+                self.key_combo.setCurrentIndex(idx)
+            elif current and current not in (_NO_KEY, _ALL):
+                self.key_combo.setEditText(current)
+            else:
+                self.key_combo.setCurrentIndex(0)  # default to _NO_KEY
+            self.key_combo.blockSignals(False)
+            # Explicit call required: setEditText above fires no signal while
+            # blocked, so _refresh_name_combo would not run otherwise.
+            self._refresh_name_combo()
+
+        def _refresh_name_combo(self, event=None):
+            import warnings
+            key_text = self.key_combo.currentText().strip()
+            geom = self._get_geom_container()
+            self.name_combo.blockSignals(True)
+            current = self.name_combo.currentText()
+            self.name_combo.clear()
+            self.name_combo.addItem(_ALL)
+            if key_text and key_text not in (_NO_KEY, _ALL) and not geom.is_empty:
+                try:
+                    meta = geom.metadata.get(key_text, {})
+                    if 'names' in meta:
+                        names = meta['names']
+                    elif 'classes' in meta:
+                        warnings.warn(
+                            f"Geometry metadata for key '{key_text}' uses deprecated field "
+                            "'classes'. Please resave the data to upgrade to the new format.",
+                            DeprecationWarning,
+                        )
+                        names = meta['classes']
+                    else:
+                        names = []
+                    for n in sorted(names, key=str.casefold):
+                        self.name_combo.addItem(n)
+                except (KeyError, AttributeError):
+                    pass
+            idx = self.name_combo.findText(current)
+            if idx >= 0:
+                self.name_combo.setCurrentIndex(idx)
+            else:
+                self.name_combo.setCurrentIndex(0)  # default to (all)
+            self.name_combo.blockSignals(False)
+
+        def _get_next_region_name(self, key_text: str) -> str:
+            return _get_next_region_name_for_layer(self.viewer, key_text, self.viewer_config)
+
+        def _on_show(self):
+            """Load existing geometries from InSituData into the viewer.
+
+            For Annotations the geometry type (shapes vs points) is determined
+            automatically from the stored data — both layers are created/updated
+            in one call. For Regions only a shapes layer is created.
+            """
+            # Refresh first so the combo reflects the current InSituData state.
+            self._refresh_key_combo()
+
+            name_text = self.name_combo.currentText().strip()
+            key_text = self.key_combo.currentText().strip()
+            type_text = self.type_combo.currentText()
+            data = self.viewer_config.data
+
+            if not key_text or key_text == _NO_KEY:
+                show_warning("Please select a key.")
+                return
+
+            load_all = (name_text == _ALL)
+            is_annotations = (type_text == "Annotations")
+            geom_attr = "annotations" if is_annotations else "regions"
+            geom_container = getattr(data, geom_attr)
+
+            if key_text == _ALL:
+                # Show all keys — iterate and load each one.
+                if geom_container.is_empty:
+                    show_warning(f"No {geom_attr} available.")
+                    return
+                for k in list(geom_container.keys()):
+                    if not is_annotations:
+                        layer_name = f"{REGIONS_SYMBOL} {k}"
+                        if layer_name in self.viewer.layers:
+                            show_info(f"Layer '{layer_name}' already exists. Skipped.")
+                            continue
+                        _add_geometries_as_layer(
+                            dataframe=geom_container[k],
+                            viewer=self.viewer,
+                            layer_name=k,
+                            mode="Regions",
+                        )
+                    else:
+                        _add_geometries_as_layer(
+                            dataframe=geom_container[k],
+                            viewer=self.viewer,
+                            layer_name=k,
+                            mode="Annotations",
+                        )
+                return
+
+            key_exists = (not geom_container.is_empty
+                          and key_text in geom_container.keys())
+            if not key_exists:
+                show_warning(
+                    f"Key '{key_text}' not found in {geom_attr}. "
+                    "Use 'Add shapes' or 'Add points' to create a new layer."
+                )
+                return
+
+            df = geom_container[key_text]
+            if not load_all:
+                df = df[df['name'] == name_text]
+                if df.empty:
+                    show_info(f"No shapes with name '{name_text}' in key '{key_text}'.")
+                    return
+
+            if not is_annotations:
+                # Regions: single shapes layer — warn if already present
+                layer_name = f"{REGIONS_SYMBOL} {key_text}"
+                if layer_name in self.viewer.layers:
+                    filter_hint = f" (filter: '{name_text}')" if not load_all else ""
+                    show_warning(
+                        f"Layer '{layer_name}' already exists{filter_hint}. Use Sync to update."
+                    )
+                    return
+                _add_geometries_as_layer(
+                    dataframe=df,
+                    viewer=self.viewer,
+                    layer_name=key_text,
+                    mode="Regions",
+                )
+            else:
+                # Annotations: _add_geometries_as_layer handles shapes and points
+                # internally; existing-layer dedup is done per-UID inside that function.
+                _add_geometries_as_layer(
+                    dataframe=df,
+                    viewer=self.viewer,
+                    layer_name=key_text,
+                    mode="Annotations",
+                )
+                # Reset current_properties name to "" on both possible annotation layers
+                # (napari promotes column.iloc[-1] to defaults on every features assignment).
+                for sym in (ANNOTATIONS_SYMBOL, POINTS_SYMBOL):
+                    ln = f"{sym} {key_text}"
+                    if ln in self.viewer.layers:
+                        layer = self.viewer.layers[ln]
+                        cp = dict(layer.current_properties)
+                        cp['name'] = np.array([''], dtype='object')
+                        layer.current_properties = cp
+
+
+        def _on_add_shapes(self):
+            """Create a new empty shapes layer for drawing."""
+            type_text = self.type_combo.currentText()  # "Annotations" or "Regions"
+            config = self.viewer_config
+
+            key_text, ok = QInputDialog.getText(self, "Add shapes layer", "Key:")
+            key_text = key_text.strip()
+            if not ok or not key_text:
+                return
+
+            if type_text == "Regions":
+                symbol = REGIONS_SYMBOL
+                internal_mode = "Regions"
+                effective_name = self._get_next_region_name(key_text)
+            else:
+                symbol = ANNOTATIONS_SYMBOL
+                internal_mode = "Annotations"
+                effective_name = ""
+
+            layer_name = f"{symbol} {key_text}"
+            self._create_new_layer(type_text, key_text, effective_name,
+                                   layer_name, internal_mode, config)
+
+        def _on_add_points(self):
+            """Create a new empty points layer for drawing (Annotations only)."""
+            config = self.viewer_config
+
+            key_text, ok = QInputDialog.getText(self, "Add points layer", "Key:")
+            key_text = key_text.strip()
+            if not ok or not key_text:
+                return
+
+            layer_name = f"{POINTS_SYMBOL} {key_text}"
+            # Use "Point annotations" as the internal type string so _create_new_layer
+            # calls viewer.add_points instead of viewer.add_shapes.
+            self._create_new_layer("Point annotations", key_text, "",
+                                   layer_name, "Annotations", config)
+
+        def _create_new_layer(self, type_text, key_text, name_text,
+                              layer_name, internal_mode, config):
+            geom_type_str = ('annotation' if type_text in ("Annotations", "Point annotations")
+                             else 'region')
+            features = {
+                'uid': np.array([], dtype='object'),
+                'type': np.array([], dtype='object'),
+                'name': np.array([], dtype='object'),
+                'geometry_type': np.array([], dtype='object'),
+            }
+            current_props = {
+                'name': np.array([name_text], dtype='object'),
+                'uid': np.array([''], dtype='object'),
+                'type': np.array([''], dtype='object'),
+                'geometry_type': np.array([geom_type_str], dtype='object'),
+            }
+
+            if layer_name in self.viewer.layers:
+                # Layer exists — update current_properties for new name and
+                # ensure color propagation is wired (may not be if layer was
+                # created in a prior session without this call).
+                layer = self.viewer.layers[layer_name]
+                layer.current_properties = current_props
+                if name_text:
+                    self._set_layer_draw_color(layer, type_text, key_text, name_text, config)
+                _connect_color_propagation(layer, config, key_text, type_text)
+                return
+
+            if type_text == "Annotations":
+                self.viewer.add_shapes(
+                    [],
+                    name=layer_name,
+                    shape_type='polygon',
+                    edge_width=4,
+                    edge_color='#808080',
+                    face_color='transparent',
+                    features=features,
+                    text={'string': '{name}', 'anchor': 'upper_left',
+                          'size': 8, 'color': 'white'},
+                )
+            elif type_text == "Point annotations":
+                self.viewer.add_points(
+                    np.zeros((0, 2)),
+                    name=layer_name,
+                    size=10,
+                    border_color='black',
+                    face_color='#808080',
+                    features=features,
+                    text={'string': '{name}', 'anchor': 'upper_left',
+                          'size': 8, 'color': 'white'},
+                )
+            elif type_text == "Regions":
+                self.viewer.add_shapes(
+                    [],
+                    name=layer_name,
+                    shape_type='polygon',
+                    edge_width=10,
+                    edge_color='#ffaa00ff',
+                    face_color='transparent',
+                    features=features,
+                    text={'string': '{name}', 'anchor': 'upper_left',
+                          'size': 8, 'color': 'white'},
+                )
+
+            if layer_name in self.viewer.layers:
+                new_layer = self.viewer.layers[layer_name]
+                new_layer.current_properties = current_props
+                if name_text:
+                    self._set_layer_draw_color(new_layer, type_text, key_text, name_text, config)
+                _connect_color_propagation(
+                    new_layer, config, key_text, type_text
+                )
+
+        def _set_layer_draw_color(self, layer, type_text, key_text, name_text, config):
+            """Set current_edge_color / current_border_color from the palette for name_text."""
+            import napari.layers as _nl
+            if type_text == "Regions":
+                color = _get_or_assign_color(
+                    config.region_colors, REGIONS_PALETTE,
+                    '_region_color_idx', config, key_text, name_text
+                )
+            else:
+                color = _get_or_assign_color(
+                    config.annot_point_colors, ANNOTATIONS_PALETTE,
+                    '_annot_point_color_idx', config, key_text, name_text
+                )
+            try:
+                if isinstance(layer, _nl.Points):
+                    layer.current_face_color = color
+                else:
+                    layer.current_edge_color = color
+            except Exception:
+                pass
+
+        def _open_features_table(self):
+            # Prefer the currently active layer; fall back to key combo lookup.
+            active = self.viewer.layers.selection.active
+            if active is not None and isinstance(
+                active, (napari.layers.Shapes, napari.layers.Points)
+            ):
+                layer = active
+            else:
+                key_text = self.key_combo.currentText().strip()
+                type_text = self.type_combo.currentText()
+                if type_text == "Annotations":
+                    layer_name = f"{ANNOTATIONS_SYMBOL} {key_text}"
+                else:
+                    layer_name = f"{REGIONS_SYMBOL} {key_text}"
+
+                if layer_name not in self.viewer.layers:
+                    show_warning("Layer not found in viewer. Add it first.")
+                    return
+                layer = self.viewer.layers[layer_name]
+
+            result = self.viewer.window.add_plugin_dock_widget(
+                plugin_name="napari", widget_name="Features table widget"
+            )
+            if result is not None:
+                dock = result[0] if isinstance(result, tuple) else result
+                dock.setFloating(True)
+                dock.show()
+                dock.raise_()
+            self.viewer.layers.selection.active = layer
+
 
 
     class ResetWidgetsButton(QWidget):
@@ -1047,7 +1542,6 @@ if WITH_NAPARI:
                 return
 
             viewer_config = config_manager[_get_viewer_uid(viewer)]
-            data = viewer_config.data
 
             # Get list of currently open dock widget names
             existing_widgets = set()
@@ -1058,7 +1552,7 @@ if WITH_NAPARI:
             (
                 show_cells_widget,
                 locate_cells_widget,
-                show_geometries_widget,
+                geometries_widget,
                 show_boundaries_widget,
                 select_data,
                 filter_cells_widget,
@@ -1076,7 +1570,7 @@ if WITH_NAPARI:
                 (show_boundaries_widget, "Show boundaries", None, False),
                 (locate_cells_widget, "Navigate to cell", None, False),
                 (filter_cells_widget, "Filter cells", 150, True),
-                (show_geometries_widget, "Show geometries", None, True),
+                (geometries_widget, "Geometries", None, True),
             ]
 
             # Add widgets that are not already open
@@ -1087,98 +1581,151 @@ if WITH_NAPARI:
                         widget.max_height = max_height
                     widget.max_width = self.widgets_max_width
 
-            # Check and add "Add geometries" widget
-            if "Add geometries" not in existing_widgets:
-                add_geom_widget = add_new_geometries_widget()
-                add_geom_widget.max_width = self.widgets_max_width
-                viewer.window.add_dock_widget(add_geom_widget, name="Add geometries", area="right", tabify=False)
+            show_info("Widgets have been reset.")
+
+
+    class UtilityButtonsWidget(QWidget):
+        """Combined dock widget grouping Sync, Refresh, and Reset Widgets buttons."""
+
+        def __init__(self, widgets_max_width: int = 500):
+            super().__init__()
+            self.widgets_max_width = widgets_max_width
+            layout = QVBoxLayout()
+            self.setLayout(layout)
+
+            # Sync + Refresh in a shared row
+            sync_refresh_row = QHBoxLayout()
+            sync_btn = QPushButton("Sync")
+            sync_btn.setToolTip("Sync geometries to data, then refresh text labels and colors")
+            sync_btn.clicked.connect(self._sync_geometries)
+            sync_refresh_row.addWidget(sync_btn)
+
+            refresh_btn = QPushButton("Refresh")
+            refresh_btn.setToolTip(
+                "Re-apply text labels and colors after editing names in the Features Table"
+            )
+            refresh_btn.clicked.connect(self._refresh_all_geometry_layers)
+            sync_refresh_row.addWidget(refresh_btn)
+            layout.addLayout(sync_refresh_row)
+
+            reset_btn = QPushButton("Reset Widgets")
+            reset_btn.setToolTip("Restore all closed widgets")
+            reset_btn.clicked.connect(self._reset_widgets)
+            layout.addWidget(reset_btn)
+
+        def _sync_geometries(self):
+            self._refresh_all_geometry_layers()
+            sync_geometries()
+
+        def _refresh_all_geometry_layers(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                return
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
+            for layer in viewer.layers:
+                if isinstance(layer, napari.layers.Points) and 'name' in layer.features.columns:
+                    # layer.size is authoritative — overwrite any Features Table edits
+                    # and fire features_update (which triggers refresh_text + colors)
+                    updated = layer.features.copy()
+                    updated['size'] = np.array(layer.size, dtype=float)
+                    layer.features = updated
+                elif (isinstance(layer, napari.layers.Shapes)
+                        and 'name' in layer.features.columns):
+                    layer.refresh_text()
+                    _apply_colors_from_features(layer, viewer_config)
+
+        def _reset_widgets(self):
+            viewer = napari.current_viewer()
+            if viewer is None:
+                show_warning("No active napari viewer found.")
+                return
+
+            viewer_config = config_manager[_get_viewer_uid(viewer)]
+
+            existing_widgets = set()
+            for dock_widget in viewer.window._dock_widgets.values():
+                existing_widgets.add(dock_widget.name)
+
+            (
+                show_cells_widget,
+                locate_cells_widget,
+                geometries_widget,
+                show_boundaries_widget,
+                select_data,
+                filter_cells_widget,
+                show_units_widget,
+            ) = _initialize_widgets(
+                viewer=viewer,
+                viewer_config=viewer_config
+            )
+
+            widgets_config = [
+                (select_data, "Select data", 80, False),
+                (show_cells_widget, "Show data", 170, False),
+                (show_units_widget, "Show spatial units", None, True),
+                (show_boundaries_widget, "Show boundaries", None, False),
+                (locate_cells_widget, "Navigate to cell", None, False),
+                (filter_cells_widget, "Filter cells", 150, True),
+                (geometries_widget, "Geometries", None, True),
+            ]
+
+            for widget, name, max_height, tabify in widgets_config:
+                if widget is not None and name not in existing_widgets:
+                    viewer.window.add_dock_widget(widget, name=name, area="right", tabify=tabify)
+                    if max_height is not None:
+                        widget.max_height = max_height
+                    widget.max_width = self.widgets_max_width
 
             show_info("Widgets have been reset.")
 
 
-    class SaveWidget(QWidget):
-        def __init__(self):
-            super().__init__()
-            self.layout = QVBoxLayout()
-            self.setLayout(self.layout)
+    class ColorLegendWidget(QWidget):
+        """Combined widget showing the colour-legend canvas with save controls beneath it."""
 
-            self.path_layout = QHBoxLayout()
+        def __init__(self, static_canvas):
+            super().__init__()
+            layout = QVBoxLayout()
+            self.setLayout(layout)
+
+            # Colour legend canvas at the top
+            layout.addWidget(static_canvas)
+
+            # Save controls below
+            path_layout = QHBoxLayout()
 
             self.label = QLabel("No folder selected")
             self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             self.label.setMinimumWidth(150)
             self.label.setMaximumWidth(200)
             self.label.setToolTip("No folder selected")
-            self.path_layout.addWidget(self.label)
+            path_layout.addWidget(self.label)
 
-            self.select_button = QPushButton()
-            self.select_button.setText("Select")
+            self.select_button = QPushButton("Select")
             self.select_button.setIconSize(QSize(16, 16))
             self.select_button.setToolTip("Select Output Folder")
-            self.select_button.clicked.connect(self.select_folder)
-            self.path_layout.addWidget(self.select_button)
+            self.select_button.clicked.connect(self._select_folder)
+            path_layout.addWidget(self.select_button)
 
-            self.layout.addLayout(self.path_layout)
+            layout.addLayout(path_layout)
 
             self.save_button = QPushButton("Save")
-            self.save_button.clicked.connect(self.save_data)
-            self.layout.addWidget(self.save_button)
+            self.save_button.clicked.connect(self._save_data)
+            layout.addWidget(self.save_button)
 
             self.output_folder = None
 
-        def select_folder(self):
+        def _select_folder(self):
             folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
             if folder:
                 self.output_folder = folder
-                self.update_label(folder)
+                metrics = QFontMetrics(self.label.font())
+                elided_text = metrics.elidedText(folder, Qt.ElideMiddle, self.label.width())
+                self.label.setText(elided_text)
+                self.label.setToolTip(folder)
 
-        def update_label(self, text):
-            metrics = QFontMetrics(self.label.font())
-            elided_text = metrics.elidedText(text, Qt.ElideMiddle, self.label.width())
-            self.label.setText(elided_text)
-            self.label.setToolTip(text)
-
-        def save_data(self):
+        def _save_data(self):
             if self.output_folder:
                 save_colorlegends(output_folder=self.output_folder)
             else:
                 self.label.setText("Please select a folder first.")
 
-
-    # class SaveWidget(QWidget):
-    #     def __init__(self):
-    #         super().__init__()
-    #         self.layout = QVBoxLayout()
-    #         self.setLayout(self.layout)
-
-    #         self.label = QLabel("No folder selected")
-    #         self.layout.addWidget(self.label)
-
-    #         self.select_button = QPushButton("Select Output Folder")
-    #         self.select_button.clicked.connect(self.select_folder)
-    #         self.layout.addWidget(self.select_button)
-
-    #         self.save_button = QPushButton("Save")
-    #         self.save_button.clicked.connect(self.save_data)
-    #         self.layout.addWidget(self.save_button)
-
-    #         self.output_folder = None
-
-    #     def select_folder(self):
-    #         folder = QFileDialog.getExistingDirectory(self, "Select Output Folder")
-    #         if folder:
-    #             self.output_folder = folder
-    #             # Truncate the path if it's too long
-    #             max_length = 40  # Adjust as needed
-    #             if len(folder) > max_length:
-    #                 truncated = "..." + folder[-(max_length - 3):]
-    #             else:
-    #                 truncated = folder
-    #             self.label.setText(f"{truncated}")
-
-    #     def save_data(self):
-    #         if self.output_folder:
-    #             # Replace this with your actual saving function
-    #             save_colorlegends(output_folder=self.output_folder)
-    #         else:
-    #             self.label.setText("Please select a folder first.")

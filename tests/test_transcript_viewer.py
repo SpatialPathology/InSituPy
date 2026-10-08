@@ -4,10 +4,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from insitupy import WITH_NAPARI
 from insitupy.interactive._transcript_viewer import (
-    DEFAULT_DEBOUNCE_MS, DEFAULT_MAX_VISIBLE_POINTS, DEFAULT_POINT_SIZE,
-    TranscriptViewerConfig, _assign_gene_colors, prepare_gene_colors,
-    prepare_gene_data)
+    DEFAULT_DEBOUNCE_MS,
+    DEFAULT_MAX_VISIBLE_POINTS,
+    DEFAULT_POINT_SIZE,
+    TranscriptViewerConfig,
+    _assign_gene_colors,
+    prepare_gene_colors,
+    prepare_gene_data,
+)
 
 
 class TestTranscriptViewerConfig:
@@ -213,60 +219,8 @@ class TestPrepareGeneColors:
         assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
 
 
-class TestBboxQuery:
-    """Tests for bounding box query functionality."""
-
-    def test_bbox_query_logic(self):
-        """Test bounding box filtering logic (unit test without widget)."""
-        # Create test coordinates
-        coords = np.array([
-            [5.0, 5.0],    # inside
-            [15.0, 5.0],   # outside (x too high)
-            [5.0, 15.0],   # outside (y too high)
-            [0.0, 0.0],    # on edge
-            [10.0, 10.0],  # on edge
-        ])
-
-        # Define bbox: xmin=0, xmax=10, ymin=0, ymax=10
-        xmin, xmax, ymin, ymax = 0, 10, 0, 10
-
-        # Apply bbox filter (same logic as in widget)
-        mask = (
-            (coords[:, 0] >= xmin) & (coords[:, 0] <= xmax) &
-            (coords[:, 1] >= ymin) & (coords[:, 1] <= ymax)
-        )
-        filtered = coords[mask]
-
-        # Should include points at indices 0, 3, 4
-        assert len(filtered) == 3
-        np.testing.assert_array_equal(filtered[0], [5.0, 5.0])
-        np.testing.assert_array_equal(filtered[1], [0.0, 0.0])
-        np.testing.assert_array_equal(filtered[2], [10.0, 10.0])
-
-
 class TestSubsampling:
     """Tests for subsampling functionality."""
-
-    def test_subsampling_logic(self):
-        """Test subsampling when points exceed limit."""
-        n_points = 1000
-        max_points = 100
-
-        coords = np.random.rand(n_points, 2)
-        colors = np.random.rand(n_points, 3)
-        gene_names = np.array([f"Gene{i}" for i in range(n_points)])
-
-        # Apply subsampling (same logic as in widget)
-        if len(coords) > max_points:
-            rng = np.random.default_rng(42)
-            idx = rng.choice(len(coords), max_points, replace=False)
-            subsampled_coords = coords[idx]
-            subsampled_colors = colors[idx]
-            subsampled_names = gene_names[idx]
-
-        assert len(subsampled_coords) == max_points
-        assert len(subsampled_colors) == max_points
-        assert len(subsampled_names) == max_points
 
     def test_no_subsampling_when_under_limit(self):
         """Test that no subsampling occurs when under limit."""
@@ -279,3 +233,128 @@ class TestSubsampling:
         assert len(coords) <= max_points
         # Coords remain unchanged
         assert coords.shape == (n_points, 2)
+
+
+@pytest.mark.skipif(not WITH_NAPARI, reason="napari required")
+class TestGetValueGuard:
+    """Tests for the _install_get_value_guard hover-lookup race hardening."""
+
+    def test_swallows_indexerror(self):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        class _Fake:
+            def _get_value(self, position):
+                raise IndexError("transient race")
+
+        fake = _Fake()
+        TranscriptViewerWidget._install_get_value_guard(fake)
+        assert fake._get_value((0.0, 0.0)) is None  # positional
+        assert fake._get_value(position=(0.0, 0.0)) is None  # keyword
+
+    def test_passes_through_value(self):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        class _Fake:
+            def _get_value(self, position):
+                return 7
+
+        fake = _Fake()
+        TranscriptViewerWidget._install_get_value_guard(fake)
+        assert fake._get_value((0.0, 0.0)) == 7
+
+
+@pytest.fixture
+def viewer_model(qapp):
+    """A headless napari ViewerModel (data layer only, no Qt window/GL canvas).
+
+    ``_create_layer``/``_update_layer`` only touch layer *data* (data, size,
+    face_color, properties, canvas_size_limits, get_value) -- none of that needs
+    an actual rendered canvas. Using ``ViewerModel`` instead of ``make_napari_viewer``
+    keeps these tests independent of whether this machine's Qt offscreen platform
+    can create a real OpenGL context (it does not, on at least one dev machine).
+    """
+    from napari.viewer import ViewerModel
+
+    return ViewerModel()
+
+
+@pytest.mark.skipif(not WITH_NAPARI, reason="napari required")
+class TestCreateLayerDefaults:
+    """Tests for the Transcripts layer's creation-time defaults."""
+
+    def test_guard_installed_and_canvas_size_limits_disabled(self, viewer_model):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        widget = TranscriptViewerWidget(
+            viewer_model,
+            gene_data_or_list={"GeneA": np.zeros((0, 2))},
+            gene_colors={"GeneA": (1.0, 0.0, 0.0)},
+        )
+        widget._create_layer()
+        layer = viewer_model.layers[TranscriptViewerWidget.LAYER_NAME]
+
+        # min=0 disables napari's canvas-size floor, which otherwise forces a
+        # visible border_color edge on zoom-out regardless of border_width=0.
+        assert layer.canvas_size_limits[0] == 0
+        # The hover-lookup guard must be installed on the real layer instance.
+        assert "_get_value" in layer.__dict__
+
+
+@pytest.mark.skipif(not WITH_NAPARI, reason="napari required")
+class TestUpdateLayerSizing:
+    """Tests for point-size consistency across _update_layer calls."""
+
+    def test_point_sizes_stay_uniform_after_size_change(self, viewer_model):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        coords = np.random.default_rng(0).uniform(0, 100, size=(20, 2))
+        widget = TranscriptViewerWidget(
+            viewer_model,
+            gene_data_or_list={"GeneA": coords},
+            gene_colors={"GeneA": (1.0, 0.0, 0.0)},
+        )
+
+        # First render (bypass bbox/camera by seeding queried coords directly).
+        widget.active_genes = {"GeneA": coords}
+        widget._create_layer()
+        widget._update_layer()
+        layer = viewer_model.layers[TranscriptViewerWidget.LAYER_NAME]
+
+        # User drags the point-size slider (no selection -> sets current_size only).
+        layer.current_size = 5.0
+
+        # A later camera move renders a different-length visible set.
+        widget.active_genes = {"GeneA": coords[:13]}
+        widget._update_layer()
+
+        assert len(layer.size) == len(layer.data)  # arrays aligned
+        assert np.allclose(np.asarray(layer.size), 5.0)  # uniform at slider value
+
+
+@pytest.mark.skipif(not WITH_NAPARI, reason="napari required")
+class TestUpdateLayerConsistency:
+    """Tests that _update_layer leaves the layer internally consistent."""
+
+    def test_hover_value_lookup_is_consistent(self, viewer_model):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        coords = np.random.default_rng(1).uniform(0, 100, size=(30, 2))
+        widget = TranscriptViewerWidget(
+            viewer_model,
+            gene_data_or_list={"GeneA": coords},
+            gene_colors={"GeneA": (0.0, 1.0, 0.0)},
+        )
+        widget.active_genes = {"GeneA": coords}
+        widget._create_layer()
+        widget._update_layer()
+        layer = viewer_model.layers[TranscriptViewerWidget.LAYER_NAME]
+
+        # napari data is (y, x); coords are (x, y). Query a real displayed point.
+        pos = tuple(layer.data[0])
+        value = layer.get_value(
+            pos, view_direction=None, dims_displayed=[0, 1], world=False
+        )
+        # Either a valid in-range index or None -- never an out-of-bounds index / raise.
+        assert value is None or (0 <= int(value) < len(layer.data))
+        # And the view-state indices are consistent with the current data length.
+        assert len(layer._indices_view) == 0 or int(layer._indices_view.max()) < len(layer.data)

@@ -1,22 +1,44 @@
+import logging
 from numbers import Number
-from typing import List, Literal, Optional, Union
+from typing import Literal
 
 import anndata as ad
 from sklearn.neighbors import radius_neighbors_graph
 
 from insitupy._checks import try_import
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils.utils import convert_to_list
+
+logger = logging.getLogger(__name__)
 
 
 def get_neighborhood(
     exp: InSituExperiment,
     sample_col: str,
-    cells_layer: Optional[str] = None,
+    cells_layer: str | None = None,
     radius: Number = 30
     ):
+    """
+    Compute spatial neighborhood connectivity matrices for each sample in an experiment.
 
+    For each sample, builds a radius-based neighbor graph from the cell spatial
+    coordinates stored in ``adata.obsm['spatial']``.
+
+    Args:
+        exp (InSituExperiment): Experiment object containing multiple samples.
+        sample_col (str): Name of the ``obs`` column that stores the sample
+            identifier, used to key the returned dictionary.
+        cells_layer (Optional[str], optional): Name of the cell segmentation
+            layer to use. Defaults to None (main layer).
+        radius (Number, optional): Radius (in the same units as the spatial
+            coordinates) within which cells are considered neighbors.
+            Defaults to 30.
+
+    Returns:
+        dict: Mapping from sample identifier to a sparse connectivity matrix
+            (``scipy.sparse`` CSR) of shape ``(n_cells, n_cells)``.
+    """
     matrices = {}
 
     for id, data in exp.iterdata():
@@ -28,6 +50,19 @@ def get_neighborhood(
     return matrices
 
 
+def _assert_counts_layer(adata, counts_layer, uid=None):
+    """Raise a clear InSituPy error when the requested counts layer is absent."""
+    if counts_layer is not None and counts_layer not in adata.layers:
+        where = f" for sample '{uid}'" if uid is not None else ""
+        raise ValueError(
+            f"counts_layer='{counts_layer}' not found in adata.layers "
+            f"(available: {list(adata.layers)}){where}. Pseudobulk aggregation needs raw counts: "
+            "run insitupy.pp.normalize_and_transform(...) first (it stores raw counts in "
+            "layers['counts']), pass an existing layer name, or pass counts_layer=None to aggregate "
+            ".X directly."
+        )
+
+
 def neighborhoods_pseudobulk(
     adata,
     coords,
@@ -37,7 +72,40 @@ def neighborhoods_pseudobulk(
     radius: int = 20,
     mode: Literal["sum", "mean", "median"] = "sum"
     ):
+    """
+    Create pseudobulk profiles for the spatial neighborhood of each cell type.
+
+    For each cell type in ``adata.obs[celltype_col]``, identifies all cells of
+    *other* cell types that are within ``radius`` of at least one cell of that
+    type, then aggregates their counts into a pseudobulk profile. Cells of the
+    target cell type itself are excluded from its own neighborhood (matching
+    the single-cell contamination path in ``tools/neighbors.py``). A cell type
+    with no other-type cell within ``radius`` is skipped (with a warning).
+
+    Requires ``decoupler`` (``pip install decoupler``).
+
+    Args:
+        adata: AnnData object containing cell expression and metadata.
+        coords: Spatial coordinates array of shape ``(n_cells, 2)``, typically
+            from ``adata.obsm['spatial']``.
+        celltype_col (str): Name of the ``obs`` column containing cell type labels.
+        counts_layer (str): Name of the AnnData layer containing raw counts to
+            aggregate. Pass ``None`` to use ``adata.X``.
+        sample_col (str): Name of the ``obs`` column containing the sample
+            identifier, used by ``decoupler.pp.pseudobulk``.
+        radius (int, optional): Neighborhood radius in the same units as
+            ``coords``. Defaults to 20.
+        mode (Literal['sum', 'mean', 'median'], optional): Aggregation method
+            for pseudobulk creation. Defaults to ``'sum'``.
+
+    Returns:
+        AnnData: Concatenated pseudobulk profiles with one observation per cell
+            type, labeled ``'<sample>_<celltype>_neighbors'`` in
+            ``obs_names``, and ``celltype_col`` stored in ``obs``.
+    """
     dc = try_import("decoupler", installation_command="pip install decoupler")
+
+    _assert_counts_layer(adata, counts_layer)
 
     # get AnnData and retrieve coordinates
     # adata = celldata.table
@@ -59,6 +127,18 @@ def neighborhoods_pseudobulk(
         #any_mask = A[mask].getnnz(axis=0) > 0 # use sparse methods to save memory
         any_mask = A[mask].astype(bool).sum(axis=0).A1 > 0 # use sparse methods to save memory
 
+        # AC-B4: a cell type's own cells are not part of its neighborhood - exclude them,
+        # matching the single-cell contamination path in tools/neighbors.py (which drops
+        # target->same-type edges).
+        any_mask = any_mask & ~mask
+
+        if not any_mask.any():
+            logger.warning(
+                "Cell type '%s' has no cells of another type within radius %s - skipping its "
+                "neighborhood pseudobulk.", celltype, radius
+            )
+            continue
+
         # filter for such neighboring cells
         filtered = adata[any_mask]
 
@@ -72,7 +152,8 @@ def neighborhoods_pseudobulk(
             )
 
         # make obs_names unique
-        assert pdata.shape[0] == 1, "Pseudobulk AnnData should have only one observation at this point."
+        if pdata.shape[0] != 1:
+            raise ValueError("Pseudobulk AnnData should have only one observation at this point.")
         pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}_neighbors"]
         #pdata.obs_names = [f"{str(pdata.obs_names[0])}_{celltype}"]
 
@@ -96,15 +177,58 @@ def _check_transfer(metadata, columns):
 def pseudobulk(
     exp,
     celltype_col: str,
-    cells_layer: Optional[str] = None,
-    counts_layer: Optional[str] = None,
+    cells_layer: str | None = None,
+    counts_layer: str | None = "counts",
     uid_col: str = "uid",
     mode: Literal["sum", "mean", "median"] = "sum",
     calculate_neighbors: bool = False,
     neighbors_radius: int = 20,
-    metadata_to_transfer: Union[List[str], str] = None,
+    metadata_to_transfer: list[str] | str = None,
     **kwargs
     ):
+    """
+    Aggregate single-cell counts into pseudobulk profiles per cell type and sample.
+
+    For each sample in ``exp``, groups cells by ``celltype_col`` and aggregates
+    their counts using ``decoupler.pp.pseudobulk``. Optionally also computes
+    neighborhood-based pseudobulks (see ``calculate_neighbors``).
+
+    Requires ``decoupler`` (``pip install decoupler``).
+
+    Args:
+        exp (InSituExperiment): Experiment object containing multiple samples.
+        celltype_col (str): Name of the ``obs`` column containing cell type labels.
+        cells_layer (Optional[str], optional): Name of the cell segmentation
+            layer to use. Defaults to None (main layer).
+        counts_layer (Optional[str], optional): Name of the AnnData layer
+            containing raw counts to aggregate. Defaults to ``"counts"`` (the
+            layer populated by :func:`~insitupy.preprocessing.normalize_and_transform`
+            with raw counts). Pass None to aggregate ``adata.X`` directly instead.
+        uid_col (str, optional): Column in the experiment metadata that uniquely
+            identifies each sample. Defaults to ``'uid'``.
+        mode (Literal['sum', 'mean', 'median'], optional): Aggregation function
+            for pseudobulk creation. Defaults to ``'sum'``.
+        calculate_neighbors (bool, optional): If True, also compute
+            neighborhood pseudobulks via
+            :func:`~insitupy.preprocessing.pseudobulk.neighborhoods_pseudobulk`.
+            Defaults to False.
+        neighbors_radius (int, optional): Radius used for spatial neighborhood
+            computation when ``calculate_neighbors=True``. Defaults to 20.
+        metadata_to_transfer (Union[List[str], str], optional): Column name(s)
+            from the experiment metadata to copy into the pseudobulk
+            ``obs`` table. Defaults to None.
+        **kwargs: Additional keyword arguments forwarded to
+            :func:`~insitupy.preprocessing.pseudobulk.neighborhoods_pseudobulk`
+            when ``calculate_neighbors=True``.
+
+    Returns:
+        AnnData: Pseudobulk AnnData with one observation per
+            ``(sample, cell_type)`` combination when ``calculate_neighbors=False``.
+
+        Tuple[AnnData, AnnData]: ``(pdata_final, nb_pdata_final)`` when
+            ``calculate_neighbors=True``, where the second element contains
+            neighborhood pseudobulks.
+    """
     dc = try_import("decoupler", installation_command="pip install decoupler")
 
     if metadata_to_transfer is not None:
@@ -123,49 +247,59 @@ def pseudobulk(
         celldata= _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
         adata = celldata.table
 
-        # add batch information
+        _assert_counts_layer(adata, counts_layer, uid=uid)
+
+        # add batch information - scoped: decoupler needs obs["uid"] present during
+        # aggregation, but we must not persist this write into the user's cell table.
+        had_uid_col = "uid" in adata.obs.columns
+        prev_uid = adata.obs["uid"].copy() if had_uid_col else None
         adata.obs["uid"] = uid
-
-        # create pseudobulk from anndata
-        pdata = dc.pp.pseudobulk(
-            adata=adata,
-            sample_col="uid",
-            groups_col=celltype_col,
-            layer=counts_layer,
-            mode=mode,
-            )
-
-        # transfer metadata
-        pdata = _transfer_metadata(
-            pdata,
-            meta,
-            metadata_to_transfer
-            )
-
-        # collect data
-        pdatas[uid] = pdata
-
-        if calculate_neighbors:
-            pdata_neighbors = neighborhoods_pseudobulk(
+        try:
+            # create pseudobulk from anndata
+            pdata = dc.pp.pseudobulk(
                 adata=adata,
-                coords=adata.obsm["spatial"],
-                celltype_col=celltype_col,
-                counts_layer=counts_layer,
                 sample_col="uid",
-                radius=neighbors_radius,
+                groups_col=celltype_col,
+                layer=counts_layer,
                 mode=mode,
-                **kwargs
-            )
+                )
 
             # transfer metadata
-            pdata_neighbors = _transfer_metadata(
-                pdata_neighbors,
+            pdata = _transfer_metadata(
+                pdata,
                 meta,
                 metadata_to_transfer
                 )
 
             # collect data
-            nb_pdatas[uid] = pdata_neighbors
+            pdatas[uid] = pdata
+
+            if calculate_neighbors:
+                pdata_neighbors = neighborhoods_pseudobulk(
+                    adata=adata,
+                    coords=adata.obsm["spatial"],
+                    celltype_col=celltype_col,
+                    counts_layer=counts_layer,
+                    sample_col="uid",
+                    radius=neighbors_radius,
+                    mode=mode,
+                    **kwargs
+                )
+
+                # transfer metadata
+                pdata_neighbors = _transfer_metadata(
+                    pdata_neighbors,
+                    meta,
+                    metadata_to_transfer
+                    )
+
+                # collect data
+                nb_pdatas[uid] = pdata_neighbors
+        finally:
+            if had_uid_col:
+                adata.obs["uid"] = prev_uid
+            else:
+                del adata.obs["uid"]
 
     # concatenate all pseudobulks
     pdata_final = ad.concat(pdatas, label="uid")
@@ -206,6 +340,6 @@ def _transfer_metadata(
             if col not in pdata.obs.columns:
                 pdata.obs[col] = meta[col]
             else:
-                print(f"Column '{col}' already exists in the pseudobulk AnnData.obs. Skipping transfer of this metadata column.")
+                logger.warning("Column '%s' already exists in the pseudobulk AnnData.obs. Skipping transfer of this metadata column.", col)
     return pdata
 

@@ -1,15 +1,12 @@
 import os
 import warnings
 from pathlib import Path
-from typing import List, Optional, Union
 
 import matplotlib.pyplot as plt
-import scanpy as sc
-from anndata import AnnData
 from matplotlib.axes._axes import Axes
 
 from insitupy._constants import with_insitupy_style
-from insitupy.dataclasses._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._checks import _calculate_single_metrics
@@ -55,7 +52,7 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
         bar = ax.barh(y=0.5, left=1, width=val, height=0.8, fc=color, ec="None", zorder=0.05)
         ax.set_xlim(0, max + 10)
         ax.set_xticks(ax.get_xticks())
-        ax.set_xticklabels(['{:.0f}'.format(x) for x in ax.get_xticks()])
+        ax.set_xticklabels([f'{x:.0f}' for x in ax.get_xticks()])
         ax.set_ylim(0, 1)
         ax.set_yticks([])
         for r in bar:
@@ -70,14 +67,14 @@ def _custom_bar(ax: Axes, val: float, max: float, color: str = None, rect_kw: di
 @with_insitupy_style
 def overview(
     data: InSituExperiment,
-    cells_layer: Optional[str] = None,
-    columns_to_plot: List[str] = [],
+    cells_layer: str | None = None,
+    columns_to_plot: list[str] = [],
     layer: str = None,
     force_layer: bool = False,
     index: bool = True,
     qc_width: float = 3.0,
     fontsize: int = 10,
-    savepath: Union[str, os.PathLike, Path] = None,
+    savepath: str | os.PathLike | Path = None,
     save_only: bool = False,
     dpi_save: int = 300
     ):
@@ -148,7 +145,7 @@ def overview(
     list_transcript_count = []
     for _, data in data.iterdata():
         if data.cells.is_empty:
-            warnings.warn("Cells were not loaded. Loading cells.")
+            warnings.warn("Cells were not loaded. Loading cells.", UserWarning, stacklevel=2)
             data.load_cells()
 
         # get CellData
@@ -210,5 +207,6 @@ def overview(
 
 # deprecated version
 def plot_overview(*args, **kwargs):
+    """Deprecated. Use :func:`overview` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="overview")

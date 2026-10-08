@@ -1,0 +1,177 @@
+<svg width="100%" viewBox="0 0 680 820" xmlns="http://www.w3.org/2000/svg" role="img">
+<title>InSituExperiment .table architecture – data model and module structure</title>
+<desc>Structural diagram showing how InSituExperiment, InSituExperimentView, per-sample AnnData, and the concatenated zarr table relate to each other, including the build and import data flows.</desc>
+
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #2C2C2A;
+    --fg2: #5F5E5A;
+    --fg3: #888780;
+    --border: rgba(0,0,0,0.15);
+    --bg2: #F1EFE8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a;
+      --fg: #D3D1C7;
+      --fg2: #B4B2A9;
+      --fg3: #888780;
+      --border: rgba(255,255,255,0.15);
+      --bg2: #2C2C2A;
+    }
+    .fill-purple { fill: #3C3489; stroke: #AFA9EC; }
+    .fill-teal { fill: #085041; stroke: #5DCAA5; }
+    .fill-green { fill: #27500A; stroke: #97C459; }
+    .fill-blue { fill: #0C447C; stroke: #85B7EB; }
+    .fill-pink { fill: #72243E; stroke: #ED93B1; }
+    .fill-coral { fill: #712B13; stroke: #F0997B; }
+    .fill-gray { fill: #2C2C2A; stroke: #B4B2A9; }
+    .t-purple { fill: #CECBF6; }
+    .t-teal { fill: #9FE1CB; }
+    .t-green { fill: #C0DD97; }
+    .t-blue { fill: #B5D4F4; }
+    .t-pink { fill: #F4C0D1; }
+    .t-coral { fill: #F5C4B3; }
+    .t-gray { fill: #D3D1C7; }
+    .ts-purple { fill: #AFA9EC; }
+    .ts-teal { fill: #5DCAA5; }
+    .ts-green { fill: #97C459; }
+    .ts-blue { fill: #85B7EB; }
+    .ts-pink { fill: #ED93B1; }
+    .ts-coral { fill: #F0997B; }
+    .ts-gray { fill: #B4B2A9; }
+  }
+  .fill-purple { fill: #EEEDFE; stroke: #534AB7; stroke-width: 0.5; }
+  .fill-teal { fill: #E1F5EE; stroke: #0F6E56; stroke-width: 0.5; }
+  .fill-green { fill: #EAF3DE; stroke: #3B6D11; stroke-width: 0.5; }
+  .fill-blue { fill: #E6F1FB; stroke: #185FA5; stroke-width: 0.5; }
+  .fill-pink { fill: #FBEAF0; stroke: #993556; stroke-width: 0.5; }
+  .fill-coral { fill: #FAECE7; stroke: #993C1D; stroke-width: 0.5; }
+  .fill-gray { fill: var(--bg2); stroke: var(--border); stroke-width: 0.5; }
+  .t-purple { fill: #3C3489; }
+  .t-teal { fill: #085041; }
+  .t-green { fill: #27500A; }
+  .t-blue { fill: #042C53; }
+  .t-pink { fill: #72243E; }
+  .t-coral { fill: #712B13; }
+  .t-gray { fill: var(--fg); }
+  .ts-purple { fill: #534AB7; }
+  .ts-teal { fill: #0F6E56; }
+  .ts-green { fill: #3B6D11; }
+  .ts-blue { fill: #185FA5; }
+  .ts-pink { fill: #993556; }
+  .ts-coral { fill: #993C1D; }
+  .ts-gray { fill: var(--fg2); }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .th { font-size: 14px; font-weight: 500; }
+  .ts { font-size: 12px; font-weight: 400; }
+  .leader { stroke: var(--fg3); stroke-width: 0.5; stroke-dasharray: 4 3; fill: none; }
+  .arr { stroke: var(--fg3); stroke-width: 1.5; fill: none; }
+</style>
+
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- TIER 1: InSituExperiment container -->
+<rect class="fill-purple" x="40" y="30" width="600" height="200" rx="16"/>
+<text class="th t-purple" x="340" y="56" text-anchor="middle">InSituExperiment</text>
+
+<!-- Per-sample AnnData boxes -->
+<rect class="fill-teal" x="70" y="80" width="120" height="56" rx="8"/>
+<text class="th t-teal" x="130" y="100" text-anchor="middle" dominant-baseline="central">Sample 0</text>
+<text class="ts ts-teal" x="130" y="118" text-anchor="middle" dominant-baseline="central">cells.table</text>
+
+<rect class="fill-teal" x="210" y="80" width="120" height="56" rx="8"/>
+<text class="th t-teal" x="270" y="100" text-anchor="middle" dominant-baseline="central">Sample 1</text>
+<text class="ts ts-teal" x="270" y="118" text-anchor="middle" dominant-baseline="central">cells.table</text>
+
+<rect class="fill-teal" x="350" y="80" width="120" height="56" rx="8"/>
+<text class="th t-teal" x="410" y="100" text-anchor="middle" dominant-baseline="central">Sample 2</text>
+<text class="ts ts-teal" x="410" y="118" text-anchor="middle" dominant-baseline="central">cells.table</text>
+
+<rect class="fill-gray" x="490" y="80" width="120" height="56" rx="8"/>
+<text class="ts ts-gray" x="550" y="108" text-anchor="middle" dominant-baseline="central">... Sample N</text>
+
+<!-- Metadata + Filters + Colors -->
+<rect class="fill-gray" x="70" y="160" width="145" height="44" rx="8"/>
+<text class="th t-gray" x="142" y="182" text-anchor="middle" dominant-baseline="central">metadata.csv</text>
+
+<rect class="fill-gray" x="235" y="160" width="130" height="44" rx="8"/>
+<text class="th t-gray" x="300" y="182" text-anchor="middle" dominant-baseline="central">filters.json</text>
+
+<rect class="fill-gray" x="385" y="160" width="120" height="44" rx="8"/>
+<text class="th t-gray" x="445" y="182" text-anchor="middle" dominant-baseline="central">colors.json</text>
+
+<!-- ARROW: build_table() -->
+<line x1="280" y1="136" x2="280" y2="290" stroke="#639922" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="th" x="294" y="220" fill="#639922">build_table()</text>
+
+<!-- ARROW: import_from_table() -->
+<line x1="400" y1="290" x2="400" y2="136" stroke="#D85A30" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text class="th" x="414" y="220" fill="#D85A30">import_from_table()</text>
+
+<!-- TIER 2: Concatenated table -->
+<rect class="fill-green" x="100" y="290" width="480" height="130" rx="14"/>
+<text class="th t-green" x="340" y="316" text-anchor="middle">tables/concat.zarr</text>
+<text class="ts ts-green" x="340" y="336" text-anchor="middle">zarr-backed AnnData via read_lazy()</text>
+
+<!-- Inside zarr -->
+<rect class="fill-gray" x="120" y="355" width="100" height="44" rx="6"/>
+<text class="ts ts-gray" x="170" y="377" text-anchor="middle" dominant-baseline="central">X (sparse)</text>
+
+<rect class="fill-gray" x="235" y="355" width="100" height="44" rx="6"/>
+<text class="ts ts-gray" x="285" y="377" text-anchor="middle" dominant-baseline="central">obs + meta</text>
+
+<rect class="fill-gray" x="350" y="355" width="100" height="44" rx="6"/>
+<text class="ts ts-gray" x="400" y="377" text-anchor="middle" dominant-baseline="central">obsm</text>
+
+<rect class="fill-gray" x="465" y="355" width="100" height="44" rx="6"/>
+<text class="ts ts-gray" x="515" y="377" text-anchor="middle" dominant-baseline="central">var</text>
+
+<!-- TIER 3: Access patterns -->
+<text class="th" x="340" y="465" text-anchor="middle" fill="var(--fg)">Access patterns</text>
+
+<rect class="fill-blue" x="40" y="485" width="190" height="56" rx="8"/>
+<text class="th t-blue" x="135" y="505" text-anchor="middle" dominant-baseline="central">exp.table</text>
+<text class="ts ts-blue" x="135" y="523" text-anchor="middle" dominant-baseline="central">All samples, lazy</text>
+<line x1="135" y1="420" x2="135" y2="483" stroke="#185FA5" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+
+<rect class="fill-pink" x="250" y="485" width="190" height="56" rx="8"/>
+<text class="th t-pink" x="345" y="505" text-anchor="middle" dominant-baseline="central">view.table</text>
+<text class="ts ts-pink" x="345" y="523" text-anchor="middle" dominant-baseline="central">Row-sliced by filter</text>
+<line x1="345" y1="420" x2="345" y2="483" stroke="#993556" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+
+<rect class="fill-gray" x="460" y="485" width="190" height="56" rx="8"/>
+<text class="th t-gray" x="555" y="505" text-anchor="middle" dominant-baseline="central">to_anndata()</text>
+<text class="ts ts-gray" x="555" y="523" text-anchor="middle" dominant-baseline="central">In-memory copy</text>
+<line x1="555" y1="136" x2="555" y2="483" stroke="var(--fg3)" stroke-width="1" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+
+<!-- TIER 4: View + FilterManager -->
+<rect class="fill-purple" x="40" y="590" width="290" height="90" rx="14"/>
+<text class="th t-purple" x="185" y="616" text-anchor="middle">InSituExperimentView</text>
+<text class="ts ts-purple" x="185" y="636" text-anchor="middle">Created by filters.view("key")</text>
+<text class="ts ts-purple" x="185" y="654" text-anchor="middle">Subsets parent experiment</text>
+
+<rect class="fill-pink" x="370" y="600" width="260" height="68" rx="8"/>
+<text class="th t-pink" x="500" y="624" text-anchor="middle" dominant-baseline="central">FilterManager</text>
+<text class="ts ts-pink" x="500" y="644" text-anchor="middle" dominant-baseline="central">.view() / .apply() / .create()</text>
+<line x1="370" y1="634" x2="332" y2="634" stroke="#993556" stroke-width="1" marker-end="url(#arrow)"/>
+
+<!-- TIER 5: Shared helpers -->
+<text class="th" x="340" y="730" text-anchor="middle" fill="var(--fg)">Shared internal helpers</text>
+
+<rect class="fill-coral" x="40" y="745" width="290" height="44" rx="8"/>
+<text class="th t-coral" x="185" y="767" text-anchor="middle" dominant-baseline="central">_concatenate_samples()</text>
+
+<rect class="fill-coral" x="350" y="745" width="290" height="44" rx="8"/>
+<text class="th t-coral" x="495" y="767" text-anchor="middle" dominant-baseline="central">_transfer_to_samples()</text>
+
+<text class="ts" x="100" y="800" fill="var(--fg2)">Used by: to_anndata(), build_table()</text>
+<text class="ts" x="410" y="800" fill="var(--fg2)">Used by: import_from_anndata(),</text>
+<text class="ts" x="450" y="814" fill="var(--fg2)">import_from_table()</text>
+
+</svg>

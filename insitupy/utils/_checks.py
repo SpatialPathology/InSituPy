@@ -1,39 +1,73 @@
-from typing import Optional
+import logging
+from warnings import warn
 
 import anndata
 import dask.array as da
 import numpy as np
 from scipy.sparse import issparse
 
-from insitupy import WITH_NAPARI
+from insitupy._constants import WITH_NAPARI
+
+logger = logging.getLogger(__name__)
 
 if WITH_NAPARI:
-    from napari.layers import Points
+    pass
 
 
 # checker functions for data sanity
 def check_adata(adata):
+    """Raise TypeError if *adata* is not an :class:`~anndata.AnnData` instance."""
     if type(adata) is not anndata.AnnData:
         raise TypeError('Input is not a valid AnnData object')
 
 
 def check_batch(batch, obs, verbose=False):
+    """Raise ValueError if the *batch* column is absent from *obs*.
+
+    Args:
+        batch: Column name to check for in *obs*.
+        obs: A DataFrame (typically ``adata.obs``).
+        verbose: If True, log the number of unique batches found.
+    """
     if batch not in obs:
         raise ValueError(f'column {batch} is not in obs')
     elif verbose:
-        print(f'Object contains {obs[batch].nunique()} batches.')
+        logger.info(f'Object contains {obs[batch].nunique()} batches.')
 
 
 def check_hvg(hvg, hvg_key, adata_var):
+    """Validate that the HVG list and HVG key are present in ``adata.var``.
+
+    Args:
+        hvg: List of highly variable gene names.
+        hvg_key: Column in *adata_var* that flags highly variable genes.
+        adata_var: The ``var`` DataFrame of an AnnData object.
+
+    Raises:
+        TypeError: If *hvg* is not a list.
+        ValueError: If any gene in *hvg* is absent from *adata_var*.
+        KeyError: If *hvg_key* is not a column in *adata_var*.
+    """
     if type(hvg) is not list:
         raise TypeError('HVG list is not a list')
     else:
         if not all(i in adata_var.index for i in hvg):
             raise ValueError('Not all HVGs are in the adata object')
-    if not hvg_key in adata_var:
+    if hvg_key not in adata_var:
         raise KeyError('`hvg_key` not found in `adata.var`')
 
 def check_sanity(adata, batch, hvg, hvg_key):
+    """Run a suite of sanity checks on an AnnData object before processing.
+
+    Delegates to :func:`check_adata`, :func:`check_batch`, and (when *hvg*
+    is truthy) :func:`check_hvg`.
+
+    Args:
+        adata: AnnData object to validate.
+        batch: Batch column name expected in ``adata.obs``.
+        hvg: HVG gene list or falsy value to skip HVG check.
+        hvg_key: Column in ``adata.var`` that marks highly variable genes.
+    """
     check_adata(adata)
     check_batch(batch, adata.obs)
     if hvg:
@@ -66,7 +100,71 @@ def is_integer_counts(X):
     # check if the matrix contains raw counts
     return np.all(np.modf(X)[0] == 0)
 
+
+def _assert_log1p_state(adata, *, assert_log1p, where):
+    """Guard against running expression stats on non-log1p ``.X``.
+
+    Reads the marker written by ``normalize_and_transform``
+    (``adata.uns['insitupy']['transformation']``). Raises on a matrix we can positively
+    identify as wrong for log1p-based analysis:
+
+    - marker ``'sqrt'`` or ``'scaled'`` (verified wrong: sqrt roughly doubles log2FC,
+      scaling yields all-NaN fold changes);
+    - no marker but ``.X`` is raw integer counts (the common "forgot to normalize"
+      mistake).
+
+    Warns (does not raise) when there is no marker and ``.X`` is not integer counts, so
+    pre-marker stores and legitimately-transformed-but-unmarked inputs still run.
+
+    Args:
+        adata: AnnData object whose ``.X`` is about to be used.
+        assert_log1p: If False, the guard is skipped entirely (no raise, no warn).
+        where: Short label identifying the caller, used in the raised/warned message.
+    """
+    if not assert_log1p:
+        return
+    state = adata.uns.get("insitupy", {}).get("transformation")
+    if state in ("sqrt", "scaled"):
+        raise ValueError(
+            f"{where}: expression matrix (.X) is '{state}'-transformed, but differential "
+            "expression assumes log1p-normalized data (fold changes are otherwise wrong: "
+            "sqrt roughly doubles log2FC, scaling yields all-NaN). Re-run "
+            "insitupy.pp.normalize_and_transform(..., transformation_method='log1p', scale=False), "
+            "or pass assert_log1p=False to override this check."
+        )
+    if state is None:
+        # No marker (legacy store, or an externally built AnnData). If .X looks like raw
+        # integer counts, that is a positively-wrong input - escalate to a raise like sqrt/scaled.
+        if is_integer_counts(adata.X):
+            raise ValueError(
+                f"{where}: expression matrix (.X) appears to be raw integer counts, but "
+                "differential expression assumes log1p-normalized data. Run "
+                "insitupy.pp.normalize_and_transform(..., transformation_method='log1p'), or pass "
+                "assert_log1p=False to override this check."
+            )
+        warn(
+            f"{where}: cannot verify that the expression matrix (.X) is log1p-transformed "
+            "(no transformation marker found - e.g. a store written before this check, or an "
+            "externally built AnnData). Differential expression assumes log1p data. Re-run "
+            "insitupy.pp.normalize_and_transform to record the state, or pass assert_log1p=False "
+            "to silence this warning."
+        )
+
+
 def check_raw(adata, use_raw, layer=None):
+    """Return the expression matrix, var DataFrame, and var names for either raw or processed data.
+
+    Args:
+        adata: AnnData object.
+        use_raw: If True, return data from ``adata.raw``; otherwise from
+            ``adata.X`` or ``adata.layers[layer]``.
+        layer: Layer key to use when *use_raw* is False.  Ignored when
+            *use_raw* is True.
+
+    Returns:
+        A tuple ``(X, var, var_names)`` where *X* is a dense numpy array
+        and *var* / *var_names* are the corresponding variable metadata.
+    """
     # check if plotting raw data
     if use_raw:
         adata_X = adata.raw.X
@@ -88,6 +186,20 @@ def check_raw(adata, use_raw, layer=None):
     return adata_X, adata_var, adata_var_names
 
 def check_zip(path):
+    """Determine whether *path* refers to a zip output and return the base path.
+
+    Args:
+        path: A :class:`~pathlib.Path` whose suffix is either ``".zip"`` or
+            ``""`` (no extension for a directory output).
+
+    Returns:
+        A tuple ``(zip_output, base_path)`` where *zip_output* is a bool
+        indicating zip mode and *base_path* is the path without the ``.zip``
+        suffix (if applicable).
+
+    Raises:
+        ValueError: If the suffix is neither ``".zip"`` nor empty.
+    """
     # check if the output directory is going to be zipped or not
     if path.suffix == ".zip":
         zip_output = True
@@ -101,6 +213,14 @@ def check_zip(path):
 
 # Function to check if there are any valid labels in matplotlib figure
 def has_valid_labels(ax):
+    """Return True if *ax* has at least one legend handle with a non-underscore label.
+
+    Args:
+        ax: A matplotlib :class:`~matplotlib.axes.Axes` to inspect.
+
+    Returns:
+        True if a labelled artist exists, False otherwise.
+    """
     for artist in ax.get_legend_handles_labels()[0]:  # Get the handles (artists)
         if artist.get_label() and not artist.get_label().startswith('_'):
             return True
@@ -193,7 +313,11 @@ def _calculate_single_metrics(adata, layer=None, force_layer=False):
     # Validate counts
     data = adata.layers.get(use_layer) if use_layer else adata.X
     if data is None or (not is_integer_counts(data) and not force_layer):
-        warnings.warn(f"No raw counts provided{f' in layer {use_layer!r}' if use_layer else ''}, metrics are set to 0.")
+        warnings.warn(
+            f"No raw counts provided{f' in layer {use_layer!r}' if use_layer else ''}, metrics are set to 0.",
+            UserWarning,
+            stacklevel=2,
+        )
         return 0, 0
 
     df_cells, _ = sc.pp.calculate_qc_metrics(adata, percent_top=None, layer=use_layer)

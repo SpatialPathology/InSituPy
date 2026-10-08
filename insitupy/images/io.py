@@ -1,10 +1,10 @@
 import logging
 import os
+import shutil
 import zipfile
 from contextlib import ExitStack
 from pathlib import Path
-from typing import List, Literal, Optional, Union
-from warnings import warn
+from typing import Literal
 
 import dask.array as da
 import numpy as np
@@ -12,7 +12,6 @@ import xmltodict
 import zarr
 from tifffile import TiffFile, TiffWriter, imread
 
-from insitupy import __version__
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
 from insitupy.images.utils import _get_chunksize, create_img_pyramid
@@ -29,7 +28,7 @@ else:
     logger.info("Using Zarr v2.")
 
 
-def get_zarr_source_path(arr) -> Optional[Path]:
+def get_zarr_source_path(arr) -> Path | None:
     """
     Extract the source Zarr store path from a dask array loaded via ``da.from_zarr()``.
 
@@ -89,7 +88,7 @@ def get_zarr_source_path(arr) -> Optional[Path]:
     return None
 
 
-def _extract_path_from_zarr_array(v) -> Optional[Path]:
+def _extract_path_from_zarr_array(v) -> Path | None:
     """Return the filesystem path of a ``zarr.Array``'s store, or ``None``."""
     if isinstance(v, zarr.Array):
         store = v.store
@@ -97,7 +96,7 @@ def _extract_path_from_zarr_array(v) -> Optional[Path]:
     return None
 
 
-def _extract_path_from_zarr_store(store) -> Optional[Path]:
+def _extract_path_from_zarr_store(store) -> Path | None:
     """Return the filesystem path backing a Zarr store, or ``None``."""
     if ZARR_V3:
         if isinstance(store, zarr.storage.LocalStore):
@@ -269,7 +268,40 @@ def _get_zarr_store(path, mode: str = "r", zipped: bool = False):
             return zarr.DirectoryStore(path)
 
 
+def _sorted_pyramid_levels(keys) -> list[str]:
+    """Return pyramid level keys in resolution order ("0", "1", ..., "10", ...).
+
+    Hidden keys (starting with ".") are dropped. Numeric keys are sorted as integers,
+    so levels above "9" do not sort before "2" as they would as strings.
+    """
+    levels = [k for k in keys if not k.startswith(".")]
+    return sorted(levels, key=lambda k: (0, int(k), k) if k.isdigit() else (1, 0, k))
+
+
 def read_zarr(path):
+    """Read an image from a Zarr or Zarr.zip store.
+
+    Loads the image data and associated OME metadata from a ``.zarr`` directory
+    or ``.zarr.zip`` archive. Both single-array stores and multi-resolution
+    pyramid stores (sub-arrays named ``0``, ``1``, …) are supported.
+    Compatible with Zarr v2 and v3.
+
+    Args:
+        path: Path to the ``.zarr`` directory or ``.zarr.zip`` file.
+
+    Returns:
+        A tuple ``(img, ome_meta, axes, pixel_size)`` where
+
+        - **img** – a :class:`dask.array.Array` for single-array stores, or a
+          :class:`list` of :class:`dask.array.Array` for pyramid stores
+          (index 0 = full resolution).
+        - **ome_meta** – OME metadata dict parsed from the Zarr store attributes.
+        - **axes** – axis string after normalisation (e.g. ``"YXS"``).
+        - **pixel_size** – physical pixel size in the unit stored in the metadata.
+
+    Raises:
+        ValueError: If no image data is found in the store.
+    """
     # load image from .zarr.zip
     zipped = zipfile.is_zipfile(path)
 
@@ -281,18 +313,17 @@ def read_zarr(path):
         if not ZARR_V3:
             dirstore = stack.enter_context(dirstore)
 
-        # open zarr group
-        root = zarr.open_group(store=dirstore, mode='r')
-        components = sorted(root.keys())
+        # open the store root, which is an array (no pyramid) or a group of pyramid levels
+        root = zarr.open(store=dirstore, mode='r')
 
-        if ".zarray" in components:
+        if isinstance(root, zarr.Array):
             # the store is an array which can be opened
             if zipped:
                 img = da.from_zarr(dirstore).persist()
             else:
                 img = da.from_zarr(dirstore)
         else:
-            subres = [elem for elem in components if not elem.startswith(".")]
+            subres = _sorted_pyramid_levels(root.keys())
             img = []
             for s in subres:
                 if zipped:
@@ -305,8 +336,7 @@ def read_zarr(path):
                                 )
 
         # retrieve OME metadata
-        store = zarr.open(dirstore)
-        meta = store.attrs.asdict()
+        meta = root.attrs.asdict()
         ome_meta = meta["OME"]
         axes = meta["axes"]
         pixel_size = meta["pixel_size"]
@@ -319,9 +349,31 @@ def read_zarr(path):
     return img, ome_meta, axes, pixel_size
 
 
-def read_image(
-    path
-    ):
+def read_image(path):
+    """Read an image from disk, dispatching on file extension.
+
+    Supported formats: ``.zarr``, ``.zarr.zip``, ``.ome.tif``, ``.ome.tiff``,
+    ``.tif``, ``.tiff``.  Zarr and OME-TIFF files are loaded lazily as
+    :class:`dask.array.Array` objects; plain TIFF files are read eagerly via
+    :func:`tifffile.imread`.
+
+    Args:
+        path: Path to the image file.
+
+    Returns:
+        A tuple ``(img, ome_meta, axes, pixel_size)`` where
+
+        - **img** – a :class:`dask.array.Array`, a :class:`list` of
+          :class:`dask.array.Array` (pyramid), or a :class:`numpy.ndarray`
+          (plain TIFF).
+        - **ome_meta** – OME metadata dict.
+        - **axes** – normalised axis string (e.g. ``"YXS"``).
+        - **pixel_size** – physical pixel size extracted from the OME metadata.
+
+    Raises:
+        :class:`~insitupy._exceptions.InvalidFileTypeError`: If the file
+            extension is not recognised.
+    """
     path = Path(path)
     suffix = path.name.split(".", maxsplit=1)[-1]
 
@@ -370,33 +422,69 @@ def read_image(
 
     return img, ome_meta, axes, pixel_size
 
-def write_zarr(image, file,
-               img_metadata: dict,
-               axes: str, # channels, e.g. "YXS" for RGB - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
-               save_pyramid: bool = True,
-               overwrite: bool = False,
-               verbose: bool = False
-               ):
-    if verbose:
-        print(f"Saving image to {str(file)}")
+def write_zarr(
+    image,
+    file,
+    img_metadata: dict,
+    axes: str,
+    save_pyramid: bool = True,
+    overwrite: bool = False,
+    verbose: bool = False,
+):
+    """Write image data to a Zarr store.
 
-    # get suffix
+    Saves an image (or existing pyramid) together with OME metadata as a
+    ``.zarr`` directory, or as a zip archive if *file* ends in ``.zarr.zip``.
+    When ``save_pyramid=True`` and a non-pyramidal array is provided, a
+    six-level pyramid is created automatically.
+    Compatible with Zarr v2 and v3.
+
+    Args:
+        image: Input image as a :class:`dask.array.Array`,
+            :class:`numpy.ndarray`, or a :class:`list` of arrays representing
+            an existing pyramid (index 0 = full resolution).
+        file: Output path. A ``.zip`` suffix (e.g. ``.zarr.zip``) writes a
+            zip archive; anything else writes a ``.zarr`` directory store.
+        img_metadata: Metadata dict to store in the Zarr root attributes
+            (e.g. ``{"OME": ..., "axes": "YXS", "pixel_size": 0.2125}``).
+        axes: Axis string describing the image dimensions, e.g. ``"YX"``
+            (grayscale), ``"YXS"`` (RGB), ``"CYX"`` (multi-channel IF).
+        save_pyramid: If ``True`` (default), write a multi-resolution pyramid.
+            If the input is already a list, it is written as-is; otherwise a
+            pyramid is created via :func:`~insitupy.images.utils.create_img_pyramid`.
+            If ``False``, only the full-resolution array is written.
+        overwrite: If ``True``, delete any existing file or directory at
+            *file* before writing. Defaults to ``False``.
+        verbose: If ``True``, log the output path. Defaults to ``False``.
+
+    Raises:
+        FileExistsError: If *file* already exists and *overwrite* is ``False``.
+    """
+    if verbose:
+        logger.info(f"Saving image to {str(file)}")
+
     file = Path(file)
 
-    if file.exists():
-        if overwrite:
-            if file.is_dir():
-                import shutil
-                shutil.rmtree(file)  # delete directory for .zarr folders
+    # Raise early if file exists and overwrite is not allowed
+    if file.exists() and not overwrite:
+        raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
+
+    # a .zip suffix (e.g. .zarr.zip) requests a zip archive
+    zipped = file.suffix == ".zip"
+
+    # Write to a staging path; commit to final path only after a successful write.
+    # A zip archive is staged as a directory store first and packed afterwards,
+    # since a Zarr v3 ZipStore opened for writing cannot be read back to add attrs.
+    tmp_file = file.parent / (file.name + ".__ispy_tmp__")
+    tmp_zip = file.parent / (file.name + ".__ispy_tmp_zip__")
+
+    # Clean any stale staging left by a previous failed write
+    for stale in (tmp_file, tmp_zip):
+        if stale.exists():
+            if stale.is_dir():
+                shutil.rmtree(stale)
             else:
-                file.unlink()  # delete file for .zarr.zip
-        else:
-            raise FileExistsError("Output file exists already ({}).\nFor overwriting it, select `overwrite=True`".format(file))
-
-    suffix = file.name.split(".", 1)[-1]
-
-    # check if the suffix contains zip
-    zipped = "zip" in suffix
+                stale.unlink()
 
     # decide whether to save as pyramid or not
     if isinstance(image, list):
@@ -413,7 +501,7 @@ def write_zarr(image, file,
 
     # Use ExitStack to handle context manager differences between Zarr v2 and v3
     with ExitStack() as stack:
-        dirstore = _get_zarr_store(file, mode="w", zipped=zipped)
+        dirstore = _get_zarr_store(tmp_file, mode="w")
 
         # In Zarr v2, stores are context managers and need to be entered
         if not ZARR_V3:
@@ -437,18 +525,34 @@ def write_zarr(image, file,
         # open zarr store save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
         store.attrs.put(make_json_serializable(img_metadata))
-    # for k,v in img_metadata.items():
-    #     store.attrs[k] = v
+
+    if zipped:
+        # pack the staged directory store into an uncompressed zip, the layout
+        # zarr's ZipStore reads (chunks are already compressed)
+        with zipfile.ZipFile(tmp_zip, mode="w", compression=zipfile.ZIP_STORED) as zf:
+            for member in sorted(tmp_file.rglob("*")):
+                if member.is_file():
+                    zf.write(member, arcname=member.relative_to(tmp_file).as_posix())
+        shutil.rmtree(tmp_file)
+        tmp_file = tmp_zip
+
+    # Commit: delete original only after new write has fully completed
+    if file.exists():
+        if file.is_dir():
+            shutil.rmtree(file)
+        else:
+            file.unlink()
+    os.rename(tmp_file, file)
 
 def write_ome_tiff(
-    image: Union[np.ndarray, da.core.Array, List[da.core.Array]],
-    file: Union[str, os.PathLike, Path],
+    image: np.ndarray | da.core.Array | list[da.core.Array],
+    file: str | os.PathLike | Path,
     axes: str = "YXS", # channels - other examples: 'TCYXS'. S for RGB channels. 'YX' for grayscale image.
     metadata: dict = {},
     subresolutions = 6,
     subres_steps: int = 2,
-    pixelsize: Optional[float] = 1, # defaults to Xenium settings.
-    pixelunit: Optional[str] = None, # usually µm
+    pixelsize: float | None = 1, # defaults to Xenium settings.
+    pixelunit: str | None = None, # usually µm
     photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', # before I had rgb here. Xenium doc says minisblack
     tile: tuple = (1024, 1024), # 1024 pixel is optimal for Xenium Explorer
     compression: Literal['jpeg', 'LZW', 'jpeg2000', "ZLIB", None] = 'ZLIB', # jpeg2000 or ZLIB are recommended in the Xenium documentation - ZLIB is faster
@@ -502,7 +606,7 @@ def write_ome_tiff(
         ... )
     """
     if verbose:
-        print(f"Saving image to {str(file)}")
+        logger.info(f"Saving image to {str(file)}")
     # check if the image is an image pyramid
     if isinstance(image, list):
         # if it is a pyramid, select only the highest resolution image
@@ -521,11 +625,10 @@ def write_ome_tiff(
         significant_bits = 16
 
     file = Path(file)
-    if file.exists():
-        if overwrite:
-            file.unlink() # delete file
-        else:
-            raise FileExistsError("Output file exists already ({}).\nFor overwriting it, select `overwrite=True`".format(file))
+
+    # Raise early if file exists and overwrite is not allowed
+    if file.exists() and not overwrite:
+        raise FileExistsError(f"Output file exists already ({file}).\nFor overwriting it, select `overwrite=True`")
 
     # create metadata
     if pixelsize != 1:
@@ -552,8 +655,12 @@ def write_ome_tiff(
             }
         }
 
+    # Write to a staging path; commit to final path only after a successful write
+    tmp_file = file.parent / (file.name + ".__ispy_tmp__")
+    if tmp_file.exists():
+        tmp_file.unlink()
 
-    with TiffWriter(file, bigtiff=True) as tif:
+    with TiffWriter(tmp_file, bigtiff=True, kind='ome') as tif:
         options = dict(
             photometric=photometric,
             tile=tile,
@@ -580,7 +687,30 @@ def write_ome_tiff(
                 **options
             )
 
+    # Commit: delete original only after new write has fully completed
+    if file.exists():
+        file.unlink()
+    os.rename(tmp_file, file)
+
 def read_zarr_pyramid(dirstore, persist):
+    """Read a pyramid from an already-opened Zarr store.
+
+    Reads sub-arrays from *dirstore*, treating them as pyramid resolution
+    levels sorted in ascending order (``"0"`` = full resolution).  If the
+    store contains a single array (indicated by a ``.zarray`` entry), that
+    array is returned directly.
+
+    Args:
+        dirstore: An open Zarr store object (e.g.
+            :class:`zarr.storage.DirectoryStore` or
+            :class:`zarr.storage.ZipStore`).
+        persist: If ``True``, call ``.persist()`` on each
+            :class:`dask.array.Array` to trigger eager loading into memory.
+
+    Returns:
+        A :class:`dask.array.Array` (single array) or a :class:`list` of
+        :class:`dask.array.Array` (pyramid, index 0 = full resolution).
+    """
     # get components of zip store
     components = dirstore.listdir()
 
@@ -591,7 +721,7 @@ def read_zarr_pyramid(dirstore, persist):
         else:
             img = da.from_zarr(dirstore)
     else:
-        subres = sorted([elem for elem in components if not elem.startswith(".")])
+        subres = _sorted_pyramid_levels(components)
         img = []
         for s in subres:
             if persist:
@@ -607,7 +737,7 @@ def read_zarr_pyramid(dirstore, persist):
 
 def read_ome_tiff(
     path,
-    levels: Optional[Union[List[int], int]] = None,
+    levels: list[int] | int | None = None,
     new_method: bool = True
     ):
     '''

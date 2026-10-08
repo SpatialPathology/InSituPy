@@ -1,5 +1,7 @@
-import warnings
-from typing import List, Literal, Tuple, Union
+import logging
+from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 import anndata
 import numpy as np
@@ -67,7 +69,7 @@ def _extract_groups(
             adata = adata.loc[mask, :].copy()
 
         if len(adata) == 0:
-            print("Subset variables '{}' not in groupby '{}'. Object not returned.".format(groups, groupby))
+            logger.warning(f"Subset variables '{groups}' not in groupby '{groupby}'. Object not returned.")
             return
         elif filtering:
             # check if all groups are in groupby category
@@ -75,7 +77,7 @@ def _extract_groups(
             groups_notfound = [group for group in groups if group not in groups_found]
 
             if len(groups_found) != len(groups):
-                print("Following groups were not found in column {}: {}".format(groupby, groups_notfound))
+                logger.warning(f"Following groups were not found in column {groupby}: {groups_notfound}")
 
             if extract_uns or uns_exclusion_pattern is not None:
                 new_uns = {key:value for (key,value) in adata.uns[uns_key].items() if np.any([group in key for group in groups])}
@@ -98,8 +100,20 @@ def _extract_groups(
             return adata
 
     else:
-        print("Subset category '{}' not found".format(groupby))
+        logger.warning(f"Subset category '{groupby}' not found")
         return
+
+
+def _layer_names(adata: anndata.AnnData) -> list:
+    """
+    Return the keys of `adata.layers`, excluding the `None` key.
+
+    anndata >=0.13 stores `X` internally as `adata.layers[None]` (`X` remains a normal
+    attribute; `None` is just an alias key layered on top of it). Enumerating and deleting
+    `adata.layers` keys without filtering out `None` therefore silently destroys `X`. On
+    anndata <0.13 there is no `None` key, so this filter is a no-op - do not "simplify" it away.
+    """
+    return [key for key in adata.layers.keys() if key is not None]
 
 
 def _select_anndata_elements(
@@ -140,7 +154,7 @@ def _select_anndata_elements(
         obs_keys = convert_to_list(obs_keys)
         missing_keys = [key for key in obs_keys if key not in adata.obs.columns]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.obs: {missing_keys}")
+            logger.warning(f"Keys not found in adata.obs: {missing_keys}")
         obs_keys = [key for key in obs_keys if key in adata.obs.columns]
         adata.obs = adata.obs[obs_keys]
 
@@ -153,7 +167,7 @@ def _select_anndata_elements(
         var_keys = convert_to_list(var_keys)
         missing_keys = [key for key in var_keys if key not in adata.var.columns]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.var: {missing_keys}")
+            logger.warning(f"Keys not found in adata.var: {missing_keys}")
         var_keys = [key for key in var_keys if key in adata.var.columns]
         adata.var = adata.var[var_keys]
 
@@ -168,7 +182,7 @@ def _select_anndata_elements(
         obsm_keys = convert_to_list(obsm_keys)
         missing_keys = [key for key in obsm_keys if key not in adata.obsm.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.obsm: {missing_keys}")
+            logger.warning(f"Keys not found in adata.obsm: {missing_keys}")
         keys_to_remove = set(adata.obsm.keys()) - set(obsm_keys)
         for key in keys_to_remove:
             del adata.obsm[key]
@@ -184,7 +198,7 @@ def _select_anndata_elements(
         varm_keys = convert_to_list(varm_keys)
         missing_keys = [key for key in varm_keys if key not in adata.varm.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.varm: {missing_keys}")
+            logger.warning(f"Keys not found in adata.varm: {missing_keys}")
         keys_to_remove = set(adata.varm.keys()) - set(varm_keys)
         for key in keys_to_remove:
             del adata.varm[key]
@@ -200,24 +214,24 @@ def _select_anndata_elements(
         uns_keys = convert_to_list(uns_keys)
         missing_keys = [key for key in uns_keys if key not in adata.uns.keys()]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.uns: {missing_keys}")
+            logger.warning(f"Keys not found in adata.uns: {missing_keys}")
         keys_to_remove = set(adata.uns.keys()) - set(uns_keys)
         for key in keys_to_remove:
             del adata.uns[key]
 
     # .layers
     if layer_keys is None:
-        keys_to_remove = list(adata.layers.keys())
+        keys_to_remove = _layer_names(adata)
         for key in keys_to_remove:
             del adata.layers[key]
     elif layer_keys == 'all':
         pass  # Keep all keys
     else:
         layer_keys = convert_to_list(layer_keys)
-        missing_keys = [key for key in layer_keys if key not in adata.layers.keys()]
+        missing_keys = [key for key in layer_keys if key not in _layer_names(adata)]
         if missing_keys:
-            warnings.warn(f"Keys not found in adata.layers: {missing_keys}")
-        keys_to_remove = set(adata.layers.keys()) - set(layer_keys)
+            logger.warning(f"Keys not found in adata.layers: {missing_keys}")
+        keys_to_remove = set(_layer_names(adata)) - set(layer_keys)
         for key in keys_to_remove:
             del adata.layers[key]
 
@@ -233,7 +247,7 @@ FilterMode = Literal[
 def filter_anndata(
     adata: anndata.AnnData,
     filter_mode: FilterMode,
-    filter_tuple: Tuple[str, Union[str, int, float, List[Union[str, int, float]]]]
+    filter_tuple: tuple[str, str | int | float | list[str | int | float]]
 ) -> anndata.AnnData:
     """
     Filters an AnnData object based on a specified filter mode and condition.

@@ -2,32 +2,22 @@
 
 import os
 import sys
-from pathlib import PurePosixPath
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_version
 
 sys.path.insert(0, os.path.abspath('../..'))
 
-
-def read(rel_path: str) -> str:
-    here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, rel_path)) as fp:
-        return fp.read()
-
-
-def get_version(rel_path: str) -> str:
-    for line in read(rel_path).splitlines():
-        if line.startswith("__version__"):
-            delim = '"' if '"' in line else "'"
-            return line.split(delim)[1]
-    raise RuntimeError("Unable to find version string.")
-
+try:
+    release = _get_version("insitupy-spatial")
+except PackageNotFoundError:
+    release = "dev"
+version = ".".join(release.split(".")[:2])
 
 # -- Project information
 
 project = 'InSituPy'
 copyright = '2025, Johannes Wirth'
 author = 'Johannes Wirth'
-release = get_version("../../insitupy/__init__.py")
-version = get_version("../../insitupy/__init__.py")
 
 # -- General configuration
 
@@ -42,7 +32,8 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinx.ext.mathjax",
     "sphinx_design", # can be used for things such as cards
-    "myst_nb"
+    "myst_nb",
+    "sphinxcontrib.mermaid",
 ]
 
 
@@ -67,6 +58,16 @@ myst_enable_extensions = [
 ]
 
 myst_url_schemes = ("http", "https", "mailto")
+
+# Render GitHub-flavored ```mermaid fences as mermaid directives. Without this, MyST treats them
+# as plain code blocks and the diagrams silently degrade to grey text boxes here while still
+# rendering fine on GitHub - so one fence can be the single source for both surfaces.
+myst_fence_as_directive = ["mermaid"]
+
+# Pin the mermaid runtime. sphinxcontrib-mermaid loads it from a CDN at page-view time and
+# defaults to whatever version the installed extension ships with; since docs/requirements.txt
+# pins nothing, that would let the renderer change under us between builds. Bump deliberately.
+mermaid_version = "11.12.1"
 nb_output_stderr = "remove"
 nb_execution_mode = "off"
 nb_merge_streams = True
@@ -78,6 +79,13 @@ source_suffix = {
     ".myst": "myst-nb",
     ".md": "myst-nb"
 }
+
+# Internal notebooks that are kept in the repo but deliberately not published. Without this they
+# are still built into unreachable HTML and each one emits a `toc.not_included` warning.
+exclude_patterns = [
+    "tutorials/01_demo_analysis/dev/**",
+    "tutorials/pancreas/**",
+]
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),

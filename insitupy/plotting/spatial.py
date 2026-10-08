@@ -1,35 +1,52 @@
 
+import copy
 import gc
+import logging
 import math
+import warnings
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Literal
 
 import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from anndata import AnnData
 from matplotlib import colors
 from matplotlib.colors import ListedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from insitupy._constants import (DEFAULT_CATEGORICAL_CMAP,
-                                 DEFAULT_CONTINUOUS_CMAP,
-                                 with_insitupy_style)
+from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
+    DEFAULT_CONTINUOUS_CMAP,
+    NA_CATEGORY,
+    with_insitupy_style,
+)
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
-from insitupy.dataclasses._utils import _get_cell_layer
-from insitupy.dataclasses.dataclasses import (AnnotationsData, ImageData,
-                                              RegionsData)
+from insitupy.containers import AnnotationsData, ImageData, RegionsData
+from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
-from insitupy.utils._colors import (_add_colorlegend_to_axis,
-                                    _extract_color_values, _rgb2hex_robust,
-                                    create_cmap_mapping)
-from insitupy.utils.utils import (convert_to_list, get_nrows_maxcols,
-                                  remove_empty_subplots)
+from insitupy.utils._colors import (
+    _add_colorlegend_to_axis,
+    _coerce_na_for_plot,
+    _extract_color_values,
+    _parse_unique_categories,
+    _rgb2hex_robust,
+    _warn_na_cells_hidden,
+    create_cmap_mapping,
+)
+from insitupy.utils.utils import (
+    convert_to_list,
+    get_nrows_maxcols,
+    remove_empty_subplots,
+)
+
+logger = logging.getLogger(__name__)
 
 FilterMode = Literal[
     "contains", "not contains", "starts with", "ends with",
@@ -62,19 +79,19 @@ class DataConfig(_UpdatablePlottingConfig):
     """
 
     # data extraction config
-    layer: Optional[str] = None
+    layer: str | None = None
     raw: bool = False
     obsm_key: str = 'spatial'
-    name_column: Optional[str] = None
+    name_column: str | None = None
 
     # data attribute keys
-    region_tuple: Optional[Tuple[str, str]] = None
-    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None
-    image_key: Optional[str] = None
+    region_tuple: tuple[str, str] | None = None
+    annotations_key: tuple[str, str | list[str] | None] | None = None
+    image_key: str | None = None
 
     # filters
-    filter_mode: Optional[FilterMode] = None,
-    filter_tuple: Optional[Tuple] = None
+    filter_mode: FilterMode | None = None
+    filter_tuple: tuple | None = None
 
 @dataclass
 class PlotConfig(_UpdatablePlottingConfig):
@@ -108,21 +125,22 @@ class PlotConfig(_UpdatablePlottingConfig):
         show_all(): Display all current configuration values.
     """
 
-    xlim: Optional[Tuple[float, float]] = None
-    ylim: Optional[Tuple[float, float]] = None
+    xlim: tuple[float, float] | None = None
+    ylim: tuple[float, float] | None = None
     spot_size: float = 10
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
     palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
     spot_type: str = "o"
     background_color: str = "white"
-    cmap_center: Optional[float] = None
-    normalize: Optional[colors.Normalize] = None
+    nan_color: str | None = None
+    cmap_center: float | None = None
+    normalize: colors.Normalize | None = None
     show_legend: bool = True
     legend_max_per_col: int = 10
-    clb_title: Optional[str] = None
+    clb_title: str | None = None
     annotations_mode: Literal["outlined", "filled"] = "outlined"
-    crange: Optional[List[int]] = None
+    crange: list[int] | None = None
     crange_type: Literal['minmax', 'max', 'upper_percentile', 'percentile'] = 'upper_percentile'
     origin_zero: bool = False
     label_size: int = 16
@@ -131,7 +149,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     show_scale: bool = True
     tick_label_size: int = 14
     pixelwidth_per_subplot: int = 200
-    histogram_setting: Union[Literal["auto"], Tuple[int, int], None] = "auto"
+    histogram_setting: Literal["auto"] | tuple[int, int] | None = "auto"
 
     def __post_init__(self):
         # check if cmap is supposed to be centered
@@ -163,8 +181,8 @@ class LayoutConfig(_UpdatablePlottingConfig):
             (rows, columns, number of plots) based on the given keys and datasets.
     """
 
-    max_cols: Optional[int] = 4
-    header: Optional[str] = None
+    max_cols: int | None = 4
+    header: str | None = None
     multikeys: bool = False
     multidata: bool = False
     n_rows: int = None
@@ -172,12 +190,26 @@ class LayoutConfig(_UpdatablePlottingConfig):
     n_plots: int = None
     subplot_width: int = 6
     subplot_height: int = 6
-    wspace: Optional[float] = 0.4
-    hspace: Optional[float] = 0.2
-    figsize: Optional[Tuple] = None
+    wspace: float | None = 0.4
+    hspace: float | None = 0.2
+    figsize: tuple | None = None
     add_legend_to_last_subplot: bool = False
     dpi_display: int = 80
     def calc_subplot_params(self, keys, n_data, color_config):
+        """Compute subplot grid dimensions and layout flags from the number of keys and data objects.
+
+        Sets ``self.n_rows``, ``self.n_cols``, ``self.n_plots``,
+        ``self.multikeys``, ``self.multidata``, and
+        ``self.add_legend_to_last_subplot`` in-place based on the combination
+        of *keys* and *n_data*.
+
+        Args:
+            keys: Sequence of colour/feature keys to plot.
+            n_data: Number of data objects (samples / experiments) to show.
+            color_config: Mapping from key to colour configuration dict; used
+                to detect categorical vs. continuous data when laying out
+                categorical legends.
+        """
         # set multiplot variables
         if len(keys) > 1:
             self.multikeys = True
@@ -231,33 +263,63 @@ class LayoutConfig(_UpdatablePlottingConfig):
         if self.figsize is None:
             self.figsize = (self.subplot_width * self.n_cols, self.subplot_height * self.n_rows)
 
+class _Unset:
+    """Sentinel marking a ``spatial()`` argument the caller did not pass.
+
+    Lets ``_explicit_overrides`` tell "argument omitted" apart from "argument
+    passed a value that happens to equal a config default", so an explicitly
+    passed top-level kwarg always overrides a caller-provided config.
+    """
+    __slots__ = ()
+
+    def __repr__(self):
+        return "UNSET"
+
+_UNSET = _Unset()
+
+def _explicit_overrides(**kwargs) -> dict:
+    """Keep only kwargs the caller explicitly passed at the top level.
+
+    A value equal to the ``_UNSET`` sentinel means the corresponding ``spatial()``
+    argument was omitted, so it is dropped and the caller-provided
+    plot_config/layout_config/data_config keeps its own value for that field.
+    Any other value - including one equal to a config default, or a numpy array -
+    is forwarded to ``update_values()``.
+    """
+    return {name: value for name, value in kwargs.items() if value is not _UNSET}
+
 @with_insitupy_style
 def spatial(
-    data: Union[InSituData, InSituExperiment],
-    keys: Union[str, List[str]],
-    cells_layer: Optional[str] = None,
-    layer: Optional[str] = None,
+    data: InSituData | InSituExperiment,
+    keys: str | list[str],
+    cells_layer: str | None = None,
+    layer: str | None = _UNSET,
 
     # data attribute keys
-    region_tuple: Optional[Tuple[str, str]] = None,
-    annotations_key: Optional[Tuple[str, Optional[Union[str, List[str]]]]] = None,
-    image_key: Optional[str] = None,
+    region_tuple: tuple[str, str] | None = _UNSET,
+    annotation_tuple: tuple[str, str | list[str] | None] | None = _UNSET,
+    annotations_key: tuple[str, str | list[str] | None] | None = None,
+    image_key: str | None = _UNSET,
 
     # filters
-    filter_mode: Optional[FilterMode] = None,
-    filter_tuple: Optional[Tuple] = None,
+    filter_mode: FilterMode | None = _UNSET,
+    filter_tuple: tuple | None = _UNSET,
 
     # plotting configs
-    xlim: Optional[Tuple[float, float]] = None,
-    ylim: Optional[Tuple[float, float]] = None,
-    spot_size: float = 10,
-    alpha: float = 1.0,
+    xlim: tuple[float, float] | None = _UNSET,
+    ylim: tuple[float, float] | None = _UNSET,
+    spot_size: float = _UNSET,
+    alpha: float = _UNSET,
+    nan_color: str | None = _UNSET,
 
     # layout configs
-    max_cols: Optional[int] = 4,
+    max_cols: int | None = _UNSET,
+    figsize: tuple[float, float] | None = _UNSET,
+    subplot_width: float | None = _UNSET,
+    subplot_height: float | None = _UNSET,
 
     # save configs
-    savepath: Optional[str] = None,
+    savepath: str | None = None,
     save_only: bool = False,
     dpi_save: int = 300,
     show: bool = True,
@@ -277,117 +339,149 @@ def spatial(
     It supports categorical and continuous features, overlays images and annotations, and provides flexible configuration
     for plotting, layout, and saving.
 
-    Parameters
-    ----------
-    Main
-        data : InSituData or InSituExperiment
-            Input dataset or experiment.
-        keys : str or list of str
-            Feature key(s) to plot (e.g., gene names or annotations).
-        cells_layer : str, optional
-            Name of the cell layer to extract data from.
-        layer : str, optional
-            AnnData layer to extract values from.
-        region_tuple : tuple of (str, str), optional
-            Region identifier (dataset key, region name).
-        annotations_key : tuple or str, optional
-            Key(s) for annotations to overlay.
-        image_key : str, optional
-            Key for associated images to overlay.
-        filter_mode : str, optional
-            Mode used for filtering cells (e.g., "contains", "greater than").
-        filter_tuple : tuple, optional
-            Parameters for filtering (depends on ``filter_mode``).
+    Args:
+        data (InSituData or InSituExperiment): Input dataset or experiment.
+        keys (str or list of str): Feature key(s) to plot (e.g., gene names or annotations).
+        cells_layer (str, optional): Name of the cell layer to extract data from.
+        layer (str, optional): AnnData layer to extract values from.
+        region_tuple (tuple of (str, str), optional): Region identifier (dataset key, region name).
+        annotation_tuple (tuple of (str, str or list of str), optional):
+            Annotation overlay specifier as ``(key, name)`` where ``key`` is the
+            annotation category and ``name`` is the specific annotation class (or
+            a list of classes) to overlay. Pass just the key as a plain string to
+            overlay all classes in that category.
+        annotations_key (tuple or str, optional): Deprecated. Use ``annotation_tuple`` instead.
+        image_key (str, optional): Key for associated images to overlay.
+        filter_mode (str, optional): Mode used for filtering cells (e.g., "contains", "greater than").
+        filter_tuple (tuple, optional): Parameters for filtering (depends on ``filter_mode``).
+        xlim (tuple of float, optional): X-axis limits.
+        ylim (tuple of float, optional): Y-axis limits.
+        spot_size (float): Marker size for cells. Default is 10.
+        alpha (float): Transparency for plotted markers. Default is 1.0.
+        nan_color (str, optional): Color for cells with missing values (NaN) in
+            categorical columns. If None (default), NaN cells are excluded from the
+            plot. Has no effect on continuous columns.
+        max_cols (int, optional): Maximum number of subplot columns. Default is 4.
+        figsize (tuple[float, float], optional): Overall figure size (width, height) in
+            inches. Overrides ``subplot_width``/``subplot_height`` when provided. Default
+            None (derived from ``subplot_width``/``subplot_height``).
+        subplot_width (float, optional): Width of each individual subplot panel in inches.
+            Used to derive the total figure width when ``figsize`` is None. Default None
+            (falls back to 6).
+        subplot_height (float, optional): Height of each individual subplot panel in
+            inches. Used to derive the total figure height when ``figsize`` is None.
+            Default None (falls back to 6).
+        savepath (str, optional): Path to save the figure (if None, figure is not saved).
+        save_only (bool): If True, save figure without displaying. Default is False.
+        dpi_save (int): Resolution in DPI for saving the figure. Default is 300.
+        show (bool): Whether to display the plot. Default is True.
+        plot_config (PlotConfig, optional): Plot appearance/rendering configuration
+            (cmap, palette, spot_type, crange, ...) for options with no dedicated
+            top-level kwarg. Fields it shares with a top-level kwarg above (xlim, ylim,
+            spot_size, alpha, nan_color) are preserved unless that kwarg is also passed
+            explicitly - see the precedence note below.
+        layout_config (LayoutConfig, optional): Figure/subplot layout configuration
+            (header, wspace, hspace, dpi_display, ...) for options with no dedicated
+            top-level kwarg. Fields it shares with a top-level kwarg above (max_cols,
+            figsize, subplot_width, subplot_height) follow the same precedence note.
+        data_config (DataConfig, optional): Data-extraction configuration (raw,
+            obsm_key, name_column, ...) for options with no dedicated top-level kwarg.
+            Fields it shares with a top-level kwarg above (layer, region_tuple,
+            annotation_tuple, image_key, filter_mode, filter_tuple) follow the same
+            precedence note.
+        verbose (bool): If True, print progress messages. Default is False.
 
-    Plotting
-        xlim : tuple of float, optional
-            X-axis limits.
-        ylim : tuple of float, optional
-            Y-axis limits.
-        spot_size : float, default=10
-            Marker size for cells.
-        alpha : float, default=1.0
-            Transparency for plotted markers.
+    Note:
+        Precedence between a shared top-level kwarg and a caller-provided
+        ``plot_config``/``layout_config``/``data_config`` object: the top-level kwarg
+        wins whenever it is explicitly passed - even when the value it is given
+        equals a config default; otherwise the config object's value is left
+        untouched. E.g. ``spatial(data, keys, plot_config=PlotConfig(spot_size=20))``
+        keeps ``spot_size=20``; adding ``spot_size=8`` at the top level overrides it to 8.
 
-    Layout
-        max_cols : int, optional, default=4
-            Maximum number of subplot columns.
+    Returns:
+        None: Displays and/or saves the generated spatial plot(s).
 
-    Save
-        savepath : str, optional
-            Path to save the figure (if None, figure is not saved).
-        save_only : bool, default=False
-            If True, save figure without displaying.
-        dpi_save : int, default=300
-            Resolution in DPI for saving the figure.
-        show : bool, default=True
-            Whether to display the plot.
+    Raises:
+        ValueError: If filter parameters or layout arguments are invalid.
+        ValueError: If mixed categorical and continuous values are encountered for a key.
 
-    Configuration
-        plot_config : PlotConfig, optional
-            Plot configuration object (overrides defaults if provided).
-        layout_config : LayoutConfig, optional
-            Layout configuration object (overrides defaults if provided).
-        data_config : DataConfig, optional
-            Data configuration object (overrides defaults if provided).
-
-    Miscellaneous
-        verbose : bool, default=False
-            If True, print progress messages.
-
-    Returns
-    -------
-    None
-        Displays and/or saves the generated spatial plot(s).
-
-    Raises
-    ------
-    ValueError
-        If filter parameters or layout arguments are invalid.
-    ValueError
-        If mixed categorical and continuous values are encountered for a key.
-
-    Examples
-    --------
+    Examples:
     >>> import insitupy as isp
     >>> isp.pl.spatial(data, keys="GeneA")
     >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
     """
 
+    if annotations_key is not None:
+        warnings.warn(
+            "'annotations_key' is deprecated, use 'annotation_tuple' instead.",
+            DeprecationWarning,
+            stacklevel=3,  # spatial is wrapped by @with_insitupy_style
+        )
+        annotation_tuple = annotations_key
+
     # convert arguments to lists
     keys = convert_to_list(keys)
 
     # init config classes
-    if plot_config is None:
-        plot_config = PlotConfig()
-    if layout_config is None:
-        layout_config = LayoutConfig()
-    if data_config is None:
-        data_config = DataConfig()
+    # Copy any caller-provided config so we never mutate the caller's object.
+    # calc_subplot_params() writes derived layout state (figsize, n_rows, ...)
+    # back into layout_config; reusing the same config across calls would
+    # otherwise leak a stale figsize (e.g. one sized for the full experiment
+    # onto a later subset plot), which also inflates the computed marker size.
+    plot_config = PlotConfig() if plot_config is None else copy.copy(plot_config)
+    layout_config = LayoutConfig() if layout_config is None else copy.copy(layout_config)
+    data_config = DataConfig() if data_config is None else copy.copy(data_config)
 
-    # update some values depending on function arguments
-    data_config.update_values(
+    # Update config objects with function arguments - only kwargs the caller
+    # explicitly passed (i.e. not left at the `_UNSET` sentinel) are forwarded, so a
+    # caller-provided plot_config/layout_config/data_config is not silently clobbered
+    # by defaults for fields the caller never touched at the top level.
+    data_config.update_values(**_explicit_overrides(
         layer=layer,
-        region_tuple=region_tuple, annotations_key=annotations_key, image_key=image_key,
-        filter_mode=filter_mode, filter_tuple=filter_tuple
-        )
-    plot_config.update_values(
+        region_tuple=region_tuple,
+        annotations_key=annotation_tuple,
+        image_key=image_key,
+        filter_mode=filter_mode,
+        filter_tuple=filter_tuple,
+    ))
+    plot_config.update_values(**_explicit_overrides(
         xlim=xlim, ylim=ylim,
-        spot_size=spot_size, alpha=alpha
-    )
-    layout_config.update_values(
-        max_cols=max_cols
-    )
+        spot_size=spot_size, alpha=alpha,
+        nan_color=nan_color,
+    ))
+    layout_config.update_values(**_explicit_overrides(
+        max_cols=max_cols,
+        figsize=figsize,
+        subplot_width=subplot_width,
+        subplot_height=subplot_height,
+    ))
+
+    # figsize wins over subplot_width/height inside calc_subplot_params, so warn when
+    # the caller asked for a per-panel size that an effective figsize - top-level OR
+    # from a caller-provided layout_config - will silently override. Must run BEFORE
+    # calc_subplot_params, which fills layout_config.figsize with a *computed* size.
+    if layout_config.figsize is not None and (
+        subplot_width is not _UNSET or subplot_height is not _UNSET
+    ):
+        warnings.warn(
+            "subplot_width/subplot_height are ignored when figsize is provided; "
+            "figsize sets the total figure size and takes precedence.",
+            UserWarning, stacklevel=3,
+        )
 
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
         n_data = len(data)
 
-        # synchronize colors before plotting
-        data.sync_colors(
+        # synchronize colors before plotting; quiet because keys that are genes,
+        # numeric or already colored are expected here and need no sync
+        data._sync_colors(
             keys=keys,
             cells_layer=cells_layer,
-            palette=plot_config.palette
+            palette=plot_config.palette,
+            overwrite=False,
+            quiet=True,
         )
     else:
         n_data = 1
@@ -408,12 +502,12 @@ def spatial(
         )
 
     # setup the subplots
-    fig, axs = setup_subplots(
+    fig, axs = _setup_subplots(
         layout_config=layout_config,
         verbose=verbose
     )
 
-    plot_to_subplots(
+    _plot_to_subplots(
         data,
         keys,
         cells_layer,
@@ -438,14 +532,15 @@ def spatial(
 
 # deprecated version
 def plot_spatial(*args, **kwargs):
+    """Deprecated. Use :func:`spatial` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="spatial")
 
-def setup_subplots(
+def _setup_subplots(
     layout_config: LayoutConfig,
     verbose: bool = False
     ):
-    print("Setup subplots.") if verbose else None
+    logger.info("Setup subplots.") if verbose else None
 
     fig, axs = plt.subplots(
         layout_config.n_rows, layout_config.n_cols,
@@ -475,7 +570,7 @@ def setup_subplots(
 
     return fig, axs
 
-def plot_to_subplots(
+def _plot_to_subplots(
     data,
     keys,
     cells_layer,
@@ -487,14 +582,16 @@ def plot_to_subplots(
     color_config,
     verbose: bool = False
 ):
-    print("Do plotting.") if verbose else None
+    logger.info("Do plotting.") if verbose else None
 
     if _is_experiment(data):
         n_data = len(data)
     else:
         n_data = 1
 
-    #i = 0
+    total_hidden = 0
+    affected_keys = set()
+
     for idx in range(n_data):
 
         # retrieve data
@@ -510,7 +607,7 @@ def plot_to_subplots(
             add_legend = plot_config.show_legend and add_legend
 
             # plot single spatial plot in given axis
-            _single_spatial(
+            n_hidden = _single_spatial(
                 adata=ad,
                 key=key, idx_key=idx_key, name=sample_name,
                 fig=fig, ax=ax, add_legend=add_legend,
@@ -518,6 +615,12 @@ def plot_to_subplots(
                 layout_config=layout_config, plot_config=plot_config,
                 regions_data=regions_data, annotations_data=annotations_data, image_data=image_data
             )
+            if n_hidden:
+                total_hidden += n_hidden
+                affected_keys.add(key)
+
+    if total_hidden:
+        _warn_na_cells_hidden(total_hidden, sorted(affected_keys))
 
     if layout_config.add_legend_to_last_subplot and plot_config.show_legend:
         # get axis of last subplots for color legend
@@ -528,6 +631,8 @@ def plot_to_subplots(
         # is_categorical = color_config_key["is_categorical"]
         # if is_categorical:
         color_dict = color_config[k]["color_dict"]
+        if plot_config.nan_color is not None and color_config[k].get("has_na"):
+            color_dict = {**color_dict, NA_CATEGORY: plot_config.nan_color}
         _add_colorlegend_to_axis(
             color_dict=color_dict,
             max_per_col=plot_config.legend_max_per_col,
@@ -535,7 +640,7 @@ def plot_to_subplots(
 
 def _single_spatial(
     adata: AnnData,
-    key: List[str],
+    key: list[str],
     idx_key: int,
     name: str,
 
@@ -551,9 +656,9 @@ def _single_spatial(
     plot_config: PlotConfig,
 
     # data attributes
-    regions_data: Optional[RegionsData] = None,
-    annotations_data: Optional[AnnotationsData] = None,
-    image_data: Optional[ImageData] = None,
+    regions_data: RegionsData | None = None,
+    annotations_data: AnnotationsData | None = None,
+    image_data: ImageData | None = None,
     ):
 
     # get color values for expression data or categories
@@ -561,8 +666,10 @@ def _single_spatial(
         adata=adata, key=key, raw=data_config.raw, layer=data_config.layer
     )
 
+    n_hidden = 0
+
     if color_values is None:
-        print("Key '{}' not found.".format(key), flush=True)
+        logger.warning(f"Key '{key}' not found.")
         ax.set_axis_off()
 
     else:
@@ -624,6 +731,20 @@ def _single_spatial(
 
         # plot transcriptomic data
         if categorical:
+            color_values = pd.Series(color_values)
+            na_mask = color_values.isna().to_numpy()
+            n_na = int(na_mask.sum())
+            if n_na:
+                if plot_config.nan_color is None:
+                    keep = ~na_mask
+                    x_coords = x_coords[keep]
+                    y_coords = y_coords[keep]
+                    color_values = color_values[keep]
+                    n_hidden = n_na
+                else:
+                    color_values = _coerce_na_for_plot(color_values)
+                    color_dict = {**color_dict, NA_CATEGORY: plot_config.nan_color}
+
             sns.scatterplot(
                 x=x_coords, y=y_coords,
                 hue=color_values,
@@ -729,35 +850,52 @@ def _single_spatial(
             else:
                 raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
 
+    return n_hidden
+
 class _ColorConfigMultiPlot:
     def __init__(
         self,
-        data: Union[InSituData, InSituExperiment],
+        data: InSituData | InSituExperiment,
         data_config: DataConfig,
         plot_config: PlotConfig,
-        cells_layer: Optional[str] = None,
-        keys: Union[str, List[str]] = None,
+        cells_layer: str | None = None,
+        keys: str | list[str] = None,
         ):
         # add properties
         self._dict = {}
 
         if _is_experiment(data):
             data_list = data.data
-            exp_color_dict = data.colors
+            exp_colors = data.colors
             # is_experiment = True
         else:
             data_list = [data]
-            exp_color_dict = {}
+            exp_colors = None
             # is_experiment = False
 
         for key in keys:
-            if key in exp_color_dict:
-                # use color_dict from InSituExperiment
+            layer_color_dict = (
+                exp_colors.get(key, cells_layer=cells_layer) if exp_colors is not None else None
+            )
+            if layer_color_dict is not None:
+                # use color_dict from InSituExperiment (copy: never mutate exp.colors)
+                has_na = any(
+                    pd.isna(_extract_color_values(
+                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
+                        key=key, raw=data_config.raw, layer=data_config.layer
+                    )[0]).any()
+                    for xd in data_list
+                    if _extract_color_values(
+                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
+                        key=key, raw=data_config.raw, layer=data_config.layer
+                    )[0] is not None
+                )
                 color_entry = {
-                    "color_dict": exp_color_dict[key],
+                    "color_dict": dict(layer_color_dict),
                     "max_value": None,
                     "is_categorical": True,
-                    "crange": None
+                    "crange": None,
+                    "has_na": has_na,
                 }
             else:
                 # EITHER because key is continuous
@@ -779,9 +917,11 @@ class _ColorConfigMultiPlot:
 
     @property
     def dict(self):
+        """Return the underlying colour configuration dictionary."""
         return self._dict
 
     def keys(self):
+        """Return the keys of the colour configuration dictionary."""
         return self._dict.keys()
 
     def _add_color_entry(
@@ -793,7 +933,8 @@ class _ColorConfigMultiPlot:
             "color_dict": None,
             "max_value": None,
             "is_categorical": False,
-            "crange": None
+            "crange": None,
+            "has_na": False,
         }
         if len(data_list) == 1:
             # one dataset
@@ -814,6 +955,7 @@ class _ColorConfigMultiPlot:
 
             if is_categorical:
                 color_entry["is_categorical"] = True
+                color_entry["has_na"] = bool(pd.isna(color_values).any())
                 # check if colors were saved in uns
                 uns_key = f"{key}_colors"
                 if uns_key in ad.uns.keys() and plot_config.palette is None:
@@ -844,6 +986,7 @@ class _ColorConfigMultiPlot:
             # multiple datasets
             value_list = []
             categorical_list = []
+            has_na = False
             for xd in data_list:
                 celldata = _get_cell_layer(
                     cells=xd.cells,
@@ -858,7 +1001,8 @@ class _ColorConfigMultiPlot:
 
                 if color_values is not None:
                     if is_categorical:
-                        value_list.append(np.unique(color_values))
+                        has_na |= bool(pd.isna(color_values).any())
+                        value_list.append(np.asarray(_parse_unique_categories(color_values)))
                     else:
                         value_list.append(np.max(color_values))
 
@@ -874,6 +1018,7 @@ class _ColorConfigMultiPlot:
                     all_values, cmap=plot_config.palette
                     )
                 color_entry["is_categorical"] = True
+                color_entry["has_na"] = has_na
 
             elif not np.any(categorical_list):
                 # no values are categorical - collect the maximum values
@@ -987,7 +1132,7 @@ def _determine_axes(axs, idx, idx_key, layout_config):
             else:
                 add_legend = False
     else:
-        raise ValueError("`len(self.axs.shape)` has wrong shape {}. Requires 1 or 2.".format(len(axs.shape)))
+        raise ValueError(f"`len(self.axs.shape)` has wrong shape {len(axs.shape)}. Requires 1 or 2.")
 
     return ax, add_legend
 

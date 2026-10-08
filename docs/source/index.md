@@ -9,7 +9,7 @@
 
 **InSituPy** is a Python package for the analysis of single-cell spatial transcriptomics data. With InSituPy, you can read, visualize, and analyze the spatially resolved gene expression within one dataset but also across different datasets. Further, it provides a general structure for organizing multiple datasets and its corresponding metadata.
 
-Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology but a broader range of reading functions will be implemented in the future.
+Currently the analysis is focused on data from the [_Xenium In Situ_](https://www.10xgenomics.com/platforms/xenium) methodology. Readers for [Visium](https://www.10xgenomics.com/platforms/visium) and [QuPath](https://qupath.github.io/) data are available as well, as is conversion to and from [SpatialData](https://spatialdata.scverse.org).
 
 ```{eval-rst}
 .. note::
@@ -18,13 +18,13 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 ## Features
 
-A key feature of InSituPy is its **hierarchical data structure**, centered around the `InSituExperiment` and `InSituData` objects:
-- `InSituData`: Represents and manages at the individual sample level. It integrates all modalities of spatial omics datasets, including cellular readouts, cellular boundaries, images, transcripts, regions, and annotations.
-- `InSituExperiment`: Aggregates multiple `InSituData` instances and links them with associated metadata, enabling cross-sample analysis and organization.
+A key feature of InSituPy is its **hierarchical data structure**: an `InSituExperiment` holds many samples, each an `InSituData` that keeps images, cells, transcripts, annotations and more together. See [InSituPy at a glance](overview.md) for how it works.
 
-<p align="center">
-   <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_data_structure.svg?raw=true" width="800">
-</p>
+```{image} _static/img/insitupy_data_hierarchy.svg
+:alt: The InSituPy data hierarchy
+:width: 800px
+:align: center
+```
 
 Additional features include:
 - **Data Preprocessing:** InSituPy provides functions for normalizing, filtering, and transforming raw in situ transcriptomics data.
@@ -35,6 +35,13 @@ Additional features include:
 ## Getting started
 
 ```{eval-rst}
+.. card:: InSituPy at a glance
+    :link: overview
+    :link-type: doc
+    :link-alt: InSituPy at a glance
+
+    New here? What **InSituPy** does and how it organises your data, in plain words.
+
 .. card:: Installation
     :link: installation
     :link-type: doc
@@ -67,7 +74,9 @@ Contributions are welcome! If you find any issues or have suggestions for new fe
 :maxdepth: 3
 :glob:
 
+overview.md
 installation.md
+ai_integration.md
 tutorials/*
 api.md
 ```

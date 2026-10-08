@@ -1,21 +1,25 @@
 import json
+import logging
 import os
 from numbers import Number
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
 import requests
 from anndata import AnnData
-from matplotlib import colormaps
-from scipy.cluster.hierarchy import (dendrogram, fcluster, linkage,
-                                     set_link_color_palette)
-from scipy.spatial.distance import squareform
+
+logger = logging.getLogger(__name__)
 
 #from .adata import create_deg_df
 
 class SpeciesToID:
+    """Map organism name strings to NCBI taxonomy IDs.
+
+    Currently supports ``'mmusculus'`` (mouse), ``'hsapiens'`` (human), and
+    ``'dmelanogaster'`` (fruit fly).
+    """
     def __init__(self):
         self.species_dict = {
             'mmusculus': 10090,
@@ -23,15 +27,24 @@ class SpeciesToID:
             'dmelanogaster': 7227
         }
     def check_species(self, species):
+        """Raise :exc:`ValueError` if *species* is not in the supported list."""
         if species not in self.species_dict:
             raise ValueError(
-                "`species` must be one of following values: {}".format(list(self.species_dict.keys()))
+                f"`species` must be one of following values: {list(self.species_dict.keys())}"
             )
     def convert(self, species):
+        """Return the NCBI taxonomy integer ID for *species*.
+
+        Args:
+            species: Organism name string (e.g. ``'hsapiens'``).
+
+        Returns:
+            The NCBI taxonomy ID as an :class:`int`.
+        """
         self.check_species(species)
         return self.species_dict[species]
 
-def find_between(s, first, last ):
+def _find_between(s, first, last ):
     try:
         start = s.index( first ) + len( first )
         end = s.index( last, start )
@@ -39,19 +52,26 @@ def find_between(s, first, last ):
     except ValueError:
         return ""
 
-class GOEnrichment():
+class GOEnrichment:
+    """Container for GO term enrichment analyses.
+
+    Wraps the `gprofiler <https://biit.cs.ut.ee/gprofiler/>`_ web API to
+    perform enrichment analysis on gene lists and stores results keyed by
+    analysis name for downstream plotting and export.
+    """
     def __init__(self):
         self._results = {}
 
     @property
     def results(self):
+        """Dict mapping analysis keys to result :class:`~pandas.DataFrame` objects."""
         return self._results
 
     def gprofiler(self,
-                  target_genes: Union[dict, list] = None,
-                  top_n: Optional[int] = None,
-                  organism: Optional[str] = None,
-                  background: Optional[Union[List[str], str]] = None,
+                  target_genes: dict | list = None,
+                  top_n: int | None = None,
+                  organism: str | None = None,
+                  background: list[str] | str | None = None,
                   key_added: str = 'result',
                   uns_key_added: str = 'gprofiler',
                   return_df: bool = True,
@@ -119,7 +139,7 @@ class GOEnrichment():
         enrichment.rename(columns={'recall': 'Gene ratio'}, inplace=True)
 
         # save in class
-        if not uns_key_added in self._results:
+        if uns_key_added not in self._results:
             self._results[uns_key_added] = {}
 
         self._results[uns_key_added][key_added] = enrichment
@@ -127,7 +147,7 @@ class GOEnrichment():
         if return_df:
             return enrichment
 
-    def stringdb(self, target_genes: Union[dict, list] = None, top_n: Optional[int] = None,
+    def stringdb(self, target_genes: dict | list = None, top_n: int | None = None,
                  organism: str = None, key_added: str = 'result',
                  uns_key_added: str = 'stringdb', return_df: bool = True,
                  sortby: str = 'pvalue_adj', **kwargs: Any):
@@ -190,7 +210,7 @@ class GOEnrichment():
         enrichment.rename(columns={'recall': 'Gene ratio'}, inplace=True)
 
         # save in class
-        if not uns_key_added in self._results:
+        if uns_key_added not in self._results:
             self._results[uns_key_added] = {}
 
         self._results[uns_key_added][key_added] = enrichment
@@ -199,10 +219,10 @@ class GOEnrichment():
             return enrichment
 
     def enrichr(self,
-                target_genes: Union[dict, list] = None,
-                top_n: Optional[int] = None,
+                target_genes: dict | list = None,
+                top_n: int | None = None,
                 organism: str = None,
-                background: Optional[Union[List[str], str]] = None,
+                background: list[str] | str | None = None,
                 key_added: str = 'result',
                 enrichr_libraries: str = 'GO_Biological_Process_2025',
                 outdir: str = None,
@@ -295,7 +315,7 @@ class GOEnrichment():
         enrichment['name'] = [elem.split(" (")[0] if " (GO" in elem else elem for elem in enrichment['name']]
 
         # save in class
-        if not uns_key_added in self._results:
+        if uns_key_added not in self._results:
             self._results[uns_key_added] = {}
 
         self._results[uns_key_added][key_added] = enrichment
@@ -314,6 +334,11 @@ class GOEnrichment():
 
 
 class StringDB:
+    """Client for the `STRING-DB <https://string-db.org/>`_ protein interaction API.
+
+    Provides methods to query functional enrichment results and download
+    interaction network images for gene lists.
+    """
     def __init__(self, return_results: bool = True):
         self.result = None
         self.return_results = return_results
@@ -354,11 +379,11 @@ class StringDB:
                 if response['Error'] == 'not found':
                     # extract error message and identify missing gene that caused the error
                     ermsg = response['ErrorMessage']
-                    missing_gene = find_between(ermsg, first="called '", last="' in the")
+                    missing_gene = _find_between(ermsg, first="called '", last="' in the")
 
                     # remove missing gene from list
                     genes.remove(missing_gene)
-                    print("Gene '{}' was not found by STRING and was removed from query.".format(missing_gene))
+                    logger.warning(f"Gene '{missing_gene}' was not found by STRING and was removed from query.")
             else:
                 break
 
@@ -394,7 +419,7 @@ class StringDB:
         if output_format in format_to_ext:
             output_ext = format_to_ext[output_format]
         else:
-            raise ValueError("`output_format` must be one of following values: {}".format(list(format_to_ext.keys())))
+            raise ValueError(f"`output_format` must be one of following values: {list(format_to_ext.keys())}")
 
         string_api_url = "https://version-11-5.string-db.org/api"
         output_format = output_format
@@ -423,8 +448,8 @@ class StringDB:
             # create output directory
             Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-            output_file = os.path.join(output_dir, "{}_network{}".format(prefix, output_ext))
-            print("Saving interaction network to {}".format(output_file))
+            output_file = os.path.join(output_dir, f"{prefix}_network{output_ext}")
+            logger.info(f"Saving interaction network to {output_file}")
 
             with open(output_file, 'wb') as fh:
                 fh.write(self.result)
@@ -432,9 +457,32 @@ class StringDB:
         if self.return_results:
             return self.result
 
-    def stringdb_network_from_adata(self, adata: AnnData = None, key: str = None, top_n: Optional[int] = None, organism: str = None, output_format: str = "image",
+    def stringdb_network_from_adata(self, adata: AnnData = None, key: str = None, top_n: int | None = None, organism: str = None, output_format: str = "image",
         key_added: str = None, sortby: str = 'pvalue_adj', ascending: bool = True,
         **kwargs: Any):
+        """Generate STRING-DB interaction network images from DGE results in an AnnData object.
+
+        Retrieves top differentially expressed genes from *adata* and calls
+        :meth:`call_stringdb_network` for each comparison group, saving the
+        resulting network images to ``stringdb_networks/``.
+
+        Args:
+            adata: :class:`~anndata.AnnData` object containing DGE results in
+                ``.uns``.
+            key: Key in ``adata.uns`` where DGE results are stored.
+            top_n: Maximum number of top genes per group to query.  ``None``
+                uses all significant genes.
+            organism: Organism name following STRING-DB conventions (e.g.
+                ``'mmusculus'``).
+            output_format: Image format — ``"image"`` (PNG) or ``"svg"``.
+                Defaults to ``"image"``.
+            key_added: Unused; reserved for future use.
+            sortby: Column in DGE results used to rank genes. Defaults to
+                ``'pvalue_adj'``.
+            ascending: Sort order for *sortby*. Defaults to ``True``.
+            **kwargs: Additional keyword arguments forwarded to
+                :meth:`call_stringdb_network`.
+        """
 
         deg, groups, key_added = GOEnrichment().prepare_enrichment(adata=adata, key=key, key_added=key_added,
                         sortby=sortby, ascending=ascending)
@@ -447,7 +495,7 @@ class StringDB:
             if top_n is not None:
                 target_genes = target_genes[:top_n]
 
-            prefix = "KEY-{}-GROUP-{}".format(key, group)
+            prefix = f"KEY-{key}-GROUP-{group}"
 
             sdb = StringDB(return_results=False)
             sdb.call_stringdb_network(genes=target_genes, species=organism, prefix=prefix, output_format=output_format, save=True, **kwargs)
@@ -462,6 +510,34 @@ def get_up_down_genes(
     logfold_col: str = 'log2foldchange',
     gene_col: str = None # assumes genes to be in index
     ):
+    """
+    Split DGE results into upregulated and downregulated gene lists.
+
+    Filters rows in ``dge_results`` by adjusted p-value and log2 fold-change
+    thresholds to produce two gene lists for downstream GO enrichment analysis.
+
+    Args:
+        dge_results: DataFrame containing differential expression results with at
+            least a p-value column and a log-fold-change column. Genes are taken
+            from the index unless ``gene_col`` is specified.
+        pval_threshold (Number, optional): Maximum adjusted p-value for a gene to
+            be considered significant. Defaults to 0.05.
+        logfold_threshold (Number, optional): Minimum absolute log2 fold-change
+            for a gene to be called up- or downregulated. Genes with
+            ``logfold > logfold_threshold`` are upregulated; genes with
+            ``logfold < -logfold_threshold`` are downregulated. Defaults to 1.
+        pval_col (str, optional): Name of the column containing adjusted p-values.
+            Defaults to ``'padj'``.
+        logfold_col (str, optional): Name of the column containing log2 fold-change
+            values. Defaults to ``'log2foldchange'``.
+        gene_col (str, optional): Name of the column containing gene names. If None,
+            gene names are taken from the DataFrame index. Defaults to None.
+
+    Returns:
+        Tuple[List[str], List[str]]: A tuple ``(genes_up, genes_down)`` where
+            ``genes_up`` contains names of significantly upregulated genes and
+            ``genes_down`` contains names of significantly downregulated genes.
+    """
     pval_mask = dge_results[pval_col] < pval_threshold
     lfc_mask_up = dge_results[logfold_col] > logfold_threshold
     lfc_mask_down = dge_results[logfold_col] < -logfold_threshold
