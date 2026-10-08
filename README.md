@@ -1,6 +1,6 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18459472.svg)](https://doi.org/10.5281/zenodo.18459472) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/SpatialPathology/InSituPy)
 
-# InSituPy: A framework for histology-guided, multi-sample  analysis of single-cell spatial transcriptomics data
+# InSituPy: A framework for histology-guided, multi-sample analysis of single-cell spatial transcriptomics data
 
 <p align="center">
    <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_logo_with_name_wo_bg.png?raw=true" width="500">
@@ -11,9 +11,9 @@ Currently the analysis is focused on data from the [_Xenium In Situ_](https://ww
 
 ## Latest changes
 
-*!!!Warning: This repository is under very active development and it cannot be ruled out that changes might impair backwards compatibility. If you observe any such thing, please feel free to contact us to solve the problem. Thanks!*
+InSituPy 0.12 is the current stable release. It adds filter layers and a cross-sample table workflow for `InSituExperiment`, multiple cell and spatial-unit layers, SpatialData conversion, AI-assistant integration and a safer save pipeline. Some analysis defaults changed in 0.12, so check the release notes when upgrading from 0.11.
 
-For the latest developments check out the [releases](https://github.com/SpatialPathology/InSituPy/releases).
+For all changes check out the [releases](https://github.com/SpatialPathology/InSituPy/releases). If an update breaks your workflow, please [open an issue](https://github.com/SpatialPathology/InSituPy/issues) or contact us via our [zulip chat](https://insitupy.zulipchat.com).
 
 ## Getting started
 
@@ -36,14 +36,14 @@ Make sure you have Conda installed on your system before proceeding with these s
 
 **Create and activate a conda environment:**
 
-When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwise all python version >=3.12 should work.
+InSituPy requires Python 3.12 or newer (also with SpatialData support).
 
    ```bash
    conda create --name insitupy python=3.13
    conda activate insitupy
    ```
 
-**Install from PyPi:**
+**Install from PyPI:**
 
    ```bash
    pip install insitupy-spatial
@@ -51,7 +51,7 @@ When using InSituPy with SpatialData, python version 3.13 is mandatory. Otherwis
 
 This base installation includes napari and related visualization dependencies.
 
-InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
+InSituPy currently requires `zarr>=3.2.1` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
 
 **Optional: install with SpatialData support (`spatialdata>=0.8.0,<0.9.0`):**
 
@@ -76,6 +76,7 @@ xd.show()                                           # interactive viewer (napari
 ```
 
 The [tutorials](https://insitupy.readthedocs.io/en/latest/tutorials/index.html) walk through this step by step with demo data.
+
 ### Documentation
 
 For detailed instructions on using InSituPy, refer to the [official documentation](https://InSituPy.readthedocs.io).
@@ -84,7 +85,7 @@ InSituPy works best within *Jupyter Lab* or *Jupyter Notebook* sessions. If you 
 
 <!-- ai-integration-start -->
 
-### AI Assistent Integration
+### AI Assistant Integration
 
 #### Which integration should I use?
 
@@ -167,7 +168,7 @@ The easiest way to activate the server in **Claude Desktop** is to add the follo
 }
 ```
 
-`uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) handles downloading and running the server automatically in an isolated environment. Install `uv` first if you haven't already (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux, `winget install --id=astral-sh.uv -e` on Windows, or see [installation options](https://docs.astral.sh/uv/getting-started/installation/)).
 
 See **[MCP_TUTORIAL.md](https://github.com/SpatialPathology/InSituPy/blob/main/MCP_TUTORIAL.md)** for step-by-step setup instructions (Claude Desktop and Codex; other clients use the same stdio command in their own MCP config).
 
@@ -180,10 +181,14 @@ See **[MCP_TUTORIAL.md](https://github.com/SpatialPathology/InSituPy/blob/main/M
 - **Interactive Visualization:** Create interactive plots using [napari](https://napari.org/stable/#) to easily explore spatial gene expression patterns.
 - **Annotation:** Annotate _Xenium In Situ_ data in the napari viewer or import annotations from external tools like [QuPath](https://qupath.github.io/).
 - **Multi-sample analysis:** Perform analysis on an experiment-level, i.e. with multiple samples at once.
+- **Sample selection and cross-sample tables:** Define named sample subsets with filter layers, and combine the cell tables of all samples into one AnnData (`build_table()`) for joint analysis, with results written back to the individual samples.
+- **Multiple segmentations:** Keep several cell and spatial-unit layers (e.g. different segmentations, Visium spots or niches) side by side in one dataset.
+- **SpatialData conversion:** Convert to and from [SpatialData](https://spatialdata.scverse.org) to use tools of the scverse ecosystem.
+- **AI-assistant integration:** A shipped skill and an MCP server help AI assistants write correct InSituPy code (see above).
 
 ## QuPath
 
-We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https://qupath.github.io). QuPath has great functionalities to visualize whole slide image data, add annotations, generate segmentations or analyze signal intensities. Scripts to simplify the connection between QuPath and InSituPy, we collect [here](https://github.com/SpatialPathology/InSituPy-QuPath). This includes:
+We try to develop InSituPy alongside the Bioimage Analysis tool [QuPath](https://qupath.github.io). QuPath has great functionalities to visualize whole slide image data, add annotations, generate segmentations or analyze signal intensities. We collect scripts that simplify the connection between QuPath and InSituPy [here](https://github.com/SpatialPathology/InSituPy-QuPath). This includes:
 - Export of annotations as GEOJSON from QuPath
 - Export of images as OME-TIFF from QuPath
 - Collected export of data from a multiplexed IF image to be imported into InSituPy. Import can be performed using either `read_qupath` or `read_qupath_project`. For cell and nucleus segmentation of multiplexed IF images we recommend using [Instanseg](https://github.com/instanseg/instanseg).
@@ -196,10 +201,10 @@ Before opening a pull request, please read the [Contributing Guide](CONTRIBUTING
 
 ## Citation
 
-If you use `InSituPy` in your work, please cite the [preprint](https://www.biorxiv.org/content/10.1101/2025.03.07.641860v1) as follows:
+If you use `InSituPy` in your work, please cite the [publication](https://doi.org/10.1093/bioinformatics/btag073) as follows:
 
-> InSituPy – A Framework for Histology-Guided, Multi-Sample Analysis of Single-Cell Spatial Transcriptomics Data. <br>Wirth, Johannes, Anna Chernysheva, Birthe Lemke, Isabel Giray, Aitana Egea Lavandera, and Katja Steiger.<br>
-bioRxiv, March 12, 2025. https://doi.org/10.1101/2025.03.07.641860.
+> Wirth, Johannes, Anna Chernysheva, Birthe Lemke, Isabel Giray, and Katja Steiger. InSituPy: a framework for histology-guided, multi-sample analysis of single-cell spatial omics data. <br>
+*Bioinformatics* 42(3), 2026. https://doi.org/10.1093/bioinformatics/btag073
 
 ## License
 
