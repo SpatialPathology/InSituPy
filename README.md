@@ -1,4 +1,10 @@
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18459472.svg)](https://doi.org/10.5281/zenodo.18459472) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/SpatialPathology/InSituPy)
+[![PyPI](https://img.shields.io/pypi/v/insitupy-spatial)](https://pypi.org/project/insitupy-spatial/)
+[![Python](https://img.shields.io/pypi/pyversions/insitupy-spatial)](https://pypi.org/project/insitupy-spatial/)
+[![Docs](https://img.shields.io/readthedocs/insitupy/latest)](https://insitupy.readthedocs.io)
+[![Paper](https://img.shields.io/badge/Bioinformatics-10.1093%2Fbioinformatics%2Fbtag073-blue)](https://doi.org/10.1093/bioinformatics/btag073)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18459471.svg)](https://doi.org/10.5281/zenodo.18459471)
+[![Zulip](https://img.shields.io/badge/zulip-join_chat-brightgreen)](https://insitupy.zulipchat.com)
+[![Ask DeepWiki](https://img.shields.io/badge/DeepWiki-Ask-blue)](https://deepwiki.com/SpatialPathology/InSituPy)
 
 # InSituPy: A framework for histology-guided, multi-sample analysis of single-cell spatial transcriptomics data
 
