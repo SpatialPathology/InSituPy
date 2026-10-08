@@ -1,4 +1,4 @@
-sphinx
+sphinx>=9.1,<10
 sphinx_book_theme
 myst-nb
 myst-parser

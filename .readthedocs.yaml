@@ -9,6 +9,10 @@ python:
   install:
     - method: pip
       path: .
+      # api.md documents insitupy.spatialdata; Sphinx >= 9 aborts the build when an
+      # autosummary entry cannot be imported, so the optional extra must be installed.
+      extra_requirements:
+        - spatialdata
     - requirements: docs/requirements.txt
 
 sphinx:
