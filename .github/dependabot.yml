@@ -1,0 +1,14 @@
+# Keep the GitHub Actions used in .github/workflows/ up to date (e.g. Node.js runtime moves).
+# Watches the default branch (main); backport workflow bumps to release/* maintenance branches.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
