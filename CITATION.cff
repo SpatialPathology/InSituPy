@@ -10,6 +10,7 @@ authors:
   - family-names: Wirth
     given-names: Johannes
     affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+    orcid: "https://orcid.org/0000-0002-2216-3332"
   - family-names: Chernysheva
     given-names: Anna
     affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
@@ -38,6 +39,7 @@ preferred-citation:
   authors:
     - family-names: Wirth
       given-names: Johannes
+      orcid: "https://orcid.org/0000-0002-2216-3332"
     - family-names: Chernysheva
       given-names: Anna
     - family-names: Lemke
