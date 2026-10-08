@@ -3,6 +3,7 @@ calculate_gex_diff_to_neighbors, pseudobulk_dge."""
 
 import contextlib
 import logging
+import sys
 
 import geopandas as gpd
 import numpy as np
@@ -702,6 +703,39 @@ class TestDiffExprResultsIndexUniqueness:
 # ── tl.pseudobulk_dge ────────────────────────────────────────────────────────
 
 class TestPseudobulkDge:
+    def test_missing_pydeseq2_fails_before_any_work(self, monkeypatch):
+        """pydeseq2 is optional: without it, pseudobulk_dge must raise an ImportError with the
+        install hint up front, not after the filtering and QC plots."""
+        monkeypatch.setitem(sys.modules, "pydeseq2", None)  # makes `import pydeseq2` fail
+        pdata = AnnData(
+            X=np.ones((4, 5)),
+            obs=pd.DataFrame({"celltype": ["A"] * 4}, index=[f"s{i}" for i in range(4)]),
+        )
+        # The condition column is missing too: the dependency check must come first.
+        with pytest.raises(ImportError, match=r'pip install "pydeseq2>=0\.5"'):
+            pseudobulk_dge(
+                pdata=pdata,
+                dge_setup=("condition", "treated", "control"),
+                celltype_col="celltype",
+                celltype="A",
+                plot_qc=False,
+                verbose=False,
+            )
+
+    @pytest.mark.parametrize("installed, too_old", [("0.4.12", True), ("0.5.0", False), ("1.0.0", False)])
+    def test_pydeseq2_version_floor(self, monkeypatch, installed, too_old):
+        """pydeseq2 < 0.5 lacks the formula ``design=`` API used by pseudobulk_dge; such an
+        install must be refused with an upgrade hint (0.4.12 < 0.5 must not compare as strings)."""
+        import insitupy.tools.pseudobulk as psb
+
+        monkeypatch.setattr(psb, "try_import", lambda *args, **kwargs: None)
+        monkeypatch.setattr(psb, "version", lambda name: installed)
+        if too_old:
+            with pytest.raises(ImportError, match=r"requires pydeseq2>=0\.5, but 0\.4\.12"):
+                psb._require_pydeseq2()
+        else:
+            psb._require_pydeseq2()
+
     def test_missing_condition_column_raises(self):
         pytest.importorskip("pydeseq2")
         pdata = AnnData(

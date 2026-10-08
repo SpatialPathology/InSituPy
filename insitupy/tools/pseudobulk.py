@@ -1,4 +1,5 @@
 import logging
+from importlib.metadata import PackageNotFoundError, version
 
 import anndata as ad
 import decoupler as dc
@@ -6,10 +7,30 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 from anndata import AnnData
 
+from insitupy._checks import try_import
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.utils._helpers import suppress_output
 
 logger = logging.getLogger(__name__)
+
+# pydeseq2 is an optional dependency (not declared in pyproject.toml). >=0.5 is needed for the
+# formula ``design=`` argument of DeseqDataSet.
+_PYDESEQ2_INSTALL = 'pip install "pydeseq2>=0.5"'
+
+
+def _require_pydeseq2():
+    """Raise an ImportError with an install hint if pydeseq2 is missing or older than 0.5."""
+    try_import("pydeseq2", installation_command=_PYDESEQ2_INSTALL)
+    try:
+        installed = version("pydeseq2")
+        major, minor = (int(part) for part in installed.split(".")[:2])
+    except (PackageNotFoundError, ValueError):
+        return  # version unknown or unusual: let pydeseq2 itself report an incompatibility
+    if (major, minor) < (0, 5):
+        raise ImportError(
+            f"Pseudobulk differential gene expression requires pydeseq2>=0.5, but {installed} "
+            f"is installed. Please upgrade it with `{_PYDESEQ2_INSTALL}`."
+        )
 
 
 def _obs_qc_plot(
@@ -114,16 +135,11 @@ def _run_deseq2_pseudobulk(adata, dge_setup, return_params: bool = False, n_cpus
         ``(stat_res, params)`` if *return_params* is True.
 
     Raises:
-        ImportError: If ``pydeseq2`` is not installed.
+        ImportError: If ``pydeseq2`` is missing or older than 0.5.
     """
-    try:
-        from pydeseq2.dds import DefaultInference, DeseqDataSet
-        from pydeseq2.ds import DeseqStats
-    except ImportError:
-        raise ImportError(
-            "The package `pydeseq2` is not installed but is required for pseudobulk differential gene expression analysis.\n"
-            "Please install it via `pip install pydeseq2`."
-        )
+    _require_pydeseq2()
+    from pydeseq2.dds import DefaultInference, DeseqDataSet
+    from pydeseq2.ds import DeseqStats
 
     with suppress_output():
         # Build DESeq2 object
@@ -199,6 +215,9 @@ def pseudobulk_dge(
     ):
     """Perform pseudobulk differential gene expression analysis.
 
+    Requires the optional package ``pydeseq2>=0.5`` (``pip install "pydeseq2>=0.5"``). It is
+    checked before any filtering or QC plotting starts.
+
     Args:
         pdata: AnnData object containing pseudobulk data with observations and expression counts.
             Not mutated - an internal copy is filtered.
@@ -227,8 +246,11 @@ def pseudobulk_dge(
             and optional neighborhood comparison results.
 
     Raises:
+        ImportError: If ``pydeseq2`` is missing or older than 0.5.
         ValueError: If dge_setup parameters are not found in pdata.obs columns or values.
     """
+    _require_pydeseq2()
+
     # Validate dge_setup parameters
     condition_col, target_cond, ref_cond = dge_setup
 
