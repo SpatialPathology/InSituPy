@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: "If you use InSituPy in your work, please cite the publication below."
+title: "InSituPy"
+abstract: >-
+  InSituPy is a framework for histology-guided, multi-sample analysis of single-cell spatial
+  omics data. Its hierarchical data structure organizes all data modalities per sample and links
+  them to their metadata, from the multi-sample level down to the cellular and subcellular level.
+type: software
+authors:
+  - family-names: Wirth
+    given-names: Johannes
+    affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+  - family-names: Chernysheva
+    given-names: Anna
+    affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+  - family-names: Lemke
+    given-names: Birthe
+    affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+  - family-names: Giray
+    given-names: Isabel
+    affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+  - family-names: Steiger
+    given-names: Katja
+    affiliation: "Institute of Pathology, School of Medicine and Health, Technical University of Munich, Munich, Germany"
+license: BSD-3-Clause
+repository-code: "https://github.com/SpatialPathology/InSituPy"
+url: "https://insitupy.readthedocs.io"
+doi: 10.5281/zenodo.18459471
+keywords:
+  - spatial omics
+  - spatial transcriptomics
+  - single-cell
+  - histology
+  - Xenium
+preferred-citation:
+  type: article
+  title: "InSituPy: a framework for histology-guided, multi-sample analysis of single-cell spatial omics data"
+  authors:
+    - family-names: Wirth
+      given-names: Johannes
+    - family-names: Chernysheva
+      given-names: Anna
+    - family-names: Lemke
+      given-names: Birthe
+    - family-names: Giray
+      given-names: Isabel
+    - family-names: Steiger
+      given-names: Katja
+  journal: "Bioinformatics"
+  volume: 42
+  issue: 3
+  year: 2026
+  doi: 10.1093/bioinformatics/btag073

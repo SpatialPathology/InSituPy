@@ -6,7 +6,7 @@
 [![Zulip](https://img.shields.io/badge/zulip-join_chat-brightgreen)](https://insitupy.zulipchat.com)
 [![Ask DeepWiki](https://img.shields.io/badge/DeepWiki-Ask-blue)](https://deepwiki.com/SpatialPathology/InSituPy)
 
-# InSituPy: A framework for histology-guided, multi-sample analysis of single-cell spatial transcriptomics data
+# InSituPy: A framework for histology-guided, multi-sample analysis of single-cell spatial omics data
 
 <p align="center">
    <img src="https://github.com/SpatialPathology/InSituPy/blob/main/docs/source/_static/img/insitupy_logo_with_name_wo_bg.png?raw=true" width="500">
@@ -218,4 +218,4 @@ InSituPy is licensed under the [BSD-3-Clause](LICENSE).
 
 ---
 
-**InSituPy** is developed and maintained by [Johannes Wirth](https://github.com/jwrth) and [Anna Chernysheva](https://github.com/annachernysheva179). Feedback is highly appreciated and hopefully **InSituPy** helps you with your analysis of spatial transcriptomics data. The package is thought to be a starting point to simplify the analysis of in situ sequencing data in Python and it would be exciting to integrate functionalities for larger and more comprehensive data structures. Currently, the framework focuses on the analysis of _Xenium In Situ_ data but it is planned to integrate more methodologies and any support on this is highly welcomed.
+**InSituPy** is developed and maintained by [Johannes Wirth](https://github.com/jwrth) and [Anna Chernysheva](https://github.com/annachernysheva179). Feedback is highly appreciated, and we hope **InSituPy** helps you with the analysis of your spatial omics data. Support for further technologies is welcome - see [Contributing](#contributing).
