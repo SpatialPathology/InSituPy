@@ -1804,29 +1804,6 @@ calculus = ["sympy (>=1.3,!=1.10)"]
 polars = ["polars (>=1)"]
 
 [[package]]
-name = "formulaic-contrasts"
-version = "1.0.0"
-description = "Build contrasts for models defined with formulaic"
-optional = true
-python-versions = ">=3.10"
-groups = ["main"]
-markers = "extra == \"pseudobulk\""
-files = [
-    {file = "formulaic_contrasts-1.0.0-py3-none-any.whl", hash = "sha256:e1220d315cf446bdec9385375ca4da43896e4ba68114ebea1b2a37efa5d097f5"},
-    {file = "formulaic_contrasts-1.0.0.tar.gz", hash = "sha256:0a575a810bf1fba28938259d86a3ae2ae90cb9826fca84b9409085170862f701"},
-]
-
-[package.dependencies]
-formulaic = "*"
-pandas = "*"
-session-info = "*"
-
-[package.extras]
-dev = ["pre-commit", "twine (>=4.0.2)"]
-doc = ["docutils (>=0.8,<0.18.dev0 || >=0.20.dev0)", "ipykernel", "ipython", "myst-nb (>=1.1)", "pandas", "setuptools", "sphinx (>=4)", "sphinx-autodoc-typehints", "sphinx-book-theme (>=1)", "sphinx-copybutton", "sphinx-tabs", "sphinxcontrib-bibtex (>=1)", "sphinxext-opengraph", "statsmodels"]
-test = ["coverage", "numpy", "pytest"]
-
-[[package]]
 name = "freetype-py"
 version = "2.5.1"
 description = "Freetype python bindings"
@@ -5637,33 +5614,6 @@ test-base = ["coverage", "dask (==2025.11.0)", "pytest (<8.4)", "pytest-cov", "p
 zarr = ["zarr (>=3.0.0)"]
 
 [[package]]
-name = "pydeseq2"
-version = "0.5.4"
-description = "A python implementation of DESeq2."
-optional = true
-python-versions = ">=3.11"
-groups = ["main"]
-markers = "extra == \"pseudobulk\""
-files = [
-    {file = "pydeseq2-0.5.4-py3-none-any.whl", hash = "sha256:690458824f1c4df0d13dbf7e5bdc1298f6dfb444b04a6e2aef9e7d3f21ba30dd"},
-    {file = "pydeseq2-0.5.4.tar.gz", hash = "sha256:49d6f47840b5444ea2b69be7857c6c4e58f369066a0fb24bc52f7d3a62bbd92c"},
-]
-
-[package.dependencies]
-anndata = ">=0.11.0"
-formulaic = ">=1.0.2"
-formulaic-contrasts = ">=0.2.0"
-matplotlib = ">=3.9.0"
-numpy = ">=2.0.0"
-pandas = ">=2.2.0"
-scikit-learn = ">=1.4.0"
-scipy = ">=1.12.0"
-
-[package.extras]
-dev = ["coverage", "mypy (==1.18.2)", "numpydoc", "pandas-stubs", "pre-commit (>=2.16.0)", "pytest (>=8.4.0)", "ruff (==0.14.0)", "scipy-stubs"]
-doc = ["docutils", "gitpython (>=3.1.42)", "ipython", "jupyter", "myst-parser", "sphinx (>=8.0.0)", "sphinx-autobuild", "sphinx-autodoc-typehints", "sphinx-click", "sphinx-gallery", "sphinx-rtd-theme", "sphinxcontrib-bibtex", "sphinxcontrib-googleanalytics (>=0.5)", "texttable"]
-
-[[package]]
 name = "pygments"
 version = "2.21.0"
 description = "Pygments is a syntax highlighting package written in Python."
@@ -7036,22 +6986,6 @@ docs = ["ipykernel", "nbconvert", "numpydoc", "pydata_sphinx_theme (==0.10.0rc2)
 stats = ["scipy (>=1.7)", "statsmodels (>=0.12)"]
 
 [[package]]
-name = "session-info"
-version = "1.0.1"
-description = "session_info outputs version information for modules loaded in the current session, Python, and the OS."
-optional = true
-python-versions = ">=3.6"
-groups = ["main"]
-markers = "extra == \"pseudobulk\""
-files = [
-    {file = "session_info-1.0.1-py3-none-any.whl", hash = "sha256:451d191e51816070b9f21a6ff3f6eb5d6015ae2738e8db63ac4e6398260a5838"},
-    {file = "session_info-1.0.1.tar.gz", hash = "sha256:d71950d5a8ce7f7f7d5e86aa208c148c4e50b5440b77d5544d422b48e4f3ed41"},
-]
-
-[package.dependencies]
-stdlib_list = "*"
-
-[[package]]
 name = "session-info2"
 version = "0.4.2"
 description = "Print versions of imported packages."
@@ -7480,26 +7414,6 @@ dev = ["colorama", "cython (>=3.0.10,<4)", "joblib", "matplotlib (>=3)", "meson"
 doc = ["arviz ; os_name != \"nt\"", "jinja2", "jupyter", "nbconvert", "nbsphinx", "notebook", "numpydoc", "pandas (>=2.2.2)", "pandas-datareader", "pickleshare", "pydata-sphinx-theme", "pymc ; os_name != \"nt\"", "pytest (>=8.4.1,<10)", "pyyaml", "seaborn", "simplegeneric", "sphinx"]
 polars = ["polars (>=1.0.0)"]
 test = ["coverage[toml]", "meson", "ninja ; sys_platform != \"emscripten\"", "pytest (>=8.4.1,<10)", "pytest-cov", "pytest-randomly", "pytest-run-parallel", "pytest-xdist"]
-
-[[package]]
-name = "stdlib-list"
-version = "0.12.0"
-description = "A list of Python Standard Libraries (2.7 through 3.14)."
-optional = true
-python-versions = ">=3.9"
-groups = ["main"]
-markers = "extra == \"pseudobulk\""
-files = [
-    {file = "stdlib_list-0.12.0-py3-none-any.whl", hash = "sha256:df2d11e97f53812a1756fb5510393a11e3b389ebd9239dc831c7f349957f62f2"},
-    {file = "stdlib_list-0.12.0.tar.gz", hash = "sha256:517824f27ee89e591d8ae7c1dd9ff34f672eae50ee886ea31bb8816d77535675"},
-]
-
-[package.extras]
-dev = ["build", "stdlib-list[doc,lint,test]"]
-doc = ["furo", "sphinx"]
-lint = ["mypy", "ruff"]
-support = ["sphobjinv"]
-test = ["coverage[toml]", "pytest", "pytest-cov"]
 
 [[package]]
 name = "superqt"
@@ -8413,10 +8327,9 @@ files = [
 [extras]
 dev = ["pytest", "pytest-qt"]
 mcp = ["mcp"]
-pseudobulk = ["pydeseq2"]
 spatialdata = ["spatialdata", "spatialdata-io"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<4.0"
-content-hash = "2a5acb79346a22cafe6403b145513c2d64205b30e4450f1f296610eb8726f83b"
+content-hash = "3fa73c180c06f835ded7c35042216b72aa6ebd35d7cb19587eb303a26445b39a"
