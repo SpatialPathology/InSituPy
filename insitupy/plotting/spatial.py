@@ -1269,6 +1269,9 @@ def _extract_image_information(
                                  ylim[1] - ylim[0]]) / pixelwidth_per_subplot
         orig_pixel_size = ImageDataObject.metadata[image_key]["pixel_size"]
         img_pyramid = ImageDataObject[image_key]
+        if not isinstance(img_pyramid, (list, tuple)):
+            # a single array (e.g. an image added in memory) is a one-level pyramid
+            img_pyramid = [img_pyramid]
         pixel_sizes_levels = np.array([orig_pixel_size * (2**i) for i in range(len(img_pyramid))])
 
         try:
