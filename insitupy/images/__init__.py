@@ -18,4 +18,10 @@ from .registration import (
                  save_registered_image_tiff,
                  save_registration_qc,
 )
+from .registration_elastix import (
+                 DisplacementTransform,
+                 ElastixRegistrationConfig,
+                 apply_displacement_transform,
+                 register_images_elastix,
+)
 from .warp import apply_warp, load_transformation_matrix

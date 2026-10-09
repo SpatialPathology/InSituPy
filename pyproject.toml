@@ -69,6 +69,9 @@ spatialdata = [
     "spatialdata-io>=0.7.1,<0.8"
 ]
 mcp = ["mcp[cli]>=1.0.0,<2.0.0"]
+# elastix-based registration of consecutive sections (insitupy.im.register_images_elastix).
+# abi3 (cp311+) wheels for Windows/macOS/Linux.
+registration = ["itk-elastix (>=0.25.4,<1.0.0)"]
 
 [project.scripts]
 insitupy-mcp = "mcp_server:main"

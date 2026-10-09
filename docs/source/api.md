@@ -362,6 +362,8 @@ Import the image submodule either as {code}`isp.images` or {code}`isp.im`.
     im.write_ome_tiff
     im.write_zarr
     im.register_images_standalone
+    im.register_images_elastix
+    im.apply_displacement_transform
     im.apply_warp
     im.load_transformation_matrix
 ```

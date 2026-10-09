@@ -2483,6 +2483,258 @@ files = [
 pygments = "*"
 
 [[package]]
+name = "itk"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:a5924fdc91cadafe68abfec8f217598faa3a1c008370153c2df56de639fb44c2"},
+    {file = "itk-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:818173ff6920f85d80f54529f66b0cbee90f47dd765aa7f5aa4bc1220112afd4"},
+    {file = "itk-5.4.7-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:049c9a2856781a626cf478b13789daf1e7a3f73972b1208ce7618167a677f2c5"},
+    {file = "itk-5.4.7-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:8001a2ab59b606f68d9471d13f4db6e129b8a62782050f6f8fbb7c61de99e948"},
+    {file = "itk-5.4.7-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:c0d46302074ec16ee19a49cd51a87552bec1d191e97405274f53e8e7e2dc4be8"},
+    {file = "itk-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:343ba9fbfbb35ea23e909cb833ac3f7d6d7bcb8a28b7cf10e53edbd8a730ce4c"},
+    {file = "itk-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:d4c3311b3294697adef1785867f0c60f2314bc2ce202ff528dfab38f2b0a4e5b"},
+    {file = "itk-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:c7c254419071b178bdf3b50b5542aaef5de3b54bc524b1f6fea72c62f531e590"},
+    {file = "itk-5.4.7-cp311-abi3-manylinux2014_x86_64.whl", hash = "sha256:9297419ccac8f0fd455ce08f4ba0580632f7be43c28c02ad0cbdeb19cd0c211e"},
+    {file = "itk-5.4.7-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:f2ae79ad0a63ab4ad61fa630e8564ab5bac4fea1c4aad4db2f52bac4f460dffc"},
+    {file = "itk-5.4.7-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:d74574c8a0196e82788e6f9991ee05ed5935d2d42e2209ef540fce9274cf2eb4"},
+    {file = "itk-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:56ca4981924ed2ba30503c319dcdb63981504c0927aa68afd33468f33c44ecb3"},
+    {file = "itk-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:d8c0b81de6bab587df54cde137cb9aac6bfb8f3b1ec6dd5cba79f6a13d2d4a29"},
+    {file = "itk-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:565504820d4017a678f872860923d02ae27701d934eb682fd9c4b664ac28202d"},
+    {file = "itk-5.4.7-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:33eab319cedab38c3854d9a7ab1fde1cb411520d80f4cdcd0b41b07fa28e191d"},
+    {file = "itk-5.4.7-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:9da341670488404330c4d98033652c6de28266fc2a1936ff1af3099355fe3a6e"},
+    {file = "itk-5.4.7-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:e6483cae572030e7b570c33a45c1b8dd052b406be73354f8df9d563ff7951f18"},
+    {file = "itk-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:dc487bb38fa7ae67c3329afa88c0ebfd140f4723f8d6041293ad774ac2a7ad0f"},
+]
+
+[package.dependencies]
+itk-core = "5.4.7"
+itk-filtering = "5.4.7"
+itk-io = "5.4.7"
+itk-numerics = "5.4.7"
+itk-registration = "5.4.7"
+itk-segmentation = "5.4.7"
+numpy = "*"
+
+[[package]]
+name = "itk-core"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_core-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:078b71db0d21ef23ed6b551dcff467e8502db2ae37d1edb47e927b7f51c9769f"},
+    {file = "itk_core-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:3521d3042b244aaaf3bf2515b02dae931909ea54f864158fd1c874e2f95c5734"},
+    {file = "itk_core-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f24c6a1e338e864e1c0ef39c009c7eee8eed040cce2ef8c6981868264b255dbb"},
+    {file = "itk_core-5.4.7-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2376ec47ea1571427275bdd5f382cd09f650b096e75a71c8f09683af6d3661b0"},
+    {file = "itk_core-5.4.7-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:850bddbf7f8682a774a0ef96d9fdad6283617213c02dd247263ecefca4bf17c4"},
+    {file = "itk_core-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:3961d1eb7a2e1fb28b9ec74ae3c55bab177bd7536ed1b423078e0428a9f0fbfb"},
+    {file = "itk_core-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:7e6e7f42f7c7017c19c0462080909ebb3e39ffefc131f4048aa8f749812cc112"},
+    {file = "itk_core-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:648749d347b9d0673e87edbe934bc32e93c9cd82ee1c5546291a9eca921b9186"},
+    {file = "itk_core-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:8b8c42cfd86d0be761b4a9e8b13e72d14f4e7ec8eff96fbd7b775f42f8daed2a"},
+    {file = "itk_core-5.4.7-cp311-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d16110e8fc530a0eb53c6b967ec05310bb6ef909fed1cedb5988b9231d5e3e3f"},
+    {file = "itk_core-5.4.7-cp311-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a48dd8ab99de8d4a758932c1923ef05bbc148d0aba6f07425c2fc69c5c323787"},
+    {file = "itk_core-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:c16055aa7f7c528d0e474987c54a440b12009e5d72ae313719ca8bc3f36f7678"},
+    {file = "itk_core-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:670d956587125a3905c68759c0306f6e3f5a59f202dc372059f37fedaa19ccbf"},
+    {file = "itk_core-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:7bee67d1a8dfcfd258ca10c86485526250bff30ea8445e3a987952485b25bae2"},
+    {file = "itk_core-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:f9f8f8c8c47c13d0a049469b819f88f982c7772533313ae8885190eb988a9bcf"},
+    {file = "itk_core-5.4.7-cp39-cp39-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0d5340520daf3bdee990a42df9f2fe5bb32cdda20e58e832b628b4f8827ec62a"},
+    {file = "itk_core-5.4.7-cp39-cp39-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:0b72724debada144d29af565307c7d6da05bdf6e48df59c1f8e5bfd0221ca892"},
+    {file = "itk_core-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:d7c5439d05e28444a153851cfdbc1807efc8ac39e401daab98c3f874b89f6d44"},
+]
+
+[package.dependencies]
+numpy = "*"
+
+[[package]]
+name = "itk-elastix"
+version = "0.25.4"
+description = "Provides an ITK Python interface to elastix, a toolbox for rigid and nonrigid registration of images"
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_elastix-0.25.4-cp310-cp310-macosx_15_0_arm64.whl", hash = "sha256:4cb5caa98600ff5855d5e3856d20614cf470d05925450bdd3cc52cbbaba0acf4"},
+    {file = "itk_elastix-0.25.4-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:46c4352aa2931bf8aa6b0bedd5545e2552248ffb7cafdc4e643b4d18432b6b6a"},
+    {file = "itk_elastix-0.25.4-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:aab5a45ed54d6042aa6d024b7d323051031af673c73b95f15ece9a06509c7ab5"},
+    {file = "itk_elastix-0.25.4-cp310-cp310-win_amd64.whl", hash = "sha256:65a27d73d6d74bdc6a51726e9d955b61bcc80d1fc90ec0a2d50a85aa827723b8"},
+    {file = "itk_elastix-0.25.4-cp311-abi3-macosx_15_0_arm64.whl", hash = "sha256:dbd05b6afeee6b25b3988bffcf92330d679a0e32195df8c430f87e231ea6ce3b"},
+    {file = "itk_elastix-0.25.4-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:5e60251781f53cc447c0f606a09fa3363668f6d96074ece2971281e88d66c036"},
+    {file = "itk_elastix-0.25.4-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:9584f9b87e536e0ba77d6a4a8ce6807b61537577957df5615b53bb9735f0acb6"},
+    {file = "itk_elastix-0.25.4-cp311-abi3-win_amd64.whl", hash = "sha256:3d671f6fbaa8d3aa84d12c083f67033215b1df1acfe6f56bee43e7abe281a95b"},
+]
+
+[package.dependencies]
+itk = ">=5.4.7,<5.5.0"
+
+[[package]]
+name = "itk-filtering"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_filtering-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:7316b53dba8ec0676aa8e31fd64c003e6d2669bfbbebf8084386691847cd7935"},
+    {file = "itk_filtering-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c80863966961b871706c51e19c0b4d5b51267f69bae47b018270baafef75c8df"},
+    {file = "itk_filtering-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:6afd32938f597307f874213e5af77c5b494ed2b037a558c10c1c72301143d3fc"},
+    {file = "itk_filtering-5.4.7-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f18a1553e7f11a1eee6cf42d597f72fb7773f6a415ddeb2c9672ea75b4750a73"},
+    {file = "itk_filtering-5.4.7-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b58d9ba716b8d4765293aa3885560e001858bd8f7c14665b5e72e171b5ec6391"},
+    {file = "itk_filtering-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:93f360b1b2c0ddfee8360f83f53e34affaf8c13ae61cdcf1edbed417fabf2354"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:3141e34cbbcb0de3c97d5b80919f05a87459943779888da93569c015c5fd57f9"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:4039494c48938d20ed7ce2a0c5680902b7160af1e5f8d4c511be5b8507404b8e"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3c29348abc0a24d668818c0651702e11c69a946053511baf588713ec5f60fdfa"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ced346599ebf3f0437263c167099615304519f279e01036fa428919df070cea8"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a5b88431bc519c1f5c3988e53a70ca16767e1e6333a26ef3bc12b35ab4721496"},
+    {file = "itk_filtering-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:00a4a98a877ab7ee55610b18b912720f5cbfed90581d059e16a5cc8df4c4b0b8"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:c079267dd8a66a021d4b447567630e6c7d90fc612a51bac38e87fbdf8bc45a83"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:8fabfbed368dddc9aa4dcfd546b5c51a3d29e5c628011e1acbcb5d1b49afb362"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:46071be2e860f5765e05f5e4f5e078c12b02c6bad45f574ba65790c7be3990ce"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:9e74898577ad62567aa684637ac5c94899a662269118dcbc0094bce94e5c10a2"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7aa957773ca63d44e77f3fdea33c914ce5d2eb72922ffacc6531112e8a91f2b0"},
+    {file = "itk_filtering-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:aa369124983338e8fd6e1a9a647d5bc477a995f93219d8b5493720206c05625f"},
+]
+
+[package.dependencies]
+itk-numerics = "5.4.7"
+
+[[package]]
+name = "itk-io"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_io-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:74411ac9aed856a2133f2447ee747c38fb8e347e48b4537e2e8b49ad70e4020d"},
+    {file = "itk_io-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c6565c1942fd7cd0e0dce95e6682c0e45a9a75fd0d2bfc3dbba64d5e1f397db8"},
+    {file = "itk_io-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:6dd6b1b8362fabb517f9a4de1a2fe99b4a92f0dc983beb32836307041a9b2921"},
+    {file = "itk_io-5.4.7-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:0f6423bc79ae84ccf93db9c36ad963eac2fc01eb3731a6d333fe7f3931d4f3cd"},
+    {file = "itk_io-5.4.7-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:228ca76d5a1b238a0d88a88dae1f0ba147beeb5e4109d3c681b2dc5fd00ae9f7"},
+    {file = "itk_io-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:db4219a73977d499ce03dd148c73a8f2d4cc9010d1430b259ab8c2c60aac821e"},
+    {file = "itk_io-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:3de7b45085dbd25281a590ebf9c6b1dafbaeff080eceabc8eb0d7fb3c5394876"},
+    {file = "itk_io-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:d158bb1cd9746238a11717ec63a05006b5dfd14c4699a0edc2ab42c02c492532"},
+    {file = "itk_io-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b5242e7cf3b7dd4a01478844a5421e637c9b860ad5c7620ef4019398d96efdc0"},
+    {file = "itk_io-5.4.7-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:a1b67764abd71a0dd5b9827ad400db2eae6a9a777a185b51681d61961c5bde2a"},
+    {file = "itk_io-5.4.7-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:a2af543cc0e2dea6549fca6af0fd08ed84cd92b34c3f25bda5e01b4000ec7d2f"},
+    {file = "itk_io-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:8c7e6a7842137fd360d80e80d9c26618df9662114d6c98f12b24be9be769da43"},
+    {file = "itk_io-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:fe73b849087db7afe4c42030e1364fed0cd478f52b4d16229c1d9a6af0cebd31"},
+    {file = "itk_io-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:0c9562c06b8be544611173fa5f9ec7798dcf33a55d93b540649f4197ea1cb170"},
+    {file = "itk_io-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b358cadd8fa6283223535f23fb362f4fec8142119dd04dcbae5d85b6f9cab0bd"},
+    {file = "itk_io-5.4.7-cp39-cp39-manylinux_2_28_aarch64.whl", hash = "sha256:f750bb8056152c1b47bad643269f4c877182d2fbcac85441f4c9db523c61f2d5"},
+    {file = "itk_io-5.4.7-cp39-cp39-manylinux_2_28_x86_64.whl", hash = "sha256:cbc655fbf3428613bf6bfc142f58fba8b52bd8f67c831dbe0f268e4f060ac84b"},
+    {file = "itk_io-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:1a223e965ef3d37c9ab3eb419406b2618496608b82044196f5e0612665be6b87"},
+]
+
+[package.dependencies]
+itk-core = "5.4.7"
+
+[[package]]
+name = "itk-numerics"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_numerics-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:592d1da49db4e98930cf18915c0f4242a25aed08b6dd14ccfb126b023f9ea5f3"},
+    {file = "itk_numerics-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:bd216c9fe8ed3ccf29c6f292c553f6fbbcac7e5f84abc1bc7f808cf86a5c8ed5"},
+    {file = "itk_numerics-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:b6f800e89fbbb16f0da3bbbff309455a6ede03df16c1c60cf71dee92ab5460c7"},
+    {file = "itk_numerics-5.4.7-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1dff959b54f7fcb048016f61b49f37c4f0d056a02d68403395821bab38806e63"},
+    {file = "itk_numerics-5.4.7-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d0604646e4fb8537d7528d37b35468054e61b7ee79353d34f01b8d60dfd2cfe1"},
+    {file = "itk_numerics-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:ef9fea78cefa55fdd5138920ec85212c3cd5e5eb882bec66122ea4b234844ea0"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:1c4ec9266c4c071aa1477e37ea5a936c49df77e52ac3efd3ba418200b7d5bf03"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:184dea905f5a6af6fa72750d5831baf48b59c2cc7070f345281e18918b33fed3"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:86586ff1ff2a07c2c2fbfc3ba50e1fd21efc705a30ba015d1a30972cfa218308"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:e37390e4527b62bd6bbe162676c1cad818635794c24742547cb64fc3c7e23860"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:473925bdabcb7c5feebef03c6fde4bc916c577776f8b9bfea69e826d7855d668"},
+    {file = "itk_numerics-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:09b3dc9efbf75ba827c03edbfc6214bfad86a643c517a19014eb37969bb139a5"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:f6ce075c82ea84e3f1e09ace2bcc755777b51f3f67d41e1707614166ebc440a1"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:ba1a01be22ca4a90c99d928e1361b822b335758157749e5f7a8dc8503ec0e6cc"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:a97fee92ce32ccf7fec8515e6774ed99ae8bd984e9fc471940f2aa0f2fc63b5b"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:5db77d3aa0301aa711c9636ee227148dbcd6fab149e5f9e6511166f893ea4f3f"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e750ac7a4e1510642a15b501e83546cc25eef0dd5cb27bde1134fa03bfc3b1e4"},
+    {file = "itk_numerics-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:ac30ce99c544894820e9a4382aadeed498abe6cc3c21b29260ff88e4c9313521"},
+]
+
+[package.dependencies]
+itk-core = "5.4.7"
+
+[[package]]
+name = "itk-registration"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_registration-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:9c5158483675a477952fc66db3aa11a9f25234f887d420d826b82812c59ebf6e"},
+    {file = "itk_registration-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:5a907e8ebe67ae3a36eedb85bdfea5efc3e6c934a07e3c373e252c53b7de21e9"},
+    {file = "itk_registration-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:822d484fb24bcc7df3b151ad868b4b6f9cdb93356c24d3e6eee674bc51487d58"},
+    {file = "itk_registration-5.4.7-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dc6416dc5a612e887e0150ba2d8789db8d2279a9c7ca148bd1f2e9f4704ecbaa"},
+    {file = "itk_registration-5.4.7-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:793f5d77ef860dc9ade9de8fb89fad83d3eadb0db418e55106a9416fcbcfb536"},
+    {file = "itk_registration-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:6d73bb209888ecadd930fb70a39614cbd17de5f2de950fcfe0230ff2bb6e9372"},
+    {file = "itk_registration-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:2efa16df50323f2f46c9e9ad20201ba959e36629821da0bca4261eb343cecd34"},
+    {file = "itk_registration-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:1dc2bcf5efc8a4e6cea88a8054a3b02cb079dbe1bf88971f1a2519ba12ccc6ef"},
+    {file = "itk_registration-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:3190ab55c41e9c33d036979cc384bd02d5f25c4b58896906da24700d10eca057"},
+    {file = "itk_registration-5.4.7-cp311-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d2756c2a86218aca1682ad13ec9d7b4fd32120f0ff335080691e42d11fb506b8"},
+    {file = "itk_registration-5.4.7-cp311-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d71e4af418aaf5d4846aaf2615e3bace9aef75ee78a9667a9455ed3016a3f645"},
+    {file = "itk_registration-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:1675047bc637bfb039ebd6fe08f2567ac28c04ecabf0ece88067b1e182ba7ce8"},
+    {file = "itk_registration-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:0f6127ddc3d542c9ee1cf52c358b2dc4fccc1829d86578b128930a2e30e01ce2"},
+    {file = "itk_registration-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:ffe04e6e3c8b32c39d4e6c7fcef33c32599d3fbf2310ee06317d44fcc707610f"},
+    {file = "itk_registration-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:bffb393baaf250513785919867524b2075eee3695a90f14846a3bfafe9b73e7c"},
+    {file = "itk_registration-5.4.7-cp39-cp39-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7f5c2dead2fd9e957cdd9768035ab811fbc2b735257861bf0ffb8ba314168c25"},
+    {file = "itk_registration-5.4.7-cp39-cp39-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5631d3895b0e0a6728310671e19a971d55a5d0d1a11d5e2f1272ba50310a333e"},
+    {file = "itk_registration-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:b6e67cd35592e36bfb8b057b02a3d2dd8a1c2d2114ed4f74d9e340019b0197f1"},
+]
+
+[package.dependencies]
+itk-filtering = "5.4.7"
+
+[[package]]
+name = "itk-segmentation"
+version = "5.4.7"
+description = "ITK is an open-source toolkit for multidimensional image analysis"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"registration\""
+files = [
+    {file = "itk_segmentation-5.4.7-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8b858cad67f2ced6813f937c6a25b49ca3673d8f0c0714a081c8d4caa4e9892c"},
+    {file = "itk_segmentation-5.4.7-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:4ac62cb5e5d221e7a897ac242e79b5a5531811fcc4c59826e5ec687e6b36a5bd"},
+    {file = "itk_segmentation-5.4.7-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:4890b595773d12da7b93c43305a95da291279ff5711b6c8fc79cc105dc874260"},
+    {file = "itk_segmentation-5.4.7-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0c6dff9bb3c90f5d0ce19b45dcc876920db012e3d5b8d45401a50774da241c28"},
+    {file = "itk_segmentation-5.4.7-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:89b652cf72364b0848bc26c62178bf37852ec7c0ab54fc4317eed311bb4e6628"},
+    {file = "itk_segmentation-5.4.7-cp310-cp310-win_amd64.whl", hash = "sha256:778bc3d452fff90791a702763c733357d467e286b3674bb942a6083565b6d922"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:05954ee97e7df4da96b0195723d91baeba1907bcd1d5fc433e700c8dbb599f9f"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:52d0517ebee2b087f2dd3f4c5fceb2213853bbd0579a247bb0c441782f4aa776"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:51162aad2728fc009acac81cbcfa2ed21bd14ccfda74423806efee3a0c3f2506"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:1393bfad55807673a7976eeb3edb4f77afd7ea003439b2ae5abe2ebd74f2ecd9"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:9746ada767eac9f118b386b58c7e4416765683b3e5e9fe46e20c46d5db503754"},
+    {file = "itk_segmentation-5.4.7-cp311-abi3-win_amd64.whl", hash = "sha256:79705efb3c160ad65648a2dff7a2ee8c5cafeb1af32aac5eaff9e481fbbac743"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:4d48d79c1032554703b1bd1cd3529e8a7e5c0ee7c69b34efa02c875a58190a98"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:741b83df58d70220380d1053cd96e1b7049b77dfa196c2493399ac54b2711e15"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:49822f2a84b9ea346fae21594de9a5aa201a5914ab0178f93a9ee2537a135bb1"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:44098d7d72b60975d1919bf8bd707fd006b91f5a1a3bd20cd55fd98623e170a9"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a1f6e52eb44b53f12602c04a4bce760d1d039ab8311cfac84f3580e917ae17e8"},
+    {file = "itk_segmentation-5.4.7-cp39-cp39-win_amd64.whl", hash = "sha256:2718a7d8dc3e22e752c0fe28266899d2cd179d6a4be91418b332367b3f92f215"},
+]
+
+[package.dependencies]
+itk-filtering = "5.4.7"
+
+[[package]]
 name = "jedi"
 version = "0.20.0"
 description = "An autocompletion tool for Python that can be used for text editors."
@@ -8327,9 +8579,10 @@ files = [
 [extras]
 dev = ["pytest", "pytest-qt"]
 mcp = ["mcp"]
+registration = ["itk-elastix"]
 spatialdata = ["spatialdata", "spatialdata-io"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12.0,<4.0"
-content-hash = "3fa73c180c06f835ded7c35042216b72aa6ebd35d7cb19587eb303a26445b39a"
+content-hash = "bd62df348d618079e062873ccd1cc519b0ae05e3028eaf07275aa3a45f94ebbe"

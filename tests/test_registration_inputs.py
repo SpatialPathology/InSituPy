@@ -287,3 +287,99 @@ def test_insufficient_matches_raises_when_configured(dummy_data, image_file, mon
             save_registered_images=False,
             raise_on_insufficient_matches=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# method="elastix"
+# ---------------------------------------------------------------------------
+
+class _MetadataImages(_DummyImages):
+    """Like the real ImageData, add_image creates a metadata entry for the added name."""
+
+    def add_image(self, *args, **kwargs):
+        super().add_image(*args, **kwargs)
+        self.metadata[kwargs["channel_names"]] = {"pixel_size": kwargs["pixel_size"], "axes": kwargs["axes"]}
+
+
+def _identity_transform(fixed_shape=(8, 8), moving_shape=(8, 8), dice=0.95):
+    from insitupy.images.registration_elastix import DisplacementTransform
+    jy, jx = np.mgrid[0:fixed_shape[0], 0:fixed_shape[1]].astype(np.float32)
+    return DisplacementTransform(
+        map_xy=np.stack([jx, jy], -1), grid_f=(1.0, 1.0),
+        fixed_shape=fixed_shape, moving_shape=moving_shape,
+        pixel_size_fixed=1.0, pixel_size_moving=1.0, affine=np.eye(3)[:2],
+        metrics={"nonrigid": True, "tissue_dice": dice, "structure_ncc": 0.5,
+                 "min_relative_jacobian": 0.9, "precision_note": "tissue-scale"},
+    )
+
+
+def test_elastix_if_path_warps_other_channels_and_records_metadata(dummy_data, image_file, monkeypatch):
+    import json
+
+    dummy_data.images = _MetadataImages()
+    img = np.zeros((2, 8, 8), dtype=np.uint16)
+    img[1, 2:5, 3:6] = 1000
+    monkeypatch.setattr(registration, "read_image", lambda _p: ([da.from_array(img)], {}, "CYX", 1.0))
+    calls = {}
+
+    def _fake_elastix(moving, fixed, **kwargs):
+        calls.update(kwargs, moving=moving)
+        return None, _identity_transform()
+
+    monkeypatch.setattr(registration, "register_images_elastix", _fake_elastix)
+
+    registration.register_images(
+        data=dummy_data,
+        image_path=image_file,
+        channel_names=["DAPI", "FITC"],
+        channel_name_for_registration="DAPI",
+        save_registered_images=False,
+        method="elastix",
+        test_flipping=False,
+        elastix_config={"nonrigid": False},
+    )
+
+    # registration ran on the DAPI channel only, without a full-res warp
+    assert calls["axes_moving"] == "YX" and calls["warp"] is False
+    assert calls["nonrigid"] is False and calls["test_flipping"] is False
+    assert calls["pixel_size_fixed"] == 1.0
+    assert len(calls["moving"]) == 1 and calls["moving"][0].shape == (8, 8)
+
+    # the other channel went through the (identity) displacement transform
+    assert [a["kwargs"]["channel_names"] for a in dummy_data.images.added_images] == ["FITC"]
+    np.testing.assert_array_equal(dummy_data.images.added_images[0]["kwargs"]["image"], img[1])
+
+    reg = dummy_data.images.metadata["FITC"]["registration"]
+    assert reg["method"] == "elastix"
+    json.dumps(reg)  # persisted via zarr attrs
+
+
+def test_elastix_low_quality_warns(dummy_data, image_file, monkeypatch):
+    dummy_data.images = _MetadataImages()
+    monkeypatch.setattr(registration, "read_image", lambda _p: (np.zeros((8, 8, 3), np.uint8), {}, "YXS", 1.0))
+    monkeypatch.setattr(
+        registration, "register_images_elastix",
+        lambda moving, fixed, **kw: (np.zeros((8, 8, 3), np.uint8), _identity_transform(dice=0.4)),
+    )
+    with pytest.warns(UserWarning, match="may have failed"):
+        registration.register_images(
+            data=dummy_data, image_path=image_file, channel_names=["HE"],
+            save_registered_images=False, method="elastix",
+        )
+    assert dummy_data.images.metadata["HE"]["registration"]["tissue_dice"] == 0.4
+
+
+def test_unknown_method_raises(dummy_data, image_file):
+    with pytest.raises(ValueError, match="`method` must be"):
+        registration.register_images(
+            data=dummy_data, image_path=image_file, channel_names=["HE"], method="sift",
+        )
+
+
+def test_unknown_elastix_config_key_raises(dummy_data, image_file, monkeypatch):
+    monkeypatch.setattr(registration, "read_image", lambda _p: (np.zeros((8, 8, 3), np.uint8), {}, "YXS", 1.0))
+    with pytest.raises(TypeError, match="Unknown elastix_config keys"):
+        registration.register_images(
+            data=dummy_data, image_path=image_file, channel_names=["HE"],
+            save_registered_images=False, method="elastix", elastix_config={"nonrigd": False},
+        )

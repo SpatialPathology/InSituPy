@@ -5,6 +5,7 @@ import time
 import tracemalloc
 import warnings
 from pathlib import Path
+from typing import Literal
 
 try:
     import cv2
@@ -23,6 +24,13 @@ from insitupy.images.io import read_image
 from insitupy.images.registration import (
     register_images_standalone,
     save_registered_image_tiff,
+)
+from insitupy.images.registration_elastix import (
+    ElastixRegistrationConfig,
+    _as_level_list,
+    apply_displacement_transform,
+    config_to_kwargs,
+    register_images_elastix,
 )
 from insitupy.images.warp import apply_warp
 from insitupy.utils.utils import convert_to_list
@@ -140,9 +148,23 @@ def register_images(
     *,
     image_to_be_registered: str | os.PathLike | Path | None = None,
     raise_on_insufficient_matches: bool = False,
+    method: Literal["features", "elastix"] = "features",
+    elastix_config: ElastixRegistrationConfig | dict | None = None,
     ):
     """
     Register images stored in an InSituData object.
+
+    Two methods are available:
+
+    - ``method="features"`` (default): SIFT feature matching of nuclei and an affine transform.
+      Precise, but only works when the image shows the *same* section as the Xenium data
+      (e.g. post-Xenium H&E or IF).
+    - ``method="elastix"``: tissue-scale registration for **consecutive sections** (global
+      flip/rotation/scale search, elastix affine and B-spline, see
+      :func:`insitupy.im.register_images_elastix`). Expected precision is tissue-neighbourhood
+      (tens of µm), not single-cell. Requires ``pip install "insitupy-spatial[registration]"``.
+      The registered image's metadata gets a ``"registration"`` entry with QC metrics, and a
+      warning is emitted when the QC metrics indicate a likely failure.
 
     Args:
         data (InSituData): The InSituData object containing the images.
@@ -180,6 +202,15 @@ def register_images(
             fails due to insufficient feature matches. If True, re-raises
             NotEnoughFeatureMatchesError. If False (default), emits a warning and aborts registration
             for the current image, allowing outer loops to continue.
+        method (str, optional): ``"features"`` (same section, default) or ``"elastix"``
+            (consecutive sections). With ``"elastix"``, ``min_good_matches_per_area``,
+            ``decon_scale_factor``, ``deconvolve_template``, ``rank_matches_for_qc``,
+            ``force_failure_qc`` and ``raise_on_insufficient_matches`` are ignored.
+        elastix_config (ElastixRegistrationConfig or dict, optional): Settings for
+            ``method="elastix"`` (fields of :class:`insitupy.im.ElastixRegistrationConfig`, e.g.
+            ``{"nonrigid": False}`` or ``{"initial_transform": M}``). Axes and pixel sizes are
+            always taken from the image metadata. If given as a dict without ``test_flipping``,
+            the ``test_flipping`` argument of this function is used. Defaults to None.
 
     Raises:
         ValueError: If neither `image_to_be_registered` nor `image_path` is provided,
@@ -222,6 +253,9 @@ def register_images(
                 level0 = level0[0]
             return level0
         return img_obj
+
+    if method not in ("features", "elastix"):
+        raise ValueError(f"`method` must be 'features' or 'elastix', got '{method}'.")
 
     if decon_scale_factor <= 0:
         raise ValueError(
@@ -272,6 +306,8 @@ def register_images(
     # read images
     logger.info("%s%s%s Loading images", _TSIGN, _HLINE, _HLINE)
     image, ome_meta, axes_image, pixel_size_image = read_image(image_to_be_registered)
+    # the elastix path uses the whole pyramid (low-res levels for registration)
+    image_levels = _as_level_list(image) if method == "elastix" else None
     image = _unwrap_first_level_image(image, str(image_to_be_registered))
 
     # infer template axes from loaded image metadata
@@ -313,6 +349,8 @@ def register_images(
     # sometimes images are read with an empty time dimension in the first axis
     if len(image.shape) == 4:
         image = image[0]
+    if image_levels is not None:
+        image_levels = [lvl[0] if len(lvl.shape) == 4 else lvl for lvl in image_levels]
 
     if image_type == "IF":
         channel_axis = axes_image.find("C")
@@ -380,7 +418,40 @@ def register_images(
 
     tracemalloc.start()
     try:
-        if image_type == "histo":
+        if method == "elastix":
+            _ignored = {
+                "min_good_matches_per_area": (min_good_matches_per_area, 5),
+                "decon_scale_factor": (decon_scale_factor, 0.2),
+                "deconvolve_template": (deconvolve_template, False),
+                "rank_matches_for_qc": (rank_matches_for_qc, True),
+                "force_failure_qc": (force_failure_qc, False),
+                "raise_on_insufficient_matches": (raise_on_insufficient_matches, False),
+            }
+            _changed = [k for k, (v, default) in _ignored.items() if v != default]
+            if _changed:
+                logger.info("%s     Ignored with method='elastix': %s", _VLINE, ", ".join(_changed))
+            _register_elastix_branch(
+                data=data,
+                image_levels=image_levels,
+                axes_image=axes_image,
+                image_type=image_type,
+                channel_names=channel_names,
+                channel_name_for_registration=channel_name_for_registration,
+                template_levels=_as_level_list(data.images[template_image_name]),
+                axes_template=axes_template,
+                pixel_size_image=pixel_size_image,
+                pixel_size_template=pixel_size_template,
+                ome_metadata=ome_metadata,
+                output_dir=output_dir,
+                save_registered_images=save_registered_images,
+                debug=debug,
+                qc_dir=qc_dir_resolved,
+                identifier=identifier,
+                test_flipping=test_flipping,
+                elastix_config=elastix_config,
+            )
+
+        elif image_type == "histo":
             save_identifier = identifier if identifier is not None else f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
 
             try:
@@ -574,5 +645,122 @@ def register_images(
     finally:
         if tracemalloc.is_tracing():
             tracemalloc.stop()
+
+
+# QC thresholds below which a consecutive-section registration is reported as likely failed
+_ELASTIX_MIN_TISSUE_DICE = 0.75
+
+
+def _register_elastix_branch(
+    data,
+    image_levels: list,
+    axes_image: str,
+    image_type: str,
+    channel_names: list[str],
+    channel_name_for_registration: str | None,
+    template_levels: list,
+    axes_template: str,
+    pixel_size_image: float,
+    pixel_size_template: float,
+    ome_metadata: dict,
+    output_dir,
+    save_registered_images: bool,
+    debug: bool,
+    qc_dir: Path,
+    identifier: str | None,
+    test_flipping: bool,
+    elastix_config: ElastixRegistrationConfig | dict | None,
+) -> None:
+    """``register_images(method="elastix")``: register, warp, store and annotate the images."""
+    _TSIGN, _VLINE, _HLINE, _LSIGN = "├", "│", "─", "└"
+
+    kwargs = config_to_kwargs(elastix_config)
+    kwargs.setdefault("test_flipping", test_flipping)
+    kwargs.update(
+        axes_fixed=axes_template,
+        pixel_size_moving=pixel_size_image,
+        pixel_size_fixed=pixel_size_template,
+    )
+
+    # list of (name, image, axes, photometric) to store
+    results = []
+    if image_type == "histo":
+        save_identifier = identifier if identifier is not None else (
+            f"{data.slide_id}__{data.sample_id}__{channel_names[0]}"
+        )
+        kwargs["axes_moving"] = axes_image
+        registered, transform = register_images_elastix(
+            moving=image_levels, fixed=template_levels,
+            **kwargs, debug=debug, qc_dir=qc_dir, qc_identifier=save_identifier,
+        )
+        results.append((channel_names[0], save_identifier, registered, axes_image, "rgb"))
+    else:
+        channel_axis = axes_image.find("C")
+        reg_idx = channel_names.index(channel_name_for_registration)
+        save_identifier = f"{data.slide_id}__{data.sample_id}__{channel_name_for_registration}"
+        kwargs["axes_moving"] = "YX"
+        reg_levels = [np.take(lvl, reg_idx, axis=channel_axis) for lvl in image_levels]
+        _, transform = register_images_elastix(
+            moving=reg_levels, fixed=template_levels,
+            **kwargs, warp=False, debug=debug, qc_dir=qc_dir, qc_identifier=save_identifier,
+        )
+        for i, n in enumerate(channel_names):
+            if n == channel_name_for_registration:
+                continue
+            logger.info("%s%s%s Registering channel: %s", _TSIGN, _HLINE, _HLINE, n)
+            channel = np.take(image_levels[0], i, axis=channel_axis)
+            registered_channel = apply_displacement_transform(channel, transform, "YX")
+            results.append((n, f"{data.slide_id}__{data.sample_id}__{n}", registered_channel, "YX", "minisblack"))
+
+    transform_file = None
+    if save_registered_images:
+        transform_file = transform.save(Path(output_dir) / f"{save_identifier}__elastix_transform.npz")
+        logger.info("%s     Saved: %s", _VLINE, transform_file)
+
+    m = transform.metrics
+    reg_meta = {
+        "method": "elastix",
+        "nonrigid": m["nonrigid"],
+        "tissue_dice": m["tissue_dice"],
+        "structure_ncc": m["structure_ncc"],
+        "min_relative_jacobian": m["min_relative_jacobian"],
+        "transform_file": None if transform_file is None else str(transform_file),
+        "precision_note": m["precision_note"],
+    }
+
+    for name, ident, registered, axes, photometric in results:
+        if save_registered_images:
+            _outfile = save_registered_image_tiff(
+                output_dir=output_dir,
+                identifier=ident,
+                registered=registered,
+                axes=axes,
+                photometric=photometric,
+                ome_metadata=ome_metadata,
+            )
+            logger.info("%s     Saved: %s", _VLINE, _outfile)
+        data.images.add_image(
+            image=registered,
+            channel_names=name,
+            axes=axes,
+            pixel_size=pixel_size_template,
+            ome_meta=ome_metadata,
+            overwrite=True,
+        )
+        data.images.metadata[name]["registration"] = dict(reg_meta)
+
+    problems = []
+    if m["tissue_dice"] < _ELASTIX_MIN_TISSUE_DICE:
+        problems.append(f"tissue Dice {m['tissue_dice']:.2f} < {_ELASTIX_MIN_TISSUE_DICE}")
+    if m["min_relative_jacobian"] <= 0:
+        problems.append("the non-rigid transform folds locally (min. relative Jacobian <= 0)")
+    if problems:
+        msg = (
+            f"Elastix registration of {data.slide_id}/{data.sample_id} ({save_identifier}) may have "
+            f"failed: {'; '.join(problems)}. Inspect the QC images with `debug=True`, or pass "
+            "`elastix_config={'initial_transform': M}` with a manual starting transform."
+        )
+        warnings.warn(msg, UserWarning, stacklevel=3)
+        logger.warning("%s%s%s %s", _LSIGN, _HLINE, _HLINE, msg)
 
 
