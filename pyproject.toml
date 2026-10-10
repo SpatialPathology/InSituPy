@@ -1,6 +1,6 @@
 [project]
 name = "insitupy-spatial"
-version = "0.12.1"
+version = "0.13.0.dev0"
 description = "A framework for histology-guided, multi-sample analysis of single-cell spatial omics data."
 license = "BSD-3-Clause"
 authors = [
