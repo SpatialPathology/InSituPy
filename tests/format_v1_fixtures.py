@@ -138,6 +138,7 @@ def _write_cells_dir(cells_dir: Path, table: AnnData, cell_names: list[str], *, 
         "cell_names": list(cell_names),
         "seg_mask_value": seg_mask_value,
         "masks": masks,
+        "mask_pixel_size": CELL_PIXEL_SIZE,
         "nucleus_to_cell_map": {i: n for i, n in enumerate(cell_names)} if has_map else {},
     }
 
@@ -258,7 +259,8 @@ def write_v1_project(root, *, variant: str = "full", seed: int = 0, uid: str | N
 
     Returns:
         Dict of expected values: ``table`` (AnnData as written), boundary values (``cell_names``,
-        ``seg_mask_value``, ``masks``, ``nucleus_to_cell_map``), ``images`` (name -> levels),
+        ``seg_mask_value``, ``masks``, ``mask_pixel_size``, ``nucleus_to_cell_map``), ``images``
+        (name -> levels) with ``image_pixel_size`` and ``image_rgb`` (name -> bool),
         ``transcripts`` (DataFrame), ``units`` (key -> values), ``annotations`` / ``regions``
         (key -> names and WKT), plus ``slide_id``, ``sample_id``, ``uid``.
     """
@@ -283,6 +285,8 @@ def write_v1_project(root, *, variant: str = "full", seed: int = 0, uid: str | N
     _write_image(root / "images" / "gray.zarr", gray, axes="YX", rgb=False, zarr_format=zarr_format)
     _write_image(root / "images" / "he.zarr", he, axes="YXS", rgb=True, zarr_format=zarr_format)
     expected["images"] = {"gray": gray, "he": he}
+    expected["image_pixel_size"] = IMAGE_PIXEL_SIZE
+    expected["image_rgb"] = {"gray": False, "he": True}
     data["images"] = {"gray": "images/gray.zarr", "he": "images/he.zarr"}
 
     # transcripts

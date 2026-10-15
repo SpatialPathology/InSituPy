@@ -47,6 +47,8 @@ def _assert_cells(xd, expected, *, extra_obs: dict | None = None):
         assert len(b[layer]) == len(levels)
         for got, want_level in zip(b[layer], levels, strict=True):
             np.testing.assert_array_equal(np.asarray(got), want_level)
+        # a wrong mask pixel size misaligns the segmentation with images and transcripts
+        assert b.metadata[layer]["pixel_size"] == expected["mask_pixel_size"]
     assert b.nucleus_to_cell_map == expected["nucleus_to_cell_map"]
 
 
@@ -58,6 +60,9 @@ def _assert_images(xd, expected):
         for got_level, want_level in zip(got, levels, strict=True):
             # in memory RGB is always channels-last (YXS), whatever the store layout
             np.testing.assert_array_equal(np.asarray(got_level), want_level)
+        meta = xd.images.metadata[name]
+        assert meta["pixel_size"] == expected["image_pixel_size"]
+        assert meta["rgb"] is expected["image_rgb"][name]
 
 
 def _assert_transcripts(xd, expected):
