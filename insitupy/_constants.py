@@ -55,6 +55,12 @@ SAMPLE_STR = "SAMPLE"
 DEFAULT_CHUNK_SIZE_X = 4096
 DEFAULT_CHUNK_SIZE_Y = 4096
 SPATIALDATA_DIALECT_VERSION = 3
+
+# On-disk layout of image and mask levels (format v2): Zarr v3 shards of ZARR_SHARD_SIZE made of
+# ZARR_CHUNK_SIZE inner chunks per spatial axis. A TissUUmaps tile is one inner chunk.
+# ZARR_SHARD_SIZE = None writes plain ZARR_CHUNK_SIZE chunks (the tested fallback).
+ZARR_SHARD_SIZE: int | None = 4096
+ZARR_CHUNK_SIZE = 512
 # SpatialData-export-only modalities with no corresponding InSituData attribute (kept out of
 # MODALITIES so InSituData.get_loaded_modalities()'s getattr(self, m) isn't affected).
 SPATIALDATA_DERIVED_MODALITIES = ["tables"]

@@ -136,6 +136,32 @@ def test_imagedata_crop_without_any_overlap_raises_and_leaves_images_unchanged()
     assert "cropping_xlim" not in xd.images.metadata["big"]
 
 
+def test_crop_of_images_read_back_from_sharded_store(tmp_path, monkeypatch):
+    from insitupy.containers.image_data import ImageData
+    from insitupy.images import _zarr_layout
+
+    monkeypatch.setattr(_zarr_layout, "ZARR_SHARD_SIZE", 64)
+    monkeypatch.setattr(_zarr_layout, "ZARR_CHUNK_SIZE", 16)
+
+    rng = np.random.default_rng(3)
+    rgb = rng.integers(0, 256, (200, 200, 3), dtype=np.uint8)
+    gray = rng.integers(0, 1000, (200, 200), dtype=np.uint16)
+    src = ImageData()
+    src.add_image(da.from_array(rgb), channel_names="he", axes="YXS", pixel_size=1.0, verbose=False)
+    src.add_image(da.from_array(gray), channel_names="gray", axes="YX", pixel_size=1.0, verbose=False)
+    paths = src.save(tmp_path / "imgs", return_savepaths=True)
+
+    xd = _make_insitudata(with_images=False)
+    for name, p in paths.items():
+        xd.images.add_image(p, channel_names=name, verbose=False)
+
+    cropped = xd.crop(xlim=(30, 130), ylim=(20, 90))
+
+    # images read from disk are pyramids; level 0 is the full-resolution crop
+    np.testing.assert_array_equal(np.asarray(cropped.images["he"][0]), rgb[20:90, 30:130])
+    np.testing.assert_array_equal(np.asarray(cropped.images["gray"][0]), gray[20:90, 30:130])
+
+
 def test_lazy_transcripts_without_cells_or_images_warn_instead_of_raising():
     # the region misses all transcripts, but lazy transcripts are not counted
     xd = _make_insitudata(with_cells=False, with_images=False)
