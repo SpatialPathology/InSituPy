@@ -368,3 +368,185 @@ class TestCropDaskArrayOrPyramid:
         # level, not the buggy compounded one
         for level, (crop, (fx0, fx1)) in enumerate(zip(cropped, fixed_bounds, strict=True)):
             assert crop.shape[1] == fx1 - fx0, f"level {level} used compounded truncation"
+
+
+# ── Format v2: sharded Zarr v3 + NGFF metadata ────────────────────────────────
+
+@pytest.fixture
+def small_layout(monkeypatch):
+    """Shrink the layout constants so multi-shard behaviour is exercised on tiny arrays."""
+    from insitupy.images import _zarr_layout
+
+    monkeypatch.setattr(_zarr_layout, "ZARR_SHARD_SIZE", 64)
+    monkeypatch.setattr(_zarr_layout, "ZARR_CHUNK_SIZE", 16)
+    monkeypatch.setattr(_zarr_layout, "DEFAULT_CHUNK_SIZE_X", 64)
+    monkeypatch.setattr(_zarr_layout, "DEFAULT_CHUNK_SIZE_Y", 64)
+
+
+def _rgb_array(height=300, width=200, seed=0):
+    rng = np.random.default_rng(seed)
+    return rng.integers(0, 256, (height, width, 3), dtype=np.uint8)
+
+
+def _rgb_metadata(pixel_size=0.5, shape=(300, 200, 3)):
+    return {"OME": {}, "axes": "YXS", "pixel_size": pixel_size, "shape": shape, "rgb": True}
+
+
+class TestShardedNgffLayout:
+    def test_rgb_roundtrip_layout_and_metadata(self, tmp_path, small_layout):
+        import zarr
+
+        from insitupy.containers.image_data import ImageData
+
+        arr = _rgb_array()
+        img = da.from_array(arr, chunks=(300, 200, 3))
+        out = tmp_path / "he.zarr"
+        write_zarr(image=img, file=out, img_metadata=_rgb_metadata(0.5), axes="YXS")
+
+        # in memory: YXS with identical values on every level
+        data = ImageData()
+        data.add_image(out, channel_names="he", verbose=False)
+        assert data.metadata["he"]["axes"] == "YXS"
+        expected = create_img_pyramid(img, axes="YXS", nsubres=6, scale_steps=2)
+        assert len(data["he"]) == len(expected)
+        for got, want in zip(data["he"], expected, strict=True):
+            np.testing.assert_array_equal(np.asarray(got), np.asarray(want))
+
+        # on disk: channel-first, sharded
+        root = zarr.open_group(out, mode="r")
+        level0 = root["0"]
+        assert level0.shape == (3, 300, 200)
+        assert level0.chunks == (3, 16, 16)
+        assert level0.shards == (3, 64, 64)
+        assert root.attrs["axes"] == "SYX"
+        assert root.attrs["rgb"] is True
+        assert tuple(root.attrs["shape"]) == (3, 300, 200)
+
+        ome = root.attrs["ome"]
+        ms = ome["multiscales"][0]
+        assert [a["name"] for a in ms["axes"]] == ["c", "y", "x"]
+        assert [a.get("unit") for a in ms["axes"]] == [None, "micrometer", "micrometer"]
+        for ds, lvl in zip(ms["datasets"], expected, strict=True):
+            h, w = lvl.shape[0], lvl.shape[1]
+            scale = ds["coordinateTransformations"][0]["scale"]
+            assert scale == pytest.approx([1.0, 0.5 * 300 / h, 0.5 * 200 / w])
+        channels = ome["omero"]["channels"]
+        assert [c["color"] for c in channels] == ["FF0000", "00FF00", "0000FF"]
+        assert all(c["window"]["start"] == 0 and c["window"]["end"] == 255 for c in channels)
+
+    def test_misaligned_input_chunks_are_stored_exactly(self, tmp_path, small_layout):
+        # input chunks straddle shard borders: two tasks writing one shard would corrupt it
+        arr = _rgb_array(seed=1)
+        img = da.from_array(arr, chunks=(37, 53, 3))
+        out = tmp_path / "he.zarr"
+        write_zarr(image=img, file=out, img_metadata=_rgb_metadata(), axes="YXS")
+
+        result, _, axes_out, _ = read_zarr(out)
+        assert axes_out == "YXS"
+        np.testing.assert_array_equal(np.asarray(result[0]), arr)
+
+    @pytest.mark.parametrize("name", ["he.zarr", "he.zarr.zip"])
+    def test_single_array_rgb_roundtrip(self, tmp_path, small_layout, name):
+        # no pyramid: the root array is stored channel-first and must come back as YXS
+        arr = _rgb_array(seed=4)
+        out = tmp_path / name
+        write_zarr(image=da.from_array(arr), file=out, img_metadata=_rgb_metadata(), axes="YXS",
+                   save_pyramid=False)
+
+        result, _, axes_out, _ = read_zarr(out)
+        assert not isinstance(result, list)
+        assert axes_out == "YXS"
+        np.testing.assert_array_equal(np.asarray(result), arr)
+
+    def test_reads_use_shard_sized_dask_chunks(self, tmp_path, small_layout, monkeypatch):
+        from insitupy.images import _zarr_layout
+
+        out = tmp_path / "he.zarr"
+        write_zarr(image=da.from_array(_rgb_array()), file=out, img_metadata=_rgb_metadata(), axes="YXS")
+        result, _, _, _ = read_zarr(out)
+        assert result[0].chunksize == (64, 64, 3)
+
+        # plain-chunk store: read in the working block, not in the 16 pixel stored chunks
+        monkeypatch.setattr(_zarr_layout, "ZARR_SHARD_SIZE", None)
+        plain = tmp_path / "plain.zarr"
+        write_zarr(image=da.from_array(_rgb_array()), file=plain, img_metadata=_rgb_metadata(), axes="YXS")
+        result, _, _, _ = read_zarr(plain)
+        assert result[0].chunksize == (64, 64, 3)
+
+    def test_grayscale_window_ignores_zeros_and_outliers(self, tmp_path, small_layout):
+        import zarr
+
+        rng = np.random.default_rng(2)
+        arr = np.zeros((300, 200), dtype=np.uint16)
+        arr[50:250, 50:150] = rng.integers(1, 1000, (200, 100))
+        out = tmp_path / "g.zarr"
+        write_zarr(image=da.from_array(arr), file=out,
+                   img_metadata={"OME": {}, "axes": "YX", "pixel_size": 1.0}, axes="YX")
+
+        window = zarr.open_group(out, mode="r").attrs["ome"]["omero"]["channels"][0]["window"]
+        assert 0 < window["end"] <= 1000
+        assert window["start"] == 0
+        assert window["min"] == 0
+        assert window["max"] == 65535
+
+    def test_all_zero_grayscale_writes_valid_window(self, tmp_path, small_layout):
+        import zarr
+
+        out = tmp_path / "g.zarr"
+        write_zarr(image=da.zeros((300, 200), dtype=np.uint16, chunks=(300, 200)), file=out,
+                   img_metadata={"OME": {}, "axes": "YX", "pixel_size": 1.0}, axes="YX")
+        window = zarr.open_group(out, mode="r").attrs["ome"]["omero"]["channels"][0]["window"]
+        assert window["start"] < window["end"] <= window["max"]
+
+    def test_caller_metadata_is_not_mutated(self, tmp_path, small_layout):
+        from insitupy.containers.image_data import ImageData
+
+        data = ImageData()
+        data.add_image(da.from_array(_rgb_array()), channel_names="he", axes="YXS", pixel_size=0.5,
+                       verbose=False)
+        data.save(tmp_path / "imgs")
+        assert data.metadata["he"]["axes"] == "YXS"
+        assert tuple(data.metadata["he"]["shape"]) == (300, 200, 3)
+
+    def test_ome_zarr_reader_opens_rgb_and_grayscale(self, tmp_path, small_layout):
+        pytest.importorskip("ome_zarr")
+        from ome_zarr.io import parse_url
+        from ome_zarr.reader import Reader
+
+        rgb = _rgb_array()
+        gray = np.arange(300 * 200, dtype=np.uint16).reshape(300, 200)
+        write_zarr(image=da.from_array(rgb), file=tmp_path / "he.zarr", img_metadata=_rgb_metadata(), axes="YXS")
+        write_zarr(image=da.from_array(gray), file=tmp_path / "g.zarr",
+                   img_metadata={"OME": {}, "axes": "YX", "pixel_size": 1.0}, axes="YX")
+
+        for name, want in (("he.zarr", np.moveaxis(rgb, -1, 0)), ("g.zarr", gray)):
+            nodes = list(Reader(parse_url(tmp_path / name))())
+            assert len(nodes) == 1
+            assert {"Multiscales", "OMERO"} <= {type(s).__name__ for s in nodes[0].specs}
+            assert len(nodes[0].data) == 7
+            np.testing.assert_array_equal(np.asarray(nodes[0].data[0]), want)
+
+    def test_shipped_defaults_shard_4096_chunk_512(self, tmp_path):
+        import zarr
+
+        out = tmp_path / "he.zarr"
+        write_zarr(image=da.from_array(_rgb_array(600, 500)), file=out,
+                   img_metadata=_rgb_metadata(shape=(600, 500, 3)), axes="YXS")
+        level0 = zarr.open_group(out, mode="r")["0"]
+        assert level0.shards == (3, 4096, 4096)
+        assert level0.chunks == (3, 512, 512)
+
+    def test_zip_store_has_plain_chunks(self, tmp_path, small_layout):
+        import zarr
+
+        arr = _rgb_array()
+        out = tmp_path / "he.zarr.zip"
+        write_zarr(image=da.from_array(arr), file=out, img_metadata=_rgb_metadata(), axes="YXS")
+
+        with zarr.storage.ZipStore(out, mode="r") as store:
+            level0 = zarr.open_group(store, mode="r")["0"]
+            assert level0.shards is None
+            assert level0.chunks == (3, 16, 16)
+        result, _, axes_out, _ = read_zarr(out)
+        assert axes_out == "YXS"
+        np.testing.assert_array_equal(np.asarray(result[0]), arr)

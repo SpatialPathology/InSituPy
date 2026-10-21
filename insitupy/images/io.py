@@ -13,8 +13,10 @@ import zarr
 from tifffile import TiffFile, TiffWriter, imread
 
 from insitupy._exceptions import InvalidFileTypeError
-from insitupy.images.axes import ImageAxes, normalize_axes_and_shape
-from insitupy.images.utils import _get_chunksize, create_img_pyramid
+from insitupy.images import ngff
+from insitupy.images._zarr_layout import working_chunks, write_level
+from insitupy.images.axes import normalize_axes_and_shape
+from insitupy.images.utils import create_img_pyramid
 from insitupy.utils.utils import convert_to_list, make_json_serializable
 
 logger = logging.getLogger(__name__)
@@ -278,6 +280,18 @@ def _sorted_pyramid_levels(keys) -> list[str]:
     return sorted(levels, key=lambda k: (0, int(k), k) if k.isdigit() else (1, 0, k))
 
 
+def _read_chunks(arr, axes: str | None) -> tuple:
+    """Dask chunks for reading the stored zarr array *arr* (shard-sized for sharded stores).
+
+    Reading sharded stores in inner-chunk blocks would multiply the task graph by the number
+    of chunks per shard. *axes* is ignored when it does not match the array dimensionality
+    (legacy ``CYX`` metadata of 2D data).
+    """
+    if axes is not None and len(axes) != arr.ndim:
+        axes = None
+    return working_chunks(arr.chunks, arr.shards, axes)
+
+
 def read_zarr(path):
     """Read an image from a Zarr or Zarr.zip store.
 
@@ -316,33 +330,36 @@ def read_zarr(path):
         # open the store root, which is an array (no pyramid) or a group of pyramid levels
         root = zarr.open(store=dirstore, mode='r')
 
-        if isinstance(root, zarr.Array):
-            # the store is an array which can be opened
-            if zipped:
-                img = da.from_zarr(dirstore).persist()
-            else:
-                img = da.from_zarr(dirstore)
-        else:
-            subres = _sorted_pyramid_levels(root.keys())
-            img = []
-            for s in subres:
-                if zipped:
-                    img.append(
-                        da.from_zarr(dirstore, component=s).persist()
-                                )
-                else:
-                    img.append(
-                        da.from_zarr(dirstore, component=s)
-                                )
-
         # retrieve OME metadata
         meta = root.attrs.asdict()
         ome_meta = meta["OME"]
         axes = meta["axes"]
         pixel_size = meta["pixel_size"]
 
+        if isinstance(root, zarr.Array):
+            # the store is an array which can be opened
+            img = da.from_zarr(dirstore, chunks=_read_chunks(root, axes))
+            if zipped:
+                img = img.persist()
+        else:
+            subres = _sorted_pyramid_levels(root.keys())
+            img = []
+            for s in subres:
+                level = da.from_zarr(dirstore, component=s, chunks=_read_chunks(root[s], axes))
+                if zipped:
+                    level = level.persist()
+                img.append(level)
+
         if len(img) == 0:
             raise ValueError(f"No image data read from zarr file: {path}")
+
+        # RGB is stored channel-first on disk (see write_zarr); restore the in-memory YXS order
+        if axes == "SYX":
+            if isinstance(img, list):
+                img = [lvl.transpose(1, 2, 0) for lvl in img]
+            else:
+                img = img.transpose(1, 2, 0)
+            axes = "YXS"
 
         img, axes = normalize_axes_and_shape(img, axes)
 
@@ -421,6 +438,33 @@ def read_image(path):
         img, axes = normalize_axes_and_shape(img, axes)
 
     return img, ome_meta, axes, pixel_size
+
+def _ngff_image_attrs(store, file: Path, attrs: dict, disk_axes: str, levels: list) -> dict:
+    """Build the ``ome`` attribute (NGFF multiscales + omero) of a written pyramid store."""
+    name = file.name
+    for suffix in (".zip", ".zarr"):
+        name = name.removesuffix(suffix)
+
+    ms = ngff.multiscales(
+        name=name,
+        axes=disk_axes,
+        pixel_size=attrs.get("pixel_size") or 1.0,
+        level_shapes=[tuple(lvl.shape) for lvl in levels],
+    )
+
+    omero = None
+    dtype = levels[0].dtype
+    if disk_axes == "SYX" and levels[0].shape[0] == 3:
+        omero = ngff.omero_rgb(dtype)
+    elif disk_axes == "YX":
+        # read the smallest written level with >= 1M pixels back from the staged store, so the
+        # pyramid graph is not computed twice
+        big = [i for i, lvl in enumerate(levels) if lvl.size >= 1_000_000]
+        sample = np.asarray(store[str(big[-1] if big else 0)][...])
+        omero = ngff.omero_grayscale(name, sample, dtype)
+
+    return ngff.ome_attrs(multiscales=ms, omero=omero)
+
 
 def write_zarr(
     image,
@@ -507,24 +551,38 @@ def write_zarr(
         if not ZARR_V3:
             dirstore = stack.enter_context(dirstore)
 
-        # Parse axes configuration to determine proper chunk sizes
-        axes_config = ImageAxes(axes)
+        # RGB is stored channel-first (NGFF has no trailing channel axis); readers restore YXS
+        disk_axes = "SYX" if axes == "YXS" else axes
+        if disk_axes != axes:
+            if save_pyramid:
+                image_data = [im.transpose(2, 0, 1) for im in image_data]
+            else:
+                image_data = image_data.transpose(2, 0, 1)
 
-        # check whether to save the image as pyramid or not
+        # zip archives are read fully into memory, so they get plain chunks instead of shards
+        sharded = not zipped
+
+        # write the levels
         if save_pyramid:
             for i, im in enumerate(image_data):
-                chunksize = _get_chunksize(axes_config, im.ndim)
-                im = im.rechunk(chunksize)
-                im.to_zarr(dirstore, component=str(i))
+                write_level(dirstore, str(i), im, disk_axes, sharded=sharded)
         else:
-            # save image data in zipstore without pyramid
-            chunksize = _get_chunksize(axes_config, image_data.ndim)
-            image_data = image_data.rechunk(chunksize)
-            image_data.to_zarr(dirstore)
+            write_level(dirstore, None, image_data, disk_axes, sharded=sharded)
 
-        # open zarr store save metadata in zarr store
+        # open zarr store and save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
-        store.attrs.put(make_json_serializable(img_metadata))
+
+        # never mutate the caller's metadata, it is the live ImageData metadata
+        attrs = dict(img_metadata)
+        attrs["axes"] = disk_axes
+        if "shape" in attrs:
+            attrs["shape"] = tuple((image_data[0] if save_pyramid else image_data).shape)
+
+        # NGFF metadata cannot describe a bare root array
+        if save_pyramid:
+            attrs["ome"] = _ngff_image_attrs(store, file, attrs, disk_axes, image_data)
+
+        store.attrs.put(make_json_serializable(attrs))
 
     if zipped:
         # pack the staged directory store into an uncompressed zip, the layout
@@ -716,22 +774,18 @@ def read_zarr_pyramid(dirstore, persist):
 
     if ".zarray" in components:
         # the store is an array which can be opened
+        img = da.from_zarr(dirstore, chunks=_read_chunks(zarr.open_array(dirstore, mode="r"), None))
         if persist:
-            img = da.from_zarr(dirstore).persist()
-        else:
-            img = da.from_zarr(dirstore)
+            img = img.persist()
     else:
         subres = _sorted_pyramid_levels(components)
         img = []
         for s in subres:
+            arr = zarr.open_array(dirstore, path=s, mode="r")
+            level = da.from_zarr(dirstore, component=s, chunks=_read_chunks(arr, None))
             if persist:
-                img.append(
-                    da.from_zarr(dirstore, component=s).persist()
-                            )
-            else:
-                img.append(
-                    da.from_zarr(dirstore, component=s)
-                            )
+                level = level.persist()
+            img.append(level)
 
     return img
 
