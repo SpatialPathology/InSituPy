@@ -772,12 +772,9 @@ def read_zarr_pyramid(dirstore, persist):
     # get components of zip store
     components = dirstore.listdir()
 
-    # stored axes, so plain-chunk stores are read in working blocks rather than stored chunks
-    axes = zarr.open(store=dirstore, mode="r").attrs.get("axes")
-
     if ".zarray" in components:
         # the store is an array which can be opened
-        img = da.from_zarr(dirstore, chunks=_read_chunks(zarr.open_array(dirstore, mode="r"), axes))
+        img = da.from_zarr(dirstore, chunks=_read_chunks(zarr.open_array(dirstore, mode="r"), None))
         if persist:
             img = img.persist()
     else:
@@ -785,7 +782,7 @@ def read_zarr_pyramid(dirstore, persist):
         img = []
         for s in subres:
             arr = zarr.open_array(dirstore, path=s, mode="r")
-            level = da.from_zarr(dirstore, component=s, chunks=_read_chunks(arr, axes))
+            level = da.from_zarr(dirstore, component=s, chunks=_read_chunks(arr, None))
             if persist:
                 level = level.persist()
             img.append(level)

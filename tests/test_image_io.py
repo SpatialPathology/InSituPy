@@ -445,6 +445,19 @@ class TestShardedNgffLayout:
         assert axes_out == "YXS"
         np.testing.assert_array_equal(np.asarray(result[0]), arr)
 
+    @pytest.mark.parametrize("name", ["he.zarr", "he.zarr.zip"])
+    def test_single_array_rgb_roundtrip(self, tmp_path, small_layout, name):
+        # no pyramid: the root array is stored channel-first and must come back as YXS
+        arr = _rgb_array(seed=4)
+        out = tmp_path / name
+        write_zarr(image=da.from_array(arr), file=out, img_metadata=_rgb_metadata(), axes="YXS",
+                   save_pyramid=False)
+
+        result, _, axes_out, _ = read_zarr(out)
+        assert not isinstance(result, list)
+        assert axes_out == "YXS"
+        np.testing.assert_array_equal(np.asarray(result), arr)
+
     def test_reads_use_shard_sized_dask_chunks(self, tmp_path, small_layout, monkeypatch):
         from insitupy.images import _zarr_layout
 
