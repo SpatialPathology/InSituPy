@@ -1,3 +1,15 @@
+"""Image axes handling: one canonical in-memory axis order.
+
+- **Canonical in-memory axes:** ``"YX"`` grayscale; ``"YXS"`` RGB (3 samples) or RGBA (4 samples);
+  ``"CYX"`` multi-channel. ``ImageData`` stores only ``YX`` and ``YXS`` (it splits ``CYX``).
+- **Readers** that return an axes string (``read_image``, ``read_zarr``) return canonical axes and
+  data in that order. Singleton extra axes are dropped.
+- **RGB** is the letter ``S`` in canonical axes. ``ImageData.metadata[name]["rgb"] == (axes == "YXS")``
+  always.
+- **Array functions with an** ``axes`` **argument** (``apply_warp``, ``register_images_standalone``)
+  accept any permutation of ``YX``, ``YX`` + ``S`` or ``YX`` + ``C`` and return the input layout.
+- **Writers** decide the disk order (``write_zarr``: ``SYX``; ``write_ome_tiff``: interleaved ``YXS``).
+"""
 from warnings import warn
 
 
@@ -149,47 +161,108 @@ def normalize_axes_and_shape(img, axes: str):
 
     return img, axes
 
-def _transpose_to_standard_axes(img, axes: str):
+def _canonical_permutation(axes: str) -> tuple[tuple[int, ...], str]:
+    """Return the permutation that brings *axes* into canonical order, and the canonical string.
+
+    *axes* must be a permutation of ``"YX"``, ``"YX"`` + ``"S"`` or ``"YX"`` + ``"C"`` (no other
+    letters, no repeats). Applying the permutation with ``arr.transpose(perm)`` yields ``"YX"``,
+    ``"YXS"`` or ``"CYX"``; ``np.argsort(perm)`` restores the input layout.
+
+    Raises:
+        ValueError: If *axes* is not a supported axes string.
     """
-    Transpose image to standard axis order: YX, CYX, or YXS.
+    letters = sorted(axes)
+    if letters == sorted("YX"):
+        canon = "YX"
+    elif letters == sorted("YXS"):
+        canon = "YXS"
+    elif letters == sorted("YXC"):
+        canon = "CYX"
+    else:
+        raise ValueError(
+            f"Unsupported image axes '{axes}'. Expected an order of 'YX' (grayscale), "
+            "'YX' plus 'S' (RGB/RGBA) or 'YX' plus 'C' (multi-channel)."
+        )
+    perm = tuple(axes.index(ax) for ax in canon)
+    return perm, canon
+
+
+def _canonicalize_axes(img, axes: str, *, rgb: bool | None = None):
+    """Return ``(img, axes)`` in canonical order: ``"YX"``, ``"YXS"`` (3 or 4 samples) or ``"CYX"``.
+
+    Legacy ``CYX`` metadata quirks are fixed first (:func:`normalize_axes_and_shape`). Extra axes
+    (``T``, ``Z``, ...) and channel axes of length 1 are dropped.
 
     Args:
-        img: Dask array or list of dask arrays (image pyramid)
-        axes: String describing current axis configuration (e.g., "CYX", "YXS", "TCYX")
+        img: numpy or dask array, or a pyramid list of them (every level is treated the same;
+            dask stays lazy).
+        axes: Axes string of *img*, e.g. ``"SYX"``, ``"TYXS"`` or ``"CYX"``.
+        rgb: ``None`` keeps the letters. ``True`` treats the channel axis as colour samples
+            (``S``), ``False`` as separate channels (``C``).
 
-    Returns:
-        Tuple of (transposed_img, new_axes_string)
-        - transposed_img: Image with axes in standard order
-        - new_axes_string: Updated axes string ("YX", "CYX", or "YXS")
+    Raises:
+        ValueError: For extra axes longer than 1, both a ``C`` and an ``S`` axis, ``rgb=True``
+            without a channel axis, an ``S`` axis with other than 3 or 4 samples, or unknown
+            or repeated letters.
     """
     img, axes = normalize_axes_and_shape(img, axes)
-    axes_obj = ImageAxes(axes)
+    is_pyramid = isinstance(img, list)
+    levels = img if is_pyramid else [img]
+    shape = tuple(levels[0].shape)
 
-    # Determine target axis order and transpose if necessary
-    if axes_obj.C is not None:
-        # Multi-channel (C) or RGB (S) image - target: CYX or YXS
-        if axes_obj.is_rgb:
-            target_axes = "YXS"
-            target_order = [axes_obj.Y, axes_obj.X, axes_obj.C]
-        else:
-            target_axes = "CYX"
-            target_order = [axes_obj.C, axes_obj.Y, axes_obj.X]
-    else:
-        # Grayscale image - target: YX
-        target_axes = "YX"
-        target_order = [axes_obj.Y, axes_obj.X]
+    if len(set(axes)) != len(axes):
+        raise ValueError(f"Image axes '{axes}' contain a repeated letter.")
 
-    # Only transpose if current order differs from target
-    current_order = list(range(len(img.shape) if not isinstance(img, list) else len(img[0].shape)))
-    if target_order != current_order:
-        if isinstance(img, list):
-            # Handle image pyramid (list of dask arrays)
-            img = [arr.transpose(target_order) for arr in img]
-        else:
-            # Handle single dask array
-            img = img.transpose(target_order)
+    # drop singleton extra axes and singleton channel axes
+    drop = []
+    for k, ax in enumerate(axes):
+        if ax in "YX":
+            continue
+        if ax not in "CS" and shape[k] != 1:
+            raise ValueError(
+                f"Axis '{ax}' of '{axes}' has length {shape[k]}. Only 2D images with an optional "
+                "channel axis are supported (no time series or z-stacks)."
+            )
+        if shape[k] == 1:
+            drop.append(k)
+    if drop:
+        levels = [lvl.squeeze(axis=tuple(drop)) for lvl in levels]
+        axes = "".join(ax for k, ax in enumerate(axes) if k not in drop)
+        shape = tuple(levels[0].shape)
 
-        return img, target_axes
-    else:
-        # No transposition needed
-        return img, axes
+    if "C" in axes and "S" in axes:
+        raise ValueError(
+            f"Image axes '{axes}' (shape {shape}) have both a 'C' and an 'S' axis. "
+            "Multi-channel RGB images are not supported."
+        )
+
+    if rgb is True:
+        if "C" not in axes and "S" not in axes:
+            raise ValueError(
+                f"is_rgb=True, but the image has no channel axis (axes '{axes}', shape {shape})."
+            )
+        axes = axes.replace("C", "S")
+    elif rgb is False:
+        axes = axes.replace("S", "C")
+
+    if "S" in axes:
+        n = shape[axes.index("S")]
+        if n not in (3, 4):
+            raise ValueError(
+                f"An 'S' axis holds 3 (RGB) or 4 (RGBA) samples, got {n} (axes '{axes}', shape "
+                f"{shape}). Label the axis 'C' for multi-channel data."
+            )
+
+    perm, canon = _canonical_permutation(axes)
+    if perm != tuple(range(len(perm))):
+        levels = [lvl.transpose(perm) for lvl in levels]
+
+    return (levels if is_pyramid else levels[0]), canon
+
+
+def _transpose_to_standard_axes(img, axes: str):
+    """Transpose image to the canonical axis order (``YX``, ``CYX`` or ``YXS``).
+
+    Thin wrapper around :func:`_canonicalize_axes`, kept for existing callers.
+    """
+    return _canonicalize_axes(img, axes)

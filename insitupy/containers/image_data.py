@@ -15,7 +15,7 @@ from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy.images.axes import (
     ImageAxes,
-    _transpose_to_standard_axes,
+    _canonicalize_axes,
 )
 from insitupy.images.io import (
     get_zarr_source_path,
@@ -151,7 +151,9 @@ class ImageData(DeepCopyMixin):
             axes: Axis specification (e.g., 'YX', 'CYX', 'YXS'). Required if image is an array.
             pixel_size: Physical pixel size in um/pixel. Required if image is an array.
             ome_meta: OME metadata dictionary.
-            is_rgb: Whether the image is RGB. Auto-detected if None.
+            is_rgb: None: decided by the axes (``S`` = RGB). True: the single channel axis holds
+                RGB/RGBA samples (3 or 4). False: the channel axis holds separate channels, which
+                are added as separate images.
             transformation_matrix: Optional affine transformation matrix to apply to the image.
             reference_image: Name of the reference image in this ImageData object.
             overwrite: If True, overwrite existing image(s) with the same name(s).
@@ -183,19 +185,18 @@ class ImageData(DeepCopyMixin):
         else:
             raise TypeError(f"`image` must be a numpy/dask array or a file path. Got: {type(image)}")
 
-        # Transpose image to standard axis order (YX, CYX, or YXS)
-        img, axes = _transpose_to_standard_axes(img, axes)
+        # Transpose image to canonical axis order (YX, CYX, or YXS)
+        img, axes = _canonicalize_axes(img, axes, rgb=is_rgb)
 
         # Get image shape
         img_shape = img[0].shape if isinstance(img, list) else img.shape
 
-        # Determine if this is a multi-channel image that should be split
-        axes_config = ImageAxes(axes)
-        is_multichannel = axes == "CYX" or (axes_config.C is not None and axes != "YXS")
+        # Multi-channel images are split into separate entries
+        is_multichannel = axes == "CYX"
 
         # Handle channel names for multi-channel images
         if is_multichannel:
-            n_channels = img_shape[axes_config.C]
+            n_channels = img_shape[0]
 
             # Extract or validate channel names
             if channel_names is None:
@@ -244,9 +245,9 @@ class ImageData(DeepCopyMixin):
                 # Extract single channel
                 if isinstance(img, list):
                     # Handle image pyramid
-                    channel_img = [np.take(level, i, axis=axes_config.C) for level in img]
+                    channel_img = [np.take(level, i, axis=0) for level in img]
                 else:
-                    channel_img = np.take(img, i, axis=axes_config.C)
+                    channel_img = np.take(img, i, axis=0)
 
                 # Determine new axes (remove channel dimension)
                 channel_axes = "YX"
@@ -259,7 +260,6 @@ class ImageData(DeepCopyMixin):
                     pixel_size=pixel_size,
                     filename=filename,
                     ome_meta=ome_meta,
-                    is_rgb=False,
                     transformation_matrix=transformation_matrix,
                     reference_image=reference_image,
                     overwrite=overwrite,
@@ -293,7 +293,6 @@ class ImageData(DeepCopyMixin):
                 pixel_size=pixel_size,
                 filename=filename,
                 ome_meta=ome_meta,
-                is_rgb=is_rgb,
                 transformation_matrix=transformation_matrix,
                 reference_image=reference_image,
                 overwrite=overwrite,
@@ -308,7 +307,6 @@ class ImageData(DeepCopyMixin):
         pixel_size: Number,
         filename: str | None,
         ome_meta: dict,
-        is_rgb: bool | None,
         transformation_matrix: np.ndarray | str | os.PathLike | Path | None,
         reference_image: str | None,
         overwrite: bool,
@@ -403,20 +401,8 @@ class ImageData(DeepCopyMixin):
 
         self._metadata[name]['pixel_size'] = pixel_size
 
-        # check whether the image is RGB or not
-        if is_rgb is None:
-            if len(img_shape) == 3:
-                channels = img_shape[2]
-                if channels == 3:
-                    self._metadata[name]["rgb"] = True
-                else:
-                    self._metadata[name]["rgb"] = False
-            elif len(img_shape) == 2:
-                self._metadata[name]["rgb"] = False
-            else:
-                raise ValueError(f"Unknown image shape: {img_shape}")
-        else:
-            self._metadata[name]["rgb"] = is_rgb
+        # RGB has one source of truth: the canonical axes
+        self._metadata[name]["rgb"] = axes == "YXS"
 
     def remove_image(
         self,

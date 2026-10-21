@@ -211,3 +211,33 @@ def test_grayscale_multichannel_is_channel_mean():
     assert axes == "YX"
     assert gray.shape == (30, 20)
     assert np.all(gray == 105)
+
+# ---------------------------------------------------------------------------
+# Axis order: channel-first RGB moving gives the canonical result (WP-12)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV required")
+def test_channel_first_rgb_moving_matches_yxs():
+    """SYX moving with H&E deconvolution and flip test equals the YXS run, in SYX layout."""
+    pytest.importorskip("skimage", reason="scikit-image required")
+    from skimage.data import astronaut
+
+    fixed = astronaut()[::2, ::2]  # (256, 256, 3) uint8, textured RGB
+    h, w = fixed.shape[:2]
+    M_gt = _cv2.getRotationMatrix2D((w / 2, h / 2), 4.0, 1.0)
+    M_gt[:, 2] += (12, 8)
+    moving = _cv2.warpAffine(fixed, M_gt, (w, h), flags=_cv2.INTER_LINEAR)
+
+    kwargs = dict(
+        fixed=fixed, axes_fixed="YXS", deconvolve_moving=True, deconvolve_fixed=True,
+        decon_scale_factor=1.0, max_width=None, flann=False, min_good_matches=5,
+        test_flipping=True, verbose=False,
+    )
+    reg_yxs, T_yxs = register_images_standalone(moving, axes_moving="YXS", **kwargs)
+    reg_syx, T_syx = register_images_standalone(
+        np.moveaxis(moving, -1, 0), axes_moving="SYX", **kwargs
+    )
+
+    np.testing.assert_allclose(T_syx, T_yxs)
+    assert reg_syx.shape == (3, h, w)
+    np.testing.assert_array_equal(reg_syx, np.moveaxis(reg_yxs, -1, 0))

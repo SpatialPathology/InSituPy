@@ -136,6 +136,32 @@ class TestPixelSizeFidelityAcrossRoundtrip:
         assert reconstructed.images.metadata["dapi"]["pixel_size"] == pytest.approx(0.5)
 
 
+# ── RGBA images (WP-12: used to fail with a reshape error) ────────────────────
+
+class TestRgbaImageRoundtrip:
+    def test_rgba_image_survives_roundtrip(self, tmp_path):
+        # large enough for the exported multiscale pyramid
+        rgba = np.random.default_rng(7).integers(0, 256, (512, 384, 4), dtype=np.uint8)
+        xd = make_insitudata(n_cells=2)
+        xd.images.add_image(rgba, channel_names="he", axes="YXS", pixel_size=0.5, verbose=False)
+
+        sdata = convert_to_spatialdata(xd)
+        (key,) = [k for k in sdata.images if k.endswith("he")]
+        base = sdata.images[key]
+        base = base["scale0"]["image"] if hasattr(base, "children") else base
+        assert list(base.coords["c"].values) == ["r", "g", "b", "a"]
+        np.testing.assert_array_equal(np.moveaxis(np.asarray(base), 0, -1), rgba)
+
+        sdata2 = roundtrip_through_zarr(sdata, tmp_path, name="rgba.zarr")
+        reconstructed = convert_from_spatialdata(sdata2, verbose=False)
+        assert reconstructed.images.names == ["he"]
+        meta = reconstructed.images.metadata["he"]
+        assert meta["axes"] == "YXS"
+        assert meta["rgb"] is True
+        img = reconstructed.images["he"]
+        np.testing.assert_array_equal(np.asarray(img[0] if isinstance(img, list) else img), rgba)
+
+
 # ── Transcripts feature_name dtype (Bug 1: MemoryError on .show()) ─────────────
 
 class TestTranscriptsFeatureNameStaysCategorical:
