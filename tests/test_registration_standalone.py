@@ -6,6 +6,7 @@ import pytest
 from insitupy._exceptions import NotEnoughFeatureMatchesError
 from insitupy.images.registration import (
     RegistrationConfig,
+    _convert_to_grayscale,
     load_and_scale_images,
     register_images_standalone,
 )
@@ -190,9 +191,10 @@ def test_grayscale_channels_first_rgb_matches_channels_last():
     rng = np.random.default_rng(0)
     yxs = rng.integers(0, 256, size=(40, 50, 3), dtype=np.uint8)
     gray_yxs, axes_yxs = _grayscale_features(yxs, "YXS")
-    gray_syx, axes_syx = _grayscale_features(np.moveaxis(yxs, -1, 0), "SYX")
+    # the stage functions take canonical axes only; the helper itself handles S anywhere
+    gray_syx = _convert_to_grayscale(np.moveaxis(yxs, -1, 0), "SYX")
 
-    assert axes_yxs == axes_syx == "YX"
+    assert axes_yxs == "YX"
     assert gray_syx.shape == (40, 50)
     np.testing.assert_array_equal(gray_syx, gray_yxs)
     # RGB luminance weights (not BGR)
@@ -241,3 +243,10 @@ def test_channel_first_rgb_moving_matches_yxs():
     np.testing.assert_allclose(T_syx, T_yxs)
     assert reg_syx.shape == (3, h, w)
     np.testing.assert_array_equal(reg_syx, np.moveaxis(reg_yxs, -1, 0))
+
+def test_stage_functions_reject_non_canonical_axes():
+    """Direct stage calls with SYX would flip/grayscale the wrong axis, so they raise."""
+    img = np.zeros((3, 32, 32), dtype=np.uint8)
+    config = RegistrationConfig(axes_moving="SYX", axes_fixed="YX", verbose=False)
+    with pytest.raises(ValueError, match="canonical order"):
+        load_and_scale_images(img, img[0], config)

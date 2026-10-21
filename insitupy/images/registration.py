@@ -532,7 +532,8 @@ def load_and_scale_images(
 
     Raises:
         ImportError: If OpenCV is not installed.
-        ValueError: If deconvolution is requested for non-RGB images.
+        ValueError: If the config axes are not canonical (``YX``, ``YXS`` or ``CYX``), or if
+            deconvolution is requested for non-RGB images.
     """
     if not HAS_OPENCV:
         raise ImportError(
@@ -541,6 +542,15 @@ def load_and_scale_images(
         )
 
     verbose = config.verbose
+
+    # the stages assume canonical axes (channel-last RGB); register_images_standalone converts
+    for role, axes in (("axes_moving", config.axes_moving), ("axes_fixed", config.axes_fixed)):
+        if _canonical_permutation(axes)[1] != axes:
+            raise ValueError(
+                f"RegistrationConfig.{role}='{axes}' is not in canonical order ('YX', 'YXS' or "
+                "'CYX'). Transpose the image first, or use register_images_standalone, which "
+                "accepts any axis order."
+            )
 
     # --- Compute dask arrays to numpy ---
     if isinstance(moving, da.Array):

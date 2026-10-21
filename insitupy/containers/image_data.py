@@ -141,7 +141,8 @@ class ImageData(DeepCopyMixin):
         """Add image data to the ImageData object.
 
         For multi-channel images ("CYX" axes), each channel is added as a separate entry.
-        RGB images ("YXS" axes with 3 channels) are kept together as a single entry.
+        RGB/RGBA images ("YXS" axes with 3 or 4 samples, any order such as "SYX" is accepted)
+        are kept together as a single entry.
 
         Args:
             image: Either a dask/numpy array or a path to an image file.
