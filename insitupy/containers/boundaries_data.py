@@ -13,7 +13,6 @@ import pandas as pd
 import zarr
 from shapely import Polygon
 
-from insitupy._constants import DEFAULT_CHUNK_SIZE_X, DEFAULT_CHUNK_SIZE_Y
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
@@ -22,6 +21,8 @@ from insitupy.containers._zarr_compat import (
     _get_zarr_store,
     _write_dask_array_to_zarr,
 )
+from insitupy.images import ngff
+from insitupy.images._zarr_layout import write_level
 from insitupy.images.utils import (
     _efficiently_resize_array,
     _get_scale_factor_from_max_res,
@@ -49,6 +50,25 @@ def _relabel_with_lut(mask: da.core.Array, lut: np.ndarray) -> da.core.Array:
         out[valid] = lut[block[valid]]
         return out
     return da.map_blocks(_apply, mask, dtype=lut.dtype)
+
+
+def _as_uint32_levels(name: str, levels: list) -> list:
+    """Cast the pyramid levels of mask layer *name* to uint32, failing on anything but integer labels."""
+    levels = [da.asarray(lv) for lv in levels]
+    dtype = levels[0].dtype
+    if not np.issubdtype(dtype, np.integer):
+        raise TypeError(
+            f"Mask layer '{name}' has dtype {dtype}: segmentation masks must be integer labels."
+        )
+    if dtype == np.uint32:
+        return levels
+    if not (np.issubdtype(dtype, np.unsignedinteger) and dtype.itemsize <= 4) and levels[0].size > 0:
+        mn, mx = da.compute(levels[0].min(), levels[0].max())
+        if mn < 0 or mx > np.iinfo(np.uint32).max:
+            raise ValueError(
+                f"Mask layer '{name}' has labels in [{mn}, {mx}], which do not fit uint32."
+            )
+    return [lv.astype(np.uint32) for lv in levels]
 
 
 class BoundariesData(DeepCopyMixin):
@@ -233,6 +253,21 @@ class BoundariesData(DeepCopyMixin):
         """
         lut = self.label_lut(mask_key)
         return mask if lut is None else _relabel_with_lut(mask, lut)
+
+    def _labels_attr(self, mask_key: str) -> dict | None:
+        """The ``labels`` attr of a saved mask layer: which array of boundaries.zarr lists its
+        raster labels, as ``raster label = array value + offset`` (0 is background).
+
+        Same rule as :meth:`label_ids_for`. None for other layers, or without ``seg_mask_value``.
+        """
+        if (mask_key == "nuclei" and self._nucleus_to_cell_map is not None
+                and self.nucleus_map_is_consistent()):
+            # nucleus indices are 0-based, raster labels 1-based
+            return {"array": "nucleus_to_cell_map/nucleus_index", "offset": 1}
+        if mask_key in ("cells", "nuclei") and self._seg_mask_value is not None:
+            # v1.x nuclei without a map are labelled with their cell's seg_mask_value
+            return {"array": "seg_mask_value", "offset": 0}
+        return None
 
     @property
     def is_empty(self):
@@ -534,6 +569,33 @@ class BoundariesData(DeepCopyMixin):
         if suffix != "zarr":
             raise InvalidFileTypeError(allowed_types=[".zarr"], received_type=suffix)
 
+        # prepare all layers first, so an unsupported mask fails before the store is created
+        layers = {}
+        for n, meta in self._metadata.items():
+            bound_data = self[n]
+            if bound_data is None:
+                continue
+
+            # determine scale factor
+            scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
+
+            # attrs written to disk; self._metadata must stay untouched so the
+            # in-memory pixel size keeps describing the in-memory raster (a capped
+            # save downsamples only the on-disk copy, never the in-memory object)
+            meta_out = dict(meta)
+            if scale_factor is not None:
+                if isinstance(bound_data, list):
+                    bound_data = bound_data[0]
+                bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
+                bound_data = da.from_array(bound_data) # convert to dask array
+                meta_out['pixel_size'] = max_resolution # update on-disk metadata only
+
+            # boundary masks are always stored as a multi-resolution pyramid
+            if not isinstance(bound_data, list):
+                bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
+
+            layers[n] = (_as_uint32_levels(n, bound_data), meta_out)
+
         # Use ExitStack to handle context manager differences between Zarr v2 and v3
         with ExitStack() as stack:
             dirstore = _get_zarr_store(path, mode="w")
@@ -542,36 +604,22 @@ class BoundariesData(DeepCopyMixin):
             if not ZARR_V3:
                 dirstore = stack.enter_context(dirstore)
 
-            for n, meta in self._metadata.items():
-                bound_data = self[n]
+            for n, (levels, meta_out) in layers.items():
+                for i, b in enumerate(levels):
+                    write_level(dirstore, f"masks/{n}/{i}", b, "YX", sharded=True)
 
-                # determine scale factor
-                scale_factor = _get_scale_factor_from_max_res(pixel_size=meta['pixel_size'], max_resolution=max_resolution)
-
-                if bound_data is not None:
-                    # attrs written to disk; self._metadata must stay untouched so the
-                    # in-memory pixel size keeps describing the in-memory raster (a capped
-                    # save downsamples only the on-disk copy, never the in-memory object)
-                    meta_out = dict(meta)
-                    if scale_factor is not None:
-                        if isinstance(bound_data, list):
-                            bound_data = bound_data[0]
-                        bound_data = _efficiently_resize_array(array=bound_data, scale_factor=scale_factor)
-                        bound_data = da.from_array(bound_data) # convert to dask array
-                        meta_out['pixel_size'] = max_resolution # update on-disk metadata only
-
-                    # boundary masks are always stored as a multi-resolution pyramid
-                    if not isinstance(bound_data, list):
-                        bound_data = create_img_pyramid(img=bound_data, axes="YX", nsubres=6)
-
-                    for i, b in enumerate(bound_data):
-                        comp = f"masks/{n}/{i}"
-                        b = b.rechunk((DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X))
-                        _write_dask_array_to_zarr(dirstore, comp, b)
-
-                    # add boundaries metadata to zarr.zip
-                    store = zarr.open(dirstore, mode="a")
-                    store[f"masks/{n}"].attrs.put(meta_out)
+                # NGFF image-label attrs next to the InSituPy metadata (no image-label
+                # "source": the root of boundaries.zarr is not an image)
+                attrs = dict(meta_out)
+                labels = self._labels_attr(n)
+                if labels is not None:
+                    attrs["labels"] = labels
+                attrs["ome"] = ngff.ome_attrs(
+                    multiscales=ngff.multiscales(n, "YX", meta_out["pixel_size"], [b.shape for b in levels]),
+                    image_label=True,
+                )
+                store = zarr.open(dirstore, mode="a")
+                store[f"masks/{n}"].attrs.put(attrs)
 
             # save cell names
             _write_dask_array_to_zarr(dirstore, "cell_names", self.cell_names)

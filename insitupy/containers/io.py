@@ -30,6 +30,7 @@ from insitupy.containers.multi_spatial_units_data import MultiSpatialUnitsData
 from insitupy.containers.shapes_data import AnnotationsData, RegionsData, ShapesData
 from insitupy.containers.spatial_units_data import SpatialUnitsData
 from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
+from insitupy.images._zarr_layout import working_chunks
 from insitupy.images.io import _sorted_pyramid_levels
 from insitupy.utils.utils import (
     _generate_time_based_uid,
@@ -202,14 +203,10 @@ def _read_boundaries_from_celldata_zarr(
                 bound_data[k] = []
                 for subres in subresolutions:
                     if not subres.startswith("."):
-                        if zipped:
-                            bound_data[k].append(
-                                da.from_zarr(dirstore, component=f"{comp}/{subres}").persist()
-                            )
-                        else:
-                            bound_data[k].append(
-                                da.from_zarr(dirstore, component=f"{comp}/{subres}")
-                            )
+                        arr = root[f"{comp}/{subres}"]
+                        chunks = working_chunks(arr.chunks, getattr(arr, "shards", None), "YX")
+                        level = da.from_zarr(dirstore, component=f"{comp}/{subres}", chunks=chunks)
+                        bound_data[k].append(level.persist() if zipped else level)
 
                 # retrieve boundaries metadata
                 store = zarr.open(dirstore)
