@@ -447,7 +447,8 @@ class TestMaskLayout:
 
             attrs = grp.attrs.asdict()
             assert attrs["pixel_size"] == 0.5
-            assert attrs["labels"] == ("seg_mask_value" if k == "cells" else "nucleus_index")
+            # no nucleus map: the nuclei are labelled with their cell's seg_mask_value
+            assert attrs["labels"] == {"array": "seg_mask_value", "offset": 0}
             ms = attrs["ome"]["multiscales"][0]
             assert [a["name"] for a in ms["axes"]] == ["y", "x"]
             assert "image-label" in attrs["ome"]
@@ -459,6 +460,35 @@ class TestMaskLayout:
             assert level.chunksize == tuple(min(64, n) for n in level.shape)
         np.testing.assert_array_equal(back["cells"][0].compute(), cells.astype(np.uint32))
         np.testing.assert_array_equal(back["nuclei"][0].compute(), nuclei.astype(np.uint32))
+
+    @pytest.mark.parametrize("with_map", [True, False])
+    def test_labels_attr_resolves_to_the_raster_labels(self, tmp_path, with_map):
+        # an external reader follows the attr: raster label = array value + offset
+        cells = np.zeros((40, 40), dtype=np.uint32)
+        cells[:20, :20], cells[:20, 20:], cells[20:, :20] = 1, 2, 3
+        nuclei = np.zeros_like(cells)
+        if with_map:
+            # c0 and c1 have two nuclei each (raster labels 1-4), c2 none; 4 labels for 3
+            # cells, so seg_mask_value (1-3) would not match the raster
+            nuclei[2:6, 2:6], nuclei[10:14, 10:14], nuclei[2:6, 25:29], nuclei[10:14, 30:34] = 1, 2, 3, 4
+            nmap = {0: "c0", 1: "c0", 2: "c1", 3: "c1"}
+        else:
+            # v1.x: nuclei carry their cell's seg_mask_value
+            nuclei[2:6, 2:6], nuclei[2:6, 25:29], nuclei[25:29, 2:6] = 1, 2, 3
+            nmap = None
+        b = BoundariesData(cell_names=["c0", "c1", "c2"], seg_mask_value=[1, 2, 3],
+                           nucleus_to_cell_map=nmap)
+        b.add_boundaries(cell_boundaries=cells, nuclei_boundaries=nuclei, pixel_size=1)
+        path = tmp_path / "boundaries.zarr"
+        b.save(path)
+
+        root = zarr.open_group(path, mode="r")
+        for k in ("cells", "nuclei"):
+            grp = root[f"masks/{k}"]
+            labels = grp.attrs["labels"]
+            listed = set((root[labels["array"]][:] + labels["offset"]).tolist())
+            in_raster = set(np.unique(grp["0"][:]).tolist()) - {0}
+            assert listed == in_raster, (k, labels)
 
     @pytest.mark.parametrize("dtype,bad", [(np.int64, 2**32), (np.int32, -1)])
     def test_out_of_range_labels_fail_before_any_write(self, tmp_path, dtype, bad):

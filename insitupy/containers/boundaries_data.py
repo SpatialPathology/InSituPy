@@ -52,10 +52,6 @@ def _relabel_with_lut(mask: da.core.Array, lut: np.ndarray) -> da.core.Array:
     return da.map_blocks(_apply, mask, dtype=lut.dtype)
 
 
-# array inside boundaries.zarr that holds the label value of each mask layer
-_MASK_LABELS_ARRAY = {"cells": "seg_mask_value", "nuclei": "nucleus_index"}
-
-
 def _as_uint32_levels(name: str, levels: list) -> list:
     """Cast the pyramid levels of mask layer *name* to uint32, failing on anything but integer labels."""
     levels = [da.asarray(lv) for lv in levels]
@@ -257,6 +253,21 @@ class BoundariesData(DeepCopyMixin):
         """
         lut = self.label_lut(mask_key)
         return mask if lut is None else _relabel_with_lut(mask, lut)
+
+    def _labels_attr(self, mask_key: str) -> dict | None:
+        """The ``labels`` attr of a saved mask layer: which array of boundaries.zarr lists its
+        raster labels, as ``raster label = array value + offset`` (0 is background).
+
+        Same rule as :meth:`label_ids_for`. None for other layers, or without ``seg_mask_value``.
+        """
+        if (mask_key == "nuclei" and self._nucleus_to_cell_map is not None
+                and self.nucleus_map_is_consistent()):
+            # nucleus indices are 0-based, raster labels 1-based
+            return {"array": "nucleus_to_cell_map/nucleus_index", "offset": 1}
+        if mask_key in ("cells", "nuclei") and self._seg_mask_value is not None:
+            # v1.x nuclei without a map are labelled with their cell's seg_mask_value
+            return {"array": "seg_mask_value", "offset": 0}
+        return None
 
     @property
     def is_empty(self):
@@ -600,8 +611,9 @@ class BoundariesData(DeepCopyMixin):
                 # NGFF image-label attrs next to the InSituPy metadata (no image-label
                 # "source": the root of boundaries.zarr is not an image)
                 attrs = dict(meta_out)
-                if n in _MASK_LABELS_ARRAY:
-                    attrs["labels"] = _MASK_LABELS_ARRAY[n]
+                labels = self._labels_attr(n)
+                if labels is not None:
+                    attrs["labels"] = labels
                 attrs["ome"] = ngff.ome_attrs(
                     multiscales=ngff.multiscales(n, "YX", meta_out["pixel_size"], [b.shape for b in levels]),
                     image_label=True,
