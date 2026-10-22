@@ -19,6 +19,7 @@ from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to
 from insitupy._mixins import DeepCopyMixin
 from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
+from insitupy.containers._viewer_table import write_viewer_table
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +357,11 @@ class CellData(DeepCopyMixin):
 
             # add entry for boundaries to metadata
             celldata_metadata["boundaries"] = Path(relpath(bound_file, path)).as_posix()
+
+        # viewer sidecar (never read by InSituPy), written in the same commit as the table
+        side_file = path / "X_csc.zarr"
+        write_viewer_table(self._table, self._boundaries, side_file)
+        celldata_metadata["x_csc"] = Path(relpath(side_file, path)).as_posix()
 
         # add version to metadata
         celldata_metadata["version"] = __version__

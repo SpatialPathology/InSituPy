@@ -12,6 +12,7 @@ from contextlib import ExitStack
 import dask.array as da
 import numpy as np
 import pytest
+import zarr
 
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.containers._zarr_compat import (
@@ -399,3 +400,111 @@ class TestConstructionAndReadGuards:
 
         with pytest.raises(ValueError, match="neither"):
             _read_boundaries_from_celldata_zarr(path)
+
+
+# ── Mask layout: uint32, NGFF image-label, sharded (viewer milestone M2) ───────
+
+
+@pytest.fixture
+def small_layout(monkeypatch):
+    """Shrink shards/chunks so a small raster spans several shards."""
+    monkeypatch.setattr("insitupy.images._zarr_layout.ZARR_SHARD_SIZE", 64)
+    monkeypatch.setattr("insitupy.images._zarr_layout.ZARR_CHUNK_SIZE", 16)
+    monkeypatch.setattr("insitupy.images._zarr_layout.DEFAULT_CHUNK_SIZE_X", 64)
+    monkeypatch.setattr("insitupy.images._zarr_layout.DEFAULT_CHUNK_SIZE_Y", 64)
+
+
+def _mask_boundaries(mask, pixel_size=1, nuclei=None):
+    n = int(mask.max())
+    b = BoundariesData(cell_names=[f"c{i}" for i in range(n)], seg_mask_value=list(range(1, n + 1)))
+    b.add_boundaries(cell_boundaries=mask, nuclei_boundaries=nuclei, pixel_size=pixel_size)
+    return b
+
+
+def _random_mask(shape, n, dtype, seed=0):
+    return np.random.default_rng(seed).integers(0, n + 1, size=shape).astype(dtype)
+
+
+class TestMaskLayout:
+    def test_masks_are_uint32_sharded_and_ngff(self, tmp_path, small_layout):
+        cells = _random_mask((150, 100), 20, np.int64, seed=1)
+        nuclei = _random_mask((150, 100), 20, np.int64, seed=2)
+        b = _mask_boundaries(cells, pixel_size=0.5, nuclei=nuclei)
+        path = tmp_path / "boundaries.zarr"
+        b.save(path)
+
+        root = zarr.open_group(path, mode="r")
+        for k, expected in (("cells", cells), ("nuclei", nuclei)):
+            grp = root[f"masks/{k}"]
+            levels = sorted(a for a in grp.array_keys())
+            assert levels
+            for lv in levels:
+                arr = grp[lv]
+                assert arr.dtype == np.uint32
+                assert arr.chunks == (16, 16)
+                assert arr.shards == (64, 64)
+            np.testing.assert_array_equal(grp["0"][:], expected.astype(np.uint32))
+
+            attrs = grp.attrs.asdict()
+            assert attrs["pixel_size"] == 0.5
+            assert attrs["labels"] == ("seg_mask_value" if k == "cells" else "nucleus_index")
+            ms = attrs["ome"]["multiscales"][0]
+            assert [a["name"] for a in ms["axes"]] == ["y", "x"]
+            assert "image-label" in attrs["ome"]
+            assert len(ms["datasets"]) == len(levels)
+
+        back = _read_boundaries_from_celldata_zarr(path)
+        assert back["cells"][0].chunksize == (64, 64)
+        for level in back["cells"]:
+            assert level.chunksize == tuple(min(64, n) for n in level.shape)
+        np.testing.assert_array_equal(back["cells"][0].compute(), cells.astype(np.uint32))
+        np.testing.assert_array_equal(back["nuclei"][0].compute(), nuclei.astype(np.uint32))
+
+    @pytest.mark.parametrize("dtype,bad", [(np.int64, 2**32), (np.int32, -1)])
+    def test_out_of_range_labels_fail_before_any_write(self, tmp_path, dtype, bad):
+        mask = np.zeros((20, 20), dtype=dtype)
+        mask[0, 0] = 1
+        mask[1, 1] = bad
+        b = _mask_boundaries(np.where(mask == 1, 1, 0).astype(dtype))
+        # hand the out-of-range raster to the layer after construction
+        b._data["cells"] = da.from_array(mask)
+        path = tmp_path / "boundaries.zarr"
+        with pytest.raises(ValueError, match="cells"):
+            b.save(path)
+        assert not path.exists()
+
+    def test_float_mask_raises_type_error(self, tmp_path):
+        b = _mask_boundaries(np.array([[0, 1], [1, 0]], dtype=np.uint32))
+        b._data["cells"] = da.from_array(np.array([[0.0, 1.0], [1.0, 0.0]]))
+        path = tmp_path / "boundaries.zarr"
+        with pytest.raises(TypeError, match="integer labels"):
+            b.save(path)
+        assert not path.exists()
+
+    def test_layers_keep_their_own_pixel_size(self, tmp_path, small_layout):
+        cells = _random_mask((80, 80), 10, np.uint32, seed=3)
+        nuclei = _random_mask((80, 80), 10, np.int32, seed=4)
+        b = BoundariesData(cell_names=[f"c{i}" for i in range(10)], seg_mask_value=list(range(1, 11)))
+        b.add_boundaries(cell_boundaries=cells, nuclei_boundaries=nuclei,
+                         pixel_size=0.2125, nucleus_pixel_size=1.0)
+        path = tmp_path / "boundaries.zarr"
+        b.save(path)
+
+        back = _read_boundaries_from_celldata_zarr(path)
+        assert back.metadata["cells"]["pixel_size"] == 0.2125
+        assert back.metadata["nuclei"]["pixel_size"] == 1.0
+        np.testing.assert_array_equal(back["nuclei"][0].compute(), nuclei.astype(np.uint32))
+
+    def test_ome_zarr_reader_sees_label_node(self, tmp_path, small_layout):
+        pytest.importorskip("ome_zarr")
+        from ome_zarr.io import parse_url
+        from ome_zarr.reader import Reader
+
+        b = _mask_boundaries(_random_mask((150, 100), 20, np.uint32, seed=5))
+        path = tmp_path / "boundaries.zarr"
+        b.save(path)
+
+        nodes = list(Reader(parse_url(str(path / "masks" / "cells")))())
+        assert len(nodes) == 1
+        spec_names = [type(s).__name__ for s in nodes[0].specs]
+        assert "Label" in spec_names
