@@ -131,3 +131,27 @@ class TestShrtMaxGuardEndToEnd:
         peak_y, peak_x = np.unravel_index(np.argmax(warped), warped.shape)
         assert abs(int(peak_x) - 25) <= 1
         assert abs(int(peak_y) - 23) <= 1
+
+# ── Axis order: any layout in, same layout out (WP-12) ───────────────────────
+
+class TestAxisOrder:
+    M = np.array([[0.9, 0.2, 4.0], [-0.15, 1.1, -3.0]], dtype=np.float64)
+    size = (50, 40)  # (width, height)
+
+    def test_channel_first_rgb_matches_yxs(self):
+        img = np.random.default_rng(0).integers(0, 256, (48, 64, 3), dtype=np.uint8)
+
+        want = np.moveaxis(apply_warp(img, self.M, self.size, "YXS"), -1, 0)
+        got = apply_warp(np.moveaxis(img, -1, 0), self.M, self.size, "SYX")
+
+        assert got.shape == (3, 40, 50)
+        np.testing.assert_array_equal(got, want)
+
+    def test_channel_last_multichannel_matches_cyx(self):
+        img = np.random.default_rng(1).integers(0, 256, (2, 48, 64), dtype=np.uint8)
+
+        want = np.moveaxis(apply_warp(img, self.M, self.size, "CYX"), 0, -1)
+        got = apply_warp(np.moveaxis(img, 0, -1), self.M, self.size, "YXC")
+
+        assert got.shape == (40, 50, 2)
+        np.testing.assert_array_equal(got, want)

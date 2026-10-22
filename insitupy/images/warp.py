@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from insitupy._constants import SHRT_MAX
-from insitupy.images.axes import ImageAxes
+from insitupy.images.axes import ImageAxes, _canonical_permutation
 from insitupy.images.utils import fit_image_to_size_limit
 
 logger = logging.getLogger(__name__)
@@ -105,13 +105,21 @@ def apply_warp(
         image: Input numpy array. Shape must be consistent with ``axes``.
         M: 2×3 affine matrix or 3×3 perspective matrix (already in pixel space).
         output_size: ``(width, height)`` of the output image in pixels.
-        axes: Axis descriptor – one of ``'YX'``, ``'YXS'`` (RGB), or ``'CYX'``
-            (multichannel).
+        axes: Axis descriptor – any order of ``'YX'``, ``'YX'`` + ``'S'`` (RGB/RGBA) or
+            ``'YX'`` + ``'C'`` (multichannel), e.g. ``'YXS'``, ``'SYX'``, ``'CYX'``.
 
     Returns:
-        Warped numpy array with spatial dimensions ``(height, width)``.
+        Warped numpy array with spatial dimensions ``(height, width)``, in the axis order of
+        the input.
     """
     import cv2
+
+    # work in canonical order (YX, YXS or CYX) and return the input layout
+    perm, canon = _canonical_permutation(axes)
+    if perm != tuple(range(len(perm))):
+        canonical = np.ascontiguousarray(np.transpose(image, perm))
+        warped = apply_warp(canonical, M, output_size, canon)
+        return np.transpose(warped, np.argsort(perm))
 
     img_axes = ImageAxes(axes)
 

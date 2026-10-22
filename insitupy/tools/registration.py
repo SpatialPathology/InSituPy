@@ -184,14 +184,14 @@ def register_images(
     Raises:
         ValueError: If neither `image_to_be_registered` nor `image_path` is provided,
             or if both are provided at the same time.
-        ValueError: If inferred `axes_image` is "CYX"/"YXC" and `channel_name_for_registration` is None.
+        ValueError: If inferred `axes_image` is "CYX" and `channel_name_for_registration` is None.
         FileNotFoundError: If the image to be registered is not found.
         ValueError: If more than one image name is retrieved for histo images.
         ValueError: If no image name is found in the file.
         ValueError: If inferred `axes_image` has an unknown configuration.
         ValueError: If no channel indicator `C` is found in the image axes for IF images.
         ValueError: If inferred template axes metadata is missing.
-        ValueError: If deconvolve_template is True but inferred `axes_template` is not RGB (YXS/SYX).
+        ValueError: If deconvolve_template is True but inferred `axes_template` is not RGB (YXS).
         ValueError: If IF channel metadata is inconsistent (channel count mismatch, duplicates,
             missing registration channel, or no channels left to register).
         ValueError: If decon_scale_factor is not strictly positive.
@@ -282,14 +282,15 @@ def register_images(
             "Please ensure image metadata includes axes information."
         )
 
+    # read_image returns canonical axes: YX, YXS or CYX
     if axes_image == "YXS":
         image_type = "histo"
-    elif axes_image in ["CYX", "YXC"]:
+    elif axes_image == "CYX":
         image_type = "IF"
     else:
         raise ValueError(
-            f"Unknown inferred axes configuration '{axes_image}' for target image. "
-            "Expected 'YXS' for histology RGB or 'CYX'/'YXC' for IF images."
+            f"Image '{image_to_be_registered}' has axes '{axes_image}'. "
+            "Expected an RGB (H&E) image or a multi-channel IF image."
         )
 
     # make sure channel naming is consistent with image type
@@ -308,11 +309,7 @@ def register_images(
 
     # if image type is IF, the channel name for registration needs to be given
     if image_type == "IF" and channel_name_for_registration is None:
-        raise ValueError("For IF images (`axes_image` in {'CYX', 'YXC'}), `channel_name_for_registration` must be provided.")
-
-    # sometimes images are read with an empty time dimension in the first axis
-    if len(image.shape) == 4:
-        image = image[0]
+        raise ValueError("For IF images (`axes_image` 'CYX'), `channel_name_for_registration` must be provided.")
 
     if image_type == "IF":
         channel_axis = axes_image.find("C")
@@ -367,9 +364,9 @@ def register_images(
     min_good_matches = int(min_good_matches_per_area * image_area)
 
     # Validate deconvolve_template parameter
-    if deconvolve_template and axes_template not in ["YXS", "SYX"]:
+    if deconvolve_template and axes_template != "YXS":
         raise ValueError(
-            f"deconvolve_template=True requires RGB template with axes 'YXS' or 'SYX', "
+            f"deconvolve_template=True requires an RGB template (axes 'YXS'), "
             f"got '{axes_template}'"
         )
 

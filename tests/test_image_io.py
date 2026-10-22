@@ -201,6 +201,22 @@ class TestReadImageDispatch:
         assert result.shape == (64, 64)
         assert pixel_size == pytest.approx(0.5)
 
+    def test_planar_rgb_ome_tiff_reads_as_yxs(self, tmp_path):
+        # tifffile reports planar RGB as 'SYX'; read_image must return canonical YXS
+        import tifffile
+
+        rgb = np.random.default_rng(5).integers(0, 256, (40, 30, 3), dtype=np.uint8)
+        out = tmp_path / "planar.ome.tif"
+        tifffile.imwrite(
+            out, np.moveaxis(rgb, -1, 0), photometric="rgb", planarconfig="separate",
+            ome=True, metadata={"axes": "SYX", "PhysicalSizeX": 0.5, "PhysicalSizeY": 0.5},
+        )
+
+        result_img, _, axes, _ = read_image(out)
+        level0 = result_img[0] if isinstance(result_img, list) else result_img
+        assert axes == "YXS"
+        np.testing.assert_array_equal(np.asarray(level0), rgb)
+
 
 # ── Priority 5: create_img_pyramid ────────────────────────────────────────────
 

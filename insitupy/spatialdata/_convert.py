@@ -292,9 +292,8 @@ def _transform_images_for_spatialdata(
             pixel_size = meta["pixel_size"]
             transformations = {"global": Scale([pixel_size, pixel_size], axes=("x", "y"))}
             img = image_list[0] if isinstance(image_list, list) else image_list
+            # ImageData holds canonical axes only: YX or YXS (RGB/RGBA)
             axes_isp = xd.images.metadata[name]["axes"]
-            axes_config = ImageAxes(axes_isp)
-            is_rgb = xd.images.metadata[name]["rgb"]
 
             dict_key = _generate_spatialdata_key(
                 sample_id=sample_id,
@@ -302,30 +301,26 @@ def _transform_images_for_spatialdata(
                 locator=name
             )
             _assert_key_absent(images, dict_key, "image")
-            if is_rgb:
-                axes = tuple(list(axes_isp.lower().replace("s", "c")))
+            if axes_isp == "YXS":
                 array = DataArray(
                     data=img,
                     name=name,
-                    dims=axes
+                    dims=("y", "x", "c")
                     )
                 images[dict_key] = Image2DModel.parse(
                     array,
                     rgb=True,
                     scale_factors=[2 for _ in range(n_pyramids)],
                     transformations=transformations,
-                    chunks=(3, DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
+                    chunks=(img.shape[2], DEFAULT_CHUNK_SIZE_Y, DEFAULT_CHUNK_SIZE_X)
                     )
             else:
-                c_dim = axes_config.C if axes_config.C is not None else 1
-
-                img_reshaped = img.reshape(
-                    c_dim,
-                    img.shape[axes_config.Y],
-                    img.shape[axes_config.X]
-                )
+                if axes_isp != "YX":
+                    raise ValueError(
+                        f"Image '{name}' has axes '{axes_isp}'; ImageData images must be 'YX' or 'YXS'."
+                    )
                 array = DataArray(
-                    data=img_reshaped,
+                    data=img[None, ...],
                     name=name,
                     dims=("c", "y", "x")
                     )
@@ -980,15 +975,15 @@ def _is_rgb_element(elem) -> bool:
 
     Verified empirically against ``spatialdata==0.8.0``:
     ``Image2DModel.parse(..., rgb=True)`` produces a ``c`` coordinate with
-    string labels ``['r', 'g', 'b']``; non-RGB images get an integer/positional
-    ``c`` coordinate.
+    string labels ``['r', 'g', 'b']`` (``['r', 'g', 'b', 'a']`` for RGBA); non-RGB
+    images get an integer/positional ``c`` coordinate.
     """
     base = _get_base_resolution_array(elem)
     c_coord = base.coords.get("c")
     if c_coord is None:
         return False
     try:
-        return list(c_coord.values) == ["r", "g", "b"]
+        return list(c_coord.values) in (["r", "g", "b"], ["r", "g", "b", "a"])
     except Exception:
         return False
 

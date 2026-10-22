@@ -15,7 +15,7 @@ from tifffile import TiffFile, TiffWriter, imread
 from insitupy._exceptions import InvalidFileTypeError
 from insitupy.images import ngff
 from insitupy.images._zarr_layout import working_chunks, write_level
-from insitupy.images.axes import normalize_axes_and_shape
+from insitupy.images.axes import _canonicalize_axes
 from insitupy.images.utils import create_img_pyramid
 from insitupy.utils.utils import convert_to_list, make_json_serializable
 
@@ -310,7 +310,8 @@ def read_zarr(path):
           :class:`list` of :class:`dask.array.Array` for pyramid stores
           (index 0 = full resolution).
         - **ome_meta** – OME metadata dict parsed from the Zarr store attributes.
-        - **axes** – axis string after normalisation (e.g. ``"YXS"``).
+        - **axes** – canonical axis string: ``"YX"`` (grayscale), ``"YXS"`` (RGB/RGBA) or
+          ``"CYX"`` (multi-channel). The data is in that order; singleton extra axes are dropped.
         - **pixel_size** – physical pixel size in the unit stored in the metadata.
 
     Raises:
@@ -353,15 +354,8 @@ def read_zarr(path):
         if len(img) == 0:
             raise ValueError(f"No image data read from zarr file: {path}")
 
-        # RGB is stored channel-first on disk (see write_zarr); restore the in-memory YXS order
-        if axes == "SYX":
-            if isinstance(img, list):
-                img = [lvl.transpose(1, 2, 0) for lvl in img]
-            else:
-                img = img.transpose(1, 2, 0)
-            axes = "YXS"
-
-        img, axes = normalize_axes_and_shape(img, axes)
+        # canonical in-memory order (RGB is stored channel-first on disk, see write_zarr)
+        img, axes = _canonicalize_axes(img, axes)
 
     return img, ome_meta, axes, pixel_size
 
@@ -384,7 +378,9 @@ def read_image(path):
           :class:`dask.array.Array` (pyramid), or a :class:`numpy.ndarray`
           (plain TIFF).
         - **ome_meta** – OME metadata dict.
-        - **axes** – normalised axis string (e.g. ``"YXS"``).
+        - **axes** – canonical axis string: ``"YX"`` (grayscale), ``"YXS"`` (RGB/RGBA) or
+          ``"CYX"`` (multi-channel). The data is in that order (e.g. planar RGB files come back
+          as ``"YXS"``); singleton extra axes are dropped.
         - **pixel_size** – physical pixel size extracted from the OME metadata.
 
     Raises:
@@ -435,7 +431,7 @@ def read_image(path):
                     # in case of .tif image
                     pixel_size = float(ome_meta['OME:Image']['OME:Pixels']['PhysicalSizeX'])
 
-        img, axes = normalize_axes_and_shape(img, axes)
+        img, axes = _canonicalize_axes(img, axes)
 
     return img, ome_meta, axes, pixel_size
 
@@ -767,7 +763,8 @@ def read_zarr_pyramid(dirstore, persist):
 
     Returns:
         A :class:`dask.array.Array` (single array) or a :class:`list` of
-        :class:`dask.array.Array` (pyramid, index 0 = full resolution).
+        :class:`dask.array.Array` (pyramid, index 0 = full resolution), in the stored axis
+        order. Use :func:`read_image` for canonical axes.
     """
     # get components of zip store
     components = dirstore.listdir()
@@ -805,7 +802,8 @@ def read_ome_tiff(
         new_method (bool): Is now the default method and uses a strategy found here: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-understanding-outputs.
 
     Returns:
-        List[dask.array.Array] or dask.array.Array: The pyramid or a single level of the pyramid, represented as Dask arrays.
+        List[dask.array.Array] or dask.array.Array: The pyramid or a single level of the pyramid, represented as Dask arrays,
+        in the stored axis order. Use `read_image` for canonical axes.
 
     '''
     if new_method:

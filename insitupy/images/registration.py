@@ -32,7 +32,7 @@ from matplotlib.patches import ConnectionPatch
 
 from insitupy._constants import SHRT_MAX
 from insitupy._exceptions import NotEnoughFeatureMatchesError
-from insitupy.images.axes import ImageAxes, get_height_and_width
+from insitupy.images.axes import ImageAxes, _canonical_permutation, get_height_and_width
 from insitupy.images.io import write_ome_tiff
 from insitupy.images.utils import (
     clip_image_histogram,
@@ -532,7 +532,8 @@ def load_and_scale_images(
 
     Raises:
         ImportError: If OpenCV is not installed.
-        ValueError: If deconvolution is requested for non-RGB images.
+        ValueError: If the config axes are not canonical (``YX``, ``YXS`` or ``CYX``), or if
+            deconvolution is requested for non-RGB images.
     """
     if not HAS_OPENCV:
         raise ImportError(
@@ -541,6 +542,15 @@ def load_and_scale_images(
         )
 
     verbose = config.verbose
+
+    # the stages assume canonical axes (channel-last RGB); register_images_standalone converts
+    for role, axes in (("axes_moving", config.axes_moving), ("axes_fixed", config.axes_fixed)):
+        if _canonical_permutation(axes)[1] != axes:
+            raise ValueError(
+                f"RegistrationConfig.{role}='{axes}' is not in canonical order ('YX', 'YXS' or "
+                "'CYX'). Transpose the image first, or use register_images_standalone, which "
+                "accepts any axis order."
+            )
 
     # --- Compute dask arrays to numpy ---
     if isinstance(moving, da.Array):
@@ -559,9 +569,9 @@ def load_and_scale_images(
     axes_moving_effective = config.axes_moving
     moving_deconvolved = None
     if config.deconvolve_moving:
-        if config.axes_moving not in ["YXS", "SYX"]:
+        if config.axes_moving != "YXS":
             raise ValueError(
-                f"HE deconvolution requires RGB image with axes 'YXS' or 'SYX', "
+                f"HE deconvolution requires an RGB image with canonical axes 'YXS', "
                 f"got '{config.axes_moving}'"
             )
         moving_for_feature = _deconvolve_he_image(
@@ -580,9 +590,9 @@ def load_and_scale_images(
     axes_fixed_effective = config.axes_fixed
     fixed_deconvolved = None
     if config.deconvolve_fixed:
-        if config.axes_fixed not in ["YXS", "SYX"]:
+        if config.axes_fixed != "YXS":
             raise ValueError(
-                f"HE deconvolution requires RGB template with axes 'YXS' or 'SYX', "
+                f"HE deconvolution requires an RGB template with canonical axes 'YXS', "
                 f"got '{config.axes_fixed}'"
             )
         fixed_for_feature = _deconvolve_he_image(
@@ -1139,6 +1149,19 @@ def save_registered_image_tiff(
 # Public orchestrator
 # ---------------------------------------------------------------------------
 
+def _to_canonical_order(img, axes: str):
+    """Return ``(img, canonical_axes, perm)``; *perm* is None when *img* is already canonical.
+
+    A non-canonical image is materialised as a contiguous numpy array (registration computes
+    it anyway, and OpenCV needs contiguous input).
+    """
+    perm, canon = _canonical_permutation(axes)
+    if perm == tuple(range(len(perm))):
+        return img, canon, None
+    arr = img.compute() if isinstance(img, da.Array) else np.asarray(img)
+    return np.ascontiguousarray(np.transpose(arr, perm)), canon, perm
+
+
 def register_images_standalone(
     moving: np.ndarray | da.Array,
     fixed: np.ndarray | da.Array,
@@ -1178,9 +1201,10 @@ def register_images_standalone(
     Args:
         moving: Image to be registered (aligned/warped). Can be numpy or dask array.
         fixed: Fixed reference image that stays stationary. Can be numpy or dask array.
-        axes_moving: Axis descriptor for moving image (e.g. "YXS" for RGB, "CYX" for
-            multichannel, "YX" for grayscale).
-        axes_fixed: Axis descriptor for fixed image.
+        axes_moving: Axis descriptor for moving image: any order of the letters of "YX"
+            (grayscale), "YXS" (RGB) or "CYX" (multichannel), e.g. "SYX". The registered
+            image is returned in the moving image's layout.
+        axes_fixed: Axis descriptor for fixed image (same rules).
         max_width: Maximum width (in pixels) for downscaling before feature detection.
             None disables scaling.
         convert_to_grayscale: If True, convert images to grayscale before feature detection.
@@ -1225,6 +1249,10 @@ def register_images_standalone(
         NotEnoughFeatureMatchesError: If insufficient feature matches are found.
         ValueError: If deconvolution is requested for non-RGB images.
     """
+    # register in canonical order (YX, YXS or CYX); the result is returned in the moving layout
+    moving, axes_moving, perm_moving = _to_canonical_order(moving, axes_moving)
+    fixed, axes_fixed, _ = _to_canonical_order(fixed, axes_fixed)
+
     config = RegistrationConfig(
         axes_moving=axes_moving,
         axes_fixed=axes_fixed,
@@ -1282,6 +1310,8 @@ def register_images_standalone(
 
     # Stage 4: Warp
     registered = perform_registration_warp(scaled, transform, features, config)
+    if perm_moving is not None:
+        registered = np.transpose(registered, np.argsort(perm_moving))
 
     # Stage 5: QC output (if debug)
     if debug:
