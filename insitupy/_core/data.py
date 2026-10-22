@@ -1704,11 +1704,16 @@ class InSituData:
                     self._transcripts = pd.read_parquet(transcripts_path)
                 elif mode == "dask":
                     # Load the transcript data using Dask
-                    try:
-                        self._transcripts = dd.read_parquet(transcripts_path)
-                    except ArrowInvalid:
-                        parquet_files = list(Path(transcripts_path).glob("part*.parquet"))
-                        self._transcripts = dd.read_parquet(parquet_files)
+                    if transcripts_path.is_file():
+                        # one file: without split_row_groups dask reads it as one partition
+                        self._transcripts = dd.read_parquet(transcripts_path, split_row_groups=True)
+                    else:
+                        # legacy directory of part files
+                        try:
+                            self._transcripts = dd.read_parquet(transcripts_path)
+                        except ArrowInvalid:
+                            parquet_files = list(Path(transcripts_path).glob("part*.parquet"))
+                            self._transcripts = dd.read_parquet(parquet_files)
                 else:
                     raise ValueError(f"Invalid value for `mode`: {mode}")
         else:

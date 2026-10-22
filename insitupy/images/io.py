@@ -555,15 +555,13 @@ def write_zarr(
             else:
                 image_data = image_data.transpose(2, 0, 1)
 
-        # zip archives are read fully into memory, so they get plain chunks instead of shards
-        sharded = not zipped
-
-        # write the levels
+        # write the levels; zip archives get the same sharded layout as directories, so an
+        # unzipped archive is viewer-ready (whole shards are stored members of the zip)
         if save_pyramid:
             for i, im in enumerate(image_data):
-                write_level(dirstore, str(i), im, disk_axes, sharded=sharded)
+                write_level(dirstore, str(i), im, disk_axes, sharded=True)
         else:
-            write_level(dirstore, None, image_data, disk_axes, sharded=sharded)
+            write_level(dirstore, None, image_data, disk_axes, sharded=True)
 
         # open zarr store and save metadata in zarr store
         store = zarr.open(dirstore, mode="a")
