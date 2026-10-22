@@ -4,7 +4,8 @@ Covers the ROAD-8 batch (report 260924 "track-b-atomic-commit"):
 - ``remove(delete_from_disk=True)`` refuses datasets outside the experiment folder (B5)
 - ``concat(mode="move")`` refuses a non-empty destination (T2) and unexpected content in a
   source experiment root unless ``force=True`` (B5), before anything is moved; a source
-  ``tables/`` folder is derived data that is not carried over (T18)
+  ``tables/`` folder is derived data that is not carried over (T18), and so are viewer files
+  (``project.tm4``, ``viewer/``; viewer milestone M5)
 - staging/backup leftovers of an interrupted save are not mistaken for datasets
 - experiment-level ``zip_output`` is rejected (its result could not be read back)
 """
@@ -97,20 +98,64 @@ def _slot_names(root):
     return sorted(p.name for p in root.glob("data-*"))
 
 
-def test_concat_move_unexpected_content_refused(tmp_path):
+@pytest.mark.parametrize("name", ["notes.txt", "registered_images"])
+def test_concat_move_unexpected_content_refused(tmp_path, name):
+    # registered_images/ holds registration output that cannot be rebuilt from the experiment
     a = _saved_experiment(tmp_path, "expA", offset=0)
     b = _saved_experiment(tmp_path, "expB", offset=10)
-    (tmp_path / "expA" / "notes.txt").write_text("my notes")
+    if name == "notes.txt":
+        item = tmp_path / "expA" / name
+    else:
+        (tmp_path / "expA" / name).mkdir()
+        item = tmp_path / "expA" / name / "he__registered.ome.tif"
+    item.write_text("my data")
     dst = tmp_path / "merged"
 
-    with pytest.raises(ValueError, match=r"notes\.txt"):
+    with pytest.raises(ValueError, match=name.replace(".", r"\.")):
         InSituExperiment.concat([a, b], path=dst, mode="move")
 
     assert _slot_names(tmp_path / "expA") == ["data-000", "data-001"]
     assert _slot_names(tmp_path / "expB") == ["data-000", "data-001"]
-    assert (tmp_path / "expA" / "notes.txt").read_text() == "my notes"
+    assert item.read_text() == "my data"
     assert not dst.exists()
     assert a.path == tmp_path / "expA" and b.path == tmp_path / "expB"
+
+
+def test_concat_move_removes_viewer_files_without_force(tmp_path):
+    # project.tm4 and viewer/ are written by an external viewer pipeline and rebuilt from
+    # the experiment, so they need no consent
+    a = _saved_experiment(tmp_path, "expA", offset=0)
+    b = _saved_experiment(tmp_path, "expB", offset=10)
+    for root in (tmp_path / "expA", tmp_path / "expB"):
+        (root / "project.tm4").write_text("{}")
+        (root / "viewer").mkdir()
+        (root / "viewer" / "a.tm4").write_text("{}")
+    dst = tmp_path / "merged"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        InSituExperiment.concat([a, b], path=dst, mode="move")
+
+    assert not [w for w in caught if "unexpected" in str(w.message) or "did not write" in str(w.message)]
+    assert not (tmp_path / "expA").exists() and not (tmp_path / "expB").exists()
+    assert not (dst / "project.tm4").exists() and not (dst / "viewer").exists()
+    assert len(InSituExperiment.read(dst)) == 4
+
+
+def test_project_root_viewer_files_survive_save(tmp_path):
+    root = tmp_path / "proj"
+    _make_xd(0).saveas(root, verbose=False)
+    (root / "project.tm4").write_bytes(b'{"layers": []}')
+    (root / "viewer").mkdir()
+    (root / "viewer" / "x.tm4").write_bytes(b'{"x": 1}')
+
+    xd = InSituData.read(root)
+    xd.cells["main"].table.obs["edited"] = 1.0
+    xd.save()
+
+    assert (root / "project.tm4").read_bytes() == b'{"layers": []}'
+    assert (root / "viewer" / "x.tm4").read_bytes() == b'{"x": 1}'
+    assert "edited" in InSituData.read(root).cells["main"].table.obs
 
 
 def test_concat_move_force_deletes(tmp_path):

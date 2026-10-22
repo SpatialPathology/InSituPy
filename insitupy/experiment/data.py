@@ -68,8 +68,14 @@ _TABLE_FORMAT_VERSION = 2
 # Suffixes of the staging / backup siblings that an interrupted atomic write leaves behind.
 _STAGING_SUFFIXES = (".__ispy_tmp__", ".__ispy_bak__")
 
-# Entries InSituPy itself writes into an experiment root besides its data-NNN dataset
-# directories. ``tables`` holds derived data (the union table) and counts as InSituPy-owned.
+# Written next to the datasets by an external viewer pipeline (TissUUmaps: project.tm4 and
+# viewer/). Derived from the experiment and rebuilt after changes, so concat(mode="move") may
+# delete them with the source root without asking.
+_VIEWER_ROOT_ITEMS = {"project.tm4", "viewer"}
+
+# Entries InSituPy itself writes or tolerates in an experiment root besides its data-NNN
+# dataset directories. ``tables`` holds derived data (the union table) and counts as
+# InSituPy-owned.
 _EXPECTED_ROOT_FILES = {
     "metadata.csv",
     _METADATA_PARQUET_FILENAME,
@@ -77,7 +83,7 @@ _EXPECTED_ROOT_FILES = {
     "colors.json",
     "filters.json",
     "tables",
-}
+} | _VIEWER_ROOT_ITEMS
 
 # Datasets removed with ``remove(delete_from_disk=True)`` are moved here instead of being
 # deleted. Deliberately not in _EXPECTED_ROOT_FILES: ``concat(mode="move")`` deletes the
@@ -5011,6 +5017,11 @@ class InSituExperiment:
                 logger.info(
                     "The union table of '%s' is not carried over; call build_table() on the "
                     "new experiment.", obj._path,
+                )
+            if any((obj._path / name).exists() for name in _VIEWER_ROOT_ITEMS):
+                logger.info(
+                    "The viewer files of '%s' (project.tm4, viewer/) are not carried over; "
+                    "rebuild them for the new experiment.", obj._path,
                 )
             # Recomputed here (concat() already checked before the move) in case content
             # appeared in the root during the move.

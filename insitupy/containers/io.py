@@ -15,6 +15,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.parquet as pq
 import scanpy as sc
 import zarr
 from zarr.errors import ArrayNotFoundError
@@ -45,6 +46,9 @@ from insitupy.utils.utils import (
 # name-like. An int/float-categorical column would need its value type derived
 # from the column instead (none exist today).
 _CATEGORICAL_PARQUET_DTYPE = pa.dictionary(pa.int32(), pa.string())
+
+# Rows per Parquet row group in transcripts.parquet; a reader gets one dask partition per group.
+_TRANSCRIPT_ROW_GROUP_SIZE = 1_000_000
 
 
 def _read_table_from_celldata(
@@ -439,37 +443,89 @@ def _save_cells(cells: MultiCellData,
     metadata["data"]["cells"] = Path(relpath(cells_path, path)).as_posix()
 
 
+def _write_dask_transcripts(transcripts: dd.DataFrame, file: Path) -> None:
+    """Stream a dask transcript frame into one Parquet file, one partition at a time."""
+    # An unnamed dask index is a per-partition artefact and is dropped; a named one is data.
+    preserve_index = transcripts.index.name is not None
+    meta = transcripts._meta_nonempty
+    schema = pa.Schema.from_pandas(meta, preserve_index=preserve_index)
+    object_cols = [col for col, dt in meta.dtypes.items() if dt == object]
+
+    writer = None
+    try:
+        for part in transcripts.to_delayed():
+            # The synchronous scheduler reads one partition at a time. The default threaded
+            # scheduler reads N partitions concurrently (N = CPU cores), multiplying peak RAM
+            # by N, which causes OOM on large transcript datasets.
+            pdf = part.compute(scheduler="synchronous")
+            if not len(pdf):
+                continue
+            if writer is None:
+                # The meta holds placeholder strings for object columns: take their type
+                # from the data (e.g. binary), unless the first partition is all-null there.
+                if object_cols:
+                    sample = pa.Schema.from_pandas(pdf[object_cols], preserve_index=False)
+                    for field in sample:
+                        if not pa.types.is_null(field.type):
+                            i = schema.get_field_index(field.name)
+                            schema = schema.set(i, schema.field(i).with_type(field.type))
+                schema = _widen_categoricals(schema)
+                writer = pq.ParquetWriter(file, schema)
+            # cast, not from_pandas(schema=...): that looks columns up by their stringified
+            # name and fails on MultiIndex columns (pandas-mode Xenium transcripts)
+            writer.write_table(
+                pa.Table.from_pandas(pdf, preserve_index=preserve_index).cast(schema),
+                row_group_size=_TRANSCRIPT_ROW_GROUP_SIZE,
+            )
+        if writer is None:
+            # no rows at all: a file with the schema and zero rows
+            schema = _widen_categoricals(schema)
+            pq.write_table(
+                pa.Table.from_pandas(transcripts._meta, preserve_index=preserve_index).cast(schema),
+                file,
+            )
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+def _widen_categoricals(schema: pa.Schema) -> pa.Schema:
+    """Give every dictionary (categorical) field the shared wide index type.
+
+    Each partition's categorical gets a locally inferred index width (int8 for <= 127
+    categories, int16 otherwise, ...), so partitions only convert against one schema
+    when the index is forced wide enough.
+    """
+    for i, field in enumerate(schema):
+        if pa.types.is_dictionary(field.type):
+            schema = schema.set(i, field.with_type(_CATEGORICAL_PARQUET_DTYPE))
+    return schema
+
+
 def _save_transcripts(transcripts, path, metadata):
+    # dask cannot read MultiIndex columns back from parquet, so such a project would not open
+    if isinstance(transcripts.columns, pd.MultiIndex):
+        raise ValueError(
+            "Transcripts with MultiIndex columns (read_xenium(..., transcript_mode='pandas', "
+            "restructure_transcripts=True)) cannot be saved; flatten the columns first."
+        )
+
     # create file path
     trans_path = path / "transcripts"
     trans_path.mkdir(parents=True, exist_ok=True) # create directory
     trans_file = trans_path / "transcripts.parquet"
 
-    # save transcripts as parquet and modify metadata
-    if isinstance(transcripts, dd.DataFrame):
-        # Any categorical column read back from a partitioned parquet store (e.g.
-        # a SpatialData Points element) has its dictionary index width inferred
-        # independently per partition (int8 for <=127 local categories, int16
-        # otherwise, ...). to_parquet() infers its target schema from a single
-        # partition, so a differently-sized partition later on fails to convert.
-        # Forcing a wide-enough dictionary index here avoids the mismatch without
-        # requiring a full-data pass to unify categories across partitions.
-        schema = "infer"
-        cat_cols = [
-            col for col, dt in transcripts.dtypes.items()
-            if isinstance(dt, pd.CategoricalDtype)
-        ]
-        if cat_cols:
-            schema = {col: _CATEGORICAL_PARQUET_DTYPE for col in cat_cols}
+    # Written next to the target and renamed at the end, so the directory never holds a
+    # truncated file. A stale temp file from a crashed write is overwritten.
+    tmp_file = trans_path / (trans_file.name + ".__ispy_tmp__")
 
-        # Use the synchronous scheduler so dask reads and writes one partition
-        # at a time. The default threaded scheduler reads N partitions
-        # concurrently (N ≈ CPU cores), multiplying peak RAM by N. For large
-        # transcript datasets this causes OOM even on systems with adequate
-        # total RAM due to concurrent allocation pressure.
-        transcripts.to_parquet(trans_file, schema=schema, compute_kwargs={"scheduler": "synchronous"})
+    # save transcripts as one parquet file with fixed-size row groups (one dask
+    # partition per row group on read) and modify metadata
+    if isinstance(transcripts, dd.DataFrame):
+        _write_dask_transcripts(transcripts, tmp_file)
     else:
-        transcripts.to_parquet(trans_file)
+        transcripts.to_parquet(tmp_file, row_group_size=_TRANSCRIPT_ROW_GROUP_SIZE)
+    os.replace(tmp_file, trans_file)
 
     #if metadata is not None:
     metadata["data"]["transcripts"] = Path(relpath(trans_file, path)).as_posix()

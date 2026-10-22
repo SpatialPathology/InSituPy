@@ -552,17 +552,24 @@ class TestShardedNgffLayout:
         assert level0.shards == (3, 4096, 4096)
         assert level0.chunks == (3, 512, 512)
 
-    def test_zip_store_has_plain_chunks(self, tmp_path, small_layout):
+    def test_zip_store_is_sharded_and_unzips_viewer_ready(self, tmp_path, small_layout):
         import zarr
 
         arr = _rgb_array()
         out = tmp_path / "he.zarr.zip"
         write_zarr(image=da.from_array(arr), file=out, img_metadata=_rgb_metadata(), axes="YXS")
 
-        with zarr.storage.ZipStore(out, mode="r") as store:
-            level0 = zarr.open_group(store, mode="r")["0"]
-            assert level0.shards is None
-            assert level0.chunks == (3, 16, 16)
         result, _, axes_out, _ = read_zarr(out)
         assert axes_out == "YXS"
         np.testing.assert_array_equal(np.asarray(result[0]), arr)
+        # a partial read decodes inner chunks out of a shard member of the zip
+        np.testing.assert_array_equal(np.asarray(result[0][70:90, 130:150]), arr[70:90, 130:150])
+
+        # unzipped, the store has the directory layout
+        unzipped = tmp_path / "he.zarr"
+        with zipfile.ZipFile(out) as zf:
+            zf.extractall(unzipped)
+        level0 = zarr.open_group(unzipped, mode="r")["0"]
+        assert level0.shards == (3, 64, 64)
+        assert level0.chunks == (3, 16, 16)
+        np.testing.assert_array_equal(np.moveaxis(level0[:], 0, -1), arr)
