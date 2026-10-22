@@ -40,9 +40,10 @@ def write_viewer_table(table: AnnData, boundaries, path: str | Path) -> None:
             logger.warning("Column '_label_id' of obs is replaced in the viewer table.")
         obs["_label_id"] = _label_ids(table, boundaries)
 
+    # always CSC, also for a dense X (e.g. after scaling): the viewer reads X by column
     X = table.X
-    if sp.issparse(X):
-        X = X.tocsc()
+    if X is not None:
+        X = X.tocsc() if sp.issparse(X) else sp.csc_matrix(X)
 
     obsm = {"spatial": table.obsm["spatial"]} if "spatial" in table.obsm else {}
     sidecar = AnnData(

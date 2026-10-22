@@ -66,7 +66,7 @@ class TestSidecarContent:
         assert g["X/indptr"].shape[0] == cd.table.n_vars + 1
 
         back = anndata.read_zarr(side)
-        assert sp.isspmatrix_csc(back.X) or sp.issparse(back.X)
+        assert sp.issparse(back.X) and back.X.format == "csc"
         np.testing.assert_allclose(back.X.toarray(), cd.table.X.toarray())
         np.testing.assert_allclose(back.obsm["spatial"], cd.table.obsm["spatial"])
         for col in ("cat", "score", "count"):
@@ -95,6 +95,15 @@ class TestSidecarContent:
         side, g = _open_sidecar(tmp_path / "layer")
         assert "_label_id" not in g["obs"]
         assert "spatial" in g["obsm"]
+
+    def test_dense_x_is_written_csc(self, tmp_path):
+        cd, _ = _make_celldata()
+        dense = cd.table.X.toarray()
+        cd.table.X = dense
+        cd.save(tmp_path / "layer")
+        side, g = _open_sidecar(tmp_path / "layer")
+        assert g["X"].attrs["encoding-type"] == "csc_matrix"
+        np.testing.assert_allclose(anndata.read_zarr(side).X.toarray(), dense)
 
     def test_no_zarr_v2_warning_reaches_caller(self, tmp_path):
         cd, _ = _make_celldata()
