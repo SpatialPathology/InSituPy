@@ -38,6 +38,17 @@ where to re-verify it if the codebase has moved on.
   (which call `read_xenium()` under the hood) populate `cells` and `images` as part of the read.
 - Images and transcripts stay dask-backed (lazy) even after loading in most cases; only
   cell-table access (`.cells.table`) forces materialization into memory (h5ad-backed AnnData).
+- **`saveas()` after a lazy read drops unloaded modalities: `load_all()` first.** It writes only
+  what is in memory, so `InSituData.read(path, load_all=False)` (or any dataset of
+  `InSituExperiment.read`) followed by `saveas(new_path)` silently leaves out every modality that
+  was not loaded. (Verify: `InSituData.saveas` in `insitupy/_core/data.py`.)
+
+## Image axes: canonical in memory, channel-first RGB on disk
+
+- Readers and `ImageData` return canonical axes (`YX`, `YXS`, `CYX`); `metadata["rgb"]` equals
+  `axes == "YXS"`. RGB is stored channel-first on disk (`axes == "SYX"` in the zarr attrs,
+  shape `(3, H, W)`), so don't read a saved store's attrs or shape as the in-memory layout.
+  (Verify: `write_zarr` / `read_zarr` in `insitupy/images/io.py`.)
 
 ## `inplace: bool = False` is the house convention
 

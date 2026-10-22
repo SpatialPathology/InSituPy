@@ -1153,23 +1153,25 @@ def get_storage_format() -> str:
     project_folder/
     ├── .ispy                           # Project metadata (JSON)
     ├── cells/
-    │   └── <YYMMDD-HHMMSSffffff-hex8>/ # Versioned cell data
-    │       ├── .celldata               # CellData metadata (JSON)
-    │       ├── .multicelldata          # MultiCellData metadata (JSON, if multiple layers)
-    │       ├── table.h5ad              # AnnData (cells × genes, obs, var, obsm)
-    │       └── boundaries.zarr         # Segmentation masks
-    │           ├── cell_names/         # Zarr array of cell IDs
-    │           ├── seg_mask_value/     # Zarr array mapping mask values → cells
-    │           ├── data/0/             # Cell mask pyramid level 0 (full res)
-    │           ├── data/1/             # Cell mask pyramid level 1 (downsampled)
-    │           └── nuclei/0/           # Nucleus mask (optional)
+    │   └── <YYMMDD-HHMMSSffffff-hex8>/ # Versioned cell data (one save)
+    │       ├── .multicelldata          # MultiCellData metadata (JSON: key_main, all_keys)
+    │       └── <layer>/                # One subfolder per cells layer (e.g. main, proseg)
+    │           ├── .celldata           # CellData metadata (JSON: table, boundaries, x_csc, ...)
+    │           ├── table.h5ad          # AnnData (cells × genes, obs, var, obsm)
+    │           ├── X_csc.zarr          # Viewer table (written on save, never read by InSituPy)
+    │           └── boundaries.zarr     # Segmentation masks (Zarr v3)
+    │               ├── cell_names      # Cell IDs
+    │               ├── seg_mask_value  # Raster label of each cell
+    │               ├── nucleus_to_cell_map/{nucleus_index,cell_name}  # optional
+    │               ├── nucleus_count   # optional
+    │               └── masks/<cells|nuclei>/0..N  # uint32 label pyramid, NGFF image-label
     ├── images/
-    │   └── <image_name>.zarr/          # OME-Zarr pyramidal image
+    │   └── <image_name>.zarr/          # OME-NGFF pyramid, Zarr v3 (or .zarr.zip)
     │       ├── 0/                      # Full resolution
-    │       ├── 1/                      # 2× downsampled
-    │       └── .zattrs                 # OME metadata, axes, pixel_size
+    │       ├── 1/ ...                  # Each level 2× downsampled
+    │       └── zarr.json               # attrs: axes, rgb, pixel_size, shape, OME, ome
     ├── transcripts/
-    │   └── transcripts.parquet         # Columns: x, y, gene, qv, ...
+    │   └── transcripts.parquet         # One file (older projects: a folder of part files)
     ├── units/                          # MultiSpatialUnitsData
     │   ├── .multispatialunitsdata      # Layer metadata (key_main, all_keys)
     │   └── <key>/                      # One subfolder per units layer
@@ -1220,14 +1222,71 @@ def get_storage_format() -> str:
     }
     ```
 
+    ## Store Layouts (format v2 viewer milestone)
+
+    Images (`images/<name>.zarr`, written by `ImageData.save` / `write_zarr`):
+    - Sharded Zarr v3: every level in 4096 × 4096 shards of 512 × 512 inner chunks
+      (one TissUUmaps tile = one inner chunk); `.zarr.zip` archives use the same layout
+    - NGFF 0.5 attrs under `ome`: `multiscales` (scale per level from the real level
+      shapes, µm) plus `omero` (RGB: red/green/blue; grayscale: a contrast window)
+    - RGB is stored channel-first: on disk `axes == "SYX"`, shape `(3, H, W)`; readers
+      and `ImageData` return canonical `YXS`, `(H, W, 3)` with identical values
+    - A store written with `save_pyramid=False` is a bare root array without `ome`
+      (not viewer-ready)
+    - Readers use shard-sized dask chunks (legacy 4096-chunk stores read as before)
+
+    Masks (`boundaries.zarr/masks/<layer>/<level>`):
+    - uint32 labels (other integer dtypes are range-checked and cast on save; float
+      masks raise), same sharded layout, NGFF `image-label` (no `source`)
+    - Group attrs: `pixel_size`, `ome`, and `labels` = `{"array": ..., "offset": n}`:
+      raster label = value of that array in boundaries.zarr + offset (0 = background).
+      Cells, and v1.x nuclei without a nucleus map: `seg_mask_value`, offset 0;
+      nuclei with a consistent map: `nucleus_to_cell_map/nucleus_index` (0-based),
+      offset 1
+
+    Transcripts (`transcripts/transcripts.parquet`):
+    - One Parquet file with 1M-row row groups, read back with one dask partition per
+      row group; older projects hold a folder of part files, which still loads
+    - Transcripts with MultiIndex columns cannot be saved
+
+    Viewer table (`cells/<uid>/<layer>/X_csc.zarr`, path in `.celldata["x_csc"]`):
+    - AnnData zarr v2, consolidated (`.zmetadata`): full `obs` plus `obs/_label_id`
+      (the cell's `seg_mask_value`, 0 if the cell has no mask), `obsm/spatial`, `var`
+      and `X` in CSC layout. Written by every `CellData.save`, never read by InSituPy
+
+    Which save writes what:
+    - `save()` writes cells (new `cells/<uid>/`, incl. masks and `X_csc.zarr`),
+      annotations, regions and units; images only with `sync_images=True` (existing stores are
+      not rewritten); transcripts never
+    - `saveas()` rewrites every loaded modality in the current layout; it drops
+      modalities that were not loaded, so call `load_all()` first
+    - A project can therefore mix layouts per store (`.ispy` format 1 with v2-layout
+      stores); readers handle both
+
+    ## Experiment Folder (InSituExperiment)
+
+    ```
+    experiment_folder/
+    ├── data-000/, data-001/, ...       # One InSituData project each
+    ├── metadata.csv, metadata.parquet, metadata.schema.json
+    ├── colors.json, filters.json
+    ├── tables/                         # Union tables from build_table() (derived)
+    ├── .trash/                         # Datasets removed with delete_from_disk=True
+    ├── project.tm4, viewer/            # Optional, written by a viewer pipeline (TissUUmaps)
+    ```
+    - `concat(mode="move")` deletes the source roots: `tables/`, `project.tm4` and
+      `viewer/` are derived and go without asking; anything else (e.g.
+      `registered_images/`, a non-empty `.trash/`) needs `force=True`
+
     ## Key Conventions
     - Coordinates are in µm: cell centroids (`obsm["spatial"]`), transcript
       positions, annotation/region/unit geometries and the crop limits in
       `cropping_history`. Only raster data (images, boundary masks) is stored
       on a pixel grid, converted via its pixel_size
     - pixel_size is in µm/pixel (e.g. 0.2125 for Xenium)
-    - Boundaries are stored as label masks (integer arrays where pixel value = cell ID)
-    - Images use OME-Zarr with multiscale pyramids for efficient access
+    - Boundaries are stored as label masks; a cell mask pixel holds the cell's
+      `seg_mask_value` (see the `labels` attr above for nuclei)
+    - Images use OME-NGFF Zarr with multiscale pyramids for efficient access
     - Versioned save directories (cells/, annotations/, regions/) are named
       `<YYMMDD-HHMMSSffffff-hex8>` (e.g. `250805-115555000343-2c58ca86`): a
       microsecond timestamp plus an 8-character hex uid
