@@ -115,12 +115,14 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
   section into the dated release-note report, then delete that section here so the file only ever
   holds pending, not-yet-released content. `planning/backlog.md` §2a just points here.
 
-### `.log/` and `planning/` are not tracked by git — links required on each machine
+### `.log/`, `planning/` and `agent-plans/` are not tracked by git — links required on each machine
 
-`.log/` and `planning/` are excluded from version control and backed up via a private
-cloud-synced folder. On a fresh clone, recreate both as a symlink or junction to that folder.
-`planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools that
-skip dot-folders can index `planning/backlog.md`. See `.claude/setup-notes.md` for
+`.log/`, `planning/` and `agent-plans/` are excluded from version control and backed up via a
+private cloud-synced folder. On a fresh clone, recreate them as symlinks or junctions to that
+folder. `planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools
+that skip dot-folders can index `planning/backlog.md`. `agent-plans/` holds the reports of the
+scheduled plan-only agent (described in `CLAUDE.md` on `main`); run one with
+`/implement @agent-plans/<YYMMDD>/<slug>/report-<slug>.md`. See `.claude/setup-notes.md` for
 instructions.
 
 ## Coding workflow
