@@ -161,8 +161,8 @@ The maintainer runs a scheduled, plan-only agent in a cloud session. In such a r
 
 - `.log/`, `planning/` and `agent-plans/` do not exist (they are local links, see above), the
   `insitupy` MCP server is not configured, and InSituPy is usually not installed - read the
-  source instead and do not run tests. The task prompt says where background notes come from and where the report
-  goes.
+  source instead and do not run tests. The task prompt says where background notes come from
+  and where the report goes.
 - Follow `.claude/plan-protocol.md`, including step 2: a well-argued "don't do this" is a valid
   result.
 - **Write nothing to GitHub:** no commits, pushes, branches, PRs, issues, comments, labels, tags,
