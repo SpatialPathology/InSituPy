@@ -115,12 +115,14 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
   section into the dated release-note report, then delete that section here so the file only ever
   holds pending, not-yet-released content. `planning/backlog.md` §2a just points here.
 
-### `.log/` and `planning/` are not tracked by git — links required on each machine
+### `.log/`, `planning/` and `agent-plans/` are not tracked by git — links required on each machine
 
-`.log/` and `planning/` are excluded from version control and backed up via a private
-cloud-synced folder. On a fresh clone, recreate both as a symlink or junction to that folder.
-`planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools that
-skip dot-folders can index `planning/backlog.md`. See `.claude/setup-notes.md` for
+`.log/`, `planning/` and `agent-plans/` are excluded from version control and backed up via a
+private cloud-synced folder. On a fresh clone, recreate them as symlinks or junctions to that
+folder. `planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools
+that skip dot-folders can index `planning/backlog.md`. `agent-plans/` holds the reports of the
+scheduled plan-only agent (see "Unattended runs" below); run one with
+`/implement @agent-plans/<YYMMDD>/<slug>/report-<slug>.md`. See `.claude/setup-notes.md` for
 instructions.
 
 ## Coding workflow
@@ -157,10 +159,10 @@ frontmatter pins its phase explicitly regardless of the session default.
 
 The maintainer runs a scheduled, plan-only agent in a cloud session. In such a run:
 
-- `.log/` and `planning/` do not exist (they are local links, see above), the `insitupy` MCP
-  server is not configured, and InSituPy is usually not installed - read the source instead and
-  do not run tests. The task prompt says where background notes come from and where the report
-  goes.
+- `.log/`, `planning/` and `agent-plans/` do not exist (they are local links, see above), the
+  `insitupy` MCP server is not configured, and InSituPy is usually not installed - read the
+  source instead and do not run tests. The task prompt says where background notes come from
+  and where the report goes.
 - Follow `.claude/plan-protocol.md`, including step 2: a well-argued "don't do this" is a valid
   result.
 - **Write nothing to GitHub:** no commits, pushes, branches, PRs, issues, comments, labels, tags,
