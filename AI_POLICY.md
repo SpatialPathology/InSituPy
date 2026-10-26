@@ -34,5 +34,9 @@ power users) so it stays current with the real API - see [CONTRIBUTING](CONTRIBU
 
 ---
 
+Maintainers also use a scheduled AI agent that drafts implementation plans. It does not open
+PRs, push commits or post comments itself; any change based on such a plan is implemented,
+reviewed and submitted by a maintainer under the rules above.
+
 Maintainers may label a PR `needs-ai-review`, request changes, or close PRs that are clearly raw
 AI output or that the contributor cannot explain. Human maintainer review always has the final say.
