@@ -141,6 +141,10 @@ dmypy.json
 # Visible planning notes (private, synced via Nextcloud symlink) - see .claude/setup-notes.md
 planning/
 
+# Plans written by the scheduled plan-only agent (private, synced via Nextcloud symlink) - see
+# .claude/setup-notes.md
+agent-plans/
+
 # Coala
 *.orig
 
