@@ -14,8 +14,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # Deployment gate: the job waits until a maintainer approves it, and the
-    # environment only accepts version tags. PYPI_TOKEN lives in this
-    # environment, so no other workflow can read it.
+    # environment only accepts version tags. PYPI_TOKEN belongs in this
+    # environment's secrets, so no other workflow can read it.
     environment: pypi
 
     steps:
