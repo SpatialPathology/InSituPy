@@ -27,7 +27,8 @@ file searching.
 
 1. **Read the report fully** and confirm the goal, affected files, and acceptance criteria. If
    the report is missing, or contradicts the current code, stop and report that rather than
-   guessing.
+   guessing. If its Verdict is "don't do", stop and summarize the reasoning instead of
+   implementing anything.
 2. **Discover before writing.** Verify the report's file/line references against current source
    (they may have drifted since planning). Match surrounding conventions.
 3. **Implement incrementally** — smallest coherent edits first.
