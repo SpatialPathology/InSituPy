@@ -1,19 +1,29 @@
 You are planning the task below. **Make no code edits.** Your only deliverable is a
-self-contained report written to `.log/`.
+self-contained report written to `.log/` (or, in an unattended run, where the task prompt says).
 
 ## Protocol
 
 1. **Understand the codebase before planning.** Use the `insitupy` MCP server
    (`mcp__insitupy__get_data_model`, `get_function_source`, `search_codebase`, … — load
    schemas via `ToolSearch` `select:` first) and read the relevant source. Prefer MCP
-   introspection over blind file searching.
-2. **Design the change.** Identify the files to touch, the approach, edge cases, and the
+   introspection over blind file searching. If the server is not available (e.g. in a cloud
+   session), read the checked-out source instead.
+2. **Challenge the task before designing it.** Check whether it still makes sense: is it already
+   done or superseded, does it conflict with a recorded decision or with how the code actually
+   works, does the cost outweigh the benefit, is there a clearly better alternative? If you find
+   reasons against doing it as written, say so openly and explain them, instead of planning it
+   anyway. "Don't do this" or "do this differently" is a valid, useful result - write it up as
+   the plan's verdict (see Report contents) and plan only what still holds up.
+3. **Design the change.** Identify the files to touch, the approach, edge cases, and the
    targeted tests that will need to run (per project convention; tests run from the
    environment where InSituPy is installed).
-3. **Surface hard design / architecture / security questions** to the user and ask whether to
+4. **Surface hard design / architecture / security questions** to the user and ask whether to
    consult a senior-advisor agent if one is configured (e.g. the maintainer's
    `@opus-consultant`); otherwise surface the question to a human. Do not escalate automatically.
-4. **Write the report.** Check whether `.log/` already exists at the repo root.
+   In an unattended run (no human to ask), record them under Open questions instead.
+5. **Write the report.** If the task prompt names an output location (e.g. an unattended run),
+   write there and skip the rest of this step. Otherwise check whether `.log/` already exists at
+   the repo root.
    - If it exists, write to `.log/reports/YYMMDD/<short-task-title>/report-<short-task-title>.md`
      (date prefix via `printf '%(%y%m%d)T\n' -1`, or read `currentDate` from context). Use the
      Write tool to create subdirectories as needed.
@@ -27,6 +37,8 @@ self-contained report written to `.log/`.
 The report is the handoff to `/implement`, possibly in a different session days later. It must
 stand alone without this conversation. Include:
 
+- **Verdict** - go / go with changes / don't do, with the reasoning from step 2. For "don't do",
+  the reasoning is the report; skip the sections that no longer apply.
 - **Goal** — what and why, in plain language.
 - **Affected files** — each with the specific change.
 - **Approach** — ordered, step by step.
