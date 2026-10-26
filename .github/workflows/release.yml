@@ -6,12 +6,17 @@ on:
       - "*.*.*"
 
 permissions:
+  # Creates the GitHub release. No id-token: publishing uses PYPI_TOKEN, not
+  # trusted publishing.
   contents: write
-  id-token: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Deployment gate: the job waits until a maintainer approves it, and the
+    # environment only accepts version tags. PYPI_TOKEN lives in this
+    # environment, so no other workflow can read it.
+    environment: pypi
 
     steps:
       - name: Checkout repository
