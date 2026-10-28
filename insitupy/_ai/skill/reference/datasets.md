@@ -7,6 +7,8 @@ They are downloaded on first call and cached locally.
 
 ## Available Datasets
 
+  atera_test_dataset(overwrite: bool = False, output_dir=None, load_transcripts: bool = False) -> insitupy._core.data.InSituData
+    Load the tiny Atera test dataset (Atera Onboard Analysis 1.0.0, 10x Genomics).
   list_downloaded_datasets(output_dir=None)
     List all downloaded demo datasets in a directory.
   visium_human_breast_cancer(overwrite: bool = False, download_fullres: bool = False, output_dir=None) -> insitupy._core.data.InSituData
@@ -33,8 +35,6 @@ They are downloaded on first call and cached locally.
     Load human FFPE breast cancer 2-FOV Xenium test data (v2.0.0, multimodal cell segmentation, 10x Genomics).
   xenium_test_dataset_v2_nucex(overwrite: bool = False, output_dir=None) -> insitupy._core.data.InSituData
     Load human FFPE lung 2-FOV Xenium test data (v2.0.0, nuclear expansion segmentation, 10x Genomics).
-  xenium_test_dataset_v3_mm(overwrite: bool = False, output_dir=None) -> insitupy._core.data.InSituData
-    Load mouse ileum tiny Xenium Prime test data (v3.0.0, multimodal cell segmentation, 10x Genomics).
-  xenium_te
+  xeni
 
-... [truncated — full text is 4573 chars]
+... [truncated — full text is 4785 chars]

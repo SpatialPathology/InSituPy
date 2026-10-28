@@ -61,7 +61,7 @@ data.saveas("path/to/my_project/")
 
 ### Submodule shorthands
 
-  insitupy.io: I/O — read_xenium, read_visium, read_qupath, etc.
+  insitupy.io: I/O — read_xenium, read_atera, read_visium, read_qupath, etc.
   insitupy.pl (plotting): Plotting — spatial, umap, volcano, overview, etc.
   insitupy.pp (preprocessing): Preprocessing — normalize, filter, pseudobulk, etc.
   insitupy.tl (tools): Analysis — DGE, distance, neighbors, registration, etc.

@@ -8,6 +8,9 @@
 |---------------------|------------|------------------------------------------|------------------|
 | read_xenium()       | 10x Xenium | cell_feature_matrix.h5, cells.parquet,   | InSituData       |
 |                     |            | cells.zarr.zip, morphology images        |                  |
+| read_atera()        | 10x Atera  | experiment.spatial, cell_feature_matrix. | InSituData       |
+|                     |            | zarr.zip, cells.zarr.zip, morphology_2d/ |                  |
+|                     |            | (transcripts.zarr.zip opt-in)            |                  |
 | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData       |
 |                     |            | spatial/tissue_positions.csv, images     |                  |
 | read_qupath()       | QuPath     | one exported sample dir (annotation.geojson, | InSituData   |

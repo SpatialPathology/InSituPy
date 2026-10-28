@@ -9,7 +9,7 @@ from insitupy._constants import CACHE
 logger = logging.getLogger(__name__)
 from insitupy._core.data import InSituData
 from insitupy.datasets.download import download_url
-from insitupy.io.data import read_visium, read_xenium
+from insitupy.io.data import read_atera, read_visium, read_xenium
 
 # parameters for download functions
 DEMODIR = CACHE / 'demo_datasets'
@@ -643,6 +643,38 @@ def xenium_test_dataset_v4_protein(
     data = read_xenium(data_dir)
     logger.info("For this dataset no additional images are available.")
     return data
+
+# atera onboard analysis 1.0.0
+# data from https://cf.10xgenomics.com/samples/atera/1.0.0/tiny_atera_dataset/tiny_atera_dataset_outs.zip
+# Tiny Atera test dataset (13 cells, 53 genes), see
+# https://www.10xgenomics.com/support/software/atera-onboard-analysis/latest/resources/example-data
+def _atera_test_dataset_dir(overwrite: bool = False, output_dir=None) -> Path:
+    """Download (if needed) the tiny Atera test dataset and return the path of the output bundle."""
+    data_url = "https://cf.10xgenomics.com/samples/atera/1.0.0/tiny_atera_dataset/tiny_atera_dataset_outs.zip"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "atera_test_dataset"
+    data_dir = named_data_dir / "tiny_atera_dataset_outs"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "32f1ae653bef673624e2d172850fe6bd"
+
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    return data_dir
+
+def atera_test_dataset(
+        overwrite: bool = False,
+        output_dir = None,
+        load_transcripts: bool = False,
+) -> InSituData:
+    """Load the tiny Atera test dataset (Atera Onboard Analysis 1.0.0, 10x Genomics).
+
+    Args:
+        overwrite: If True, download the dataset again. Defaults to False.
+        output_dir: Directory to store the dataset in. Defaults to the InSituPy demo dataset cache.
+        load_transcripts: Whether to load the transcripts (see :func:`insitupy.io.read_atera`).
+            Defaults to False.
+    """
+    data_dir = _atera_test_dataset_dir(overwrite=overwrite, output_dir=output_dir)
+    return read_atera(data_dir, load_transcripts=load_transcripts)
 
 
 # visium analysis version 2.0.0
