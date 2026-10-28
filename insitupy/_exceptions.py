@@ -247,6 +247,25 @@ class InvalidXeniumDirectory(Exception):
         super().__init__(self.message)
 
 
+class InvalidAteraDirectory(Exception):
+    """Raised when a path is not a valid Atera output directory."""
+    def __init__(self, directory, missing_files=None):
+        directory = Path(directory)
+        if (directory / ".ispy").exists():
+            self.message = (
+                f"The directory '{directory}' is not an Atera output directory, but it contains an "
+                "InSituPy project file. Try `InSituData.read()` instead."
+            )
+        else:
+            missing = f" Missing: {', '.join(missing_files)}." if missing_files else ""
+            self.message = (
+                f"The directory '{directory}' is not a valid Atera directory.{missing} "
+                "Expected an Atera Onboard Analysis output bundle with an 'experiment.spatial' file "
+                "(or preproduction Atera data in Xenium format with an 'experiment.xenium' file)."
+            )
+        super().__init__(self.message)
+
+
 class InSituDataConstructorPathError(ValueError):
     """Raised when a saved InSituPy project path is passed to ``InSituData()``
     instead of ``InSituData.read()``."""

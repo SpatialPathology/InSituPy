@@ -10,7 +10,15 @@ import pandas as pd
 from shapely import affinity
 
 from insitupy._core.data import InSituData
-from insitupy._exceptions import InvalidXeniumDirectory
+from insitupy._exceptions import InvalidAteraDirectory, InvalidXeniumDirectory
+from insitupy._io._atera import (
+    ATERA_CELL_FEATURE_MATRIX_FILE,
+    ATERA_CELLS_FILE,
+    ATERA_METADATA_FILE,
+    ATERA_MORPHOLOGY_DIR,
+    _read_table_from_atera,
+    _read_transcripts_from_atera,
+)
 from insitupy._io._qupath import _read_boundaries_qupath, _read_measurements_qupath
 from insitupy._io._read import _read_boundaries, _read_measurements
 from insitupy._io._xenium import (
@@ -43,6 +51,40 @@ def _handle_xenium_image_names(im_path):
         )
 
     return ch, ch_name
+
+def _add_morphology_images(
+    data: InSituData,
+    nuclei_file: str | os.PathLike | Path,
+    image_dir: Path,
+    load_cell_segmentation_images: bool,
+    load_background_images: bool,
+) -> None:
+    """Add the nuclei image and, optionally, the other morphology channels of a 10x bundle.
+
+    Shared by ``read_xenium`` (``morphology_focus/``) and ``read_atera`` (``morphology_2d/``),
+    which use the same ``chNNNN_<name>.ome.tif`` naming.
+    """
+    img_names = ["nuclei"]
+    img_files = [nuclei_file]
+
+    # get cell segmentation images if available
+    if image_dir.is_dir():
+        for im_path in image_dir.glob("*.ome.tif"):
+            ch, ch_name = _handle_xenium_image_names(im_path)
+
+            if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
+                continue
+            if not load_background_images and ch_name.endswith("_background"):
+                continue
+            if ch_name == "dapi":
+                continue
+
+            img_names.append(ch_name)
+            img_files.append(im_path)
+
+    img_paths = [data.path / elem for elem in img_files]
+    for im, n in zip(img_paths, img_names, strict=True):
+        data.images.add_image(im, n, overwrite=False, verbose=True)
 
 def _warn_ignored_spatialdata_params(
     nuclei_type: str,
@@ -250,37 +292,13 @@ def read_xenium(
             nuclei_type = "focus"
             nuclei_file_key = f"morphology_{nuclei_type}_filepath"
 
-        # if names == "nuclei":
-        img_keys = [nuclei_file_key]
-        img_names = ["nuclei"]
-
-        # get path of image files
-        img_files = [data.metadata["method_params"]["images"][k] for k in img_keys]
-
-        # get cell segmentation images if available
-        image_dir = path / "morphology_focus/"
-        if image_dir.is_dir():
-            for im_path in image_dir.glob("*.ome.tif"):
-                ch, ch_name = _handle_xenium_image_names(im_path)
-
-                if not load_cell_segmentation_images and (ch_name.startswith("cellseg") or ch_name in CELLSEG_NAMES):
-                    continue
-                if not load_background_images and ch_name.endswith("_background"):
-                    continue
-                if ch_name == "dapi":
-                    continue
-
-                img_names.append(ch_name)
-                img_files.append(im_path)
-
-        # create imageData object
-        img_paths = [data.path / elem for elem in img_files]
-
-        # if data.images is None:
-        #     data.images = ImageData(img_paths, img_names)
-        # else:
-        for im, n in zip(img_paths, img_names):
-            data.images.add_image(im, n, overwrite=False, verbose=True)
+        _add_morphology_images(
+            data=data,
+            nuclei_file=data.metadata["method_params"]["images"][nuclei_file_key],
+            image_dir=path / "morphology_focus/",
+            load_cell_segmentation_images=load_cell_segmentation_images,
+            load_background_images=load_background_images,
+        )
 
         # LOAD TRANSCRIPTS
         transcript_filename = "transcripts.parquet"
@@ -301,6 +319,155 @@ def read_xenium(
             raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
     else:
         raise ValueError(f"Invalid backend: {backend}. Supported backends are 'insitupy' and 'spatialdata'.")
+
+    return data
+
+
+def read_atera(
+    path: str | os.PathLike | Path,
+    load_cell_segmentation_images: bool = False,
+    load_background_images: bool = False,
+    load_transcripts: bool = False,
+    transcript_mode: Literal["pandas", "dask"] = "dask",
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    verbose: bool = True,
+    ) -> InSituData:
+    """
+    Reads `10x Genomics Atera data <https://www.10xgenomics.com/support/software/atera-onboard-analysis/latest>`__
+    from the specified directory.
+
+    Supports output bundles of Atera Onboard Analysis 1.x (metadata in ``experiment.spatial``, cell
+    table, segmentation and transcripts in zipped zarr stores, images in ``morphology_2d/``).
+    Preproduction Atera data that was converted to the Xenium format (with an ``experiment.xenium``
+    file) is read with :func:`read_xenium` and labelled as Atera.
+
+    Args:
+        path (Union[str, os.PathLike, Path]): Path to the Atera output bundle.
+        load_cell_segmentation_images (bool, optional): Whether to load the cell segmentation stain
+            images in addition to the nuclei (DAPI) image. Defaults to False.
+        load_background_images (bool, optional): Whether to load background images. Defaults to False.
+        load_transcripts (bool, optional): Whether to load the transcripts. Defaults to False, because
+            whole-transcriptome bundles contain billions of transcripts and :meth:`InSituData.saveas`
+            writes all loaded transcripts to disk. If True, the transcripts are loaded lazily.
+            For preproduction data in Xenium format, transcripts are handled as in :func:`read_xenium`.
+        transcript_mode (Literal["pandas", "dask"], optional): Mode to load transcript data. Defaults to "dask".
+            - "pandas": Computes all transcripts into memory.
+            - "dask": Keeps the transcripts as a lazy Dask DataFrame.
+        dataset_name (str, optional): Name for the overarching dataset/slide. Defaults to None, which
+            uses ``slide_id`` from the Atera metadata. A value passed here takes precedence.
+        sample_name (str, optional): Name for the individual sample/region. Defaults to None, which
+            uses ``region_name`` from the Atera metadata. A value passed here takes precedence.
+        verbose (bool, optional): Whether to print progress messages. Defaults to True.
+
+    Returns:
+        InSituData: An object containing the Atera data, including metadata, cells, images and
+        (optionally) transcripts.
+
+    Raises:
+        FileNotFoundError: If the specified directory does not exist.
+        NotADirectoryError: If the path is not a directory.
+        InvalidAteraDirectory: If required Atera files are missing.
+        ValueError: If an invalid value is provided for ``transcript_mode``, or if the cell ids of the
+            cell table and the segmentation do not match.
+
+    Notes:
+        - The cell table contains only "Gene Expression" features (as in :func:`read_xenium`). The
+          count matrix is loaded into memory. 10x's clusterings, cell type annotations and
+          embeddings (``X_umap``, ``X_pca``) are kept. 10x's ``highly_variable`` and ``filtered``
+          flags are renamed to ``atera_highly_variable`` and ``atera_filtered``.
+        - Transcript columns follow the Xenium naming (``x_location``, ``y_location``,
+          ``z_location``, ``feature_name``, ``qv``, ``overlaps_nucleus``, ``cell_id``,
+          ``codeword_index``). Transcripts outside of cells have ``cell_id == "UNASSIGNED"``.
+        - 3D morphology images (``morphology_3d/``) are not loaded.
+    """
+    path = Path(path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"The directory '{path}' does not exist.")
+
+    if not path.is_dir():
+        raise NotADirectoryError(f"The path '{path}' is not a directory.")
+
+    if transcript_mode not in ("pandas", "dask"):
+        raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
+
+    # preproduction Atera data was converted to the Xenium output format
+    if (path / "experiment.xenium").exists() and not (path / ATERA_METADATA_FILE).exists():
+        if verbose:
+            logger.info("Xenium-formatted (preproduction) Atera data detected. Reading with read_xenium...")
+        data = read_xenium(
+            path,
+            load_cell_segmentation_images=load_cell_segmentation_images,
+            load_background_images=load_background_images,
+            verbose=verbose,
+            transcript_mode=transcript_mode,
+        )
+        data._metadata["method"] = "Atera"
+        if dataset_name is not None:
+            data.slide_id = dataset_name
+        if sample_name is not None:
+            data.sample_id = sample_name
+        return data
+
+    required_files = [ATERA_METADATA_FILE, ATERA_CELL_FEATURE_MATRIX_FILE, ATERA_CELLS_FILE]
+    missing_files = [f for f in required_files if not (path / f).exists()]
+    if missing_files:
+        raise InvalidAteraDirectory(directory=path, missing_files=missing_files)
+
+    # read metadata
+    atera_metadata = read_json(path / ATERA_METADATA_FILE)
+    pixel_size = float(atera_metadata["pixel_size"])
+
+    if verbose:
+        logger.info("Reading Atera data with InSituPy backend...")
+
+    data = InSituData(
+        path=path,
+        metadata=None, # initializes new metadata
+        slide_id=dataset_name if dataset_name is not None else atera_metadata.get("slide_id"),
+        sample_id=sample_name if sample_name is not None else atera_metadata.get("region_name"),
+        method_name="Atera",
+        method_params=atera_metadata,
+        )
+
+    # LOAD CELLS
+    if verbose:
+        logger.info("Loading cells...")
+    table = _read_table_from_atera(path=path)
+    boundaries = _read_boundaries_from_xenium(path=path, pixel_size=pixel_size)
+
+    # the cell table and the segmentation share the row order; a mismatch means the format changed
+    if not table.obs_names.equals(pd.Index(boundaries.cell_names)):
+        raise ValueError(
+            f"Cell ids in '{ATERA_CELL_FEATURE_MATRIX_FILE}' and '{ATERA_CELLS_FILE}' do not match. "
+            "This Atera output format is not supported yet - please open an issue."
+        )
+
+    cd = CellData(table=table, boundaries=boundaries)
+    data.cells.add_celldata(cd=cd, key="main", is_main=True)
+
+    # LOAD IMAGES
+    if verbose:
+        logger.info("Loading images...")
+    _add_morphology_images(
+        data=data,
+        nuclei_file=atera_metadata.get("images", {}).get(
+            "morphology_2d_filepath", f"{ATERA_MORPHOLOGY_DIR}/ch0000_dapi.ome.tif"
+        ),
+        image_dir=path / ATERA_MORPHOLOGY_DIR,
+        load_cell_segmentation_images=load_cell_segmentation_images,
+        load_background_images=load_background_images,
+    )
+
+    # LOAD TRANSCRIPTS
+    if load_transcripts:
+        if verbose:
+            logger.info("Loading transcripts...")
+        transcripts = _read_transcripts_from_atera(path)
+        if transcript_mode == "pandas":
+            transcripts = transcripts.compute()
+        data.transcripts = transcripts
 
     return data
 

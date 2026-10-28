@@ -1,4 +1,5 @@
 from .datasets import (
+                       atera_test_dataset,
                        list_downloaded_datasets,
                        visium_human_breast_cancer,
                        xenium_human_brain_cancer,
