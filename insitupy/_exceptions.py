@@ -13,6 +13,15 @@ class InSituPyError(ValueError):
     """
 
 
+class InSituPyDeprecationWarning(FutureWarning):
+    """Warning for deprecated InSituPy API.
+
+    Visible by default (it subclasses :class:`FutureWarning`, not
+    :class:`DeprecationWarning`). Every message names the replacement and the
+    version in which the old API is removed.
+    """
+
+
 class ProjectDivergedError(InSituPyError, RuntimeError):
     """Raised when an object no longer matches the project it was read from.
 

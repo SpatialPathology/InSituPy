@@ -706,7 +706,7 @@ def get_io_formats() -> str:
     | Method                         | Source                                   |
     |--------------------------------|------------------------------------------|
     | MultiCellData.add_proseg()     | Proseg output (transcript assignments)    |
-    | MultiCellData.add_baysor()     | Deprecated in 0.12, removed in 0.13 - see the "Use a Baysor segmentation" tutorial |
+    | MultiCellData.add_baysor()     | Removed in 0.13 - see the "Use a Baysor segmentation" tutorial |
 
     ## SpatialData Integration (insitupy.spatialdata)
 
@@ -1129,7 +1129,7 @@ def get_workflow_guide() -> str:
     # Switch between segmentation layers
     data.cells.set_main("proseg")
 
-    # Baysor: add_baysor() is deprecated (removed in 0.13). For Xenium data,
+    # Baysor: add_baysor() was removed in 0.13. For Xenium data,
     # import the segmentation with `xeniumranger import-segmentation` and read
     # the new bundle with ispy.io.read_xenium().
     ```
