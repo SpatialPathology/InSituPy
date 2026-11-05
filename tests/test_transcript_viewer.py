@@ -5,12 +5,15 @@ import pandas as pd
 import pytest
 
 from insitupy import WITH_NAPARI
+from insitupy.palettes import TRANSCRIPTS_DARK_BG_PALETTE, TRANSCRIPTS_LIGHT_BG_PALETTE
 from insitupy.interactive._transcript_viewer import (
     DEFAULT_DEBOUNCE_MS,
     DEFAULT_MAX_VISIBLE_POINTS,
     DEFAULT_POINT_SIZE,
     TranscriptViewerConfig,
-    _assign_gene_colors,
+    _get_background_palette,
+    _hex_to_rgb,
+    _next_gene_color,
     prepare_gene_colors,
     prepare_gene_data,
 )
@@ -47,51 +50,61 @@ class TestTranscriptViewerConfig:
         assert config.y_column == "y"
 
 
-class TestAssignGeneColors:
-    """Tests for _assign_gene_colors function."""
+def _contrast(hex_color: str, background: str) -> float:
+    """WCAG contrast ratio of a hex color against black or white."""
+    channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    lum = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    return (lum + 0.05) / 0.05 if background == "dark" else 1.05 / (lum + 0.05)
 
-    def test_empty_gene_list(self):
-        """Test with empty gene list."""
-        colors = _assign_gene_colors([])
-        assert colors == {}
 
-    def test_single_gene(self):
-        """Test with single gene."""
-        colors = _assign_gene_colors(["GeneA"])
-        assert len(colors) == 1
-        assert "GeneA" in colors
-        assert len(colors["GeneA"]) == 3  # RGB tuple
-        assert all(0 <= c <= 1 for c in colors["GeneA"])
+class TestBackgroundPalettes:
+    """Contrast of the transcript palettes against their canvas background."""
 
-    def test_multiple_genes(self):
-        """Test with multiple genes."""
-        genes = ["GeneA", "GeneB", "GeneC", "GeneD"]
-        colors = _assign_gene_colors(genes)
-        assert len(colors) == 4
-        for gene in genes:
-            assert gene in colors
-            assert len(colors[gene]) == 3
-            assert all(0 <= c <= 1 for c in colors[gene])
+    @pytest.mark.parametrize(
+        "palette, background",
+        [
+            (TRANSCRIPTS_DARK_BG_PALETTE, "dark"),
+            (TRANSCRIPTS_LIGHT_BG_PALETTE, "light"),
+        ],
+    )
+    def test_contrast_at_least_4_5(self, palette, background):
+        low = [c for c in palette if _contrast(c, background) < 4.5]
+        assert low == []
+        assert len(palette) == 64
+        assert len(set(palette)) == 64
 
-    def test_reproducibility(self):
-        """Test that colors are reproducible with same input."""
-        genes = ["GeneA", "GeneB", "GeneC"]
-        colors1 = _assign_gene_colors(genes)
-        colors2 = _assign_gene_colors(genes)
-        for gene in genes:
-            assert colors1[gene] == colors2[gene]
+    def test_get_background_palette(self):
+        assert _get_background_palette("dark") is TRANSCRIPTS_DARK_BG_PALETTE
+        assert _get_background_palette("light") is TRANSCRIPTS_LIGHT_BG_PALETTE
 
-    def test_distinct_colors(self):
-        """Test that different genes get different colors."""
-        genes = ["GeneA", "GeneB", "GeneC"]
-        colors = _assign_gene_colors(genes)
-        color_tuples = list(colors.values())
-        # Colors should be distinct (with some tolerance for floating point)
-        for i, c1 in enumerate(color_tuples):
-            for j, c2 in enumerate(color_tuples):
-                if i != j:
-                    # At least one channel should differ
-                    assert not np.allclose(c1, c2, atol=1e-6)
+    def test_invalid_background_raises(self):
+        with pytest.raises(ValueError, match="background"):
+            _get_background_palette("grey")
+
+
+@pytest.mark.parametrize("palette", [TRANSCRIPTS_DARK_BG_PALETTE, TRANSCRIPTS_LIGHT_BG_PALETTE])
+class TestNextGeneColor:
+    """Add-order colour selection (works with either palette)."""
+
+    def test_first_n_genes_get_first_n_colors(self, palette):
+        active: set = set()
+        picked = []
+        for _ in range(3):
+            color = _next_gene_color(active, palette)
+            picked.append(color)
+            active.add(color)
+        assert picked == [_hex_to_rgb(h) for h in palette[:3]]
+
+    def test_freed_color_is_reused(self, palette):
+        a, b, c = (_hex_to_rgb(h) for h in palette[:3])
+        # B removed, D added: D takes B's slot.
+        assert _next_gene_color({a, c}, palette) == b
+
+    def test_all_in_use_cycles_without_error(self, palette):
+        active = {_hex_to_rgb(h) for h in palette}
+        color = _next_gene_color(active, palette)
+        assert color in active
 
 
 class TestPrepareGeneData:
@@ -127,7 +140,7 @@ class TestPrepareGeneData:
 
         # Check gene_colors structure
         assert isinstance(gene_colors, dict)
-        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+        assert gene_colors == {}  # colours are assigned by the widget on add
 
     def test_custom_column_names(self):
         """Test with custom column names."""
@@ -171,7 +184,7 @@ class TestPrepareGeneData:
 
         assert set(gene_data.keys()) == {"GeneA", "GeneB", "GeneC"}
         assert all(isinstance(gene, str) for gene in gene_data.keys())
-        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+        assert gene_colors == {}  # colours are assigned by the widget on add
 
 
 class TestPrepareGeneColors:
@@ -198,7 +211,7 @@ class TestPrepareGeneColors:
 
         # Check gene_colors
         assert isinstance(gene_colors, dict)
-        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+        assert gene_colors == {}  # colours are assigned by the widget on add
 
     def test_mixed_bytes_and_str_gene_names(self):
         """Test normalization of mixed bytes/str gene names in lazy mode."""
@@ -216,7 +229,7 @@ class TestPrepareGeneColors:
 
         assert gene_list == ["GeneA", "GeneB", "GeneC"]
         assert all(isinstance(gene, str) for gene in gene_list)
-        assert set(gene_colors.keys()) == {"GeneA", "GeneB", "GeneC"}
+        assert gene_colors == {}  # colours are assigned by the widget on add
 
 
 class TestSubsampling:
@@ -358,3 +371,54 @@ class TestUpdateLayerConsistency:
         assert value is None or (0 <= int(value) < len(layer.data))
         # And the view-state indices are consistent with the current data length.
         assert len(layer._indices_view) == 0 or int(layer._indices_view.max()) < len(layer.data)
+
+
+@pytest.mark.skipif(not WITH_NAPARI, reason="napari required")
+class TestWidgetColorAssignment:
+    """Add-order colouring and the background switch on the real widget."""
+
+    def _widget(self, viewer_model, background="dark"):
+        from insitupy.interactive._transcript_viewer import TranscriptViewerWidget
+
+        genes = {g: np.zeros((0, 2)) for g in ["A", "B", "C", "D"]}
+        return TranscriptViewerWidget(
+            viewer_model, gene_data_or_list=genes, gene_colors={}, background=background
+        )
+
+    def _add(self, widget, gene):
+        widget.search_input.setText(gene)
+        widget._on_add_gene()
+
+    @pytest.mark.parametrize(
+        "background, palette",
+        [("dark", TRANSCRIPTS_DARK_BG_PALETTE), ("light", TRANSCRIPTS_LIGHT_BG_PALETTE)],
+    )
+    def test_add_order_and_slot_reuse(self, viewer_model, background, palette):
+        widget = self._widget(viewer_model, background)
+        for gene in "ABC":
+            self._add(widget, gene)
+        rgb = [_hex_to_rgb(h) for h in palette]
+        assert [widget.gene_colors[g] for g in "ABC"] == rgb[:3]
+
+        del widget.active_genes["B"]
+        self._add(widget, "D")
+        assert widget.gene_colors["D"] == rgb[1]  # D takes the freed slot
+
+        # B re-added: its old colour is taken by D, so it gets a free one.
+        self._add(widget, "B")
+        assert widget.gene_colors["B"] == rgb[3]
+        colors = [widget.gene_colors[g] for g in widget.active_genes]
+        assert len(set(colors)) == len(colors)
+
+    def test_readd_keeps_color_when_free(self, viewer_model):
+        widget = self._widget(viewer_model)
+        for gene in "AB":
+            self._add(widget, gene)
+        old = widget.gene_colors["B"]
+        del widget.active_genes["B"]
+        self._add(widget, "B")
+        assert widget.gene_colors["B"] == old
+
+    def test_invalid_background_raises(self, viewer_model):
+        with pytest.raises(ValueError, match="background"):
+            self._widget(viewer_model, background="grey")

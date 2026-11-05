@@ -107,6 +107,14 @@ def cmap2hex(cmap):
 #   REGIONS_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
 #                         lightness_bounds=(20, 40), chroma_bounds=(40, 50))
 #   TRANSCRIPTS_PALETTE = glasbey.create_palette(palette_size=256, colorblind_safe=True)
+#   # Transcript viewer palettes, one per canvas background. Entries are ordered by
+#   # distinctness (glasbey), so the first N genes shown get the N most distinct colours.
+#   # Bounds were tuned so every entry has WCAG contrast >= 4.5:1 against its background
+#   # (black for dark, white for light); tests/test_transcript_viewer.py checks this.
+#   TRANSCRIPTS_DARK_BG_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
+#                         lightness_bounds=(55, 95))
+#   TRANSCRIPTS_LIGHT_BG_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
+#                         lightness_bounds=(20, 37))
 
 ANNOTATIONS_PALETTE: list = [
     "#0c71ff", "#ca2800", "#ff28ba", "#000096", "#59d700", "#1c5951", "#20d2ff", "#69a28a",
@@ -163,6 +171,31 @@ TRANSCRIPTS_PALETTE: list = [
     "#653561", "#e771b2", "#820008", "#b2fbf3", "#655d49", "#a255aa", "#fb24a2", "#797935",
     "#ff5555", "#c29ae7", "#fba271", "#db1c2d", "#754d71", "#614949", "#3dae9a", "#18ae49",
     "#412d04", "#ff7dae", "#18ffdf", "#610051", "#aac251", "#dbd761", "#085d45", "#fb55eb",
+]
+
+
+# Bright colours for dark canvases (DAPI / fluorescence base images).
+TRANSCRIPTS_DARK_BG_PALETTE: list = [
+    "#ff6500", "#1caaff", "#ff51a2", "#f7ff00", "#24c69a", "#f7b2ff", "#ffba8e", "#fb39f7",
+    "#04db2d", "#8aa2b2", "#00efe3", "#ebb6c6", "#d7827d", "#1cfbd2", "#20d7ff", "#28ba51",
+    "#ffc231", "#fb82db", "#00ff79", "#9a9ad7", "#dfe7ff", "#b69aa2", "#ef9e5d", "#caae9e",
+    "#9eb6b6", "#fff3ce", "#ffeb6d", "#c2dbdb", "#24b6a2", "#59d779", "#ceaaca", "#0cb2c6",
+    "#ff82a2", "#8eae00", "#00cac6", "#c686b2", "#ffbeeb", "#f3cebe", "#00dbbe", "#b2cee3",
+    "#86f728", "#8ea686", "#ff614d", "#fb86ff", "#ff8ac2", "#ff9600", "#c279ff", "#ffdbeb",
+    "#c2d269", "#ce7dce", "#9afff7", "#aee3a6", "#61ebff", "#aacaba", "#96b6d7", "#ff8e82",
+    "#baffa6", "#c2ffe3", "#c2b6ff", "#04e3a6", "#c69241", "#86b2ff", "#aaae71", "#ff49c2",
+]
+
+# Dark colours for light canvases (H&E-like base images).
+TRANSCRIPTS_LIGHT_BG_PALETTE: list = [
+    "#0069ff", "#ca2400", "#920069", "#005124", "#0000f7", "#00827d", "#75009e", "#b618c2",
+    "#ca045d", "#208639", "#044d51", "#7d0031", "#862400", "#006996", "#4114ca", "#654d55",
+    "#96598a", "#8a008a", "#8a18ce", "#925139", "#2d6500", "#553949", "#be0079", "#515d6d",
+    "#188269", "#7d6d00", "#184d41", "#9e0859", "#084d71", "#714528", "#617192", "#aa0096",
+    "#8a6569", "#7561be", "#a20431", "#354d9e", "#750065", "#006d39", "#ce0039", "#4d4500",
+    "#b20014", "#7d00ef", "#082dff", "#593939", "#51415d", "#921cae", "#8a516d", "#6d6d79",
+    "#7d5110", "#820018", "#86519a", "#1c65c2", "#04695d", "#617151", "#5d2871", "#5908ae",
+    "#7d0049", "#594d7d", "#c21096", "#7d4575", "#9a28ff", "#924151", "#004dff", "#495541",
 ]
 
 

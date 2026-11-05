@@ -5,7 +5,7 @@
 Requires napari: `pip install "napari[all]"`
 
 ## data.show() — Launch napari viewer
-  InSituData.show(self, keys: str | None = None, key_type: Literal['genes', 'obs', 'obsm'] = 'genes', cells_layer: str | None = None, point_size: int = 8, scalebar: bool = True, unit: str = 'µm', return_viewer: bool = False, widgets_max_width: int = 500, verbose: bool = False, show_transcripts: bool = True, transcript_lazy_loading: bool = True, transcript_config=None)
+  InSituData.show(self, keys: str | None = None, key_type: Literal['genes', 'obs', 'obsm'] = 'genes', cells_layer: str | None = None, point_size: int = 8, scalebar: bool = True, unit: str = 'µm', return_viewer: bool = False, widgets_max_width: int = 500, verbose: bool = False, show_transcripts: bool = True, transcript_lazy_loading: bool = True, transcript_config=None, transcript_background: Literal['dark', 'light'] = 'dark')
 
   Visualize the data using a napari viewer.
 
@@ -22,10 +22,10 @@ Requires napari: `pip install "napari[all]"`
       show_transcripts: Whether to show the transcript viewer widget.
       transcript_l
 
-  ... [truncated — full text is 941 chars]
+  ... [truncated — full text is 1140 chars]
 
 ## TranscriptViewerWidget — Napari dock widget for transcripts
-  TranscriptViewerWidget.__init__(self, viewer: napari.viewer.Viewer, gene_data_or_list: dict[str, numpy.ndarray] | list[str], gene_colors: dict[str, tuple[float, float, float]], lazy_loading: bool = False, dask_df: Optional[ForwardRef('dd.DataFrame')] = None, config: insitupy.interactive._transcript_viewer.TranscriptViewerConfig | None = None, viewer_config: insitupy.interactive._configs.ViewerConfig | None = None)
+  TranscriptViewerWidget.__init__(self, viewer: napari.viewer.Viewer, gene_data_or_list: dict[str, numpy.ndarray] | list[str], gene_colors: dict[str, tuple[float, float, float]], lazy_loading: bool = False, dask_df: Optional[ForwardRef('dd.DataFrame')] = None, config: insitupy.interactive._transcript_viewer.TranscriptViewerConfig | None = None, viewer_config: insitupy.interactive._configs.ViewerConfig | None = None, background: Literal['dark', 'light'] = 'dark')
 
   Napari dock widget for viewing transcript points by gene.
 
@@ -42,7 +42,7 @@ Requires napari: `pip install "napari[all]"`
   Lazy mode (lazy_loading=True):
       Gene coordinates are loaded on-demand from a Dask DataFrame w
 
-... [truncated — full text is 1139 chars]
+... [truncated — full text is 1284 chars]
 
 ## sync_geometries() — Push napari edits back to InSituData
   ispy.interactive.viewer.sync_geometries()
@@ -93,11 +93,6 @@ data.show(
 ispy.interactive.viewer.sync_geometries()
 
 # 5. Assign annotations to cells. By default the result is written to
-#    data.cells.table.obsm["annotations"] (pass add_to_obs=True for .obs).
-data.assign_annotations(keys="all")
-```
+#    data.cells.table.obsm["anno
 
-## Notes
-- `data.show(
-
-... [truncated — full text is 4213 chars]
+... [truncated — full text is 4319 chars]
