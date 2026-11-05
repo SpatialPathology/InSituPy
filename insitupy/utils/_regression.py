@@ -1,11 +1,14 @@
+import contextlib
+import logging
 from typing import Literal
-from warnings import warn
 
 import numpy as np
 import pandas as pd
 import scipy
 from scipy import stats
 from statsmodels.nonparametric.smoothers_lowess import lowess as sm_lowess
+
+logger = logging.getLogger(__name__)
 
 
 class confidence_intervals:
@@ -86,18 +89,17 @@ class lowess:
 
         # regularly sample it onto the grid (statsmodel does not provide the solution on interpolated values)
         # for the statistics later it is important that the same grid of x values is used
-        if not verbose:
-            # suppress runtime error for division by nan
-            np.seterr(invalid='ignore')
+        # suppress runtime error for division by nan (only inside this call)
+        ctx = contextlib.nullcontext() if verbose else np.errstate(invalid='ignore')
+        with ctx:
+            values = scipy.interpolate.interp1d(self.pred_x, self.pred_y,
+                                                fill_value='extrapolate')(newdata)
 
-        values = scipy.interpolate.interp1d(self.pred_x, self.pred_y,
-                                            fill_value='extrapolate')(newdata)
-
-        if stderror:
-            self.calc_stderror(newdata, K=K, **kwargs)
-        else:
-            self.stderr = None
-            self.bootstrap_result = None
+            if stderror:
+                self.calc_stderror(newdata, K=K, **kwargs)
+            else:
+                self.stderr = None
+                self.bootstrap_result = None
 
         return lowess_prediction(values, self.stderr, self.bootstrap_result)
 
@@ -150,50 +152,6 @@ class lowess:
         self.fitted = True
         self.frac = frac # save frac setting for functions run later
 
-
-def bootstrap_loess(x, y, newdata, sample_frac=0.5):
-    """Run one LOESS bootstrap replicate using scikit-misc.
-
-    Args:
-        x: Full x-coordinate array.
-        y: Full y-coordinate array.
-        newdata: X-coordinates at which to evaluate the replicate curve.
-        sample_frac: Fraction of observations to include in the subsample.
-
-    Returns:
-        A 1-D array of LOESS predicted values at *newdata*.
-
-    Raises:
-        ImportError: If ``scikit-misc`` is not installed.
-    """
-    try:
-        from skmisc.loess import loess
-    except ImportError:
-        raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
-
-    # subsample data
-    samples = np.random.choice(len(x), int(len(x)*sample_frac), replace=True)
-    y_s = y[samples]
-    x_s = x[samples]
-
-    # fit on subsampled data and predict for new data using LOESS
-    ls = loess(x_s, y_s)
-    pred = ls.predict(newdata)
-    return pred.values
-
-def calc_loess_stderror_by_bootstrap(x, y, newdata, sample_frac=0.5, K=50, **kwargs):
-    '''
-    Interesting input on topic from:
-        - https://acclab.github.io/bootstrap-confidence-intervals.html
-        - https://stackoverflow.com/questions/28242593/correct-way-to-obtain-confidence-interval-with-scipy
-    '''
-    # calculate confidence interval using bootstrapping approach
-    bootstrap_result = np.stack([bootstrap_loess(x, y, newdata, sample_frac=sample_frac, **kwargs) for k in range(K)]).T
-
-    # calc mean and stderr of smooths
-    stderr = np.nanstd(bootstrap_result, axis=1, ddof=0) # OR std
-
-    return stderr
 
 class bootstrap_loess:
     '''
@@ -293,20 +251,19 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
         ys (np.ndarray): The y values.
         xmin (Optional[float]): Minimum x value to include in the fit. Defaults to None.
         xmax (Optional[float]): Maximum x value to include in the fit. Defaults to None.
-        nsteps (Optional[float]): Number of steps x is divided into for the prediction. Defaults to None.
+        nsteps (Optional[int]): Number of grid points between `xmin` and `xmax` at which the fit is predicted
+            (the first and last grid point are dropped). Must be at least 2. Defaults to 100. If None, the fit is
+            predicted at the unique input x values, which can be slow and memory-heavy for very many points.
         method (Literal["lowess", "loess"]): The smoothing method to use. Options are "loess" or "lowess". Defaults to "loess".
         stderr (bool): Whether to calculate standard errors of the prediction. Defaults to True.
-        loess_bootstrap (bool): Whether to use bootstrapping for LOESS standard error calculation. Defaults to True.
+        loess_bootstrap (bool): Whether to use bootstrapping for LOESS standard error calculation. Only applies to
+            `method="loess"`; LOWESS always uses bootstrapping. Defaults to True.
         K (int): Number of bootstrapping cycles for LOWESS. Only needed if `method` is "lowess". Defaults to 100.
 
     Returns:
-        pd.DataFrame: A DataFrame containing the predicted y values and associated standard errors and confidence intervals.
+        pd.DataFrame: A DataFrame containing the predicted y values and associated standard errors (column `std`,
+        NaN if `stderr=False`) and confidence intervals.
     """
-    try:
-        from skmisc.loess import loess
-    except ImportError:
-        raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
-
     # assure the input are numpy arrays
     xs = np.array(xs)
     ys = np.array(ys)
@@ -314,12 +271,25 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
     # check method
     if method == "loess":
         use_loess = True
-        if (stderr == True) & (bootstrap_loess == False):
-            warn("When using the LOESS method and `stderr=True`, `bootstrap_loess` should be set True. Otherwise it could be that the kernel is crashing due to the high number of data points in Xenium experiments.")
+        try:
+            from skmisc.loess import loess
+        except ImportError:
+            raise ImportError("This function requires the scikit-misc package to perform LOESS regression, please install it with `pip install scikit-misc`.")
     elif method == "lowess":
         use_loess = False
     else:
-        raise ValueError('Invalid `method`. Expected is one of: ["loess", "lowess"')
+        raise ValueError('Invalid `method`. Expected is one of: ["loess", "lowess"]')
+
+    # bootstrapping of the standard error is only implemented for LOESS
+    use_bootstrap = use_loess and loess_bootstrap
+    if use_loess and stderr and not loess_bootstrap:
+        logger.debug(
+            "LOESS with `stderr=True` and `loess_bootstrap=False` uses the analytic standard error, "
+            "which can be slow and memory-heavy for a high number of data points."
+        )
+
+    if nsteps is not None and nsteps < 2:
+        raise ValueError("`nsteps` must be None or at least 2.")
 
     # sort x values
     srt = np.argsort(xs)
@@ -347,15 +317,15 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
 
     # if stepsize is given determine xs to fit the data on
     if nsteps is not None:
-        stepsize = (xmax - xmin) / nsteps
-        #if stepsize is not None:
-        xs_pred = np.asarray(np.arange(xmin, xmax+stepsize, stepsize))
         xs_pred = np.linspace(xmin, xmax, nsteps)
         xs_pred = xs_pred[(xs_pred < xs.max()) & (xs_pred > xs.min())]
+    else:
+        # predict at the unique input x values
+        xs_pred = np.unique(xs)
 
     # predict on data
     if use_loess:
-        if loess_bootstrap:
+        if use_bootstrap:
             pred =  ls.predict(xs_pred, stderror=False)
         else:
             pred =  ls.predict(xs_pred, stderror=stderr)
@@ -367,18 +337,20 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
 
     if stderr:
         # calculate confidence intervals and standard error if that was not calculated before
-        if loess_bootstrap:
+        if use_bootstrap:
             bl = bootstrap_loess(ls)
             bl.calc_loess_stderror_by_bootstrap(newdata=xs_pred, K=K)
             conf = bl.confidence()
+            stderr_values = bl.stderr
         else:
-            stderr = pred.stderr
+            stderr_values = pred.stderr
             conf = pred.confidence()
 
         # retrieve upper and lower confidence intervals
         lower = conf.lower
         upper = conf.upper
     else:
+        stderr_values = np.nan
         lower = np.nan
         upper = np.nan
 
@@ -386,7 +358,7 @@ def smooth_fit(xs: np.ndarray, ys: np.ndarray,
         'x': xs_pred,
         #'y': ys,
         'y_pred': ys_hat,
-        'std': stderr,
+        'std': stderr_values,
         'conf_lower': lower,
         'conf_upper': upper
     })
