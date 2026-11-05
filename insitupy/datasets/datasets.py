@@ -118,10 +118,11 @@ def _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, dat
     use_existing_zip = False
     if zip_file.exists():
         logger.info("ZIP file exists. Checking md5sum...")
-        if _md5sum(zip_file) == expected_md5sum and not overwrite:
+        zip_md5_ok = _md5sum(zip_file) == expected_md5sum
+        if zip_md5_ok and not overwrite:
             logger.info("The md5sum matches. Download is skipped.")
             use_existing_zip = True
-        elif _md5sum(zip_file) != expected_md5sum:
+        elif not zip_md5_ok:
             logger.warning("The ZIP file exists already but the md5sum is not as expected. Dataset is downloaded again.")
 
     if not use_existing_zip:
