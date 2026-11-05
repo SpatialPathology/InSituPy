@@ -122,5 +122,7 @@ for moves. Do not reformat other content in these files.
    `/implement @agent-plans/approved/<YYMMDD>-<slug>/report-<slug>.md`
 3. Deferred plans that were re-reviewed and the reminders that are still open.
 4. Add a session log entry to `.log/log.md` (global CLAUDE.md format).
-5. Offer to start the first `/implement`. Note that `/implement` runs on Sonnet: start it as a
-   new command, not inside this session's reasoning.
+5. Offer the next step: **`/implement-insitupy-plans`** implements all runnable approved plans as a
+   batch (one Sonnet subagent per plan in its own worktree, then an Opus review and the
+   bookkeeping); pass plan folder names to limit it. For a single plan, `/implement @<report>`.
+   Both are new commands: start them after this one, not inside this session's reasoning.

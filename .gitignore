@@ -171,6 +171,7 @@ docs/source/generated/
 # fails. Ignore the contents with `.claude/*`, then re-include the shared paths.
 .claude/*
 !.claude/commands/
+!.claude/implement-protocol.md
 !.claude/plan-protocol.md
 !.claude/settings.json
 !.claude/setup-notes.md

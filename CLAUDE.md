@@ -124,8 +124,10 @@ that skip dot-folders can index `planning/backlog.md`. `agent-plans/` holds the 
 scheduled plan-only agent (see "Unattended runs" below). New plans land in date folders
 (`agent-plans/<YYMMDD>/<slug>/`); review them with `/walkthrough-insitupy-plans`, which files
 each into `approved/`, `deferred/` or `rejected/` and records the outcome in
-`agent-plans/review-log.md` for the agent. Run an approved one with
-`/implement @agent-plans/approved/<YYMMDD>-<slug>/report-<slug>.md`; `/implement` then moves it
+`agent-plans/review-log.md` for the agent. Run the approved ones as a batch with
+`/implement-insitupy-plans` (Opus orchestrator, one Sonnet subagent per plan in its own worktree,
+review and bookkeeping by the orchestrator), or one with
+`/implement @agent-plans/approved/<YYMMDD>-<slug>/report-<slug>.md`; both move a finished plan
 to `implemented/`. See `.claude/setup-notes.md` for the link setup.
 
 ## Coding workflow
