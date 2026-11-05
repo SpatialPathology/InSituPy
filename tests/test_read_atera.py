@@ -1,14 +1,22 @@
 import json
 import shutil
+import zipfile
 
 import numpy as np
+import pandas as pd
 import pytest
 import zarr
+from anndata.io import write_elem
+from scipy import sparse
 
 from insitupy import InSituData
 from insitupy._exceptions import InvalidAteraDirectory
 from insitupy._io import _atera
-from insitupy._io._atera import _encode_xenium_cell_ids, _read_transcripts_from_atera
+from insitupy._io._atera import (
+    _encode_xenium_cell_ids,
+    _read_table_from_atera,
+    _read_transcripts_from_atera,
+)
 from insitupy.datasets import atera_test_dataset, xenium_test_dataset_v4_nucex
 from insitupy.datasets.datasets import _atera_test_dataset_dir
 from insitupy.io import read_atera
@@ -172,6 +180,124 @@ def test_xenium_formatted_data_is_delegated():
     assert data.metadata["method"] == "Atera"
     assert data.sample_id == "atera_preview"
     assert data.cells.table.n_obs > 0
+    # transcripts are opt-in on this path, too (read_xenium would attach them)
+    assert data.transcripts is None
+
+    with_tx = read_atera(xenium_dir, load_transcripts=True, verbose=False)
+    assert with_tx.transcripts is not None
+    assert len(with_tx.transcripts.columns) > 0
+
+
+def test_atera_markers_win_over_xenium_file(atera_dir, tmp_path):
+    # a bundle that has both experiment.xenium and experiment.spatial is read as Atera
+    both = tmp_path / "both"
+    shutil.copytree(atera_dir, both)
+    (both / "experiment.xenium").write_text("{}")
+    assert read_atera(both, verbose=False).metadata["method_params"]["pixel_size"] > 0
+    assert (both / "experiment.spatial").exists()
+
+
+def test_bundle_without_experiment_spatial(atera_dir, tmp_path):
+    meta = json.loads((atera_dir / "experiment.spatial").read_text())
+    bundle = tmp_path / "no_spatial"
+    shutil.copytree(atera_dir, bundle)
+    (bundle / "experiment.spatial").unlink()
+
+    data = read_atera(bundle, dataset_name="my_slide", sample_name="my_sample", verbose=False)
+    assert data.slide_id == "my_slide"
+    assert data.sample_id == "my_sample"
+    assert data.metadata["method_params"]["pixel_size"] == pytest.approx(meta["pixel_size"], rel=1e-4)
+    assert data.cells.table.n_obs == meta["num_cells"]
+    assert list(data.images.keys()) == ["nuclei"]
+
+    unnamed = read_atera(bundle, verbose=False)
+    assert unnamed.slide_id is None
+    assert unnamed.sample_id is None
+
+
+def test_invalid_directory_names_missing_files(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(InvalidAteraDirectory) as exc:
+        read_atera(empty)
+    assert "cell_feature_matrix.zarr.zip" in str(exc.value)
+    assert "cells.zarr.zip" in str(exc.value)
+
+    # only one of the two files is missing, and experiment.spatial is not required
+    partial = tmp_path / "partial"
+    partial.mkdir()
+    (partial / "cells.zarr.zip").write_bytes(b"")
+    with pytest.raises(InvalidAteraDirectory) as exc:
+        read_atera(partial)
+    message = str(exc.value)
+    assert "cell_feature_matrix.zarr.zip" in message
+    assert "Missing: cell_feature_matrix.zarr.zip." in message
+    assert "experiment.spatial" not in message
+
+
+def _write_synthetic_table(directory, n_cells=1500, chunk=1000):
+    """Write a minimal cell_feature_matrix.zarr.zip (zarr v2, vlen-utf8 string columns).
+
+    Strings are plain (non-categorical) arrays whose length is not a multiple of ``chunk``, i.e.
+    they end with a ragged chunk.
+    """
+    rng = np.random.default_rng(0)
+    genes = [f"G{i}" for i in range(5)]
+    obs = pd.DataFrame(
+        {
+            "barcode": [f"bc{i}" for i in range(n_cells)],
+            "cell_id": [f"cell{i}" for i in range(n_cells)],
+            "filtered": np.zeros(n_cells, dtype=bool),
+            "centroid_column": rng.random(n_cells),
+            "centroid_row": rng.random(n_cells),
+            "azimuth_celltype_l1": np.where(np.arange(n_cells) % 2, "T cell", "B cell").astype(object),
+            "azimuth_celltype_l1_score": rng.random(n_cells),
+        },
+        index=[f"bc{i}" for i in range(n_cells)],
+    )
+    var = pd.DataFrame(
+        {
+            "feature_name": genes + ["NegControl"],
+            "feature_type": ["Gene Expression"] * 5 + ["Negative Control Probe"],
+            "genome": "hg38",
+            "highly_variable": False,
+            "filtered": False,
+        },
+        index=[f"ENSG{i}" for i in range(6)],
+    )
+    X = sparse.random(n_cells, 6, density=0.5, format="csr", random_state=0, dtype=np.float32)
+
+    store_dir = directory / "table.zarr"
+    group = zarr.open_group(store_dir, mode="w", zarr_format=2)
+    write_elem(group, "obs", obs)
+    write_elem(group, "var", var)
+    write_elem(group, "X", X)
+    # force a small chunk size for the string columns so that the trailing chunk is ragged
+    for name in ["_index", "barcode", "cell_id", "azimuth_celltype_l1"]:
+        arr = group["obs"][name]
+        values, attrs = arr[:], dict(arr.attrs)
+        del group["obs"][name]
+        new = group["obs"].create_array(name, shape=(n_cells,), chunks=(chunk,), dtype=arr.dtype)
+        new[:] = values
+        new.attrs.update(attrs)
+    assert n_cells % chunk != 0
+
+    with zipfile.ZipFile(directory / "cell_feature_matrix.zarr.zip", "w") as zf:
+        for file in sorted(store_dir.rglob("*")):
+            if file.is_file():
+                zf.write(file, file.relative_to(store_dir).as_posix())
+    shutil.rmtree(store_dir)
+
+
+def test_azimuth_columns_and_ragged_string_chunks(tmp_path):
+    _write_synthetic_table(tmp_path, n_cells=1500, chunk=1000)
+    obs = _read_table_from_atera(tmp_path).obs
+
+    assert len(obs) == 1500
+    assert "azimuth_celltype_l1" in obs.columns
+    assert isinstance(obs["azimuth_celltype_l1"].dtype, pd.CategoricalDtype)
+    assert set(obs["azimuth_celltype_l1"].cat.categories) == {"T cell", "B cell"}
+    assert pd.api.types.is_float_dtype(obs["azimuth_celltype_l1_score"])
 
 
 def test_atera_test_dataset():
