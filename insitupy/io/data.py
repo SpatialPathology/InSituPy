@@ -16,6 +16,7 @@ from insitupy._io._atera import (
     ATERA_CELLS_FILE,
     ATERA_METADATA_FILE,
     ATERA_MORPHOLOGY_DIR,
+    _read_pixel_size_from_ome,
     _read_table_from_atera,
     _read_transcripts_from_atera,
 )
@@ -350,7 +351,8 @@ def read_atera(
         load_transcripts (bool, optional): Whether to load the transcripts. Defaults to False, because
             whole-transcriptome bundles contain billions of transcripts and :meth:`InSituData.saveas`
             writes all loaded transcripts to disk. If True, the transcripts are loaded lazily.
-            For preproduction data in Xenium format, transcripts are handled as in :func:`read_xenium`.
+            The same applies to preproduction data in Xenium format (``transcript_mode`` is only
+            used if ``load_transcripts=True``).
         transcript_mode (Literal["pandas", "dask"], optional): Mode to load transcript data. Defaults to "dask".
             - "pandas": Computes all transcripts into memory.
             - "dask": Keeps the transcripts as a lazy Dask DataFrame.
@@ -374,8 +376,14 @@ def read_atera(
     Notes:
         - The cell table contains only "Gene Expression" features (as in :func:`read_xenium`). The
           count matrix is loaded into memory. 10x's clusterings, cell type annotations and
-          embeddings (``X_umap``, ``X_pca``) are kept. 10x's ``highly_variable`` and ``filtered``
-          flags are renamed to ``atera_highly_variable`` and ``atera_filtered``.
+          embeddings (``X_umap``, ``X_pca``) are kept. This includes the Azimuth cell type
+          annotations (``azimuth_*`` columns in ``.obs``, labels and scores) of bundles that
+          have them. 10x's ``highly_variable`` and ``filtered`` flags are renamed to
+          ``atera_highly_variable`` and ``atera_filtered``.
+        - ``experiment.spatial`` is optional. Without it the pixel size is read from the OME
+          metadata of the first image in ``morphology_2d/``, ``slide_id`` and ``region_name`` are
+          not set (pass ``dataset_name`` and ``sample_name``) and the default nuclei image
+          ``morphology_2d/ch0000_dapi.ome.tif`` is used.
         - Transcript columns follow the Xenium naming (``x_location``, ``y_location``,
           ``z_location``, ``feature_name``, ``qv``, ``overlaps_nucleus``, ``cell_id``,
           ``codeword_index``). Transcripts outside of cells have ``cell_id == "UNASSIGNED"``.
@@ -392,17 +400,24 @@ def read_atera(
     if transcript_mode not in ("pandas", "dask"):
         raise ValueError(f"Invalid value for `transcript_mode`: {transcript_mode}")
 
-    # preproduction Atera data was converted to the Xenium output format
-    if (path / "experiment.xenium").exists() and not (path / ATERA_METADATA_FILE).exists():
+    # Format detection. Preproduction Atera data was converted to the Xenium output format, which
+    # also has cells.zarr.zip and cell_feature_matrix.zarr.zip, so those files cannot tell the two
+    # apart. Atera-specific markers are experiment.spatial and the morphology_2d/ directory.
+    has_atera_markers = (path / ATERA_METADATA_FILE).exists() or (path / ATERA_MORPHOLOGY_DIR).is_dir()
+    if (path / "experiment.xenium").exists() and not has_atera_markers:
         if verbose:
             logger.info("Xenium-formatted (preproduction) Atera data detected. Reading with read_xenium...")
+        # read_xenium always attaches the transcripts (lazily in dask mode); keep them lazy and drop
+        # them unless requested, so that saveas does not write them by accident
         data = read_xenium(
             path,
             load_cell_segmentation_images=load_cell_segmentation_images,
             load_background_images=load_background_images,
             verbose=verbose,
-            transcript_mode=transcript_mode,
+            transcript_mode=transcript_mode if load_transcripts else "dask",
         )
+        if not load_transcripts:
+            data._transcripts = None
         data._metadata["method"] = "Atera"
         if dataset_name is not None:
             data.slide_id = dataset_name
@@ -410,14 +425,21 @@ def read_atera(
             data.sample_id = sample_name
         return data
 
-    required_files = [ATERA_METADATA_FILE, ATERA_CELL_FEATURE_MATRIX_FILE, ATERA_CELLS_FILE]
+    required_files = [ATERA_CELL_FEATURE_MATRIX_FILE, ATERA_CELLS_FILE]
     missing_files = [f for f in required_files if not (path / f).exists()]
     if missing_files:
         raise InvalidAteraDirectory(directory=path, missing_files=missing_files)
 
-    # read metadata
-    atera_metadata = read_json(path / ATERA_METADATA_FILE)
-    pixel_size = float(atera_metadata["pixel_size"])
+    # read metadata; experiment.spatial is optional (some bundles omit it)
+    if (path / ATERA_METADATA_FILE).exists():
+        atera_metadata = read_json(path / ATERA_METADATA_FILE)
+    else:
+        atera_metadata = {}
+    if "pixel_size" in atera_metadata:
+        pixel_size = float(atera_metadata["pixel_size"])
+    else:
+        pixel_size = _read_pixel_size_from_ome(path)
+        atera_metadata["pixel_size"] = pixel_size
 
     if verbose:
         logger.info("Reading Atera data with InSituPy backend...")
