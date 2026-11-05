@@ -65,3 +65,14 @@ InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy
    ```bash
    pip install git+https://github.com/SpatialPathology/InSituPy.git
    ```
+
+## Upgrading from 0.12
+
+InSituPy now depends on `opencv-python-headless` instead of `opencv-python`. In an existing
+environment, run `pip uninstall -y opencv-python opencv-python-headless` and then
+`pip install opencv-python-headless` (or reinstall InSituPy). Having both wheels installed puts
+two copies of the `cv2` module in the same folder, and uninstalling either one later breaks the
+other.
+
+If you rely on `cv2.imshow` or other OpenCV GUI functions in your own code, install
+`opencv-python` yourself (after removing the headless wheel).
