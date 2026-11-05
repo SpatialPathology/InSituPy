@@ -50,6 +50,17 @@ file searching.
    - If they don't exist, don't create them silently. Ask the user whether to set up this
      session-log/backlog structure (briefly: a running dev journal at `.log/log.md` and a todo
      list at `planning/backlog.md`); if they decline, skip logging entirely.
+7. **Agent plans only** (report under `agent-plans/`, written by the scheduled plan agent):
+   - At the start: if the report is still in a date folder (`agent-plans/<YYMMDD>/...`), it has
+     not been reviewed. Say so and ask whether to proceed or to review it first with
+     `/walkthrough-insitupy-plans`. A `## Review` section in the report overrides the rest of
+     the report where they conflict.
+   - At the end, once the change is implemented and the targeted tests pass: move the plan
+     folder from `agent-plans/approved/<YYMMDD>-<slug>/` to
+     `agent-plans/implemented/<YYMMDD>-<slug>/`, and update the plan's row in
+     `agent-plans/review-log.md` (outcome `implemented`, date, branch, new location). If parts
+     were left out, keep the folder in `approved/`, note what is missing in the row, and ask
+     the user.
 
 ## Delegation note
 
