@@ -10,7 +10,7 @@ import pandas as pd
 from shapely import affinity
 
 from insitupy._core.data import InSituData
-from insitupy._exceptions import InvalidXeniumDirectory
+from insitupy._exceptions import InSituPyDeprecationWarning, InvalidXeniumDirectory
 from insitupy._io._qupath import _read_boundaries_qupath, _read_measurements_qupath
 from insitupy._io._read import _read_boundaries, _read_measurements
 from insitupy._io._xenium import (
@@ -111,6 +111,9 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
+
+            .. deprecated:: 0.13
+                Removed in 0.14. Only has an effect with ``transcript_mode='pandas'``.
         dataset_name (str, optional): Name for the overarching dataset/slide. For the insitupy
             backend this is overridden by the value in the Xenium metadata file. For the spatialdata
             backend it is not used (``spatialdata_io.xenium()`` has no equivalent parameter).
@@ -148,6 +151,13 @@ def read_xenium(
         warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
                       DeprecationWarning, stacklevel=2)
         sample_name = sample_id
+    if restructure_transcripts:
+        warnings.warn(
+            "`read_xenium(restructure_transcripts=True)` is deprecated and will be removed in "
+            "InSituPy 0.14. The MultiIndex-column transcript table it builds cannot be saved. "
+            "Use the default flat columns (`x_location`, `y_location`, ...) instead.",
+            InSituPyDeprecationWarning, stacklevel=2,
+        )
 
     path = Path(path) # make sure the path is a pathlib path
 

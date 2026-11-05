@@ -46,9 +46,6 @@ def add_alt(self, *args, **kwargs):
     """Deprecated. Use ``.cells.add_*()`` instead."""
     warn("`add_alt()` is deprecated. Use `.cells.add_{}()` instead.", DeprecationWarning, stacklevel=2)
 
-#def add_baysor(self, *args, **kwargs):
-    #warn("`add_baysor()` is deprecated. Use `.cells.add_{}()` instead.", DeprecationWarning, stacklevel=2)
-
 def store_geometries(self, *args, **kwargs):
     """Deprecated. Use ``sync_geometries()`` or the 'Sync Geometries' button in the napari viewer instead."""
     warn("`store_geometries()` is deprecated. Use the `sync_geometries()` or the 'Sync Geometries' button in the napari viewer instead.", DeprecationWarning, stacklevel=2)
