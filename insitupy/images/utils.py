@@ -91,7 +91,7 @@ def resize_image(img: NDArray,
     Time-series images (e.g. "TCYX") are not supported yet.
     '''
     if not HAS_OPENCV:
-        raise ImportError("OpenCV (cv2) is required for resize_image. Install it with: pip install opencv-python")
+        raise ImportError("OpenCV (cv2) is required for resize_image. Install it with: pip install opencv-python-headless")
 
     # Set default interpolation if not provided
     if interpolation is None:
@@ -473,7 +473,7 @@ def otsu_thresholding(image: np.ndarray) -> np.ndarray:
         ImportError: If OpenCV (``cv2``) is not installed.
     """
     if not HAS_OPENCV:
-        raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python")
+        raise ImportError("OpenCV (cv2) is required for otsu_thresholding. Install it with: pip install opencv-python-headless")
 
     # Apply GaussianBlur to reduce image noise if necessary
     #blur = cv2.GaussianBlur(image, (5, 5), 0)

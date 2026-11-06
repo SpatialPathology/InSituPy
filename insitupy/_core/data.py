@@ -2684,6 +2684,7 @@ class InSituData:
         show_transcripts: bool = True,
         transcript_lazy_loading: bool = True,
         transcript_config = None,
+        transcript_background: Literal["dark", "light"] = "dark",
         ):
         """Visualize the data using a napari viewer.
 
@@ -2702,6 +2703,9 @@ class InSituData:
                 (recommended for datasets > 50M transcripts).
             transcript_config: TranscriptViewerConfig object for customizing
                 the transcript viewer. Import from insitupy.interactive.
+            transcript_background: Canvas background the transcript colors are
+                chosen for: ``"dark"`` (bright colors, e.g. DAPI base image) or
+                ``"light"`` (dark colors, e.g. H&E base image).
 
         Returns:
             The napari Viewer instance if ``return_viewer`` is ``True``,
@@ -2729,6 +2733,7 @@ class InSituData:
             show_transcripts=show_transcripts,
             transcript_lazy_loading=transcript_lazy_loading,
             transcript_config=transcript_config,
+            transcript_background=transcript_background,
         )
 
     def reload(

@@ -4,7 +4,6 @@ import logging
 import os
 from numbers import Number
 from pathlib import Path
-from warnings import warn
 
 from shapely import MultiPolygon, Polygon
 
@@ -19,6 +18,11 @@ logger = logging.getLogger(__name__)
 class MultiCellData(DeepCopyMixin):
     '''
     Data object containing multiple CellData objects.
+
+    Each layer is a :class:`~insitupy.containers.cell_data.CellData`, and its table and
+    boundaries follow the sync rule described there: indexing and table assignment sync
+    automatically, in-place AnnData changes need a :meth:`sync` call. :meth:`sync` here
+    syncs all layers at once.
     '''
     def __init__(self):
         self._layers: dict[str, CellData] = dict()
@@ -280,99 +284,6 @@ class MultiCellData(DeepCopyMixin):
             adata, boundaries_mask, cell_names, seg_mask_value = _read_proseg(
                 path, counts_file=counts_file, cell_metadata_file=cell_metadata_file,
                 polygons_file=polygons_file, pixel_size=pixel_size
-            )
-
-        # generate boundaries data object
-        boundaries = BoundariesData(
-            cell_names=cell_names,
-            seg_mask_value=seg_mask_value
-            )
-
-        # add cellular boundaries
-        boundaries.add_boundaries(
-            cell_boundaries=boundaries_mask,
-            pixel_size=pixel_size
-            )
-        del boundaries_mask  # no longer needed after add_boundaries
-
-        # Create cell data and add to object
-        celldata = CellData(table=adata, boundaries=boundaries)
-        del adata, boundaries  # now owned by celldata
-
-        self.add_celldata(cd=celldata, key=key, is_main=is_main, overwrite=overwrite)
-
-
-    def add_baysor(
-                    self,
-                    xd: str | os.PathLike | Path, # XeniumRanger output
-                    path: str | os.PathLike | Path, # baysor output
-                    counts_file: str | None = None,
-                    cell_metadata_file: str | None = None,
-                    polygons_file: str | None = None,
-                    pixel_size: Number = 1,
-                    key: str = "baysor",
-                    is_main: bool = False,
-                    overwrite: bool = False
-                    ):
-        """
-        Add Baysor (https://github.com/kharchenkolab/Baysor) segmentation output to the object.
-
-        .. deprecated:: 0.12
-            ``add_baysor`` will be removed in 0.13. For Xenium data, import the Baysor
-            segmentation with ``xeniumranger import-segmentation`` and read the result with
-            :func:`insitupy.io.read_xenium`; otherwise build a
-            :class:`~insitupy.containers.CellData` layer from the Baysor output files. Both
-            routes are shown in the "Use a Baysor segmentation" tutorial.
-
-        Reads Baysor output files (counts, cell metadata, and polygon files)
-        together with the XeniumRanger output directory and registers the
-        resulting cell data as a new segmentation layer named ``key``.
-
-        Args:
-            xd (Union[str, os.PathLike, Path]): Path to the XeniumRanger output
-                directory. Used alongside the Baysor output to reconstruct cell
-                boundaries.
-            path (Union[str, os.PathLike, Path]): Path to the Baysor output
-                directory containing individual result files.
-            counts_file (Optional[str], optional): Name of the counts file
-                within ``path``. Defaults to None (auto-detected).
-            cell_metadata_file (Optional[str], optional): Name of the cell
-                metadata file within ``path``. Defaults to None (auto-detected).
-            polygons_file (Optional[str], optional): Name of the polygons file
-                within ``path``. Defaults to None (auto-detected).
-            pixel_size (Number, optional): Size of one pixel in micrometers,
-                used to scale coordinates. Defaults to 1.
-            key (str, optional): Key under which the segmentation layer is
-                stored. Defaults to ``'baysor'``.
-            is_main (bool, optional): If True, set this layer as the main
-                (active) cell segmentation layer. Defaults to False.
-            overwrite (bool, optional): If True, allow overwriting an existing
-                layer with the same ``key``. Defaults to False.
-
-        Returns:
-            None: Modifies the object in place by adding a new cell segmentation
-                layer accessible via ``self[key]``.
-        """
-        warn(
-            "`add_baysor()` is deprecated and will be removed in InSituPy 0.13. For Xenium data, "
-            "import the Baysor segmentation with `xeniumranger import-segmentation` and read it "
-            "with `insitupy.io.read_xenium()`; otherwise build a CellData layer from the Baysor "
-            "output files (see the 'Use a Baysor segmentation' tutorial).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        from ._segmentations import _read_baysor
-        from .boundaries_data import BoundariesData
-        from .cell_data import CellData
-
-        # Convert to Path object
-        path = Path(path)
-        logger.debug(path)
-        # Legacy path-based input (directory with individual files)
-        adata, boundaries_mask, cell_names, seg_mask_value = _read_baysor(path, xd,
-            counts_file=counts_file, cell_metadata_file=cell_metadata_file,
-            polygons_file=polygons_file, pixel_size=pixel_size
             )
 
         # generate boundaries data object

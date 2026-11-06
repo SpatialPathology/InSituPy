@@ -121,9 +121,14 @@ Follow the layout defined in the global `~/.claude/CLAUDE.md`:
 private cloud-synced folder. On a fresh clone, recreate them as symlinks or junctions to that
 folder. `planning/` is a visible folder (unlike the dot-folder `.log/`) so that note-taking tools
 that skip dot-folders can index `planning/backlog.md`. `agent-plans/` holds the reports of the
-scheduled plan-only agent (see "Unattended runs" below); run one with
-`/implement @agent-plans/<YYMMDD>/<slug>/report-<slug>.md`. See `.claude/setup-notes.md` for
-instructions.
+scheduled plan-only agent (see "Unattended runs" below). New plans land in date folders
+(`agent-plans/<YYMMDD>/<slug>/`); review them with `/walkthrough-insitupy-plans`, which files
+each into `approved/`, `deferred/` or `rejected/` and records the outcome in
+`agent-plans/review-log.md` for the agent. Run the approved ones as a batch with
+`/implement-insitupy-plans` (Opus orchestrator, one Sonnet subagent per plan in its own worktree,
+review and bookkeeping by the orchestrator), or one with
+`/implement @agent-plans/approved/<YYMMDD>-<slug>/report-<slug>.md`; both move a finished plan
+to `implemented/`. See `.claude/setup-notes.md` for the link setup.
 
 ## Coding workflow
 

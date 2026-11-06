@@ -1,3 +1,6 @@
+import json
+import logging
+
 import pytest
 
 from insitupy import InSituData
@@ -310,3 +313,30 @@ def test_read_xenium_empty_dir_has_no_atera_hint(tmp_path):
     with pytest.raises(InvalidXeniumDirectory) as excinfo:
         read_xenium(tmp_path)
     assert "read_atera" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "version_fields, expect_warning",
+    [({"major_version": 7, "minor_version": 0, "patch_version": 0}, True),
+     ({"major_version": 6}, False),
+     ({}, False)],  # XOA 1.x bundles have no major_version key
+)
+def test_read_xenium_untested_major_version_warning(tmp_path, caplog, version_fields, expect_warning):
+    """An experiment.xenium newer than the highest tested major version logs a warning."""
+    meta = {"pixel_size": 0.2125, "slide_id": "s", "region_name": "r", **version_fields}
+    (tmp_path / "experiment.xenium").write_text(json.dumps(meta))
+
+    # `insitupy` loggers don't propagate, so attach caplog's handler to the source logger.
+    logger = logging.getLogger("insitupy.io.data")
+    caplog.set_level(logging.WARNING, logger="insitupy.io.data")
+    logger.addHandler(caplog.handler)
+    try:
+        with pytest.raises(Exception):  # synthetic bundle is incomplete, reading fails later
+            read_xenium(tmp_path)
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    found = [r for r in caplog.records if "major version" in r.getMessage()]
+    assert bool(found) == expect_warning
+    if expect_warning:
+        assert "7" in found[0].getMessage() and "6" in found[0].getMessage()

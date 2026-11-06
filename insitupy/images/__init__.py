@@ -5,7 +5,6 @@ from .io import (
                  read_image,
                  read_ome_tiff,
                  read_zarr,
-                 read_zarr_pyramid,
                  write_ome_tiff,
                  write_zarr,
 )

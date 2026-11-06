@@ -10,7 +10,11 @@ import pandas as pd
 from shapely import affinity
 
 from insitupy._core.data import InSituData
-from insitupy._exceptions import InvalidAteraDirectory, InvalidXeniumDirectory
+from insitupy._exceptions import (
+    InSituPyDeprecationWarning,
+    InvalidAteraDirectory,
+    InvalidXeniumDirectory,
+)
 from insitupy._io._atera import (
     ATERA_CELL_FEATURE_MATRIX_FILE,
     ATERA_CELLS_FILE,
@@ -32,6 +36,9 @@ from insitupy._io.geo import parse_geopandas
 from insitupy.containers.cell_data import CellData
 
 logger = logging.getLogger(__name__)
+
+# Highest "major_version" in experiment.xenium (Xenium Onboard Analysis 4.0) InSituPy was tested with.
+_XENIUM_MAX_TESTED_MAJOR_VERSION = 6
 
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
@@ -154,6 +161,9 @@ def read_xenium(
             - "pandas": Loads the data into a pandas DataFrame.
             - "dask": Loads the data into a Dask DataFrame for larger datasets.
         restructure_transcripts (bool, optional): Whether to restructure the transcript data. Defaults to False.
+
+            .. deprecated:: 0.13
+                Removed in 0.14. Only has an effect with ``transcript_mode='pandas'``.
         dataset_name (str, optional): Name for the overarching dataset/slide. For the insitupy
             backend this is overridden by the value in the Xenium metadata file. For the spatialdata
             backend it is not used (``spatialdata_io.xenium()`` has no equivalent parameter).
@@ -191,6 +201,13 @@ def read_xenium(
         warnings.warn("'sample_id' is deprecated, use 'sample_name' instead.",
                       DeprecationWarning, stacklevel=2)
         sample_name = sample_id
+    if restructure_transcripts:
+        warnings.warn(
+            "`read_xenium(restructure_transcripts=True)` is deprecated and will be removed in "
+            "InSituPy 0.14. The MultiIndex-column transcript table it builds cannot be saved. "
+            "Use the default flat columns (`x_location`, `y_location`, ...) instead.",
+            InSituPyDeprecationWarning, stacklevel=2,
+        )
 
     path = Path(path) # make sure the path is a pathlib path
 
@@ -214,6 +231,15 @@ def read_xenium(
     # read metadata
     xenium_metadata = read_json(path / metadata_filename)
     pixel_size = xenium_metadata["pixel_size"]
+
+    # bundles written by Xenium Onboard Analysis 1.x have no "major_version" key
+    found_major = xenium_metadata.get("major_version")
+    if isinstance(found_major, int) and found_major > _XENIUM_MAX_TESTED_MAJOR_VERSION:
+        logger.warning(
+            "This Xenium bundle has major version %s (experiment.xenium), but InSituPy was only "
+            "tested up to major version %s. Reading may fail or be incomplete.",
+            found_major, _XENIUM_MAX_TESTED_MAJOR_VERSION,
+        )
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")

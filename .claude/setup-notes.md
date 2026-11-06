@@ -87,7 +87,8 @@ contents), then recreate it with the new target path using either option above.
 
 `agent-plans/` holds the plans written by the scheduled plan-only agent (see "Unattended runs"
 in `CLAUDE.md`). The agent uploads them to the private cloud folder; the link makes them
-available in the repository, e.g. for `/implement @agent-plans/<YYMMDD>/<slug>/report-<slug>.md`.
+available in the repository, e.g. for
+`/implement @agent-plans/approved/<YYMMDD>-<slug>/report-<slug>.md`.
 Like `planning/`, it is excluded from version control (`.gitignore`). Create it the same way as
 `planning/` above, e.g. as a junction:
 
