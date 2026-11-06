@@ -53,6 +53,37 @@ def _encode_xenium_cell_ids(cell_id: np.ndarray) -> np.ndarray:
     return ids
 
 
+def _read_pixel_size_from_ome(path: str | os.PathLike | Path) -> float:
+    """Read the pixel size (microns) from the OME-XML of the first ``morphology_2d/*.ome.tif``.
+
+    Fallback for bundles without ``experiment.spatial`` (or without ``pixel_size`` in it).
+    """
+    import xml.etree.ElementTree as ET
+
+    import tifffile
+
+    files = sorted((Path(path) / ATERA_MORPHOLOGY_DIR).glob("*.ome.tif"))
+    if not files:
+        raise ValueError(
+            f"Cannot determine the pixel size: '{ATERA_METADATA_FILE}' is missing and "
+            f"'{ATERA_MORPHOLOGY_DIR}/' contains no '*.ome.tif' image."
+        )
+    with tifffile.TiffFile(files[0]) as tif:
+        ome_xml = tif.ome_metadata
+    if not ome_xml:
+        raise ValueError(f"Cannot determine the pixel size: '{files[0].name}' has no OME metadata.")
+
+    pixels = next((el for el in ET.fromstring(ome_xml).iter() if el.tag.endswith("Pixels")), None)
+    size = None if pixels is None else pixels.get("PhysicalSizeX")
+    if size is None:
+        raise ValueError(f"Cannot determine the pixel size: no PhysicalSizeX in the OME metadata of '{files[0].name}'.")
+    unit = pixels.get("PhysicalSizeXUnit", "µm")
+    factor = {"µm": 1.0, "um": 1.0, "nm": 1e-3, "mm": 1e3}.get(unit)
+    if factor is None:
+        raise ValueError(f"Unsupported PhysicalSizeXUnit '{unit}' in '{files[0].name}'.")
+    return float(size) * factor
+
+
 def _read_table_from_atera(path: str | os.PathLike | Path) -> AnnData:
     """Read the cell-by-gene table of an Atera bundle from ``cell_feature_matrix.zarr.zip``.
 
@@ -89,6 +120,13 @@ def _read_table_from_atera(path: str | os.PathLike | Path) -> AnnData:
     obs = obs.drop(columns=["barcode"], errors="ignore")
     obs = obs.rename(columns={"cell_id": "atera_cell_id", "filtered": "atera_filtered"})
     obs.index = pd.Index(obs.index.astype(str).to_numpy())
+
+    # string annotations (e.g. the azimuth_* cell type labels) arrive as plain strings if the store
+    # does not encode them as categoricals; make them categorical so that plotting and color
+    # handling treat them as annotations. Numeric columns (e.g. azimuth_*_score) stay numeric.
+    for col in obs.columns:
+        if pd.api.types.is_string_dtype(obs[col].dtype) and not isinstance(obs[col].dtype, pd.CategoricalDtype):
+            obs[col] = obs[col].astype("category")
 
     adata = AnnData(X=X, obs=obs, var=var, obsm=dict(obsm))
     adata.var_names_make_unique()
