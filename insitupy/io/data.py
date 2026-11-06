@@ -39,6 +39,22 @@ logger = logging.getLogger(__name__)
 
 # Highest "major_version" in experiment.xenium (Xenium Onboard Analysis 4.0) InSituPy was tested with.
 _XENIUM_MAX_TESTED_MAJOR_VERSION = 6
+# Highest "major_version" in experiment.spatial (Atera Onboard Analysis 1.0) InSituPy was tested with.
+_ATERA_MAX_TESTED_MAJOR_VERSION = 1
+
+
+def _warn_if_untested_major_version(metadata: dict, max_tested: int, product: str, metadata_file: str):
+    """Log a warning when a bundle's ``major_version`` is newer than the highest tested one.
+
+    A missing key (e.g. Xenium Onboard Analysis 1.x bundles) or a non-integer value is ignored.
+    """
+    found_major = metadata.get("major_version")
+    if isinstance(found_major, int) and found_major > max_tested:
+        logger.warning(
+            "This %s bundle has major version %s (%s), but InSituPy was only "
+            "tested up to major version %s. Reading may fail or be incomplete.",
+            product, found_major, metadata_file, max_tested,
+        )
 
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
@@ -232,14 +248,9 @@ def read_xenium(
     xenium_metadata = read_json(path / metadata_filename)
     pixel_size = xenium_metadata["pixel_size"]
 
-    # bundles written by Xenium Onboard Analysis 1.x have no "major_version" key
-    found_major = xenium_metadata.get("major_version")
-    if isinstance(found_major, int) and found_major > _XENIUM_MAX_TESTED_MAJOR_VERSION:
-        logger.warning(
-            "This Xenium bundle has major version %s (experiment.xenium), but InSituPy was only "
-            "tested up to major version %s. Reading may fail or be incomplete.",
-            found_major, _XENIUM_MAX_TESTED_MAJOR_VERSION,
-        )
+    _warn_if_untested_major_version(
+        xenium_metadata, _XENIUM_MAX_TESTED_MAJOR_VERSION, "Xenium", metadata_filename
+    )
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
@@ -463,6 +474,9 @@ def read_atera(
     # read metadata; experiment.spatial is optional (some bundles omit it)
     if (path / ATERA_METADATA_FILE).exists():
         atera_metadata = read_json(path / ATERA_METADATA_FILE)
+        _warn_if_untested_major_version(
+            atera_metadata, _ATERA_MAX_TESTED_MAJOR_VERSION, "Atera", ATERA_METADATA_FILE
+        )
     else:
         atera_metadata = {}
     if "pixel_size" in atera_metadata:
