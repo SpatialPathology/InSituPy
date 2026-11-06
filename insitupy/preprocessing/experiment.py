@@ -118,9 +118,8 @@ def filter_cells(
                 inplace=True,
                 **kwargs
             )
-
-        # sync cell names between boundaries and table
-        celldata.sync()
+            # the in-place filter bypasses the table setter, so sync boundaries explicitly
+            celldata.sync()
 
 def filter_genes(
     data: InSituExperiment | InSituData, # type: ignore
