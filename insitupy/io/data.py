@@ -24,6 +24,9 @@ from insitupy.containers.cell_data import CellData
 
 logger = logging.getLogger(__name__)
 
+# Highest "major_version" in experiment.xenium (Xenium Onboard Analysis 4.0) InSituPy was tested with.
+_XENIUM_MAX_TESTED_MAJOR_VERSION = 6
+
 CELLSEG_NAMES = ["atp1a1_cd45_e-cadherin", "18s", "alphasma_vimentin"]
 
 def _handle_xenium_image_names(im_path):
@@ -177,6 +180,15 @@ def read_xenium(
     # read metadata
     xenium_metadata = read_json(path / metadata_filename)
     pixel_size = xenium_metadata["pixel_size"]
+
+    # bundles written by Xenium Onboard Analysis 1.x have no "major_version" key
+    found_major = xenium_metadata.get("major_version")
+    if isinstance(found_major, int) and found_major > _XENIUM_MAX_TESTED_MAJOR_VERSION:
+        logger.warning(
+            "This Xenium bundle has major version %s (experiment.xenium), but InSituPy was only "
+            "tested up to major version %s. Reading may fail or be incomplete.",
+            found_major, _XENIUM_MAX_TESTED_MAJOR_VERSION,
+        )
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
