@@ -4,6 +4,7 @@ import logging
 import pytest
 
 from insitupy import InSituData
+from insitupy._exceptions import InvalidXeniumDirectory
 from insitupy.datasets import (
     xenium_test_dataset_v2_mm,
     xenium_test_dataset_v2_nucex,
@@ -294,6 +295,24 @@ class TestReadXeniumSpatialDataBackend:
         assert "feature_name" in data.transcripts.columns
         assert "x_location" in data.transcripts.columns
         assert "y_location" in data.transcripts.columns
+
+
+def test_read_xenium_atera_hint_spatial_file(tmp_path):
+    (tmp_path / "experiment.spatial").write_text("{}")
+    with pytest.raises(InvalidXeniumDirectory, match=r"insitupy\.io\.read_atera"):
+        read_xenium(tmp_path)
+
+
+def test_read_xenium_atera_hint_morphology_dir(tmp_path):
+    (tmp_path / "morphology_2d").mkdir()
+    with pytest.raises(InvalidXeniumDirectory, match=r"insitupy\.io\.read_atera"):
+        read_xenium(tmp_path)
+
+
+def test_read_xenium_empty_dir_has_no_atera_hint(tmp_path):
+    with pytest.raises(InvalidXeniumDirectory) as excinfo:
+        read_xenium(tmp_path)
+    assert "read_atera" not in str(excinfo.value)
 
 
 @pytest.mark.parametrize(
