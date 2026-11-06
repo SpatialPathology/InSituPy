@@ -10,6 +10,7 @@ from anndata.io import read_elem
 from dask import delayed
 
 from insitupy.images.io import _get_zarr_store
+from insitupy.utils.utils import _encode_xenium_cell_ids
 
 ATERA_METADATA_FILE = "experiment.spatial"
 ATERA_CELL_FEATURE_MATRIX_FILE = "cell_feature_matrix.zarr.zip"
@@ -20,37 +21,6 @@ ATERA_MORPHOLOGY_DIR = "morphology_2d"
 # upper bound of transcript rows per dask partition; one spatial tile of a WTA bundle can hold
 # far more rows than fit comfortably into memory at once
 MAX_TRANSCRIPT_ROWS_PER_PARTITION = 5_000_000
-
-# Xenium-style cell ids encode each hex digit of the id prefix as a letter a-p
-# see: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-zarr#cellID
-_XENIUM_HEX_LETTERS = np.frombuffer(b"abcdefghijklmnop", dtype="S1")
-_UNASSIGNED_ID = np.iinfo(np.uint32).max
-
-
-def _encode_xenium_cell_ids(cell_id: np.ndarray) -> np.ndarray:
-    """Vectorized conversion of ``(prefix, dataset_suffix)`` uint32 pairs to Xenium-style cell ids.
-
-    Equivalent to :func:`insitupy.utils.utils.convert_int_to_xenium_hex` applied row-wise
-    (e.g. ``[7790, 1] -> "aaaabogo-1"``). The "unassigned" sentinel
-    ``(0xFFFFFFFF, 0xFFFFFFFF)`` used for transcripts outside of cells becomes ``"UNASSIGNED"``,
-    the value Xenium uses in its transcripts file.
-
-    Args:
-        cell_id: Array of shape ``(n, 2)``.
-
-    Returns:
-        Object array of length ``n`` with string cell ids.
-    """
-    cell_id = np.asarray(cell_id)
-    prefix = cell_id[:, 0].astype(np.uint64)
-    digits = np.stack(
-        [(prefix >> np.uint64(4 * (7 - i))) & np.uint64(0xF) for i in range(8)], axis=1
-    ).astype(np.int64)
-    letters = _XENIUM_HEX_LETTERS[digits].view("S8").ravel().astype(str)
-    ids = np.char.add(np.char.add(letters, "-"), cell_id[:, 1].astype(str)).astype(object)
-    unassigned = (cell_id[:, 0] == _UNASSIGNED_ID) & (cell_id[:, 1] == _UNASSIGNED_ID)
-    ids[unassigned] = "UNASSIGNED"
-    return ids
 
 
 def _read_pixel_size_from_ome(path: str | os.PathLike | Path) -> float:

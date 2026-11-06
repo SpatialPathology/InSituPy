@@ -13,14 +13,13 @@ from insitupy import InSituData
 from insitupy._exceptions import InvalidAteraDirectory
 from insitupy._io import _atera
 from insitupy._io._atera import (
-    _encode_xenium_cell_ids,
     _read_table_from_atera,
     _read_transcripts_from_atera,
 )
 from insitupy.datasets import atera_test_dataset, xenium_test_dataset_v4_nucex
 from insitupy.datasets.datasets import _atera_test_dataset_dir
 from insitupy.io import read_atera
-from insitupy.utils.utils import convert_int_to_xenium_hex
+from insitupy.utils.utils import _encode_xenium_cell_ids, convert_int_to_xenium_hex
 
 
 @pytest.fixture(scope="module")
@@ -146,6 +145,21 @@ def test_encode_xenium_cell_ids():
     assert list(encoded[:3]) == expected
     assert encoded[0] == "aaaabogo-1"
     assert encoded[3] == "UNASSIGNED"
+
+
+@pytest.mark.parametrize("dtype", [np.uint32, np.int64])  # cells.zarr cell_id dtype varies by XOA version
+def test_encode_xenium_cell_ids_matches_scalar_converter(dtype):
+    # read_xenium and old boundaries stores now use the vectorized encoder instead of a loop over
+    # convert_int_to_xenium_hex, so both must agree on random ids and on hex-digit edge values
+    rng = np.random.default_rng(0)
+    edges = [0, 1, 0xF, 0x10, 0xFF, 0x100, 0xFFFFFFF, 0x10000000, 0xFFFFFFFE]
+    prefixes = np.concatenate([edges, rng.integers(0, 0xFFFFFFFF, size=500)])
+    suffixes = np.concatenate([[1, 2] * (len(edges) // 2) + [1], rng.integers(1, 20, size=500)])
+    ids = np.stack([prefixes, suffixes], axis=1).astype(dtype)
+
+    encoded = _encode_xenium_cell_ids(ids)
+    expected = [convert_int_to_xenium_hex(int(a), int(b)) for a, b in ids]
+    assert list(encoded) == expected
 
 
 def test_saveas_roundtrip(atera_data, tmp_path):
