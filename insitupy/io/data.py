@@ -205,7 +205,11 @@ def read_xenium(
 
     # Check if the required metadata file exists
     if not (path / metadata_filename).exists():
-        raise InvalidXeniumDirectory(directory=path)
+        # Atera bundles have no experiment.xenium but carry experiment.spatial and/or morphology_2d/
+        hint = None
+        if (path / ATERA_METADATA_FILE).exists() or (path / ATERA_MORPHOLOGY_DIR).is_dir():
+            hint = "This looks like 10x Atera output - use `insitupy.io.read_atera` instead."
+        raise InvalidXeniumDirectory(directory=path, hint=hint)
 
     # read metadata
     xenium_metadata = read_json(path / metadata_filename)
