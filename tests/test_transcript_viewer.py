@@ -83,8 +83,7 @@ class TestBackgroundPalettes:
         from skimage.color import deltaE_ciede2000, rgb2lab
 
         def to_lab(hexes):
-            rgb = np.array([[int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)] for h in hexes])
-            return rgb2lab(rgb[None])[0]
+            return rgb2lab(np.array([[_hex_to_rgb(h) for h in hexes]]))[0]
 
         anchors = to_lab(HE_STAIN_ANCHORS)
         dist = {

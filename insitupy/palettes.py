@@ -198,7 +198,7 @@ TRANSCRIPTS_DARK_BG_PALETTE: list = [
     "#baffa6", "#c2ffe3", "#c2b6ff", "#04e3a6", "#c69241", "#86b2ff", "#aaae71", "#ff49c2",
 ]
 
-# Typical hematoxylin (blue/purple nuclei) and eosin (pink cytoplasm) shades, light to dark.
+# Typical hematoxylin (blue/purple nuclei, first 9) and eosin (pink cytoplasm, last 4) shades.
 # The light-background transcript palette is generated to stay away from these.
 HE_STAIN_ANCHORS: list = [
     "#2b3a80", "#3f4fa0", "#5a6ab8", "#2e1f5e", "#3b2f7f", "#4b3b8f", "#5a4aa0", "#6f60b0",
