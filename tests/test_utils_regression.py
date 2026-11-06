@@ -1,9 +1,11 @@
 """Tests for insitupy.utils._regression — LOWESS/confidence interval helpers."""
 
+import warnings
+
 import numpy as np
 import pytest
 
-from insitupy.utils._regression import confidence_intervals, lowess, lowess_prediction
+from insitupy.utils._regression import confidence_intervals, lowess, lowess_prediction, smooth_fit
 
 
 class TestConfidenceIntervals:
@@ -121,3 +123,66 @@ class TestLowessClass:
         expected = 3.0 * newdata
         # Allow 20% relative error for LOWESS approximation
         np.testing.assert_allclose(result.values, expected, rtol=0.2)
+
+class TestSmoothFit:
+    @staticmethod
+    def _data():
+        rng = np.random.default_rng(0)
+        x = np.linspace(0, 10, 200)
+        y = np.sin(x) + rng.normal(0, 0.1, 200)
+        return x, y
+
+    def test_lowess_with_defaults_does_not_raise(self):
+        # GitHub #170: loess_bootstrap=True (default) must not be applied to LOWESS
+        x, y = self._data()
+        df = smooth_fit(x, y, method="lowess", K=10)
+        assert len(df) == 98
+        assert np.isfinite(df["std"]).all()
+
+    def test_nsteps_none_predicts_at_unique_x(self):
+        # GitHub #171: nsteps=None used to raise UnboundLocalError
+        x, y = self._data()
+        x = np.append(x, x[:5])  # duplicates must collapse
+        y = np.append(y, y[:5])
+        df = smooth_fit(x, y, nsteps=None, stderr=False)
+        np.testing.assert_array_equal(df["x"].to_numpy(), np.unique(x))
+
+    @pytest.mark.parametrize("method,bootstrap", [("loess", True), ("loess", False), ("lowess", True)])
+    def test_std_is_a_nonnegative_float_column(self, method, bootstrap):
+        x, y = self._data()
+        df = smooth_fit(x, y, method=method, loess_bootstrap=bootstrap, K=10)
+        assert df["std"].dtype == float
+        assert np.isfinite(df["std"]).all()
+        assert (df["std"] >= 0).all()
+        assert (df["conf_lower"] <= df["conf_upper"]).all()
+        if method == "loess" and not bootstrap:
+            # analytic CI is centred on the prediction
+            assert (df["conf_lower"] <= df["y_pred"]).all()
+            assert (df["y_pred"] <= df["conf_upper"]).all()
+
+    @pytest.mark.parametrize("method", ["loess", "lowess"])
+    def test_no_stderr_gives_nan_columns(self, method):
+        x, y = self._data()
+        df = smooth_fit(x, y, method=method, stderr=False)
+        for col in ["std", "conf_lower", "conf_upper"]:
+            assert df[col].isna().all()
+
+    def test_predict_does_not_change_global_numpy_error_state(self):
+        x, y = self._data()
+        model = lowess(x, y)
+        model.fit()
+        before = np.geterr()
+        model.predict(np.linspace(1, 9, 5), stderror=True, K=5)
+        assert np.geterr() == before
+
+    def test_nsteps_below_two_raises(self):
+        x, y = self._data()
+        with pytest.raises(ValueError, match="nsteps"):
+            smooth_fit(x, y, nsteps=1)
+
+    def test_internal_caller_settings_emit_no_warning(self):
+        # loess_bootstrap=False with stderr=True is what the plotting code uses on purpose
+        x, y = self._data()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            smooth_fit(x, y, loess_bootstrap=False, nsteps=100)
