@@ -5,7 +5,11 @@ import pandas as pd
 import pytest
 
 from insitupy import WITH_NAPARI
-from insitupy.palettes import TRANSCRIPTS_DARK_BG_PALETTE, TRANSCRIPTS_LIGHT_BG_PALETTE
+from insitupy.palettes import (
+    HE_STAIN_ANCHORS,
+    TRANSCRIPTS_DARK_BG_PALETTE,
+    TRANSCRIPTS_LIGHT_BG_PALETTE,
+)
 from insitupy.interactive._transcript_viewer import (
     DEFAULT_DEBOUNCE_MS,
     DEFAULT_MAX_VISIBLE_POINTS,
@@ -73,6 +77,26 @@ class TestBackgroundPalettes:
         assert low == []
         assert len(palette) == 64
         assert len(set(palette)) == 64
+
+    def test_light_palette_avoids_he_stains(self):
+        """Light-mode colours must stay distinguishable from hematoxylin and eosin."""
+        from skimage.color import deltaE_ciede2000, rgb2lab
+
+        def to_lab(hexes):
+            rgb = np.array([[int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)] for h in hexes])
+            return rgb2lab(rgb[None])[0]
+
+        anchors = to_lab(HE_STAIN_ANCHORS)
+        dist = {
+            hex_color: min(deltaE_ciede2000(lab[None], anchors))
+            for hex_color, lab in zip(
+                TRANSCRIPTS_LIGHT_BG_PALETTE, to_lab(TRANSCRIPTS_LIGHT_BG_PALETTE)
+            )
+        }
+        first = {c: dist[c] for c in TRANSCRIPTS_LIGHT_BG_PALETTE[:8] if dist[c] < 15}
+        rest = {c: d for c, d in dist.items() if d < 12}
+        assert first == {}, f"first 8 colours too close to H&E stains (dE2000): {first}"
+        assert rest == {}, f"colours too close to H&E stains (dE2000): {rest}"
 
     def test_get_background_palette(self):
         assert _get_background_palette("dark") is TRANSCRIPTS_DARK_BG_PALETTE

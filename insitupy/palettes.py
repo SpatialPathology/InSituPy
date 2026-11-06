@@ -113,8 +113,20 @@ def cmap2hex(cmap):
 #   # (black for dark, white for light); tests/test_transcript_viewer.py checks this.
 #   TRANSCRIPTS_DARK_BG_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
 #                         lightness_bounds=(55, 95))
-#   TRANSCRIPTS_LIGHT_BG_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
-#                         lightness_bounds=(20, 37))
+#   # The light palette must also avoid H&E stain colours (HE_STAIN_ANCHORS below), so it is
+#   # seeded with them and filtered. Pass chroma/hue bounds explicitly, otherwise glasbey
+#   # infers them from the seed colours and returns only purples.
+#   import numpy as np
+#   from colorspacious import cspace_convert  # installed with glasbey
+#   def ucs(hexes):
+#       rgb = np.array([[int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)] for h in hexes])
+#       return cspace_convert(rgb, "sRGB1", "CAM02-UCS")
+#   ext = glasbey.extend_palette(HE_STAIN_ANCHORS, palette_size=len(HE_STAIN_ANCHORS) + 160,
+#                         lightness_bounds=(20, 37), chroma_bounds=(10, 90),
+#                         hue_bounds=(0, 360), colorblind_safe=True)
+#   cand = ext[len(HE_STAIN_ANCHORS):]
+#   dist = np.sqrt(((ucs(cand)[:, None] - ucs(HE_STAIN_ANCHORS)[None]) ** 2).sum(-1)).min(1)
+#   TRANSCRIPTS_LIGHT_BG_PALETTE = [c for c, d in zip(cand, dist) if d >= 22][:64]
 
 ANNOTATIONS_PALETTE: list = [
     "#0c71ff", "#ca2800", "#ff28ba", "#000096", "#59d700", "#1c5951", "#20d2ff", "#69a28a",
@@ -186,16 +198,24 @@ TRANSCRIPTS_DARK_BG_PALETTE: list = [
     "#baffa6", "#c2ffe3", "#c2b6ff", "#04e3a6", "#c69241", "#86b2ff", "#aaae71", "#ff49c2",
 ]
 
-# Dark colours for light canvases (H&E-like base images).
+# Typical hematoxylin (blue/purple nuclei) and eosin (pink cytoplasm) shades, light to dark.
+# The light-background transcript palette is generated to stay away from these.
+HE_STAIN_ANCHORS: list = [
+    "#2b3a80", "#3f4fa0", "#5a6ab8", "#2e1f5e", "#3b2f7f", "#4b3b8f", "#5a4aa0", "#6f60b0",
+    "#8878c0", "#d36c9a", "#e08fb4", "#e8a0c0", "#f4c6d8",
+]
+
+# Dark colours for light canvases (H&E-like base images); blue/purple/pink hues near the
+# H&E stains (HE_STAIN_ANCHORS) are excluded.
 TRANSCRIPTS_LIGHT_BG_PALETTE: list = [
-    "#0069ff", "#ca2400", "#920069", "#005124", "#0000f7", "#00827d", "#75009e", "#b618c2",
-    "#ca045d", "#208639", "#044d51", "#7d0031", "#862400", "#006996", "#4114ca", "#654d55",
-    "#96598a", "#8a008a", "#8a18ce", "#925139", "#2d6500", "#553949", "#be0079", "#515d6d",
-    "#188269", "#7d6d00", "#184d41", "#9e0859", "#084d71", "#714528", "#617192", "#aa0096",
-    "#8a6569", "#7561be", "#a20431", "#354d9e", "#750065", "#006d39", "#ce0039", "#4d4500",
-    "#b20014", "#7d00ef", "#082dff", "#593939", "#51415d", "#921cae", "#8a516d", "#6d6d79",
-    "#7d5110", "#820018", "#86519a", "#1c65c2", "#04695d", "#617151", "#5d2871", "#5908ae",
-    "#7d0049", "#594d7d", "#c21096", "#7d4575", "#9a28ff", "#924151", "#004dff", "#495541",
+    "#006d00", "#920049", "#008271", "#ce042d", "#284949", "#820000", "#204d24", "#75145d",
+    "#10864d", "#7d4d2d", "#926500", "#4d5d51", "#9e1886", "#b20041", "#6d2828", "#aa0400",
+    "#614151", "#962d69", "#1c6561", "#554900", "#006935", "#8a693d", "#088600", "#824959",
+    "#960024", "#557561", "#005541", "#7d5100", "#751049", "#c63100", "#5d5139", "#4d712d",
+    "#513d39", "#86393d", "#aa2428", "#696149", "#61350c", "#a61c5d", "#a2491c", "#00715d",
+    "#823504", "#005108", "#756169", "#92046d", "#71243d", "#515d1c", "#556969", "#964949",
+    "#3d5551", "#10754d", "#ba00c2", "#8e0035", "#757155", "#794d65", "#5d6d00", "#694545",
+    "#710071", "#8e0459", "#086141", "#007975", "#9e1c49", "#455120", "#92148e", "#7d0c18",
 ]
 
 
