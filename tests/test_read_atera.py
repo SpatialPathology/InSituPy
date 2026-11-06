@@ -1,4 +1,5 @@
 import json
+import logging
 import shutil
 import zipfile
 
@@ -227,6 +228,32 @@ def test_bundle_without_experiment_spatial(atera_dir, tmp_path):
     unnamed = read_atera(bundle, verbose=False)
     assert unnamed.slide_id is None
     assert unnamed.sample_id is None
+
+
+@pytest.mark.parametrize("bump, expect_warning", [(1, True), (0, False)])
+def test_untested_major_version_warning(atera_dir, tmp_path, caplog, bump, expect_warning):
+    """An experiment.spatial newer than the highest tested major version logs a warning, but reads."""
+    bundle = tmp_path / "bundle"
+    shutil.copytree(atera_dir, bundle)
+    meta = json.loads((bundle / "experiment.spatial").read_text())
+    found = meta["major_version"] + bump
+    meta["major_version"] = found
+    (bundle / "experiment.spatial").write_text(json.dumps(meta))
+
+    # `insitupy` loggers don't propagate, so attach caplog's handler to the source logger.
+    logger = logging.getLogger("insitupy.io.data")
+    caplog.set_level(logging.WARNING, logger="insitupy.io.data")
+    logger.addHandler(caplog.handler)
+    try:
+        data = read_atera(bundle, verbose=False)
+    finally:
+        logger.removeHandler(caplog.handler)
+
+    assert data.cells.table.n_obs == meta["num_cells"]
+    warnings = [r for r in caplog.records if "major version" in r.getMessage()]
+    assert bool(warnings) == expect_warning
+    if expect_warning:
+        assert "Atera" in warnings[0].getMessage() and str(found) in warnings[0].getMessage()
 
 
 def test_invalid_directory_names_missing_files(tmp_path):
