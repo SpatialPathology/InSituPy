@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 class MultiCellData(DeepCopyMixin):
     '''
     Data object containing multiple CellData objects.
+
+    Each layer is a :class:`~insitupy.containers.cell_data.CellData`, and its table and
+    boundaries follow the sync rule described there: indexing and table assignment sync
+    automatically, in-place AnnData changes need a :meth:`sync` call. :meth:`sync` here
+    syncs all layers at once.
     '''
     def __init__(self):
         self._layers: dict[str, CellData] = dict()
