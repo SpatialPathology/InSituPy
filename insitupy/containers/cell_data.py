@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 class CellData(DeepCopyMixin):
     '''
     Data object containing an AnnData object and a boundary object which are kept in sync.
+
+    Indexing (``cd[mask]``) and assigning a new table (``cd.table = ...`` or
+    :meth:`set_table`) sync the boundaries automatically. Changing the AnnData in place
+    (e.g. ``sc.pp.filter_cells(cd.table, inplace=True)``) or changing the boundaries alone
+    does not: call :meth:`sync` afterwards so the boundaries match the table again.
+    ``insitupy.pp.filter_cells`` already does this.
     '''
     def __init__(self,
                table: AnnData,
