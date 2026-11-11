@@ -240,6 +240,7 @@ To read an individual dataset on can use following functions:
 .. autosummary::
     :toctree: generated/external_data
 
+    io.read_atera
     io.read_qupath
     io.read_visium
     io.read_xenium
@@ -381,6 +382,7 @@ call and cached locally.
     :toctree: generated/datasets
 
     datasets.list_downloaded_datasets
+    datasets.atera_test_dataset
     datasets.xenium_human_breast_cancer
     datasets.visium_human_breast_cancer
 ```
