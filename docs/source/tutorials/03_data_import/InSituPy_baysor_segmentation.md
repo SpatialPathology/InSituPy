@@ -1,8 +1,8 @@
 # Use a Baysor segmentation
 
 [Baysor](https://github.com/kharchenkolab/Baysor) segments cells from the transcript positions.
-`InSituPy` does not ship a dedicated Baysor reader: `MultiCellData.add_baysor()` is deprecated
-since 0.12 and will be removed in 0.13. There are two ways to use a Baysor segmentation instead.
+`InSituPy` does not ship a dedicated Baysor reader: `MultiCellData.add_baysor()` was removed
+in 0.13 (it was deprecated in 0.12). There are two ways to use a Baysor segmentation instead.
 
 ## Xenium data: import the segmentation with Xenium Ranger
 

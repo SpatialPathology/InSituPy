@@ -29,8 +29,6 @@ Images in InSituPy are stored as OME-Zarr pyramids and loaded as dask arrays.
   read_zarr(path)
     Read an image from a Zarr or Zarr.zip store.
     Returns: A tuple ``(img, ome_meta, axes, pixel_size)`` where - **img** – a :class:`dask.array.Array` for single-array stores, or a :class:`list` of :class:`dask.array.Array` for pyramid stores (index 0 = full resolution). - **ome_meta** – OME metadata dict parsed from the Zarr store attributes. - **axes** – canonical axis string: ``"YX"`` (grayscale), ``"YXS"`` (RGB/RGBA) or ``"CYX"`` (multi-channel). The data is in that order; singleton extra axes are dropped. - **pixel_size** – physical pixel size in the unit stored in the metadata.
-  read_zarr_pyramid(dirstore, persist)
-    Read a pyramid from an already-opened Zarr store.
-    Returns: A :class:`dask.array.Array` (single array) or a :class:`list` of :class:`dask.array.Array` (pyramid, index 0 = full resolution), in the stored axis order. Use :func:`
+  write_ome_tiff(image: numpy.ndarray | dask.array.core.Array | list[dask.array.core.Array], file: str | os.PathLike | pathlib._local.Path, axes: str = 'YXS', metadata: dict = {}, subresolutions=6, subres_steps: int = 2, pixelsize: float | None = 1, pixelunit: str | None 
 
-... [truncated — full text is 6243 chars]
+... [truncated — full text is 5939 chars]

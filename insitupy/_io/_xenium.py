@@ -16,7 +16,7 @@ from zarr.errors import ArrayNotFoundError
 from insitupy.containers.boundaries_data import BoundariesData
 from insitupy.images.io import _get_zarr_store
 from insitupy.images.utils import _efficiently_resize_array
-from insitupy.utils.utils import convert_int_to_xenium_hex, decode_robust_series
+from insitupy.utils.utils import _encode_xenium_cell_ids, decode_robust_series
 
 
 def _read_nucleus_to_cell_map_from_store(
@@ -142,7 +142,8 @@ def _read_boundaries_from_xenium(
     # for info see: https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/analysis/xoa-output-zarr#cells
     cell_ids = da.from_zarr(store, component="cell_id").compute()
     if len(cell_ids.shape) == 2:
-        cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
+        # .astype(str) keeps the fixed-width unicode dtype the old per-cell loop produced
+        cell_names = _encode_xenium_cell_ids(cell_ids).astype(str)
     elif len(cell_ids.shape) == 1:
         cell_names = cell_ids.astype(str)
     else:

@@ -5,7 +5,7 @@ description: >-
   histology-guided, multi-sample single-cell spatial transcriptomics (10x Xenium, Visium, ...).
   Use whenever a user asks how to read, preprocess, analyze, plot, or save spatial
   transcriptomics data with insitupy, or writes code that imports insitupy.
-version: "0.12.0b8"   # AUTO-STAMPED by tools/generate_skill_reference.py to the package version
+version: "0.13.0.dev0"   # AUTO-STAMPED by tools/generate_skill_reference.py to the package version
 ---
 
 # InSituPy

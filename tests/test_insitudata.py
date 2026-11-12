@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import scanpy as sc
 
 from insitupy.datasets.datasets import xenium_test_dataset
@@ -9,7 +7,6 @@ from insitupy.preprocessing import (
     reduce_dimensions,
 )
 
-BAYSOR_PATH = Path("tests/data/baysor_output-slide__region__20241212__134825__j1_b1_s1")
 image_x = 3522
 image_y = 5789
 n_cells = 23

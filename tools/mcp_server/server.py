@@ -677,6 +677,9 @@ def get_io_formats() -> str:
     |---------------------|------------|------------------------------------------|------------------|
     | read_xenium()       | 10x Xenium | cell_feature_matrix.h5, cells.parquet,   | InSituData       |
     |                     |            | cells.zarr.zip, morphology images        |                  |
+    | read_atera()        | 10x Atera  | experiment.spatial, cell_feature_matrix. | InSituData       |
+    |                     |            | zarr.zip, cells.zarr.zip, morphology_2d/ |                  |
+    |                     |            | (transcripts.zarr.zip opt-in)            |                  |
     | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData       |
     |                     |            | spatial/tissue_positions.csv, images     |                  |
     | read_qupath()       | QuPath     | one exported sample dir (annotation.geojson, | InSituData   |
@@ -706,7 +709,7 @@ def get_io_formats() -> str:
     | Method                         | Source                                   |
     |--------------------------------|------------------------------------------|
     | MultiCellData.add_proseg()     | Proseg output (transcript assignments)    |
-    | MultiCellData.add_baysor()     | Deprecated in 0.12, removed in 0.13 - see the "Use a Baysor segmentation" tutorial |
+    | MultiCellData.add_baysor()     | Removed in 0.13 - see the "Use a Baysor segmentation" tutorial |
 
     ## SpatialData Integration (insitupy.spatialdata)
 
@@ -977,7 +980,7 @@ def get_public_api() -> str:
 
     lines.append("\n## Submodule shorthands\n")
     shorthands = {
-        "insitupy.io": "I/O — read_xenium, read_visium, read_qupath, etc.",
+        "insitupy.io": "I/O — read_xenium, read_atera, read_visium, read_qupath, etc.",
         "insitupy.pl (plotting)": "Plotting — spatial, umap, volcano, overview, etc.",
         "insitupy.pp (preprocessing)": "Preprocessing — normalize, filter, pseudobulk, etc.",
         "insitupy.tl (tools)": "Analysis — DGE, distance, neighbors, registration, etc.",
@@ -1129,7 +1132,7 @@ def get_workflow_guide() -> str:
     # Switch between segmentation layers
     data.cells.set_main("proseg")
 
-    # Baysor: add_baysor() is deprecated (removed in 0.13). For Xenium data,
+    # Baysor: add_baysor() was removed in 0.13. For Xenium data,
     # import the segmentation with `xeniumranger import-segmentation` and read
     # the new bundle with ispy.io.read_xenium().
     ```

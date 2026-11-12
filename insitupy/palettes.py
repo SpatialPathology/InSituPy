@@ -107,6 +107,26 @@ def cmap2hex(cmap):
 #   REGIONS_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
 #                         lightness_bounds=(20, 40), chroma_bounds=(40, 50))
 #   TRANSCRIPTS_PALETTE = glasbey.create_palette(palette_size=256, colorblind_safe=True)
+#   # Transcript viewer palettes, one per canvas background. Entries are ordered by
+#   # distinctness (glasbey), so the first N genes shown get the N most distinct colours.
+#   # Bounds were tuned so every entry has WCAG contrast >= 4.5:1 against its background
+#   # (black for dark, white for light); tests/test_transcript_viewer.py checks this.
+#   TRANSCRIPTS_DARK_BG_PALETTE = glasbey.create_palette(palette_size=64, colorblind_safe=True,
+#                         lightness_bounds=(55, 95))
+#   # The light palette must also avoid H&E stain colours (HE_STAIN_ANCHORS below), so it is
+#   # seeded with them and filtered. Pass chroma/hue bounds explicitly, otherwise glasbey
+#   # infers them from the seed colours and returns only purples.
+#   import numpy as np
+#   from colorspacious import cspace_convert  # installed with glasbey
+#   def ucs(hexes):
+#       rgb = np.array([[int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)] for h in hexes])
+#       return cspace_convert(rgb, "sRGB1", "CAM02-UCS")
+#   ext = glasbey.extend_palette(HE_STAIN_ANCHORS, palette_size=len(HE_STAIN_ANCHORS) + 160,
+#                         lightness_bounds=(20, 37), chroma_bounds=(10, 90),
+#                         hue_bounds=(0, 360), colorblind_safe=True)
+#   cand = ext[len(HE_STAIN_ANCHORS):]
+#   dist = np.sqrt(((ucs(cand)[:, None] - ucs(HE_STAIN_ANCHORS)[None]) ** 2).sum(-1)).min(1)
+#   TRANSCRIPTS_LIGHT_BG_PALETTE = [c for c, d in zip(cand, dist) if d >= 22][:64]
 
 ANNOTATIONS_PALETTE: list = [
     "#0c71ff", "#ca2800", "#ff28ba", "#000096", "#59d700", "#1c5951", "#20d2ff", "#69a28a",
@@ -163,6 +183,39 @@ TRANSCRIPTS_PALETTE: list = [
     "#653561", "#e771b2", "#820008", "#b2fbf3", "#655d49", "#a255aa", "#fb24a2", "#797935",
     "#ff5555", "#c29ae7", "#fba271", "#db1c2d", "#754d71", "#614949", "#3dae9a", "#18ae49",
     "#412d04", "#ff7dae", "#18ffdf", "#610051", "#aac251", "#dbd761", "#085d45", "#fb55eb",
+]
+
+
+# Bright colours for dark canvases (DAPI / fluorescence base images).
+TRANSCRIPTS_DARK_BG_PALETTE: list = [
+    "#ff6500", "#1caaff", "#ff51a2", "#f7ff00", "#24c69a", "#f7b2ff", "#ffba8e", "#fb39f7",
+    "#04db2d", "#8aa2b2", "#00efe3", "#ebb6c6", "#d7827d", "#1cfbd2", "#20d7ff", "#28ba51",
+    "#ffc231", "#fb82db", "#00ff79", "#9a9ad7", "#dfe7ff", "#b69aa2", "#ef9e5d", "#caae9e",
+    "#9eb6b6", "#fff3ce", "#ffeb6d", "#c2dbdb", "#24b6a2", "#59d779", "#ceaaca", "#0cb2c6",
+    "#ff82a2", "#8eae00", "#00cac6", "#c686b2", "#ffbeeb", "#f3cebe", "#00dbbe", "#b2cee3",
+    "#86f728", "#8ea686", "#ff614d", "#fb86ff", "#ff8ac2", "#ff9600", "#c279ff", "#ffdbeb",
+    "#c2d269", "#ce7dce", "#9afff7", "#aee3a6", "#61ebff", "#aacaba", "#96b6d7", "#ff8e82",
+    "#baffa6", "#c2ffe3", "#c2b6ff", "#04e3a6", "#c69241", "#86b2ff", "#aaae71", "#ff49c2",
+]
+
+# Typical hematoxylin (blue/purple nuclei, first 9) and eosin (pink cytoplasm, last 4) shades.
+# The light-background transcript palette is generated to stay away from these.
+HE_STAIN_ANCHORS: list = [
+    "#2b3a80", "#3f4fa0", "#5a6ab8", "#2e1f5e", "#3b2f7f", "#4b3b8f", "#5a4aa0", "#6f60b0",
+    "#8878c0", "#d36c9a", "#e08fb4", "#e8a0c0", "#f4c6d8",
+]
+
+# Dark colours for light canvases (H&E-like base images); blue/purple/pink hues near the
+# H&E stains (HE_STAIN_ANCHORS) are excluded.
+TRANSCRIPTS_LIGHT_BG_PALETTE: list = [
+    "#006d00", "#920049", "#008271", "#ce042d", "#284949", "#820000", "#204d24", "#75145d",
+    "#10864d", "#7d4d2d", "#926500", "#4d5d51", "#9e1886", "#b20041", "#6d2828", "#aa0400",
+    "#614151", "#962d69", "#1c6561", "#554900", "#006935", "#8a693d", "#088600", "#824959",
+    "#960024", "#557561", "#005541", "#7d5100", "#751049", "#c63100", "#5d5139", "#4d712d",
+    "#513d39", "#86393d", "#aa2428", "#696149", "#61350c", "#a61c5d", "#a2491c", "#00715d",
+    "#823504", "#005108", "#756169", "#92046d", "#71243d", "#515d1c", "#556969", "#964949",
+    "#3d5551", "#10754d", "#ba00c2", "#8e0035", "#757155", "#794d65", "#5d6d00", "#694545",
+    "#710071", "#8e0459", "#086141", "#007975", "#9e1c49", "#455120", "#92148e", "#7d0c18",
 ]
 
 

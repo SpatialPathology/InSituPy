@@ -485,6 +485,7 @@ if WITH_NAPARI:
         lazy_loading: bool = True,
         transcript_config: TranscriptViewerConfig | None = None,
         widgets_max_width: int = 500,
+        background: Literal["dark", "light"] = "dark",
     ) -> None:
         """Add transcript viewer widget to the napari viewer.
 
@@ -494,6 +495,7 @@ if WITH_NAPARI:
             lazy_loading: If True, use lazy loading mode for large datasets.
             transcript_config: Configuration for the transcript viewer widget.
             widgets_max_width: Maximum width of the widget in pixels.
+            background: Canvas background the transcript colors are chosen for.
         """
         if data.transcripts is None:
             return
@@ -507,6 +509,7 @@ if WITH_NAPARI:
             lazy_loading=lazy_loading,
             config=transcript_config,
             viewer_config=viewer_config,
+            background=background,
         )
         transcript_widget.setMaximumWidth(widgets_max_width)
 
@@ -546,6 +549,7 @@ if WITH_NAPARI:
         show_transcripts: bool = True,
         transcript_lazy_loading: bool = True,
         transcript_config: TranscriptViewerConfig | None = None,
+        transcript_background: Literal["dark", "light"] = "dark",
         ):
 
         _sync_cells_for_viewer_if_needed(data)
@@ -594,6 +598,7 @@ if WITH_NAPARI:
                 lazy_loading=transcript_lazy_loading,
                 transcript_config=transcript_config,
                 widgets_max_width=widgets_max_width,
+                background=transcript_background,
             )
 
         # BUTTONS

@@ -7,7 +7,8 @@ Features:
     - In-memory spatial queries with numpy boolean indexing
     - Debounced camera updates (configurable interval)
     - Searchable gene selector with autocomplete
-    - Per-gene color assignment using shuffled HSV colormap
+    - Per-gene colors assigned in add order from a glasbey palette
+      matched to the canvas background (dark or light)
     - Max point limit with random subsampling
     - Hover display showing gene names
     - Memory management for lazy loading mode
@@ -20,12 +21,15 @@ Two loading modes:
 """
 
 import logging
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Literal, Optional, Union
 
 import numpy as np
 
 from insitupy._constants import WITH_NAPARI
-from insitupy.palettes import TRANSCRIPTS_PALETTE
+from insitupy.palettes import (
+    TRANSCRIPTS_DARK_BG_PALETTE,
+    TRANSCRIPTS_LIGHT_BG_PALETTE,
+)
 
 if TYPE_CHECKING:
     import dask.dataframe as dd
@@ -115,7 +119,8 @@ def prepare_gene_data(
     Returns:
         Tuple containing:
             - gene_data: Dict mapping gene names to coordinate arrays of shape (N, 2).
-            - gene_colors: Dict mapping gene names to RGB color tuples.
+            - gene_colors: Dict mapping gene names to RGB color tuples. Empty
+              by default: the widget fills it in the order genes are added.
     """
     if config is None:
         config = TranscriptViewerConfig()
@@ -134,7 +139,8 @@ def prepare_gene_data(
     n_genes = len(genes)
     logger.info("Found %d unique genes", n_genes)
 
-    gene_colors = _assign_gene_colors(genes)
+    # Colors are assigned lazily by the widget when a gene is added.
+    gene_colors: dict[str, tuple[float, float, float]] = {}
 
     # Build per-gene coordinate arrays
     gene_data: dict[str, np.ndarray] = {}
@@ -162,7 +168,8 @@ def prepare_gene_colors(
     Returns:
         Tuple containing:
             - gene_list: Sorted list of unique gene names.
-            - gene_colors: Dict mapping gene names to RGB color tuples.
+            - gene_colors: Dict mapping gene names to RGB color tuples. Empty
+              by default: the widget fills it in the order genes are added.
     """
     if config is None:
         config = TranscriptViewerConfig()
@@ -174,29 +181,50 @@ def prepare_gene_colors(
     n_genes = len(genes)
     logger.info("Found %d unique genes", n_genes)
 
-    gene_colors = _assign_gene_colors(genes)
+    # Colors are assigned lazily by the widget when a gene is added.
+    gene_colors: dict[str, tuple[float, float, float]] = {}
 
     return genes, gene_colors
 
 
-def _assign_gene_colors(
-    genes: list[str],
-) -> dict[str, tuple[float, float, float]]:
-    """Assign distinct colors to genes using the static TRANSCRIPTS_PALETTE.
+def _get_background_palette(background: str) -> list[str]:
+    """Return the transcript palette for a canvas background.
 
     Args:
-        genes: List of gene names to assign colors to.
+        background: ``"dark"`` (bright colors, for DAPI-like images) or
+            ``"light"`` (dark colors, for H&E-like images).
+
+    Raises:
+        ValueError: If ``background`` is neither ``"dark"`` nor ``"light"``.
+    """
+    if background == "dark":
+        return TRANSCRIPTS_DARK_BG_PALETTE
+    if background == "light":
+        return TRANSCRIPTS_LIGHT_BG_PALETTE
+    raise ValueError(
+        f"background must be 'dark' or 'light', got {background!r}."
+    )
+
+
+def _next_gene_color(
+    active_colors: set[tuple[float, float, float]],
+    palette: list[str],
+) -> tuple[float, float, float]:
+    """Pick the first palette color not used by the currently active genes.
+
+    Args:
+        active_colors: RGB tuples (values 0-1) currently used by active genes.
+        palette: Hex color strings, ordered from most to least distinct.
 
     Returns:
-        Dict mapping gene names to RGB color tuples (values 0-1).
+        RGB tuple (values 0-1). If every palette color is in use, colors are
+        reused cyclically (``palette[len(active_colors) % len(palette)]``).
     """
-    if not genes:
-        return {}
-
-    return {
-        gene: _hex_to_rgb(TRANSCRIPTS_PALETTE[i % len(TRANSCRIPTS_PALETTE)])
-        for i, gene in enumerate(genes)
-    }
+    for hex_color in palette:
+        rgb = _hex_to_rgb(hex_color)
+        if rgb not in active_colors:
+            return rgb
+    return _hex_to_rgb(palette[len(active_colors) % len(palette)])
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[float, float, float]:
@@ -250,7 +278,9 @@ if WITH_NAPARI:
 
         Attributes:
             viewer: The napari viewer instance.
-            gene_colors: Dict mapping gene names to RGB color tuples.
+            gene_colors: Dict mapping gene names to RGB color tuples. Filled
+                lazily in add order; entries passed in at construction are kept.
+            background: Canvas background the colors are chosen for.
             active_genes: Dict mapping active gene names to their visible coordinates.
             config: Configuration object for viewer settings.
             viewer_config: ViewerConfig for accessing the color legend canvas.
@@ -267,6 +297,7 @@ if WITH_NAPARI:
             dask_df: Optional["dd.DataFrame"] = None,
             config: TranscriptViewerConfig | None = None,
             viewer_config: ViewerConfig | None = None,
+            background: Literal["dark", "light"] = "dark",
         ):
             """Initialize the transcript viewer widget.
 
@@ -274,18 +305,26 @@ if WITH_NAPARI:
                 viewer: The napari viewer instance.
                 gene_data_or_list: In-memory mode: dict mapping gene names to
                     coordinate arrays. Lazy mode: list of gene names.
-                gene_colors: Dict mapping gene names to RGB color tuples.
+                gene_colors: Dict mapping gene names to RGB color tuples. May be
+                    empty; genes without an entry get the first palette color
+                    not used by the active genes when they are added.
                 lazy_loading: If True, use lazy loading mode with on-demand
                     gene loading from dask_df.
                 dask_df: Required if lazy_loading=True. Dask DataFrame with
                     transcript coordinates.
                 config: Configuration object. If None, uses defaults.
                 viewer_config: ViewerConfig for accessing static_canvas for color legend.
+                background: ``"dark"`` for bright colors on a dark canvas
+                    (e.g. DAPI base image, default) or ``"light"`` for dark
+                    colors on a light canvas (e.g. H&E base image).
 
             Raises:
-                ValueError: If lazy_loading=True but dask_df is None.
+                ValueError: If lazy_loading=True but dask_df is None, or if
+                    ``background`` is not ``"dark"`` or ``"light"``.
             """
             super().__init__()
+            self.background = background
+            self._palette = _get_background_palette(background)
             self.viewer = viewer
             self.gene_colors = gene_colors
             self.lazy_loading = lazy_loading
@@ -529,6 +568,7 @@ if WITH_NAPARI:
                 self._load_gene_coords(gene)
 
             self.active_genes[gene] = None
+            self._color_for(gene)
             self._update_active_list()
             self.search_input.clear()
 
@@ -537,6 +577,23 @@ if WITH_NAPARI:
                 self._create_layer()
 
             self._do_query()
+
+        def _color_for(self, gene: str) -> tuple[float, float, float]:
+            """Return the color of a gene, assigning one in add order if needed.
+
+            A gene keeps its color for the session, also after it was removed
+            and re-added, unless another active gene took that color meanwhile.
+            """
+            others = {
+                self.gene_colors[g]
+                for g in self.active_genes
+                if g != gene and g in self.gene_colors
+            }
+            color = self.gene_colors.get(gene)
+            if color is None or color in others:
+                color = _next_gene_color(others, self._palette)
+                self.gene_colors[gene] = color
+            return color
 
         def _init_gene_query_mode(self) -> None:
             """Infer whether gene column values are stored as strings or bytes."""
@@ -658,7 +715,7 @@ if WITH_NAPARI:
             # Build mapping of gene names to colors
             import math
             mapping = {
-                gene: self.gene_colors[gene]
+                gene: self._color_for(gene)
                 for gene in sorted(self.active_genes.keys())
             }
 
@@ -788,7 +845,7 @@ if WITH_NAPARI:
             for gene, coords in self.active_genes.items():
                 if coords is not None and len(coords) > 0:
                     all_coords.append(coords)
-                    color = self.gene_colors[gene]
+                    color = self._color_for(gene)
                     all_colors.extend([color] * len(coords))
                     all_gene_names.extend([gene] * len(coords))
 
@@ -851,6 +908,7 @@ if WITH_NAPARI:
         lazy_loading: bool = True,
         config: TranscriptViewerConfig | None = None,
         viewer_config: Optional["ViewerConfig"] = None,
+        background: Literal["dark", "light"] = "dark",
     ) -> TranscriptViewerWidget:
         """Create a TranscriptViewerWidget from transcript data.
 
@@ -864,6 +922,12 @@ if WITH_NAPARI:
                 datasets > 50M points).
             config: Configuration object. If None, uses defaults.
             viewer_config: ViewerConfig for accessing static_canvas for color legend.
+            background: ``"dark"`` for bright colors on a dark canvas (e.g. DAPI
+                base image, default) or ``"light"`` for dark colors on a light
+                canvas (e.g. H&E base image).
+
+        Raises:
+            ValueError: If ``background`` is not ``"dark"`` or ``"light"``.
 
         Returns:
             Configured TranscriptViewerWidget ready to be added to the viewer.
@@ -872,6 +936,7 @@ if WITH_NAPARI:
             >>> widget = create_transcript_viewer_widget(viewer, xdata.transcripts)
             >>> viewer.window.add_dock_widget(widget, name="Transcripts")
         """
+        _get_background_palette(background)  # fail early on an invalid value
         if config is None:
             config = TranscriptViewerConfig()
 
@@ -890,6 +955,7 @@ if WITH_NAPARI:
                 dask_df=transcripts,
                 config=config,
                 viewer_config=viewer_config,
+                background=background,
             )
         else:
             gene_data, gene_colors = prepare_gene_data(transcripts, config)
@@ -900,6 +966,7 @@ if WITH_NAPARI:
                 lazy_loading=False,
                 config=config,
                 viewer_config=viewer_config,
+                background=background,
             )
 
         return widget
