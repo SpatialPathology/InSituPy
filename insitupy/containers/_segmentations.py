@@ -9,7 +9,6 @@ import dask.array as da
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import shapely
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from shapely.geometry import Polygon
@@ -18,86 +17,6 @@ from shapely.ops import unary_union
 from insitupy.utils._shapely import scale_polygon
 
 logger = logging.getLogger(__name__)
-
-
-def _read_baysor_polygons(
-    file: str | os.PathLike | Path
-    ) -> gpd.GeoDataFrame:
-    from insitupy._io.files import read_json
-
-    d = read_json(file)
-
-    # prepare output dictionary
-    df = {
-    "geometry": [],
-    "cell": [],
-    "type": [],
-    "minx": [],
-    "miny": [],
-    "maxx": [],
-    "maxy": []
-    }
-
-    for i in range(len(d["features"])):
-        cell = d["features"][i]
-        coords = cell['geometry']['coordinates'][0]
-
-        # check if there are enough coordinates for a Polygon (some segmented cells are very small in Baysor)
-        if len(coords) > 3:
-            p = shapely.Polygon(coords)
-            df["geometry"].append(p)
-            df["type"].append("polygon")
-
-        else:
-            p = shapely.LineString(coords)
-            df["geometry"].append(p)
-            df["type"].append("line")
-        df["cell"].append(i)
-
-        # extract bounding box
-        bounds = p.bounds
-        df["minx"].append(bounds[0])
-        df["miny"].append(bounds[1])
-        df["maxx"].append(bounds[2])
-        df["maxy"].append(bounds[3])
-
-    # create geopandas dataframe
-    df = gpd.GeoDataFrame(df)
-
-    return df
-
-
-def read_baysor_transcripts(
-    baysor_output: str | os.PathLike | Path
-    ) -> pd.DataFrame:
-    """Read the transcript-level assignment CSV produced by Baysor.
-
-    Reads ``segmentation.csv`` from the Baysor output directory and returns
-    a :class:`~pandas.DataFrame` indexed by the transcript identifier column
-    (``transcript_id`` or ``molecule_id``).
-
-    Args:
-        baysor_output: Path to the Baysor output directory containing
-            ``segmentation.csv``.
-
-    Returns:
-        A :class:`~pandas.DataFrame` with one row per transcript and
-        Baysor-assigned cell IDs (and other columns) as columns.
-    """
-    # convert to pathlib path
-    baysor_output = Path(baysor_output)
-
-    # read transcripts from Baysor results
-    logger.info("Parsing transcripts data...")
-
-    logger.info("Read data")
-    segcsv_file = baysor_output / "segmentation.csv"
-    baysor_transcript_dataframe = pd.read_csv(segcsv_file)
-
-    # reshaping
-    transcript_id_col = [elem for elem in ["transcript_id", "molecule_id"] if elem in baysor_transcript_dataframe.columns][0]
-    baysor_transcript_dataframe = baysor_transcript_dataframe.set_index(transcript_id_col)
-    return baysor_transcript_dataframe
 
 
 def _read_proseg_polygons(
@@ -348,74 +267,3 @@ def _read_proseg(
 
     return adata, boundaries_mask, cell_names, seg_mask_value
 
-def _read_baysor(
-    path,
-    xd,
-    counts_file: str | None = None,
-    cell_metadata_file: str | None = None,
-    polygons_file: str | None = None,
-    pixel_size: Number = 1
-    ):
-    try:
-        from rasterio.features import rasterize
-    except ImportError:
-        raise ImportError("This function requires the rasterio package, please install with `pip install rasterio`.")
-
-    import scanpy as sc
-
-    from insitupy.io import read_xenium
-
-    if counts_file is None:
-        path_counts = list(path.glob("segmentation_counts.*"))[0] #r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_counts.loom"
-    else:
-        path_counts = path / counts_file
-
-    if cell_metadata_file is None:
-        path_cell_metadata = list(path.glob("segmentation_cell_stats.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_cell_stats.csv"
-    else:
-        path_cell_metadata = path / cell_metadata_file
-
-    if polygons_file is None:
-        path_polygons = list(path.glob("segmentation_polygons_2d.*"))[0] # r"C:\Users\ge62lav\Phd\SegmentationBenchmarking\baysor__transcripts_human_pancreas\segmentation_polygons_2d.json"
-    else:
-        path_polygons = path / polygons_file
-
-    # read baysor counts
-    xd=read_xenium(xd)
-    cell_metadata=pd.read_csv(path_cell_metadata)
-    counts=sc.read_loom(path_counts)
-
-    counts.obs=cell_metadata.copy()
-    counts.var_names=counts.var['Name'].copy()
-
-    adata=counts[:,counts.var_names.isin(xd.cells['main'].matrix.var.index.tolist())].copy()
-
-    # Read Proseg polygons
-    polygons = _read_baysor_polygons(path_polygons)
-
-    # Scale Proseg polygons
-    if pixel_size != 1:
-        polygons['geometry'] = polygons['geometry'].apply(lambda x: scale_polygon(x, pixel_size))
-        polygons["maxx"] = polygons["maxx"] / pixel_size
-        polygons["maxy"] = polygons["maxy"] / pixel_size
-
-
-    # Calculate bounds for rasterization
-    polygon_bounds = polygons.geometry.bounds
-    xmax = ceil(polygon_bounds.loc[:, "maxx"].max())
-    ymax = ceil(polygon_bounds.loc[:, "maxy"].max())
-
-    # get cell names and generate segmentation mask values
-    cell_names = polygons['cell']#.values
-    seg_mask_value = range(1, len(polygons['cell'])+1)
-
-    # rasterize polygons (use int32 to reduce memory; sufficient for up to ~2 billion cells)
-    boundaries_mask_np = rasterize(list(zip(polygons["geometry"], seg_mask_value)), out_shape=(ymax,xmax), dtype=np.int32)
-    # Wrap as dask array without copying (da.from_array copies by default)
-    boundaries_mask = da.from_delayed(
-        dask.delayed(np.asarray)(boundaries_mask_np),
-        shape=boundaries_mask_np.shape,
-        dtype=boundaries_mask_np.dtype
-    )
-
-    return adata, boundaries_mask, cell_names, seg_mask_value

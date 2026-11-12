@@ -538,7 +538,7 @@ def load_and_scale_images(
     if not HAS_OPENCV:
         raise ImportError(
             "OpenCV (cv2) is required for image registration. "
-            "Install it with: pip install opencv-python"
+            "Install it with: pip install opencv-python-headless"
         )
 
     verbose = config.verbose
@@ -714,7 +714,7 @@ def extract_features(
     if not HAS_OPENCV:
         raise ImportError(
             "OpenCV (cv2) is required for image registration. "
-            "Install it with: pip install opencv-python"
+            "Install it with: pip install opencv-python-headless"
         )
 
     verbose = config.verbose
@@ -936,7 +936,7 @@ def calculate_transformation_matrix(
     if not HAS_OPENCV:
         raise ImportError(
             "OpenCV (cv2) is required for calculating transformation matrix. "
-            "Install it with: pip install opencv-python"
+            "Install it with: pip install opencv-python-headless"
         )
 
     verbose = config.verbose

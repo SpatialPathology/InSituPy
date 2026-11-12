@@ -744,46 +744,6 @@ def write_ome_tiff(
         file.unlink()
     os.rename(tmp_file, file)
 
-def read_zarr_pyramid(dirstore, persist):
-    """Read a pyramid from an already-opened Zarr store.
-
-    Reads sub-arrays from *dirstore*, treating them as pyramid resolution
-    levels sorted in ascending order (``"0"`` = full resolution).  If the
-    store contains a single array (indicated by a ``.zarray`` entry), that
-    array is returned directly.
-
-    Args:
-        dirstore: An open Zarr store object (e.g.
-            :class:`zarr.storage.DirectoryStore` or
-            :class:`zarr.storage.ZipStore`).
-        persist: If ``True``, call ``.persist()`` on each
-            :class:`dask.array.Array` to trigger eager loading into memory.
-
-    Returns:
-        A :class:`dask.array.Array` (single array) or a :class:`list` of
-        :class:`dask.array.Array` (pyramid, index 0 = full resolution), in the stored axis
-        order. Use :func:`read_image` for canonical axes.
-    """
-    # get components of zip store
-    components = dirstore.listdir()
-
-    if ".zarray" in components:
-        # the store is an array which can be opened
-        img = da.from_zarr(dirstore, chunks=_read_chunks(zarr.open_array(dirstore, mode="r"), None))
-        if persist:
-            img = img.persist()
-    else:
-        subres = _sorted_pyramid_levels(components)
-        img = []
-        for s in subres:
-            arr = zarr.open_array(dirstore, path=s, mode="r")
-            level = da.from_zarr(dirstore, component=s, chunks=_read_chunks(arr, None))
-            if persist:
-                level = level.persist()
-            img.append(level)
-
-    return img
-
 def read_ome_tiff(
     path,
     levels: list[int] | int | None = None,

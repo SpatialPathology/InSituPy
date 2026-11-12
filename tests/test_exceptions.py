@@ -219,3 +219,37 @@ class TestMissingPackageError:
     def test_custom_install_command(self):
         exc = MissingPackageError("mypackage", "conda install mypackage")
         assert "conda install mypackage" in str(exc)
+
+
+class TestInSituPyDeprecationWarning:
+    def test_is_visible_future_warning(self):
+        import insitupy
+
+        assert issubclass(insitupy.InSituPyDeprecationWarning, FutureWarning)
+        assert "InSituPyDeprecationWarning" in insitupy.__all__
+
+    def test_restructure_transcripts_warns_once(self, tmp_path):
+        import warnings
+
+        from insitupy import InSituPyDeprecationWarning
+        from insitupy.io import read_xenium
+
+        # the warning is emitted before the path check, so no Xenium bundle is needed
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            with pytest.raises(FileNotFoundError):
+                read_xenium(tmp_path / "missing", restructure_transcripts=True)
+        dep = [w for w in record if issubclass(w.category, InSituPyDeprecationWarning)]
+        assert len(dep) == 1
+        assert "0.14" in str(dep[0].message)
+
+    def test_restructure_transcripts_false_does_not_warn(self, tmp_path):
+        import warnings
+
+        from insitupy import InSituPyDeprecationWarning
+        from insitupy.io import read_xenium
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", InSituPyDeprecationWarning)
+            with pytest.raises(FileNotFoundError):
+                read_xenium(tmp_path / "missing")

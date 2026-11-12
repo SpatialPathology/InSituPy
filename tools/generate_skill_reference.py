@@ -88,6 +88,7 @@ RENDERERS: dict[str, tuple[str, str]] = {
 # symbol the API no longer exports. Verified against the live API at implementation time.
 CURATED_SYMBOLS: tuple[str, ...] = (
     "insitupy.io.read_xenium",
+    "insitupy.io.read_atera",
     "insitupy.io.read_visium",
     "insitupy.io.read_qupath",
     "insitupy._core.data.InSituData.read",

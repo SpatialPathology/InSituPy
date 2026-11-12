@@ -5,6 +5,7 @@ from . import preprocessing as pp
 from . import tools as tl
 from ._constants import CACHE, WITH_NAPARI
 from ._core.data import InSituData
+from ._exceptions import InSituPyDeprecationWarning
 from ._module_aliases import register_module_aliases as _register_module_aliases
 from ._version import __author__, __email__, __version__
 from .experiment.data import InSituExperiment
@@ -20,6 +21,7 @@ __all__ = [
     "__email__",
     "InSituData",
     "InSituExperiment",
+    "InSituPyDeprecationWarning",
     "_core",
     "containers",
     "datasets",

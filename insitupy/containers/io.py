@@ -34,8 +34,8 @@ from insitupy.containers._zarr_compat import ZARR_V3, _get_zarr_store
 from insitupy.images._zarr_layout import working_chunks
 from insitupy.images.io import _sorted_pyramid_levels
 from insitupy.utils.utils import (
+    _encode_xenium_cell_ids,
     _generate_time_based_uid,
-    convert_int_to_xenium_hex,
     glob_visible,
 )
 
@@ -105,7 +105,7 @@ def _read_boundaries_from_celldata_zarr(
         try:
             # read cell ids and seg_mask_values
             cell_ids = da.from_zarr(bound_path, component="cell_id").compute()
-            cell_names = np.array([convert_int_to_xenium_hex(elem[0], elem[1]) for elem in cell_ids])
+            cell_names = _encode_xenium_cell_ids(cell_ids).astype(str)
         except ArrayNotFoundError:
             # neither cell_names nor cell_id on disk: the store lacks an identity axis, so
             # cell_names would be left unbound and blow up later with UnboundLocalError. Raise a

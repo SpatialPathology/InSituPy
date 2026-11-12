@@ -9,7 +9,7 @@ from insitupy._constants import CACHE
 logger = logging.getLogger(__name__)
 from insitupy._core.data import InSituData
 from insitupy.datasets.download import download_url
-from insitupy.io.data import read_visium, read_xenium
+from insitupy.io.data import read_atera, read_visium, read_xenium
 
 # parameters for download functions
 DEMODIR = CACHE / 'demo_datasets'
@@ -100,49 +100,59 @@ def list_downloaded_datasets(output_dir=None):
 
 # function that checks data for md5sum, downloads and unpacks the data.
 def _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir):
-    # check if the unzipped data exists
-    download_data = False
+    data_dir = Path(data_dir)
+    zip_file = Path(zip_file)
+    named_data_dir = Path(named_data_dir)
+
     if data_dir.exists():
-        # if it exists, everything is fine and it is assumed that the dataset was downloaded correctly. Overwrite is still checked.
         if not overwrite:
             logger.info("This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
             return
-        else:
-            logger.info("This dataset exists already but is overwritten because of `overwrite=True`.")
-            download_data = True
-    else:
-        # if unzipped data does not exist, we need to check if a zip file exists, and if yes if its md5sum is correct
-        if zip_file.exists():
-            logger.info("ZIP file exists. Checking md5sum...")
-            if _md5sum(zip_file) == expected_md5sum:
-                if not overwrite:
-                    logger.info("This dataset exists already. Download is skipped. To force download set `overwrite=True`.")
-                    return
-                else:
-                    # if the md5sum matches but overwrite=True, the data is still downloaded
-                    download_data = True
-            else:
-                logger.warning("The dataset exists already but the md5sum is not as expected. Dataset is downloaded again.")
-                download_data = True
-        else:
-            download_data = True
+        logger.info("This dataset exists already but is overwritten because of `overwrite=True`.")
+        # only ever delete a folder that lies inside the dataset folder
+        if named_data_dir.resolve() not in data_dir.resolve().parents:
+            raise ValueError(f"Refusing to delete {data_dir}: it is not inside {named_data_dir}.")
+        shutil.rmtree(data_dir)
 
-    if download_data:
-        # download data as zip file
+    # get a valid zip file: reuse an existing one if its md5sum matches, else download
+    use_existing_zip = False
+    if zip_file.exists():
+        logger.info("ZIP file exists. Checking md5sum...")
+        zip_md5_ok = _md5sum(zip_file) == expected_md5sum
+        if zip_md5_ok and not overwrite:
+            logger.info("The md5sum matches. Download is skipped.")
+            use_existing_zip = True
+        elif not zip_md5_ok:
+            logger.warning("The ZIP file exists already but the md5sum is not as expected. Dataset is downloaded again.")
+
+    if not use_existing_zip:
         download_url(data_url, out_dir=named_data_dir, overwrite=True)
+        actual_md5sum = _md5sum(zip_file)
+        if actual_md5sum != expected_md5sum:
+            os.remove(zip_file)
+            raise ValueError(
+                f"The md5sum of the downloaded file does not match (expected {expected_md5sum}, "
+                f"got {actual_md5sum}) for {data_url}. The ZIP file was deleted. "
+                "The download may be incomplete: try again. If the error persists, 10x Genomics "
+                "may have changed the file - please report this to the InSituPy developers."
+            )
 
-        # unzip data
-        shutil.unpack_archive(zip_file, data_dir)
+    # unpack into a temporary sibling folder so that `data_dir` only appears once it is complete
+    partial_dir = named_data_dir / f".{data_dir.name}.partial"
+    if partial_dir.exists():
+        shutil.rmtree(partial_dir)
+    shutil.unpack_archive(zip_file, partial_dir)
 
-        # move files from outs folder into parent directory and remove the outs folder
-        if (data_dir / "outs/").exists():
-            for f in data_dir.glob("outs/*"):
-                shutil.move(f, data_dir)
-            os.rmdir(data_dir / "outs")
+    # move files from outs folder into parent directory and remove the outs folder
+    if (partial_dir / "outs").exists():
+        for f in (partial_dir / "outs").glob("*"):
+            shutil.move(f, partial_dir)
+        os.rmdir(partial_dir / "outs")
 
-        #remove zip file after unpacking
-        os.remove(zip_file)
+    partial_dir.rename(data_dir)
 
+    # remove zip file after unpacking
+    os.remove(zip_file)
 
 # Xenium onboard analysis version 1.0.1
 # data from https://www.10xgenomics.com/products/xenium-in-situ/preview-dataset-human-breast
@@ -643,6 +653,38 @@ def xenium_test_dataset_v4_protein(
     data = read_xenium(data_dir)
     logger.info("For this dataset no additional images are available.")
     return data
+
+# atera onboard analysis 1.0.0
+# data from https://cf.10xgenomics.com/samples/atera/1.0.0/tiny_atera_dataset/tiny_atera_dataset_outs.zip
+# Tiny Atera test dataset (13 cells, 53 genes), see
+# https://www.10xgenomics.com/support/software/atera-onboard-analysis/latest/resources/example-data
+def _atera_test_dataset_dir(overwrite: bool = False, output_dir=None) -> Path:
+    """Download (if needed) the tiny Atera test dataset and return the path of the output bundle."""
+    data_url = "https://cf.10xgenomics.com/samples/atera/1.0.0/tiny_atera_dataset/tiny_atera_dataset_outs.zip"
+    base_dir = _resolve_output_dir(output_dir)
+    named_data_dir = base_dir / "atera_test_dataset"
+    data_dir = named_data_dir / "tiny_atera_dataset_outs"
+    zip_file = named_data_dir / Path(data_url).name
+    expected_md5sum = "32f1ae653bef673624e2d172850fe6bd"
+
+    _data_check_and_download(data_dir, zip_file, expected_md5sum, overwrite, data_url, named_data_dir)
+    return data_dir
+
+def atera_test_dataset(
+        overwrite: bool = False,
+        output_dir = None,
+        load_transcripts: bool = False,
+) -> InSituData:
+    """Load the tiny Atera test dataset (Atera Onboard Analysis 1.0.0, 10x Genomics).
+
+    Args:
+        overwrite: If True, download the dataset again. Defaults to False.
+        output_dir: Directory to store the dataset in. Defaults to the InSituPy demo dataset cache.
+        load_transcripts: Whether to load the transcripts (see :func:`insitupy.io.read_atera`).
+            Defaults to False.
+    """
+    data_dir = _atera_test_dataset_dir(overwrite=overwrite, output_dir=output_dir)
+    return read_atera(data_dir, load_transcripts=load_transcripts)
 
 
 # visium analysis version 2.0.0

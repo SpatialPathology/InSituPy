@@ -7,9 +7,7 @@ allowed-tools: Read, Glob, Grep, Edit, Write, PowerShell, mcp__insitupy__*
 
 # /implement — execute a plan report
 
-Implement the change described in the report below. All conventions, environment rules, and
-tool availability come from `CLAUDE.md` (auto-loaded into this session) and this command — the
-report carries only the task.
+@.claude/implement-protocol.md
 
 ## Report
 
@@ -23,38 +21,36 @@ with `select:mcp__insitupy__<name>` to load a schema before first use.** Key too
 `mcp__insitupy__search_codebase`, `mcp__insitupy__get_data_model`. Prefer these over blind
 file searching.
 
-## Protocol
+## Your role: interactive session
 
-1. **Read the report fully** and confirm the goal, affected files, and acceptance criteria. If
-   the report is missing, or contradicts the current code, stop and report that rather than
-   guessing.
-2. **Discover before writing.** Verify the report's file/line references against current source
-   (they may have drifted since planning). Match surrounding conventions.
-3. **Implement incrementally** — smallest coherent edits first.
-4. **Run targeted tests** for the changed method/module only — not the full suite. Run
-   `pytest <targeted test files>` from the environment where InSituPy is installed (see
-   `CLAUDE.md`; the specific env name/path is in your own user config). Before *adding* a test,
-   apply the altitude check: a test must exercise the **real code path against a real failure
-   mode**. Do not add change-detector tests (asserting the specific line/attribute you wrote) or
-   tests that stub the unit under test; for trivial state/glue changes, verify manually and note
-   it in the log.
-5. **Escalate when genuinely stuck:** for a hard design / security / correctness question, ask
+1. **Agent plans, at the start** (report under `agent-plans/`, written by the scheduled plan
+   agent): if the report is still in a date folder (`agent-plans/<YYMMDD>/...`), it has not been
+   reviewed. Say so and ask whether to proceed or to review it first with
+   `/walkthrough-insitupy-plans`.
+2. **Escalate when genuinely stuck:** for a hard design / security / correctness question, ask
    the user whether to invoke a senior-advisor agent if one is configured (e.g. the maintainer's
    `@opus-consultant`, a structured Opus Report contract); otherwise surface the question to a
    human. For a lightweight stall, the native `/advisor` toggle is the lower-friction option.
-6. **Log the work.** Check whether `.log/log.md` and `planning/backlog.md` already exist at the
+3. **Log the work.** Check whether `.log/log.md` and `planning/backlog.md` already exist at the
    repo root.
    - If they exist, append an entry to `.log/log.md` (via Edit, newest first) per the global
      CLAUDE.md format, and update `planning/backlog.md` if a tracked item was completed.
    - If they don't exist, don't create them silently. Ask the user whether to set up this
      session-log/backlog structure (briefly: a running dev journal at `.log/log.md` and a todo
      list at `planning/backlog.md`); if they decline, skip logging entirely.
+4. **Agent plans, at the end:** once the change is implemented and the targeted tests pass, move
+   the plan folder from `agent-plans/approved/<YYMMDD>-<slug>/` to
+   `agent-plans/implemented/<YYMMDD>-<slug>/`, and update the plan's row in
+   `agent-plans/review-log.md` (outcome `implemented`, date, branch, new location). If parts
+   were left out, keep the folder in `approved/`, note what is missing in the row, and ask
+   the user.
 
 ## Delegation note
 
 Implement directly. Do not spawn subagents without the user's confirmation. If you need a
 read-only lookup, the built-in `Explore` agent suffices — but restate any required convention
 (the project environment, the targeted-test rule, the `insitupy` MCP tools) in the delegation
-prompt, since subagents do **not** inherit `CLAUDE.md`.
+prompt, since subagents do **not** inherit `CLAUDE.md`. To implement several approved agent plans
+at once, use `/implement-insitupy-plans` instead.
 
 Finish by reporting what changed, which tests ran, and their results.

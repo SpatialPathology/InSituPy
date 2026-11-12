@@ -13,6 +13,15 @@ class InSituPyError(ValueError):
     """
 
 
+class InSituPyDeprecationWarning(FutureWarning):
+    """Warning for deprecated InSituPy API.
+
+    Visible by default (it subclasses :class:`FutureWarning`, not
+    :class:`DeprecationWarning`). Every message names the replacement and the
+    version in which the old API is removed.
+    """
+
+
 class ProjectDivergedError(InSituPyError, RuntimeError):
     """Raised when an object no longer matches the project it was read from.
 
@@ -238,12 +247,34 @@ class InvalidDataTypeError(Exception):
 
 class InvalidXeniumDirectory(Exception):
     """Raised when a path is not a valid Xenium output directory."""
-    def __init__(self, directory):
+    def __init__(self, directory, hint=None):
         directory = Path(directory)
         if (directory / ".ispy").exists():
             self.message = f"The directory '{directory}' does not contain the required 'experiment.xenium' file, but it contains an InSituPy project file. Try `InSituData.read()` instead."
         else:
             self.message = f"The directory '{directory}' is not a valid Xenium directory. It does not contain the required 'experiment.xenium' metadata file."
+        if hint:
+            self.message = f"{self.message} {hint}"
+        super().__init__(self.message)
+
+
+class InvalidAteraDirectory(Exception):
+    """Raised when a path is not a valid Atera output directory."""
+    def __init__(self, directory, missing_files=None):
+        directory = Path(directory)
+        if (directory / ".ispy").exists():
+            self.message = (
+                f"The directory '{directory}' is not an Atera output directory, but it contains an "
+                "InSituPy project file. Try `InSituData.read()` instead."
+            )
+        else:
+            missing = f" Missing: {', '.join(missing_files)}." if missing_files else ""
+            self.message = (
+                f"The directory '{directory}' is not a valid Atera directory.{missing} "
+                "Expected an Atera Onboard Analysis output bundle with 'cell_feature_matrix.zarr.zip' "
+                "and 'cells.zarr.zip' (or preproduction Atera data in Xenium format with an "
+                "'experiment.xenium' file)."
+            )
         super().__init__(self.message)
 
 

@@ -73,6 +73,16 @@ where to re-verify it if the codebase has moved on.
   `mask`. Same constraint applies to `pp.filter_genes`. Reference:
   `insitupy/preprocessing/experiment.py::filter_cells`.
 
+## Table and boundaries sync only through the `CellData` API
+
+- Indexing a layer (`cd[mask]`) and assigning a table (`cd.table = new_adata`,
+  `cd.set_table(...)`) sync the boundaries automatically.
+- Mutating the AnnData in place does **not**: `sc.pp.filter_cells(cd.table, inplace=True)`,
+  `cd.table._inplace_subset_obs(...)`, or changing `cd.boundaries` alone leave table and
+  boundaries out of step. Call `cd.sync()` (or `xd.cells.sync()` for all layers) afterwards.
+  `insitupy.pp.filter_cells` already does this. Check with `cd.is_synced`. Reference:
+  `insitupy/containers/cell_data.py` (`__getitem__`, `_set_table`, `sync`).
+
 ## Public names are often re-exported, not defined, at the module you'd expect
 
 - Many public functions (most of `insitupy.datasets`, much of `insitupy.io`) are implemented in

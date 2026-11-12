@@ -66,7 +66,7 @@ def test_valid_calls_pass():
         [
             'ispy.tl.dge(data, target_annotation_tuple=("tumor", "region1"))',
             'ispy.pl.spatial(data, keys="leiden", image_key="DAPI")',
-            'data.cells.add_baysor("xenium/", "baysor/", pixel_size=0.2125)',
+            'data.cells.add_proseg("proseg/", pixel_size=0.2125)',
             'data.crop(xlim=(0, 100), ylim=(0, 100))',
         ]
     )
