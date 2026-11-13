@@ -10,6 +10,7 @@ from .datasets import (
                        xenium_human_lymph_node_5k,
                        xenium_human_pancreatic_cancer,
                        xenium_human_skin_melanoma,
+                       xenium_test_dataset,
                        xenium_test_dataset_v2_mm,
                        xenium_test_dataset_v2_nucex,
                        xenium_test_dataset_v3_mm,
