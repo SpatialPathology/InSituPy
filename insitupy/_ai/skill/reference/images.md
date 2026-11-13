@@ -3,7 +3,9 @@
 # InSituPy Images API (insitupy.im)
 
 ## Lazy Loading
-Images in InSituPy are stored as OME-Zarr pyramids and loaded as dask arrays.
+Images in InSituPy are loaded as lazy dask arrays. Pyramidal images (e.g. Xenium/Atera
+morphology OME-TIFFs, pyramid zarr stores) are a list of dask arrays, one per resolution
+level, index 0 = full resolution; single-level images are a bare dask array.
 - Images are not read into RAM until `.compute()` is called or a region is accessed.
 - Pyramid levels allow efficient access at multiple resolutions.
 - `ImageData` stores multiple named images (e.g. "DAPI", "morphology_focus").
@@ -29,8 +31,6 @@ Images in InSituPy are stored as OME-Zarr pyramids and loaded as dask arrays.
   read_zarr(path)
     Read an image from a Zarr or Zarr.zip store.
     Returns: A tuple ``(img, ome_meta, axes, pixel_size)`` where - **img** – a :class:`dask.array.Array` for single-array stores, or a :class:`list` of :class:`dask.array.Array` for pyramid stores (index 0 = full resolution). - **ome_meta** – OME metadata dict parsed from the Zarr store attributes. - **axes** – axis string after normalisation (e.g. ``"YXS"``). - **pixel_size** – physical pixel size in the unit stored in the metadata.
-  write_ome_tiff(image: numpy.ndarray | dask.array.core.Array | list[dask.array.core.Array], file: str | os.PathLike | pathlib._local.Path, axes: str = 'YXS', metadata: dict = {}, subresolutions=6, subres_steps: int = 2, pixelsize: float | None = 1, pixelunit: str | None = None, photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', tile: tuple = (1024, 1024), compression: Literal['jpeg', 'LZW', 'jpeg2000', 'ZLIB', None] = 'ZLIB', overwrite: bool = False, verbose: bool = False)
-    Write image data to a pyramidal OME-TIFF file.
-  write_zarr(image, file, img_metadata: dict, axes: str, save
+  write_ome_tiff(image: numpy.ndarray | dask.array.core.Array | list[dask.array.core.Array], file: str | os.PathLike | pathlib._local.Path, axes: str = 'YXS', metadata: dict = {}, subresolutions=6, subres_steps: int = 2, pixelsize: float | None = 1, pixelunit: str | None = None, photometric: Literal['rgb', 'minisblack', 'maxisblack'] = 'rgb', tile: tuple = (1024, 1024), compression: Literal['jpeg', 'LZW', 'jpeg2000', 'ZLIB', N
 
-... [truncated — full text is 5606 chars]
+... [truncated — full text is 5781 chars]

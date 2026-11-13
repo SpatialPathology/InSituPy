@@ -61,4 +61,4 @@ SpatialUnitsData
 - InSituData.cells.table → AnnData (scanpy-compatible)
 - InSituData.cells.boundaries → segmentation masks as dask arrays
 - Annotations/Regions are GeoDataFrames assignable to cells via .assign_annotations()
-- Images are dask arrays, supporting lazy loading and zarr-backed pyramids
+- Images are lazy dask arrays; pyramidal images (e.g. Xenium/Atera morphology OME-TIFFs) are a list of dask arrays, one per resolution level, index 0 = full resolution
