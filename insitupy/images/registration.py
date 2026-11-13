@@ -208,12 +208,24 @@ def _deconvolve_he_image(
 ) -> np.ndarray:
     """Apply H&E color deconvolution to extract nuclei channel."""
     logger.info("%s%s%s Color deconvolution (%s, scale factor: %s)", _TSIGN, _HLINE, _HLINE, name, decon_scale_factor)
+    h, w = get_height_and_width(img, ImageAxes(axes))
+    # deconvolve_he expects channels last (YXS)
+    img_small = np.moveaxis(
+        resize_image(
+            img,
+            dim=(max(1, int(w * decon_scale_factor)), max(1, int(h * decon_scale_factor))),
+            axes=axes,
+        ),
+        axes.index("S"), -1,
+    )
     nuclei_img, _, _ = deconvolve_he(
-        img=resize_image(img, scale_factor=decon_scale_factor, axes=axes),
+        img=img_small,
         return_type="grayscale",
         convert=True,
     )
-    nuclei_img = resize_image(nuclei_img, scale_factor=1 / decon_scale_factor, axes="YX")
+    # resize back to the exact original size (a 1 / scale_factor resize would truncate and
+    # shift the scale factors computed from the original shape)
+    nuclei_img = resize_image(nuclei_img, dim=(w, h), axes="YX")
     return nuclei_img
 
 
