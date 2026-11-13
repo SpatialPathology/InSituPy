@@ -656,7 +656,7 @@ def get_data_model() -> str:
     - InSituData.cells.table → AnnData (scanpy-compatible)
     - InSituData.cells.boundaries → segmentation masks as dask arrays
     - Annotations/Regions are GeoDataFrames assignable to cells via .assign_annotations()
-    - Images are dask arrays, supporting lazy loading and zarr-backed pyramids
+    - Images are lazy dask arrays; pyramidal images (e.g. Xenium/Atera morphology OME-TIFFs) are a list of dask arrays, one per resolution level, index 0 = full resolution
     """)
 
 
@@ -1541,7 +1541,9 @@ def get_images_api() -> str:
 
     lines.append(textwrap.dedent("""\
     ## Lazy Loading
-    Images in InSituPy are stored as OME-Zarr pyramids and loaded as dask arrays.
+    Images in InSituPy are loaded as lazy dask arrays. Pyramidal images (e.g. Xenium/Atera
+    morphology OME-TIFFs, pyramid zarr stores) are a list of dask arrays, one per resolution
+    level, index 0 = full resolution; single-level images are a bare dask array.
     - Images are not read into RAM until `.compute()` is called or a region is accessed.
     - Pyramid levels allow efficient access at multiple resolutions.
     - `ImageData` stores multiple named images (e.g. "DAPI", "morphology_focus").
