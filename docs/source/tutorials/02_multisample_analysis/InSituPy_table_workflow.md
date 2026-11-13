@@ -44,6 +44,10 @@ from insitupy import InSituExperiment
 
 # Load a saved experiment (must have a path for build_table to write to)
 exp = InSituExperiment.read("path/to/my_experiment")
+
+# Needed for the default method="in_memory"; method="concat_on_disk" reads
+# from disk and does not need it
+exp.load_cells()
 exp
 ```
 
@@ -242,7 +246,7 @@ sc.pl.umap(exp.data[0].cells.table, color="leiden_integrated")
 
 ## Working with filters and views
 
-`InSituExperimentView` — created by `exp.filters.apply()` or direct slicing —
+`InSituExperimentView` — created by `exp.filters.view()` or direct slicing —
 has its own `.table` accessor. It does **not** merely row-slice the parent
 table: it reconstructs the correct gene set for the view's samples — the inner
 join over only the view's datasets — and row-filters to those samples. This
@@ -250,13 +254,16 @@ recovers genes shared within the subset even when they are absent from some
 other sample in the full experiment:
 
 ```python
-# Apply a filter defined on the experiment
-view = exp.filters.apply("high_quality")
+# View of the samples selected by a filter defined on the experiment
+view = exp.filters.view("high_quality")
 
 # View's table: inner-over-view genes, restricted to the view's rows
 view_tbl = view.table["main"]
 print(f"View covers {view_tbl.n_obs} cells from {len(view)} samples")
 ```
+
+`filters.apply()` instead returns an independent copy (a normal
+`InSituExperiment`), see the filter workflow.
 
 This is read-only, and a view cannot call `build_table()` — build on the
 parent experiment, then read the per-view result via `view.table[...]`.
