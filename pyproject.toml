@@ -59,7 +59,7 @@ dependencies = [
     # security patches
     "tornado>=6.5.8", # GHSA-mpf4-983q-p7j4 (#71) / GHSA-768j-98cg-p3fv (#70)
     "urllib3>=2.7.0", # GHSA-2xpw-w6gg-jr37
-    "pillow>=12.3.0" # GHSA-3f63-hfp8-52jq
+    "pillow>=13.0.0" # Pillow 13.0.0 security release, e.g. CVE-2026-96639
 ]
 
 [project.optional-dependencies]
