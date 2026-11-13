@@ -211,3 +211,45 @@ def test_grayscale_multichannel_is_channel_mean():
     assert axes == "YX"
     assert gray.shape == (30, 20)
     assert np.all(gray == 105)
+
+
+# ---------------------------------------------------------------------------
+# H&E deconvolution keeps the original shape (scale-factor consistency)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV not installed")
+@pytest.mark.parametrize("axes", ["YXS", "SYX"])
+def test_deconvolve_he_image_preserves_shape(axes):
+    """Down- and up-scaling must not truncate the size of a non-divisible image."""
+    from insitupy.images.registration import _deconvolve_he_image
+
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 256, size=(1501, 1003, 3), dtype=np.uint8)
+    if axes == "SYX":
+        img = np.moveaxis(img, -1, 0)
+
+    nuclei = _deconvolve_he_image(img, axes, 0.2)
+
+    assert nuclei.shape == (1501, 1003)
+
+
+@pytest.mark.skipif(not HAS_OPENCV, reason="OpenCV not installed")
+@pytest.mark.parametrize("axes", ["YXS", "SYX"])
+def test_deconvolution_scale_factors_are_one_without_max_width(axes):
+    """Without max_width the feature image is full size, so both scale factors are exactly 1."""
+    rng = np.random.default_rng(1)
+    img = rng.integers(0, 256, size=(1501, 1003, 3), dtype=np.uint8)
+    if axes == "SYX":
+        img = np.moveaxis(img, -1, 0)
+    config = RegistrationConfig(
+        axes_moving=axes, axes_fixed=axes, deconvolve_moving=True,
+        deconvolve_fixed=True, max_width=None, verbose=False,
+    )
+
+    scaled = load_and_scale_images(img, img, config)
+
+    assert scaled.moving_deconvolved is not None  # deconvolution branch was taken
+    assert scaled.x_sf_moving == 1.0
+    assert scaled.y_sf_moving == 1.0
+    assert scaled.x_sf_fixed == 1.0
+    assert scaled.y_sf_fixed == 1.0
