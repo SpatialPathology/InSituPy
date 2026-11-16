@@ -938,6 +938,8 @@ class TestConcatOnDisk:
             obs=pd.DataFrame(index=pd.Index([f"s1cell_{i}" for i in range(5)])),
             var=pd.DataFrame(index=pd.Index(shared + unique)),
         )
+        # every sample must carry the same obsm keys (partial keys are refused)
+        adata.obsm["spatial"] = rng.random((5, 2)) * 100
         adata.write_h5ad(h5ad_path)
 
         exp.build_table(method="concat_on_disk")
@@ -1259,3 +1261,119 @@ class TestPresenceReconstruction:
         tbl = empty_view.table["main"]
         assert tbl is not None
         assert tbl.n_obs == 0
+
+
+# ── Build-side fixes: fill value, partial element keys, sparse X ──────────────
+
+_TS_DIR = "260101-000000000000-a1b2c3d4"
+
+
+def _sample_h5ad(tmp_path, i):
+    return tmp_path / f"sample_{i}" / "cells" / _TS_DIR / "main" / "table.h5ad"
+
+
+def _union_frame(tmp_path):
+    """Read the raw union zarr store as a dense DataFrame (obs x genes)."""
+    import anndata as ad
+    from scipy import sparse
+    tbl = ad.read_zarr(tmp_path / "tables" / "main.zarr")
+    X = tbl.X.toarray() if sparse.issparse(tbl.X) else np.asarray(tbl.X)
+    return pd.DataFrame(X, index=tbl.obs_names, columns=tbl.var_names)
+
+
+class TestUnionFillAndPresence:
+    def test_union_store_fills_zero_on_disk_like_in_memory(self, tmp_path):
+        """concat_on_disk must fill unmeasured genes with 0 (not NaN), like in_memory."""
+        exp = _make_saved_asymmetric_experiment(tmp_path)
+
+        exp.build_table(method="in_memory")
+        ref = _union_frame(tmp_path)
+        exp.build_table(method="concat_on_disk", overwrite=True)
+        disk = _union_frame(tmp_path)
+
+        assert not np.isnan(disk.to_numpy()).any()
+        cols = sorted(ref.columns)
+        pd.testing.assert_frame_equal(
+            disk.loc[ref.index, cols], ref[cols], check_dtype=False
+        )
+        # sample_0 has no gD: its rows hold 0 there
+        s0 = [n for n in disk.index if n.endswith("-sample_0")]
+        assert (disk.loc[s0, "gD"] == 0).all()
+
+    @pytest.mark.parametrize("method", ["in_memory", "concat_on_disk"])
+    def test_table_returns_only_genes_present_in_every_covered_sample(
+        self, tmp_path, method
+    ):
+        """No filled gene is returned by .table, for the experiment or a view."""
+        exp = _make_saved_asymmetric_experiment(tmp_path)
+        exp.build_table(method=method)
+
+        assert set(exp.table["main"].var_names) == {"gA"}
+        view = exp._subset([0, 1], as_view=True)
+        assert set(view.table["main"].var_names) == {"gA", "gB"}
+
+
+class TestPartialElementKeys:
+    def test_partial_obsm_key_raises_in_memory(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        tbl = exp._data[0].cells.table
+        tbl.obsm["X_umap"] = np.zeros((tbl.n_obs, 2))
+        with pytest.raises(ValueError, match=r"obsm\['X_umap'\].*sample_1"):
+            exp.build_table(obsm_keys="all")
+
+    def test_partial_layer_key_raises_in_memory(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        tbl = exp._data[0].cells.table
+        tbl.layers["counts"] = np.ones(tbl.shape)
+        with pytest.raises(ValueError, match=r"layers\['counts'\].*sample_1"):
+            exp.build_table(layer_keys="all")
+
+    def test_default_selection_ignores_unselected_partial_keys(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        tbl = exp._data[0].cells.table
+        tbl.obsm["X_umap"] = np.zeros((tbl.n_obs, 2))
+        exp.build_table()  # obsm_keys="spatial": X_umap is not selected
+        assert exp.table["main"].n_obs == 20
+
+    def test_to_anndata_raises_too(self, tmp_path):
+        exp = _make_experiment_with_path(tmp_path)
+        tbl = exp._data[0].cells.table
+        tbl.obsm["X_umap"] = np.zeros((tbl.n_obs, 2))
+        with pytest.raises(ValueError, match="X_umap"):
+            exp.to_anndata(obsm_keys="all")
+
+    def test_partial_obsm_key_raises_on_disk(self, tmp_path):
+        import anndata as ad
+        exp = _make_saved_experiment(tmp_path)
+        path = _sample_h5ad(tmp_path, 0)
+        adata = ad.read_h5ad(path)
+        adata.obsm["X_umap"] = np.zeros((adata.n_obs, 2))
+        adata.write_h5ad(path)
+        with pytest.raises(ValueError, match=r"obsm\['X_umap'\].*sample_1"):
+            exp.build_table(method="concat_on_disk")
+        # the failed build leaves no table behind
+        assert not (tmp_path / "tables" / "main.zarr").exists()
+
+
+class TestSparseX:
+    @pytest.mark.parametrize("method", ["in_memory", "concat_on_disk"])
+    def test_sparse_identical_panel_roundtrip(self, tmp_path, method):
+        import anndata as ad
+        from scipy import sparse
+        exp = _make_saved_experiment(tmp_path)
+        for i, (_, xd) in enumerate(exp.iterdata()):
+            tbl = xd.cells.table
+            tbl.X = sparse.csr_matrix(tbl.X)
+            tbl.write_h5ad(_sample_h5ad(tmp_path, i))
+
+        exp.build_table(method=method)
+        raw = ad.read_zarr(tmp_path / "tables" / "main.zarr")
+        assert sparse.issparse(raw.X)
+        out = exp.table["main"]
+        assert out.shape == (20, 5)
+        expected = np.vstack(
+            [xd.cells.table.X.toarray() for _, xd in exp.iterdata()]
+        )
+        got = out.X.compute() if hasattr(out.X, "compute") else out.X
+        assert sparse.issparse(got)
+        np.testing.assert_array_equal(got.toarray(), expected)
