@@ -322,6 +322,7 @@ Import the tools submodule either as {code}`isp.tools` or {code}`isp.tl`.
     tl.dge
     tl.calc_distance_of_cells_from
     tl.pseudobulk_dge
+    tl.transfer_obs
     tl.register_images
 ```
 

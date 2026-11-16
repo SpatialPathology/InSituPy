@@ -131,7 +131,7 @@ def test_spatial_plot_config_and_data_config_not_clobbered(monkeypatch):
 
     def _fake_plot_to_subplots(
         data, keys, cells_layer, fig, axs,
-        plot_config, layout_config, data_config, color_config,
+        plot_config, layout_config, data_config, color_config, **kwargs,
     ):
         captured["plot_config"] = plot_config
         captured["data_config"] = data_config
@@ -245,7 +245,7 @@ def test_spatial_default_valued_kwarg_overrides_caller_config(monkeypatch):
 
     def _fake_plot_to_subplots(
         data, keys, cells_layer, fig, axs,
-        plot_config, layout_config, data_config, color_config,
+        plot_config, layout_config, data_config, color_config, **kwargs,
     ):
         captured["plot_config"] = plot_config
 
@@ -286,7 +286,7 @@ def test_spatial_ndarray_xlim_does_not_raise(monkeypatch):
 
     def _fake_plot_to_subplots(
         data, keys, cells_layer, fig, axs,
-        plot_config, layout_config, data_config, color_config,
+        plot_config, layout_config, data_config, color_config, **kwargs,
     ):
         captured["plot_config"] = plot_config
 

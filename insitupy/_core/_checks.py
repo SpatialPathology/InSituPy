@@ -1,20 +1,21 @@
 import logging
 from typing import Literal
 
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 
 logger = logging.getLogger(__name__)
 
 
 def _check_assignment(
     data,
-    cells_layer: str,
+    cells_layer: str | None,
     key: str,
     modality: Literal["annotations", "regions"],
     force_assignment: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    units_layer: str | None = None,
 ):
-    celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+    celldata = _get_table_layer(data, cells_layer=cells_layer, units_layer=units_layer)
     try:
         column = celldata.table.obsm[modality].columns
     except KeyError:
@@ -28,10 +29,16 @@ def _check_assignment(
     if do_assignment or force_assignment:
         if modality == "annotations":
             # assign annotations
-            data.assign_annotations(keys=key, cells_layers=cells_layer)
+            if units_layer is not None:
+                data.assign_annotations(keys=key, cells_layers=[], units_layers=units_layer)
+            else:
+                data.assign_annotations(keys=key, cells_layers=cells_layer)
         elif modality == "regions":
             # assign regions
-            data.assign_regions(keys=key, cells_layers=cells_layer)
+            if units_layer is not None:
+                data.assign_regions(keys=key, cells_layers=[], units_layers=units_layer)
+            else:
+                data.assign_regions(keys=key, cells_layers=cells_layer)
     else:
         if verbose:
             logger.info(f"{modality.capitalize()} with key '{key}' have already been assigned to the dataset.")

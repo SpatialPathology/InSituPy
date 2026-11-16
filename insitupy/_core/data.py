@@ -64,7 +64,7 @@ from insitupy.containers import (
     RegionsData,
     SpatialUnitsData,
 )
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_cell_layer, _get_table_layer
 from insitupy.containers.io import (
     _read_multicelldata,
     _read_multispatialunitsdata,
@@ -620,7 +620,8 @@ class InSituData:
                           add_masks: bool = False,
                           add_to_obs: bool = False,
                           overwrite: bool = True,
-                          cells_layer: str = None
+                          cells_layer: str = None,
+                          units_layer: str | None = None
                           ):
         '''
         Function to assign geometries (annotations or regions) to the anndata object in
@@ -637,6 +638,9 @@ class InSituData:
         centroids exactly on a polygon boundary are treated as outside. A cell inside two or more
         overlapping geometries of the same key gets a `" & "`-joined label (for example
         ``"Region 2 & Region 3"``); downstream tools that filter by a single name split on `" & "`.
+
+        With ``units_layer`` (mutually exclusive with ``cells_layer``), the geometries are
+        assigned to the bins/spots of ``.units[units_layer].table`` instead.
         '''
         if add_masks and not add_to_obs:
             raise ValueError(
@@ -651,11 +655,14 @@ class InSituData:
             raise ModalityNotFoundError(modality=geometry_type)
 
         # get the right cells layer
-        celldata, cells_layer_name = _get_cell_layer(
-            cells=self.cells, cells_layer=cells_layer,
+        celldata, layer_name = _get_table_layer(
+            self, cells_layer=cells_layer, units_layer=units_layer,
             verbose=True, return_layer_name=True
             )
-        name = f".cells['{cells_layer_name}']"
+        if units_layer is not None:
+            name = f".units['{layer_name}']"
+        else:
+            name = f".cells['{layer_name}']"
 
         if keys == "all":
             keys = geom_attr.metadata.keys()
@@ -710,7 +717,16 @@ class InSituData:
             data.index = celldata.table.obs_names
 
             # transform data into one column
-            column_to_add = [" & ".join(geom_names[row.values]) if np.any(row.values) else "unassigned" for _, row in data.iterrows()]
+            # (vectorized over the boolean matrix; labels are joined in `geom_names` order)
+            labels = np.full(len(data), "", dtype=object)
+            for n in geom_names:
+                m = data[n].to_numpy(dtype=bool)
+                first = m & (labels == "")
+                more = m & ~first
+                labels[more] = labels[more] + " & " + n
+                labels[first] = n
+            labels[labels == ""] = "unassigned"
+            column_to_add = labels.tolist()
 
             if all(label == "unassigned" for label in column_to_add):
                 warn(
@@ -767,7 +783,8 @@ class InSituData:
         cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
         add_to_obs: bool = False,
-        overwrite: bool = True
+        overwrite: bool = True,
+        units_layers: list[str] | str | None = None
     ):
         """Assign annotation geometries to cell layers.
 
@@ -791,9 +808,13 @@ class InSituData:
                 ``obsm``. Defaults to ``False``.
             overwrite: If ``True``, overwrite an existing assignment column
                 for the same key. Defaults to ``True``.
+            units_layers: Units layer name(s) (e.g. Visium HD bins) to assign to.
+                Units layers are assigned only when named - ``None`` never
+                assigns to units. Pass ``cells_layers=[]`` to assign to units only.
+                Defaults to ``None``.
         """
         if cells_layers is None:
-            layers_list = self._cells.keys()
+            layers_list = list(self._cells.keys()) if self._cells is not None else []
         else:
             layers_list = convert_to_list(cells_layers)
 
@@ -807,13 +828,25 @@ class InSituData:
                 cells_layer=l
             )
 
+        for u in ([] if units_layers is None else convert_to_list(units_layers)):
+            self.assign_geometries(
+                geometry_type="annotations",
+                keys=keys,
+                add_masks=add_masks,
+                add_to_obs=add_to_obs,
+                overwrite=overwrite,
+                units_layer=u
+            )
+
+
     def assign_regions(
         self,
         keys: str | Literal["all"] = "all",
         cells_layers: list[str] | str | None = None,
         add_masks: bool = False,
         add_to_obs: bool = False,
-        overwrite: bool = True
+        overwrite: bool = True,
+        units_layers: list[str] | str | None = None
     ):
         """Assign region geometries to cell layers.
 
@@ -834,9 +867,13 @@ class InSituData:
                 Defaults to ``False``.
             overwrite: If ``True``, overwrite an existing assignment column
                 for the same key. Defaults to ``True``.
+            units_layers: Units layer name(s) (e.g. Visium HD bins) to assign to.
+                Units layers are assigned only when named - ``None`` never
+                assigns to units. Pass ``cells_layers=[]`` to assign to units only.
+                Defaults to ``None``.
         """
         if cells_layers is None:
-            layers_list = self._cells.keys()
+            layers_list = list(self._cells.keys()) if self._cells is not None else []
         else:
             layers_list = convert_to_list(cells_layers)
 
@@ -849,6 +886,17 @@ class InSituData:
                 overwrite=overwrite,
                 cells_layer=l
             )
+
+        for u in ([] if units_layers is None else convert_to_list(units_layers)):
+            self.assign_geometries(
+                geometry_type="regions",
+                keys=keys,
+                add_masks=add_masks,
+                add_to_obs=add_to_obs,
+                overwrite=overwrite,
+                units_layer=u
+            )
+
 
     def copy(self, keep_path: bool = False):
         '''

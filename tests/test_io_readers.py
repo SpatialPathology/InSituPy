@@ -301,112 +301,70 @@ class TestReadVisiumHD:
         cd = xd.cells["main"]
         assert cd.matrix.n_obs == 3
         assert cd.boundaries["nuclei"] is not None
-        assert xd.images["hires"].metadata["pixel_size"] == pytest.approx(0.5 / 0.5)
-        assert xd.images["lowres"].metadata["pixel_size"] == pytest.approx(0.5 / 0.1)
+        assert xd.images.metadata["hires"]["pixel_size"] == pytest.approx(0.5 / 0.5)
+        assert xd.images.metadata["lowres"]["pixel_size"] == pytest.approx(0.5 / 0.1)
 
-    def test_real_dataset_smoke(self):
-        import os
-        pytest.importorskip("spatialdata_io")
-        root = Path(os.environ.get(
-            "INSITUPY_VISIUM_HD_TEST_DIR",
-            Path.home() / ".cache/InSituPy/demo_datasets/visium_test_dataset_v4"))
-        if not root.is_dir():
-            pytest.skip("Visium HD test dataset not available")
-        xd = read_visium_hd(root, load_nuclei=True, verbose=False)
-        assert list(xd.units.keys()) == ["square_008um", "square_016um"]
-        assert len(xd.units["square_008um"]) == 20830
-        assert len(xd.units["square_016um"]) == 5262
-        cd = xd.cells["main"]
-        assert cd.matrix.n_obs == 612
-        mask = np.asarray(cd.boundaries["cells"].compute())
-        nuc = np.asarray(cd.boundaries["nuclei"].compute())
-        xy = cd.matrix.obsm["spatial"]
-        values = np.asarray(cd.boundaries.seg_mask_value)
-        checked = 0
-        for i in np.random.default_rng(0).choice(612, 40, replace=False):
-            x, y = int(xy[i, 0]), int(xy[i, 1])
-            if mask[y, x] != 0:
-                assert mask[y, x] == values[i]
-                if nuc[y, x] != 0:
-                    assert nuc[y, x] == values[i]
-                checked += 1
-        assert checked > 10
-        assert set(np.unique(nuc)) <= set(np.unique(mask))
-
-
-class TestReadVisiumHD:
     @staticmethod
-    def _bundle(root: Path, bins=(8, 16), segmentation=True, mpp=0.5):
-        import json
-        for b in bins:
-            d = root / "binned_outputs" / f"square_{b:03d}um" / "spatial"
-            d.mkdir(parents=True)
-        seg = root / "segmented_outputs"
-        (seg / "spatial").mkdir(parents=True)
-        sf = {"microns_per_pixel": mpp, "tissue_hires_scalef": 0.5, "tissue_lowres_scalef": 0.1}
-        (seg / "spatial" / "scalefactors_json.json").write_text(json.dumps(sf))
-        if segmentation:
-            (seg / "cell_segmentations.geojson").write_text("{}")
-            (seg / "filtered_feature_cell_matrix.h5").write_text("")
-        return root
+    def _write_mapping(root: Path, barcodes, cell_ids):
+        pytest.importorskip("pyarrow")
+        pd.DataFrame({
+            "square_002um": barcodes,
+            "square_008um": ["s_008um_00000_00000-1"] * len(barcodes),
+            "square_016um": ["s_016um_00000_00000-1"] * len(barcodes),
+            "cell_id": cell_ids,
+            "in_nucleus": [True] * len(barcodes),
+            "in_cell": [cid is not None for cid in cell_ids],
+        }).to_parquet(root / "barcode_mappings.parquet")
 
-    def test_missing_directory_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
-            read_visium_hd(tmp_path / "nope")
-
-    def test_unknown_bin_size_raises(self, tmp_path):
-        self._bundle(tmp_path, bins=(8,))
-        with pytest.raises(ValueError, match=r"Available: \[8\]"):
-            read_visium_hd(tmp_path, bin_size=2)
-
-    def test_controlled_kwargs_rejected(self, tmp_path):
-        self._bundle(tmp_path)
-        with pytest.raises(TypeError):
-            read_visium_hd(tmp_path, load_segmentations_only=True)
-
-    def test_nuclei_without_segmentation_raises(self, tmp_path):
-        self._bundle(tmp_path)
-        with pytest.raises(ValueError, match="load_segmentation"):
-            read_visium_hd(tmp_path, load_segmentation=False, load_nuclei=True)
-
-    def test_reader_logic_on_stubbed_visium_hd(self, tmp_path, monkeypatch):
+    def _read_stubbed(self, tmp_path, monkeypatch, **kwargs):
         pytest.importorskip("spatialdata")
         pytest.importorskip("spatialdata_io")
         import spatialdata_io
 
         from tests.spatialdata_fixtures import make_visium_hd_like_sdata
 
-        self._bundle(tmp_path, mpp=0.5)
-        (tmp_path / "segmented_outputs" / "nucleus_segmentations.geojson").write_text("{}")
-        calls = {}
-
-        def fake_visium_hd(path, **kwargs):
-            calls.update(kwargs)
-            return make_visium_hd_like_sdata(prefix="pre")
+        def fake_visium_hd(path, **kw):
+            sdata = make_visium_hd_like_sdata(prefix="pre")
+            # as in real spatialdata-io output, cell tables are indexed by cell id
+            cell_table = sdata.tables["cell_segmentations"]
+            cell_table.obs_names = cell_table.obs["cell_id"].astype(str).to_numpy()
+            return sdata
 
         monkeypatch.setattr(spatialdata_io, "visium_hd", fake_visium_hd)
-        xd = read_visium_hd(tmp_path, load_nuclei=True, verbose=False)
+        return read_visium_hd(tmp_path, verbose=False, **kwargs)
 
-        assert calls["bin_size"] == [8, 16]
-        assert calls["load_segmentations_only"] is False
-        assert calls["load_nucleus_segmentations"] is True
-        assert calls["bins_as_squares"] is True
+    def test_bin_mapping_keeps_only_layer_cells_and_parses_grid(self, tmp_path, monkeypatch):
+        self._bundle(tmp_path)
+        self._write_mapping(
+            tmp_path,
+            barcodes=["s_002um_00000_00004-1", "s_002um_00012_00007-1",
+                      "s_002um_00001_00001-1", "s_002um_00002_00002-1"],
+            cell_ids=["cellid_000000001-1", "cellid_000000002-1", "cellid_000000099-1", None],
+        )
+        xd = self._read_stubbed(tmp_path, monkeypatch)
+        mapping = xd.cells["main"].table.uns["visium_hd_bin_mapping"]
+        assert list(mapping.columns) == ["cell_id", "array_row", "array_col", "in_nucleus"]
+        # the cell not in the layer and the unassigned bin are dropped
+        assert list(mapping["cell_id"].astype(str)) == ["cellid_000000001-1", "cellid_000000002-1"]
+        assert list(mapping["array_row"]) == [0, 12]
+        assert list(mapping["array_col"]) == [4, 7]
+        assert set(mapping["cell_id"].astype(str)) <= set(xd.cells["main"].table.obs_names)
 
-        assert list(xd.units.keys()) == ["square_008um", "square_016um"]
-        assert xd.units.main_key == "square_008um"
-        su = xd.units["square_008um"]
-        assert su._unit_type == "visium_hd_bin"
-        assert su._data.uns["bin_size_um"] == 8
-        # geometries and centroids scaled by microns_per_pixel (0.5): 8 px bins -> 4 um
-        minx, _, maxx, _ = su.shapes.geometry.iloc[0].bounds
-        assert maxx - minx == pytest.approx(4.0)
-        # first row is location 2 -> bin origin (0, 8) px, centre (4, 12) px -> (2, 6) um
-        np.testing.assert_allclose(su._data.obsm["spatial"][0], (2.0, 6.0))
-        cd = xd.cells["main"]
-        assert cd.matrix.n_obs == 3
-        assert cd.boundaries["nuclei"] is not None
-        assert xd.images.metadata["hires"]["pixel_size"] == pytest.approx(0.5 / 0.5)
-        assert xd.images.metadata["lowres"]["pixel_size"] == pytest.approx(0.5 / 0.1)
+        xd = self._read_stubbed(tmp_path, monkeypatch, load_bin_mapping=False)
+        assert "visium_hd_bin_mapping" not in xd.cells["main"].table.uns
+
+    def test_bin_mapping_unparsable_barcode_raises(self, tmp_path, monkeypatch):
+        self._bundle(tmp_path)
+        self._write_mapping(tmp_path, ["s_002um_bad-1"], ["cellid_000000001-1"])
+        with pytest.raises(ValueError, match="array_row"):
+            self._read_stubbed(tmp_path, monkeypatch)
+
+    def test_bin_mapping_no_overlap_warns(self, tmp_path, monkeypatch):
+        self._bundle(tmp_path)
+        self._write_mapping(tmp_path, ["s_002um_00000_00004-1"], ["cellid_000000099-1"])
+        with pytest.warns(UserWarning, match="matches the cell layer"):
+            xd = self._read_stubbed(tmp_path, monkeypatch)
+        assert len(xd.cells["main"].table.uns["visium_hd_bin_mapping"]) == 0
 
     def test_real_dataset_smoke(self):
         import os
@@ -436,3 +394,53 @@ class TestReadVisiumHD:
                 checked += 1
         assert checked > 10
         assert set(np.unique(nuc)) <= set(np.unique(mask))
+
+    def test_real_dataset_bin_nesting_mapping_and_transfer(self):
+        import os
+        pytest.importorskip("spatialdata_io")
+        pq = pytest.importorskip("pyarrow.parquet")
+        import pyarrow.compute as pc
+
+        import insitupy as isp
+        root = Path(os.environ.get(
+            "INSITUPY_VISIUM_HD_TEST_DIR",
+            Path.home() / ".cache/InSituPy/demo_datasets/visium_test_dataset_v4"))
+        if not root.is_dir():
+            pytest.skip("Visium HD test dataset not available")
+
+        # nesting 2 -> 8 -> 16 um is plain integer division of the grid indices
+        df = pq.read_table(
+            root / "barcode_mappings.parquet",
+            columns=["square_002um", "square_008um", "square_016um"],
+            filters=pc.field("cell_id").is_valid(),
+        ).to_pandas()
+        df = df.sample(1000, random_state=0)
+        grid = {
+            s: df[f"square_{s:03d}um"].str.extract(rf"^s_{s:03d}um_(\d+)_(\d+)-\d+$").astype(int).to_numpy()
+            for s in (2, 8, 16)
+        }
+        np.testing.assert_array_equal(grid[8], grid[2] // 4)
+        np.testing.assert_array_equal(grid[16], grid[2] // 8)
+
+        xd = read_visium_hd(root, verbose=False)
+        cells = xd.cells["main"].table
+        mapping = cells.uns["visium_hd_bin_mapping"]
+        assert len(mapping) > 0
+        assert set(mapping["cell_id"].astype(str)) <= set(cells.obs_names)
+
+        # bins -> cells transfer on a numeric column
+        isp.tl.transfer_obs(xd, "array_row", source=("units", "square_008um"),
+                            target=("cells", "main"))
+        mapped = cells.obs_names.isin(mapping["cell_id"].astype(str))
+        assert mapped.any()
+        assert cells.obs.loc[mapped, "array_row"].notna().mean() > 0.9
+
+        # mapping survives a save / read round trip
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "hd"
+            xd.saveas(out)
+            xd2 = isp.InSituData.read(out)
+            xd2.load_cells()
+            m2 = xd2.cells["main"].table.uns["visium_hd_bin_mapping"]
+            assert len(m2) == len(mapping)

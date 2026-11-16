@@ -3106,6 +3106,11 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.load_regions()
 
+    def load_units(self):
+        """Load spatial units (e.g. Visium HD bins) for all datasets."""
+        for xd in tqdm(self._data):
+            xd.load_units()
+
     def load_transcripts(self,
                         transcript_filename: str = "transcripts.parquet"
                         ):

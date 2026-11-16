@@ -8,7 +8,7 @@ import scanpy as sc
 from scipy import sparse
 
 from insitupy._core.data import InSituData
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.tools.neighbors import mean_gex_diff_to_neighbors
 from insitupy.utils._checks import _assert_log1p_state
@@ -33,6 +33,7 @@ def dge(
     ref_name: str | None = None,
     ref_metadata: dict | None = None,
     cells_layer: str | None = None,
+    units_layer: str | None = None,
     consider_neighbors: bool = False,
     method: Literal['t-test', 'wilcoxon', 'logreg', 't-test_overestim_var'] | None = 't-test',
     exclude_ambiguous_assignments: bool = False,
@@ -61,6 +62,7 @@ def dge(
         ref_name (Optional[str]): Label for the reference group used in result output. Defaults to None.
         ref_metadata (Optional[dict]): Additional metadata to attach to the reference group. Defaults to None.
         cells_layer (Optional[str]): Name of the cell segmentation layer to use. Defaults to None (main layer).
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer (mutually exclusive with `cells_layer`). Defaults to None.
         consider_neighbors (bool): If True, additionally compute, for the target and reference
             groups separately, a comparison of each cell against its own spatial neighborhood
             (within a 20 micrometer radius), returned as `target_neighborhood` and `ref_neighborhood`
@@ -157,6 +159,7 @@ def dge(
     adata_target, adata_target_full = _select_data_for_dge(
         data=target,
         cells_layer=cells_layer,
+        units_layer=units_layer,
         annotation_tuple=target_annotation_tuple,
         cell_type_tuple=target_cell_type_tuple,
         region_tuple=target_region_tuple,
@@ -172,7 +175,7 @@ def dge(
 
     if ref is None:
         ref = target#.copy()
-        ref_celldata = _get_cell_layer(cells=ref.cells, cells_layer=cells_layer)
+        ref_celldata = _get_table_layer(ref, cells_layer=cells_layer, units_layer=units_layer)
 
         # TODO: Implement behavior for "rest"
         # The "rest" argument is only implemented if ref_data is None in the beginning
@@ -221,6 +224,7 @@ def dge(
         ad_ref, ad_ref_full = _select_data_for_dge(
             data=rd,
             cells_layer=cells_layer,
+            units_layer=units_layer,
             annotation_tuple=ref_annotation_tuple,
             cell_type_tuple=ref_cell_type_tuple,
             region_tuple=ref_region_tuple,
@@ -335,6 +339,7 @@ def dge(
         mode="single-cell",
         method_params=method_params,
         cells_layer=cells_layer,
+        units_layer=units_layer,
         exclude_ambiguous_assignments=exclude_ambiguous_assignments,
 
         target_annotation=target_annotation_tuple[1] if isinstance(target_annotation_tuple, tuple) else target_annotation_tuple,

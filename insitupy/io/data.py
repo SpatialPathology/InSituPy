@@ -672,6 +672,57 @@ def _read_visium_hd_scalefactors(path: Path) -> dict:
     return {}
 
 
+def _read_visium_hd_bin_mapping(path: Path, cell_ids: pd.Index) -> pd.DataFrame | None:
+    """Read the 2 um bin -> cell mapping of a Visium HD bundle.
+
+    Reads only the needed columns of ``barcode_mappings.parquet`` (bundle root) and keeps
+    only 2 um bins that belong to a cell in ``cell_ids``.
+
+    Returns:
+        DataFrame with columns ``cell_id`` (categorical), ``array_row``, ``array_col`` (int32),
+        ``in_nucleus``; or None if no mapping file exists.
+    """
+    file = path / "barcode_mappings.parquet"
+    if not file.is_file():
+        logger.info("No barcode_mappings.parquet found - bin -> cell mapping is not loaded.")
+        return None
+
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    cols = ["square_002um", "cell_id", "in_nucleus"]
+    table = pq.read_table(file, columns=cols, filters=pc.field("cell_id").is_valid())
+    df = table.to_pandas()
+    n_before = len(df)
+
+    parsed = df["square_002um"].astype(str).str.extract(r"^s_002um_(\d+)_(\d+)-\d+$")
+    if parsed.isna().any(axis=None):
+        bad = df["square_002um"][parsed.isna().any(axis=1)].iloc[0]
+        raise ValueError(
+            f"Could not parse array_row/array_col from 2 um barcode '{bad}' "
+            "(expected 's_002um_<row>_<col>-<n>')."
+        )
+    df["array_row"] = parsed[0].astype("int32").to_numpy()
+    df["array_col"] = parsed[1].astype("int32").to_numpy()
+
+    df = df[df["cell_id"].isin(cell_ids)]
+    n_dropped = n_before - len(df)
+    logger.info(f"Bin mapping: kept {len(df)} 2 um bins, dropped {n_dropped} not in the cell layer.")
+    if n_before > 0 and len(df) == 0:
+        warnings.warn(
+            "None of the cell ids in barcode_mappings.parquet matches the cell layer - "
+            "the bin -> cell mapping is empty. The cell id format may differ between "
+            "Space Ranger versions."
+        )
+
+    return pd.DataFrame({
+        "cell_id": pd.Categorical(df["cell_id"].to_numpy()),
+        "array_row": df["array_row"].to_numpy(),
+        "array_col": df["array_col"].to_numpy(),
+        "in_nucleus": df["in_nucleus"].to_numpy(),
+    })
+
+
 def read_visium_hd(
     path: str | os.PathLike | Path,
     bin_size: int | list[int] | None = None,
@@ -679,6 +730,7 @@ def read_visium_hd(
     load_nuclei: bool = False,
     segmentation_pixel_size: Number = 1.0,
     fullres_pixel_size: Number | None = None,
+    load_bin_mapping: bool = True,
     dataset_name: str | None = None,
     sample_name: str | None = None,
     verbose: bool = True,
@@ -697,7 +749,9 @@ def read_visium_hd(
         path: Path to the Space Ranger output folder.
         bin_size: Bin size(s) in micrometres to load, e.g. ``8`` or ``[2, 8, 16]``. Default
             (None): 8 and 16 um where available (2 um bins are large and therefore opt-in).
-            ``[]`` loads the segmentation only.
+            ``[]`` loads the segmentation only. Loaded 2 um bins cost roughly 0.6-0.7 kB per bin
+            in memory (about 6-8 GB for a full 6.5 mm slide), plus a higher transient peak while
+            loading - crop early.
         load_segmentation: Load the cell segmentation, if present. Defaults to True.
         load_nuclei: Also import nucleus boundaries. Requires ``load_segmentation=True`` and is
             expensive on full slides (spatialdata-io builds nucleus counts from the 2 um matrix).
@@ -706,6 +760,12 @@ def read_visium_hd(
             Defaults to 1.0.
         fullres_pixel_size: Micrometres per full-resolution pixel. Defaults to
             ``microns_per_pixel`` from ``scalefactors_json.json``.
+        load_bin_mapping: Store the 2 um bin -> cell mapping from ``barcode_mappings.parquet`` in
+            ``cells["main"].table.uns["visium_hd_bin_mapping"]`` (columns ``cell_id``,
+            ``array_row``, ``array_col``, ``in_nucleus``). Only effective if the segmentation is
+            loaded. Used by :func:`insitupy.tl.transfer_obs`. The bin nesting (2 -> 8 -> 16 um) is
+            not stored: it is derived from ``array_row``/``array_col`` by integer division.
+            Defaults to True.
         dataset_name: Name for the overarching dataset/slide.
         sample_name: Name for the individual sample/ROI within the slide.
         verbose: Whether to print progress messages. Defaults to True.
@@ -802,7 +862,7 @@ def read_visium_hd(
     if ps != 1.0:
         for key in list(sdata.shapes):
             gdf = sdata.shapes[key]
-            gdf["geometry"] = gdf.geometry.scale(xfact=ps, yfact=ps, origin=(0, 0))
+            gdf["geometry"] = _transform_geoseries(gdf.geometry, lambda c: c * ps)
         for tkey in list(sdata.tables):
             if "spatial" in sdata.tables[tkey].obsm:
                 sdata.tables[tkey].obsm["spatial"] = sdata.tables[tkey].obsm["spatial"] * ps
@@ -851,7 +911,7 @@ def read_visium_hd(
             continue
         images[name] = {"key": keys[0], "pixel_size": pixel_size, "is_rgb": True}
 
-    return convert_from_foreign_spatialdata(
+    data = convert_from_foreign_spatialdata(
         sdata=sdata,
         images=images or None,
         cells=cells,
@@ -862,6 +922,14 @@ def read_visium_hd(
         method_name="visium_hd",
         verbose=verbose,
     )
+
+    if use_seg and load_bin_mapping:
+        celltable = data.cells["main"].table
+        mapping = _read_visium_hd_bin_mapping(path, celltable.obs_names)
+        if mapping is not None:
+            celltable.uns["visium_hd_bin_mapping"] = mapping
+
+    return data
 
 
 def read_any(

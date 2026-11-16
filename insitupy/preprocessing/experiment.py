@@ -9,7 +9,7 @@ from tqdm import tqdm
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._exceptions import ModalityNotFoundError
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.preprocessing.anndata import (
     cluster_anndata,
@@ -23,6 +23,7 @@ def calculate_qc_metrics(
     cells_layer: str | None = None,
     percent_top: Collection[int] = None,
     log1p: bool = False,
+    units_layer: str | None = None,
     **kwargs
 ):
     """
@@ -43,6 +44,8 @@ def calculate_qc_metrics(
             Defaults to False.
         **kwargs: Additional keyword arguments forwarded to
             ``sc.pp.calculate_qc_metrics``.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Returns:
         None: Modifies the cell table of each sample in place.
@@ -55,7 +58,7 @@ def calculate_qc_metrics(
         iterator = zip([None], [data])
 
     for _, d in iterator:
-        celldata = _get_cell_layer(cells=d.cells, cells_layer=cells_layer)
+        celldata = _get_table_layer(d, cells_layer=cells_layer, units_layer=units_layer)
         sc.pp.calculate_qc_metrics(
             celldata.table, percent_top=percent_top, log1p=log1p, inplace=True, **kwargs
             )
@@ -68,6 +71,7 @@ def filter_cells(
     max_counts: int | None = None,
     max_genes: int | None = None,
     mask: np.ndarray | list | pd.Series | None = None,
+    units_layer: str | None = None,
     **kwargs
 ):
     """
@@ -82,6 +86,8 @@ def filter_cells(
         max_genes (Optional[int]): Maximum number of genes for filtering cells.
         mask (Optional[np.ndarray]): Boolean array for filtering cells.
         **kwargs: Additional keyword arguments forwarded to ``sc.pp.filter_cells()``.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Raises:
         ValueError: If more than one filtering argument is provided or if the mask is not a boolean array.
@@ -104,10 +110,12 @@ def filter_cells(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+        celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
 
         if mask is not None:
             celldata.table = celldata.table[mask]
+            # (idempotent) make sure shapes/boundaries follow the filtered table
+            celldata.sync()
         else:
             sc.pp.filter_cells(
                 celldata.table,
@@ -128,6 +136,7 @@ def filter_genes(
     min_cells: int | None = None,
     max_counts: int | None = None,
     max_cells: int | None = None,
+    units_layer: str | None = None,
     **kwargs
 ):
     """
@@ -151,6 +160,8 @@ def filter_genes(
             gene may be expressed to pass the filter. Defaults to None.
         **kwargs: Additional keyword arguments forwarded to
             ``sc.pp.filter_genes()``.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Returns:
         None: Modifies the cell table of each sample in place.
@@ -163,7 +174,7 @@ def filter_genes(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+        celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
         sc.pp.filter_genes(
             celldata.table,
             min_counts=min_counts,
@@ -182,7 +193,8 @@ def normalize_and_transform(
     target_sum: int = 250,
     scale: bool = False,
     assert_integer_counts: bool = True,
-    verbose: bool = False
+    verbose: bool = False,
+    units_layer: str | None = None,
     ) -> None:
     """
     Normalize and transform the cell count data for an experiment or sample.
@@ -214,6 +226,8 @@ def normalize_and_transform(
         assert_integer_counts (bool, optional): If True, raise an error when the
             count matrix does not contain integer values. Defaults to True.
         verbose (bool, optional): If True, print progress messages. Defaults to False.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Raises:
         ValueError: If ``transformation_method`` is not one of ``['log1p', 'sqrt']``.
@@ -230,8 +244,8 @@ def normalize_and_transform(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if not xd.cells.is_empty:
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+        if units_layer is not None or not xd.cells.is_empty:
+            celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
             normalize_and_transform_anndata(
                 adata=celldata.table,
                 layer=adata_layer,
@@ -250,6 +264,7 @@ def reduce_dimensions(
     method: Literal["umap", "tsne"] = "umap",
     n_neighbors: int = 16,
     n_pcs: int | None = None,
+    units_layer: str | None = None,
     ):
     """
     Perform dimensionality reduction on cell data using UMAP or t-SNE.
@@ -272,6 +287,8 @@ def reduce_dimensions(
             components from the PCA (``X_pca``) - i.e. the neighbor graph is
             built on the PCA representation. Passing ``0`` forces scanpy to
             build the graph on ``.X`` (the raw feature matrix) instead.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Raises:
         ModalityNotFoundError: If a sample has no cells modality.
@@ -288,8 +305,8 @@ def reduce_dimensions(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if not xd.cells.is_empty:
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+        if units_layer is not None or not xd.cells.is_empty:
+            celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
 
             reduce_dimensions_anndata(
                 adata=celldata.table,
@@ -304,7 +321,8 @@ def cluster_cells(
     data: InSituExperiment | InSituData, # type: ignore
     cells_layer: str | None = None,
     method: Literal["leiden", "louvain"] = "leiden",
-    verbose: bool = False
+    verbose: bool = False,
+    units_layer: str | None = None,
     ):
     """
     Performs clustering on the data using the specified method.
@@ -314,6 +332,8 @@ def cluster_cells(
         cells_layer (Optional[str]): The specific layer of cells to use for clustering.
         method (Literal["leiden", "louvain"], optional): The clustering method to use. Defaults to "leiden".
         verbose (bool, optional): If True, enables verbose output. Defaults to False.
+        units_layer (Optional[str]): Units layer (e.g. Visium HD bins) to use instead of a cell layer
+            (mutually exclusive with ``cells_layer``). Defaults to None.
 
     Raises:
         ModalityNotFoundError: If the 'cells' modality is not found in the individual samples.
@@ -327,8 +347,8 @@ def cluster_cells(
         iterator = zip([None], [data])
 
     for _, xd in iterator:
-        if not xd.cells.is_empty:
-            celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+        if units_layer is not None or not xd.cells.is_empty:
+            celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
 
             cluster_anndata(
                 adata=celldata.table,

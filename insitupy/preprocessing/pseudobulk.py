@@ -6,7 +6,7 @@ import anndata as ad
 from sklearn.neighbors import radius_neighbors_graph
 
 from insitupy._checks import try_import
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.utils.utils import convert_to_list
 
@@ -17,7 +17,8 @@ def get_neighborhood(
     exp: InSituExperiment,
     sample_col: str,
     cells_layer: str | None = None,
-    radius: Number = 30
+    radius: Number = 30,
+    units_layer: str | None = None,
     ):
     """
     Compute spatial neighborhood connectivity matrices for each sample in an experiment.
@@ -34,6 +35,9 @@ def get_neighborhood(
         radius (Number, optional): Radius (in the same units as the spatial
             coordinates) within which cells are considered neighbors.
             Defaults to 30.
+        units_layer (Optional[str], optional): Units layer (e.g. Visium HD bins) to use
+            instead of a cell layer (mutually exclusive with ``cells_layer``).
+            Defaults to None.
 
     Returns:
         dict: Mapping from sample identifier to a sparse connectivity matrix
@@ -42,7 +46,7 @@ def get_neighborhood(
     matrices = {}
 
     for id, data in exp.iterdata():
-        layer = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+        layer = _get_table_layer(data, cells_layer=cells_layer, units_layer=units_layer)
         coords = layer.table.obsm["spatial"]
         A = radius_neighbors_graph(coords, radius=radius, mode="connectivity", include_self=False)
         matrices[layer.table.obs[sample_col].unique().tolist()[0]] = A
@@ -184,6 +188,7 @@ def pseudobulk(
     calculate_neighbors: bool = False,
     neighbors_radius: int = 20,
     metadata_to_transfer: list[str] | str = None,
+    units_layer: str | None = None,
     **kwargs
     ):
     """
@@ -217,6 +222,9 @@ def pseudobulk(
         metadata_to_transfer (Union[List[str], str], optional): Column name(s)
             from the experiment metadata to copy into the pseudobulk
             ``obs`` table. Defaults to None.
+        units_layer (Optional[str], optional): Units layer (e.g. Visium HD bins) to use
+            instead of a cell layer (mutually exclusive with ``cells_layer``).
+            Defaults to None.
         **kwargs: Additional keyword arguments forwarded to
             :func:`~insitupy.preprocessing.pseudobulk.neighborhoods_pseudobulk`
             when ``calculate_neighbors=True``.
@@ -244,7 +252,7 @@ def pseudobulk(
         uid = meta[uid_col]
 
         # extract anndata
-        celldata= _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
+        celldata = _get_table_layer(data, cells_layer=cells_layer, units_layer=units_layer)
         adata = celldata.table
 
         _assert_counts_layer(adata, counts_layer, uid=uid)
@@ -309,6 +317,7 @@ def pseudobulk(
     settings = dict(
         celltype_col=celltype_col,
         cells_layer=cells_layer,
+        units_layer=units_layer,
         counts_layer=counts_layer,
         uid_col=uid_col,
         mode=mode,

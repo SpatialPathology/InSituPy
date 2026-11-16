@@ -25,6 +25,7 @@ class DiffExprConfigCollector:
     mode: Literal["single-cell", "pseudobulk"]
     method_params: dict
     cells_layer: str | None = None
+    units_layer: str | None = None
     exclude_ambiguous_assignments: bool | None = None
 
     # Target
@@ -44,7 +45,8 @@ class DiffExprConfigCollector:
     ref_metadata: dict[str, Any] = None
 
     # class variables
-    GENERAL_FIELDS = ["mode", "method_params", "cells_layer", "exclude_ambiguous_assignments"]
+    GENERAL_FIELDS = ["mode", "method_params", "cells_layer", "units_layer",
+                      "exclude_ambiguous_assignments"]
     TARGET_FIELDS = ["target_annotation", "target_cell_type", "target_region",
                      "target_cell_number", "target_name", "target_metadata"]
     REFERENCE_FIELDS = ["ref_annotation", "ref_cell_type", "ref_region",
@@ -54,7 +56,7 @@ class DiffExprConfigCollector:
         # Validate string fields
         for field_name in ["target_annotation", "target_cell_type", "target_region", "target_name",
                            "ref_annotation", "ref_cell_type", "ref_region", "ref_name",
-                           "mode", "cells_layer"]:
+                           "mode", "cells_layer", "units_layer"]:
             field = getattr(self, field_name)
             if not isinstance(field, str) and field is not None:
                 raise TypeError(f"{field_name} must be a string. Instead got {type(getattr(self, field_name))}.")

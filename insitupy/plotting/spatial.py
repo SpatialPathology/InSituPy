@@ -27,7 +27,7 @@ from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
 from insitupy.containers import AnnotationsData, ImageData, RegionsData
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
@@ -293,6 +293,7 @@ def spatial(
     data: InSituData | InSituExperiment,
     keys: str | list[str],
     cells_layer: str | None = None,
+    units_layer: str | None = None,
     layer: str | None = _UNSET,
 
     # data attribute keys
@@ -343,6 +344,13 @@ def spatial(
         data (InSituData or InSituExperiment): Input dataset or experiment.
         keys (str or list of str): Feature key(s) to plot (e.g., gene names or annotations).
         cells_layer (str, optional): Name of the cell layer to extract data from.
+        units_layer (str, optional): Name of a units layer (e.g. Visium HD bins such as
+            ``"square_008um"``, or Visium spots) to plot instead of a cell layer. Mutually exclusive
+            with ``cells_layer``. Unless ``spot_size``/``plot_config`` are given, bins are drawn as
+            squares with the bin edge length as marker size (tiling the tissue) and spots as circles
+            with the spot diameter. Plotting 2 um layers of a full slide is slow: use
+            ``xlim``/``ylim`` or crop first. Colors of an ``InSituExperiment`` (``exp.colors``) are
+            not used for units layers.
         layer (str, optional): AnnData layer to extract values from.
         region_tuple (tuple of (str, str), optional): Region identifier (dataset key, region name).
         annotation_tuple (tuple of (str, str or list of str), optional):
@@ -423,6 +431,12 @@ def spatial(
     # convert arguments to lists
     keys = convert_to_list(keys)
 
+    if cells_layer is not None and units_layer is not None:
+        raise ValueError("cells_layer and units_layer are mutually exclusive")
+
+    # whether the caller gave a plot_config (units marker defaults apply only without one)
+    user_plot_config = plot_config is not None
+
     # init config classes
     # Copy any caller-provided config so we never mutate the caller's object.
     # calc_subplot_params() writes derived layout state (figsize, n_rows, ...)
@@ -470,19 +484,25 @@ def spatial(
             UserWarning, stacklevel=3,
         )
 
+    # marker defaults for units layers (bins tile as squares, spots are circles)
+    if units_layer is not None and spot_size is _UNSET and not user_plot_config:
+        _set_units_marker_defaults(data, units_layer, plot_config)
+
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
         n_data = len(data)
 
         # synchronize colors before plotting; quiet because keys that are genes,
         # numeric or already colored are expected here and need no sync
-        data._sync_colors(
-            keys=keys,
-            cells_layer=cells_layer,
-            palette=plot_config.palette,
-            overwrite=False,
-            quiet=True,
-        )
+        # (experiment colors are cells-only, so units layers skip this)
+        if units_layer is None:
+            data._sync_colors(
+                keys=keys,
+                cells_layer=cells_layer,
+                palette=plot_config.palette,
+                overwrite=False,
+                quiet=True,
+            )
     else:
         n_data = 1
         # is_experiment = False
@@ -490,6 +510,7 @@ def spatial(
     color_config = _ColorConfigMultiPlot(
         data=data,
         cells_layer=cells_layer,
+        units_layer=units_layer,
         keys=keys,
         data_config=data_config,
         plot_config=plot_config
@@ -516,7 +537,8 @@ def spatial(
         plot_config,
         layout_config,
         data_config,
-        color_config
+        color_config,
+        units_layer=units_layer,
     )
 
     save_and_show_figure(
@@ -580,7 +602,8 @@ def _plot_to_subplots(
     layout_config,
     data_config,
     color_config,
-    verbose: bool = False
+    verbose: bool = False,
+    units_layer: str | None = None,
 ):
     logger.info("Do plotting.") if verbose else None
 
@@ -596,7 +619,7 @@ def _plot_to_subplots(
 
         # retrieve data
         ad, sample_name, image_data, regions_data, annotations_data = _get_data(
-            data, idx, cells_layer, data_config,
+            data, idx, cells_layer, data_config, units_layer=units_layer,
             )
 
         for idx_key, key in enumerate(keys):
@@ -860,13 +883,15 @@ class _ColorConfigMultiPlot:
         plot_config: PlotConfig,
         cells_layer: str | None = None,
         keys: str | list[str] = None,
+        units_layer: str | None = None,
         ):
         # add properties
         self._dict = {}
 
         if _is_experiment(data):
             data_list = data.data
-            exp_colors = data.colors
+            # experiment colors are cells-only
+            exp_colors = data.colors if units_layer is None else None
             # is_experiment = True
         else:
             data_list = [data]
@@ -884,7 +909,7 @@ class _ColorConfigMultiPlot:
                 # to a gene must be drawn as expression, not with a categorical palette)
                 resolved = [
                     _extract_color_values(
-                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
+                        adata=_get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer).table,
                         key=key, raw=data_config.raw, layer=data_config.layer
                     )
                     for xd in data_list
@@ -916,7 +941,8 @@ class _ColorConfigMultiPlot:
                     key=key,
                     cells_layer=cells_layer,
                     data_config=data_config,
-                    plot_config=plot_config
+                    plot_config=plot_config,
+                    units_layer=units_layer,
                     )
 
             # add entry to dictionary
@@ -936,7 +962,7 @@ class _ColorConfigMultiPlot:
 
     def _add_color_entry(
         self, data_list, key, cells_layer,
-        data_config, plot_config
+        data_config, plot_config, units_layer=None
         ):
         # preconfigure entry
         color_entry = {
@@ -949,9 +975,8 @@ class _ColorConfigMultiPlot:
         if len(data_list) == 1:
             # one dataset
             xd = data_list[0]
-            celldata = _get_cell_layer(
-                cells=xd.cells,
-                cells_layer=cells_layer
+            celldata = _get_table_layer(
+                xd, cells_layer=cells_layer, units_layer=units_layer
                 )
             ad = celldata.table
 
@@ -998,9 +1023,8 @@ class _ColorConfigMultiPlot:
             categorical_list = []
             has_na = False
             for xd in data_list:
-                celldata = _get_cell_layer(
-                    cells=xd.cells,
-                    cells_layer=cells_layer
+                celldata = _get_table_layer(
+                    xd, cells_layer=cells_layer, units_layer=units_layer
                     )
                 ad = celldata.table
 
@@ -1150,7 +1174,8 @@ def _get_data(
     data,
     idx,
     cells_layer,
-    data_config
+    data_config,
+    units_layer=None,
     ):
     # extract the InSituData object
     try:
@@ -1161,10 +1186,17 @@ def _get_data(
         meta = None
 
     # retrieve the right cell data
-    celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
+    celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
 
     # extract anndata
     adata = celldata.table
+
+    if units_layer is not None and data_config.obsm_key not in adata.obsm:
+        raise ValueError(
+            f"Units layer '{units_layer}' has no `.obsm['{data_config.obsm_key}']` coordinates. "
+            f"Set `table.obsm['{data_config.obsm_key}']` from `shapes.centroid` first, "
+            "e.g. `np.c_[shapes.centroid.x, shapes.centroid.y]`."
+        )
 
     # filter anndata
     if data_config.filter_mode is not None and data_config.filter_tuple is not None:
@@ -1348,6 +1380,18 @@ def _extract_annotations_information(
         annotations_df = None
 
     return annotations_df
+
+def _set_units_marker_defaults(data, units_layer, plot_config):
+    """Set marker type/size so that units tile the tissue (bins) or match their extent (spots)."""
+    xd = data.data[0] if _is_experiment(data) else data
+    layer = _get_table_layer(xd, units_layer=units_layer)
+    bin_size = layer.table.uns.get("bin_size_um")
+    if bin_size:
+        plot_config.update_values(spot_type="s", spot_size=float(bin_size))
+    elif not layer.shapes.empty:
+        median_area = float(np.median(layer.shapes.geometry.area))
+        plot_config.update_values(spot_type="o", spot_size=2 * float(np.sqrt(median_area / np.pi)))
+
 
 def _calculate_marker_size(
     ax,
