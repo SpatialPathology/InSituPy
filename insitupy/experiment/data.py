@@ -1828,6 +1828,19 @@ class InSituExperiment:
                             )
                         subset.obs_names = best_index
 
+            # Duplicate source names: the obs assignment aligns on the index and
+            # fails on duplicate labels, while the obsm path would keep the last
+            # one. Keep the first occurrence so both agree.
+            if not subset.obs_names.is_unique:
+                dup = subset.obs_names[subset.obs_names.duplicated()].unique()
+                warnings.warn(
+                    f"Dataset '{current_uid}': {len(dup)} duplicate cell name(s) in the "
+                    f"source table (e.g. {list(dup[:3])}); keeping the first occurrence.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                subset = subset[~subset.obs_names.duplicated(keep="first")].copy()
+
             # Check for cell name matches
             matching_cells = celldata.table.obs_names.isin(subset.obs_names)
             n_matching = matching_cells.sum()
@@ -1998,7 +2011,9 @@ class InSituExperiment:
         Args:
             obs_columns: Column names in ``table.obs`` to transfer.
             obsm_keys: Keys in ``table.obsm`` to transfer.
-            cells_layer: Cell layer to transfer data into.
+            cells_layer: Cell layer to read the table from and transfer data
+                into. If None, the table is auto-resolved and data is written
+                into the layer that table was built from.
             overwrite: If True, overwrite existing columns/keys.
 
         Returns:
@@ -2027,8 +2042,24 @@ class InSituExperiment:
         # Load the full table into memory for cell matching
         table_adata = anndata.read_zarr(table_path)
 
-        # Retrieve the label column used during build_table (sidecar JSON takes priority)
-        label_col = self._read_build_params(cells_layer).get("label_col", "uid")
+        # Retrieve the build parameters (embedded in the zarr, sidecar JSON as legacy fallback)
+        params = self._read_build_params(cells_layer)
+        label_col = params.get("label_col", "uid")
+
+        # With cells_layer=None the table was auto-resolved above; write back into
+        # the layer it was built from, not into the main layer.
+        if cells_layer is None:
+            cells_layer = params.get("cells_layer")
+            if not cells_layer:
+                if table_path.stem == "concat":
+                    # Legacy single table: keep writing into the main layer.
+                    logger.debug(
+                        "Legacy table 'concat.zarr' has no recorded cells_layer; "
+                        "importing into the main layer."
+                    )
+                    cells_layer = None
+                else:
+                    cells_layer = table_path.stem
 
         if label_col not in table_adata.obs.columns:
             raise ValueError(
@@ -2174,6 +2205,19 @@ class InSituExperiment:
             adatas[label] = adata
             metas_by_label[label] = meta
 
+        # Refuse selected obsm/layers/varm keys that exist in only some samples
+        # (they would otherwise be silently zero-filled or dropped).
+        self._assert_consistent_element_keys(
+            {
+                label: {
+                    "obsm": list(adata.obsm.keys()),
+                    "layers": list(adata.layers.keys()),
+                    "varm": list(adata.varm.keys()),
+                }
+                for label, adata in adatas.items()
+            }
+        )
+
         # Add experiment metadata as obs columns *after* obs selection, so a
         # metadata key that collides with a retained per-cell obs column is stored
         # under a ``_meta`` suffix instead of overwriting the per-cell data. The
@@ -2307,6 +2351,11 @@ class InSituExperiment:
 
         Returns:
             AnnData: A concatenated AnnData object.
+
+        Raises:
+            ValueError: If a selected ``obsm``/``layers``/``varm`` key exists
+                in only some samples. Compute it for every sample or leave it
+                out of the selection.
         """
         return self._concatenate_samples(
             cells_layer=cells_layer,
@@ -2575,8 +2624,22 @@ class InSituExperiment:
 
         index_unique = "-" if make_obs_names_unique else None
 
+        # Refuse obsm/layers/varm keys present in only some samples. Only key
+        # names are read from the h5ad files, no X.
+        import h5py
+        keys_by_label: dict = {}
+        for label, path in in_files.items():
+            with h5py.File(str(path), "r") as f:
+                keys_by_label[label] = {
+                    element: list(f[element].keys()) if element in f else []
+                    for element in ("obsm", "layers", "varm")
+                }
+        self._assert_consistent_element_keys(keys_by_label, on_disk=True)
+
         # When in_files is a Mapping, the dict keys serve as the label values;
         # passing keys= separately would be redundant and raises TypeError.
+        # fill_value=0 so genes a sample did not measure are 0 (like in_memory)
+        # instead of NaN; the gene-presence record says what was measured.
         concat_on_disk(
             in_files=in_files,
             out_file=output_path,
@@ -2584,6 +2647,7 @@ class InSituExperiment:
             label=label_col,
             index_unique=index_unique,
             merge="unique",
+            fill_value=0,
         )
 
         logger.info(
@@ -2648,6 +2712,53 @@ class InSituExperiment:
                 f"result instead of raising. Pass a label_col that is unique per "
                 f"sample (the default, 'uid', always is unless samples were merged "
                 f"without re-keying)."
+            )
+
+    @staticmethod
+    def _assert_consistent_element_keys(keys_by_label: dict, on_disk: bool = False) -> None:
+        """Raise if an obsm/layers/varm key is present in only some samples.
+
+        Args:
+            keys_by_label: ``{sample_label: {"obsm": [keys], "layers": [keys],
+                "varm": [keys]}}``.
+            on_disk: True for ``concat_on_disk``, which cannot select keys; the
+                error then suggests removing the key or using ``in_memory``.
+
+        Raises:
+            ValueError: If any key is missing from at least one sample.
+        """
+        problems = []
+        for element in ("obsm", "layers", "varm"):
+            union: set = set()
+            for per_element in keys_by_label.values():
+                union |= set(per_element.get(element, ()))
+            for key in sorted(union):
+                missing = [
+                    str(label)
+                    for label, per_element in keys_by_label.items()
+                    if key not in per_element.get(element, ())
+                ]
+                if missing:
+                    problems.append(
+                        f"{element}['{key}'] is missing in sample(s) {missing}"
+                    )
+        if problems:
+            if on_disk:
+                hint = (
+                    "Compute it for every sample, delete it from the samples that "
+                    "have it, or use method='in_memory' and leave it out of "
+                    "obsm_keys/layer_keys/varm_keys (concat_on_disk cannot select keys)."
+                )
+            else:
+                hint = (
+                    "Compute it for every sample or leave it out of "
+                    "obsm_keys/layer_keys/varm_keys."
+                )
+            raise ValueError(
+                "Cannot concatenate samples: "
+                + "; ".join(problems)
+                + ". A key present in only some samples cannot be concatenated "
+                "(it would be silently zero-filled or dropped). " + hint
             )
 
     def _assert_cells_loaded(self, cells_layer: str | None) -> None:
@@ -2726,6 +2837,12 @@ class InSituExperiment:
         fill values are ever surfaced through ``.table``.
 
         .. note::
+            The zeros stored for genes a sample did not measure are storage
+            placeholders, not measurements. The presence record, not the value,
+            says whether a gene was measured. Always read the table through
+            :attr:`table` and not from the raw zarr store.
+
+        .. note::
             This feature is experimental and may change in future versions.
             The ``join`` parameter has been removed; storage is always the union
             (inner) result follows from the presence record.
@@ -2766,6 +2883,10 @@ class InSituExperiment:
                 ``method="concat_on_disk"`` is used with unsupported filter
                 arguments.
             FileExistsError: If a table already exists and ``overwrite=False``.
+            ValueError: Also raised if a selected ``obsm``/``layers``/``varm``
+                key exists in only some samples (``concat_on_disk`` checks all
+                keys). Compute it for every sample or leave it out of the
+                selection.
         """
 
         if self.path is None:
@@ -4089,7 +4210,10 @@ class InSituExperiment:
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: dict[str, Any] = {"comment": "#"}
+        # Only the auto-generated header line is skipped (not every "#"), so values
+        # such as "Patient #3" survive. Read as UTF-8, falling back to the platform
+        # default for older files written with it.
+        csv_dtypes: dict[str, str] = {}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -4097,10 +4221,27 @@ class InSituExperiment:
                 for column, dtype in dtype_map.items()
                 if dtype.lower() in string_like_dtypes
             }
-            if csv_dtypes:
-                read_csv_kwargs["dtype"] = csv_dtypes
 
-        metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
+        def _read_csv(encoding: str) -> pd.DataFrame:
+            kwargs: dict[str, Any] = {"index_col": 0, "encoding": encoding}
+            with open(metadata_path, encoding=encoding) as fh:
+                if fh.readline().startswith("# AUTO-GENERATED"):
+                    kwargs["skiprows"] = 1
+            dtypes = dict(csv_dtypes)
+            # uid values such as "00123" must stay text even without a sidecar.
+            header = pd.read_csv(metadata_path, nrows=0, **kwargs)
+            if "uid" in header.columns or header.index.name == "uid":
+                dtypes["uid"] = "string"
+            if dtypes:
+                kwargs["dtype"] = dtypes
+            return pd.read_csv(metadata_path, **kwargs)
+
+        try:
+            metadata = _read_csv("utf-8")
+        except UnicodeDecodeError:
+            # pandas treats encoding=None as UTF-8, so name the platform default.
+            import locale
+            metadata = _read_csv(locale.getpreferredencoding(False))
 
         if not dtype_map:
             return cls._migrate_legacy_metadata(metadata)
