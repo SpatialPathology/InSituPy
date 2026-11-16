@@ -2188,6 +2188,19 @@ class InSituExperiment:
             adatas[label] = adata
             metas_by_label[label] = meta
 
+        # Refuse selected obsm/layers/varm keys that exist in only some samples
+        # (they would otherwise be silently zero-filled or dropped).
+        self._assert_consistent_element_keys(
+            {
+                label: {
+                    "obsm": list(adata.obsm.keys()),
+                    "layers": list(adata.layers.keys()),
+                    "varm": list(adata.varm.keys()),
+                }
+                for label, adata in adatas.items()
+            }
+        )
+
         # Add experiment metadata as obs columns *after* obs selection, so a
         # metadata key that collides with a retained per-cell obs column is stored
         # under a ``_meta`` suffix instead of overwriting the per-cell data. The
@@ -2321,6 +2334,11 @@ class InSituExperiment:
 
         Returns:
             AnnData: A concatenated AnnData object.
+
+        Raises:
+            ValueError: If a selected ``obsm``/``layers``/``varm`` key exists
+                in only some samples. Compute it for every sample or leave it
+                out of the selection.
         """
         return self._concatenate_samples(
             cells_layer=cells_layer,
@@ -2589,8 +2607,22 @@ class InSituExperiment:
 
         index_unique = "-" if make_obs_names_unique else None
 
+        # Refuse obsm/layers/varm keys present in only some samples. Only key
+        # names are read from the h5ad files, no X.
+        import h5py
+        keys_by_label: dict = {}
+        for label, path in in_files.items():
+            with h5py.File(str(path), "r") as f:
+                keys_by_label[label] = {
+                    element: list(f[element].keys()) if element in f else []
+                    for element in ("obsm", "layers", "varm")
+                }
+        self._assert_consistent_element_keys(keys_by_label, on_disk=True)
+
         # When in_files is a Mapping, the dict keys serve as the label values;
         # passing keys= separately would be redundant and raises TypeError.
+        # fill_value=0 so genes a sample did not measure are 0 (like in_memory)
+        # instead of NaN; the gene-presence record says what was measured.
         concat_on_disk(
             in_files=in_files,
             out_file=output_path,
@@ -2598,6 +2630,7 @@ class InSituExperiment:
             label=label_col,
             index_unique=index_unique,
             merge="unique",
+            fill_value=0,
         )
 
         logger.info(
@@ -2662,6 +2695,53 @@ class InSituExperiment:
                 f"result instead of raising. Pass a label_col that is unique per "
                 f"sample (the default, 'uid', always is unless samples were merged "
                 f"without re-keying)."
+            )
+
+    @staticmethod
+    def _assert_consistent_element_keys(keys_by_label: dict, on_disk: bool = False) -> None:
+        """Raise if an obsm/layers/varm key is present in only some samples.
+
+        Args:
+            keys_by_label: ``{sample_label: {"obsm": [keys], "layers": [keys],
+                "varm": [keys]}}``.
+            on_disk: True for ``concat_on_disk``, which cannot select keys; the
+                error then suggests removing the key or using ``in_memory``.
+
+        Raises:
+            ValueError: If any key is missing from at least one sample.
+        """
+        problems = []
+        for element in ("obsm", "layers", "varm"):
+            union: set = set()
+            for per_element in keys_by_label.values():
+                union |= set(per_element.get(element, ()))
+            for key in sorted(union):
+                missing = [
+                    str(label)
+                    for label, per_element in keys_by_label.items()
+                    if key not in per_element.get(element, ())
+                ]
+                if missing:
+                    problems.append(
+                        f"{element}['{key}'] is missing in sample(s) {missing}"
+                    )
+        if problems:
+            if on_disk:
+                hint = (
+                    "Compute it for every sample, delete it from the samples that "
+                    "have it, or use method='in_memory' and leave it out of "
+                    "obsm_keys/layer_keys/varm_keys (concat_on_disk cannot select keys)."
+                )
+            else:
+                hint = (
+                    "Compute it for every sample or leave it out of "
+                    "obsm_keys/layer_keys/varm_keys."
+                )
+            raise ValueError(
+                "Cannot concatenate samples: "
+                + "; ".join(problems)
+                + ". A key present in only some samples cannot be concatenated "
+                "(it would be silently zero-filled or dropped). " + hint
             )
 
     def _assert_cells_loaded(self, cells_layer: str | None) -> None:
@@ -2740,6 +2820,12 @@ class InSituExperiment:
         fill values are ever surfaced through ``.table``.
 
         .. note::
+            The zeros stored for genes a sample did not measure are storage
+            placeholders, not measurements. The presence record, not the value,
+            says whether a gene was measured. Always read the table through
+            :attr:`table` and not from the raw zarr store.
+
+        .. note::
             This feature is experimental and may change in future versions.
             The ``join`` parameter has been removed; storage is always the union
             (inner) result follows from the presence record.
@@ -2780,6 +2866,10 @@ class InSituExperiment:
                 ``method="concat_on_disk"`` is used with unsupported filter
                 arguments.
             FileExistsError: If a table already exists and ``overwrite=False``.
+            ValueError: Also raised if a selected ``obsm``/``layers``/``varm``
+                key exists in only some samples (``concat_on_disk`` checks all
+                keys). Compute it for every sample or leave it out of the
+                selection.
         """
 
         if self.path is None:
