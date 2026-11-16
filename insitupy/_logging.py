@@ -8,9 +8,62 @@ log output during batch operations with progress bars.
 import io
 import logging
 import sys
+import threading
 import warnings
 from collections import Counter
 from contextlib import contextmanager
+
+# State of the reference-counted tqdm output redirect (see _tqdm_output_redirect).
+_redirect_lock = threading.Lock()
+_redirect_depth = 0
+_saved_showwarning = None
+_redirect_cm = None
+
+
+def _tqdm_showwarning(message, category, filename, lineno, file=None, line=None):
+    """Replacement for warnings.showwarning that writes via tqdm.write()."""
+    from tqdm import tqdm
+    tqdm.write(
+        warnings.formatwarning(message, category, filename, lineno, line).rstrip()
+    )
+
+
+@contextmanager
+def _tqdm_output_redirect():
+    """
+    Route Python warnings and root-logger output through tqdm.write() while active.
+
+    Both ``warnings.showwarning`` and the root logger's handlers are process-global, so
+    the redirect is reference-counted: it is installed by the first active user and
+    removed only when the last one exits. This keeps interleaved, nested or abandoned
+    progress loops from leaving the patch behind. ``warnings.showwarning`` is restored
+    only if it is still our function (a replacement installed meanwhile is kept).
+    """
+    global _redirect_depth, _saved_showwarning, _redirect_cm
+    from tqdm.contrib.logging import logging_redirect_tqdm
+
+    with _redirect_lock:
+        if _redirect_depth == 0:
+            # enter the logging redirect first: if it raises, nothing is patched yet
+            cm = logging_redirect_tqdm()
+            cm.__enter__()
+            _redirect_cm = cm
+            _saved_showwarning = warnings.showwarning
+            warnings.showwarning = _tqdm_showwarning
+        _redirect_depth += 1
+    try:
+        yield
+    finally:
+        with _redirect_lock:
+            _redirect_depth -= 1
+            if _redirect_depth == 0:
+                try:
+                    _redirect_cm.__exit__(None, None, None)
+                finally:
+                    _redirect_cm = None
+                    if warnings.showwarning is _tqdm_showwarning:
+                        warnings.showwarning = _saved_showwarning
+                    _saved_showwarning = None
 
 
 def setup_logging():

@@ -40,7 +40,7 @@ from insitupy._io.files import (
     read_json,
     write_dict_to_json,
 )
-from insitupy._logging import WarningCollector, collect_warnings
+from insitupy._logging import WarningCollector, _tqdm_output_redirect, collect_warnings
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment._metadata_frame import _GuardedMetadataFrame
@@ -2067,28 +2067,14 @@ class InSituExperiment:
                 yield row, self._data[idx]
             return
 
-        import warnings
-
-        from tqdm.contrib.logging import logging_redirect_tqdm
-
         bar = tqdm(it, total=len(self._metadata), desc=desc, dynamic_ncols=True)
 
-        # Patch warnings.showwarning so warning text goes via tqdm.write()
-        # instead of straight to stderr, which would corrupt the bar.
-        _orig_showwarning = warnings.showwarning
-
-        def _tqdm_showwarning(message, category, filename, lineno, file=None, line=None):
-            tqdm.write(
-                warnings.formatwarning(message, category, filename, lineno, line).rstrip()
-            )
-
-        warnings.showwarning = _tqdm_showwarning
-        try:
-            with logging_redirect_tqdm():
-                for idx, row in bar:
-                    yield row, self._data[idx]
-        finally:
-            warnings.showwarning = _orig_showwarning
+        # Warnings and log output go via tqdm.write() instead of straight to stderr, which
+        # would corrupt the bar. The redirect is reference-counted so that interleaved or
+        # abandoned generators cannot leave it installed.
+        with _tqdm_output_redirect():
+            for idx, row in bar:
+                yield row, self._data[idx]
 
 
     def _concatenate_samples(
