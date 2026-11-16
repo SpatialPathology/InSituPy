@@ -874,6 +874,7 @@ class InSituData:
 
         Args:
             region_tuple (Optional[Tuple[str, str]]): A tuple specifying the region to crop.
+                If given, ``xlim``/``ylim`` are ignored (with a warning).
             xlim (Optional[Tuple[int, int]]): The x-axis limits for cropping.
             ylim (Optional[Tuple[int, int]]): The y-axis limits for cropping.
             inplace (bool): If True, modify the data in place (keeping the object's uid).
@@ -922,6 +923,13 @@ class InSituData:
             ylim = tuple(np.clip(ylim, a_min=0, a_max=None))
             shape = None
         else:
+            if xlim is not None or ylim is not None:
+                warn(
+                    "Both `region_tuple` and `xlim`/`ylim` were passed to `crop`. The limits "
+                    "are ignored; the crop window is taken from the bounds of the region.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             # extract regions dataframe
             region_key = region_tuple[0]
             region_name = region_tuple[1]
@@ -974,7 +982,7 @@ class InSituData:
         cropped_units = _self._units
         if not _self._units.is_empty:
             cropped_units = _staged_crop(
-                _self._units, shape=shape, xlim=xlim, ylim=ylim, verbose=verbose
+                _self._units, shape=shape, xlim=xlim, ylim=ylim, verbose=False
             )
 
         # _crop_transcripts never modifies its input
@@ -983,7 +991,7 @@ class InSituData:
             cropped_transcripts = _crop_transcripts(
                 transcript_df=_self._transcripts,
                 shape=shape,
-                xlim=xlim, ylim=ylim, verbose=verbose,
+                xlim=xlim, ylim=ylim, verbose=False,
                 materialize=materialize_transcripts
             )
 
@@ -1056,14 +1064,14 @@ class InSituData:
         if not _self._annotations.is_empty:
             cropped_annotations = _staged_crop(
                 _self._annotations, shape=shape,
-                xlim=tuple(xlim), ylim=tuple(ylim), verbose=verbose
+                xlim=tuple(xlim), ylim=tuple(ylim), verbose=False
             )
 
         cropped_regions = _self._regions
         if not _self._regions.is_empty:
             cropped_regions = _staged_crop(
                 _self._regions, shape=shape,
-                xlim=tuple(xlim), ylim=tuple(ylim), verbose=verbose
+                xlim=tuple(xlim), ylim=tuple(ylim), verbose=False
             )
 
         # Remember what was loaded when the object first diverged from its project, so that

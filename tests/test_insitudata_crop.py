@@ -6,6 +6,7 @@ Layout used by all tests (physical units = pixels, pixel_size=1):
 - cells and transcripts lie in 0-50 x 0-50 only
 """
 
+import logging
 import warnings
 
 import dask.array as da
@@ -152,3 +153,42 @@ def test_lazy_transcripts_with_cells_do_not_warn_about_empty_result():
         xd.crop(xlim=(0, 25), ylim=(0, 25), materialize_transcripts=False)
 
     assert not any("may be empty" in str(w.message) for w in record)
+
+
+def _add_shapes(xd):
+    import geopandas as gpd
+    from shapely.geometry import box
+
+    def _gdf(name, geom):
+        return gpd.GeoDataFrame(
+            {"id": [name], "name": [name], "geometry": [geom], "color": ["#ff0000"]}
+        )
+
+    xd.regions.add_data(data=_gdf("r", box(10, 10, 40, 40)), key="reg", scale_factor=1.0, verbose=False)
+    xd.annotations.add_data(data=_gdf("a", box(20, 20, 30, 30)), key="ann", scale_factor=1.0, verbose=False)
+
+
+def test_crop_with_region_logs_no_both_limits_and_shape_message(caplog):
+    xd = _make_insitudata()
+    _add_shapes(xd)
+
+    # `insitupy` does not propagate to the root logger, so attach caplog's handler directly
+    insitupy_logger = logging.getLogger("insitupy")
+    caplog.set_level(logging.DEBUG, logger="insitupy")
+    insitupy_logger.addHandler(caplog.handler)
+    try:
+        cropped = xd.crop(region_tuple=("reg", "r"), verbose=True)
+    finally:
+        insitupy_logger.removeHandler(caplog.handler)
+
+    assert not any("Both xlim/ylim and shape" in r.getMessage() for r in caplog.records)
+    # the origin is still moved to the region corner (guards against dropping xlim)
+    assert cropped.annotations["ann"].geometry.iloc[0].bounds == (10.0, 10.0, 20.0, 20.0)
+
+
+def test_crop_with_region_and_limits_warns_that_limits_are_ignored():
+    xd = _make_insitudata()
+    _add_shapes(xd)
+
+    with pytest.warns(UserWarning, match="limits are ignored"):
+        xd.crop(region_tuple=("reg", "r"), xlim=(0, 20), ylim=(0, 20))
