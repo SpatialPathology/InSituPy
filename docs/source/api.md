@@ -243,6 +243,7 @@ To read an individual dataset on can use following functions:
     io.read_atera
     io.read_qupath
     io.read_visium
+    io.read_visium_hd
     io.read_xenium
 ```
 
@@ -321,6 +322,7 @@ Import the tools submodule either as {code}`isp.tools` or {code}`isp.tl`.
     tl.dge
     tl.calc_distance_of_cells_from
     tl.pseudobulk_dge
+    tl.transfer_obs
     tl.register_images
 ```
 

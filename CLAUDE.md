@@ -24,7 +24,7 @@ over this summary if they ever conflict.
 
 `import insitupy` exposes `InSituData`, `InSituExperiment`, and submodule shorthands:
 
-- `insitupy.io` — readers (`read_xenium`, `read_visium`, `read_qupath`, …)
+- `insitupy.io` — readers (`read_xenium`, `read_visium`, `read_visium_hd`, `read_qupath`, …)
 - `insitupy.pp` — preprocessing (normalize, filter, pseudobulk, …)
 - `insitupy.tl` — analysis tools (DGE, distance, neighbors, registration, …)
 - `insitupy.pl` — plotting (spatial, umap, volcano, overview, …)

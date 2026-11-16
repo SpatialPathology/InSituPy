@@ -90,6 +90,7 @@ CURATED_SYMBOLS: tuple[str, ...] = (
     "insitupy.io.read_xenium",
     "insitupy.io.read_atera",
     "insitupy.io.read_visium",
+    "insitupy.io.read_visium_hd",
     "insitupy.io.read_qupath",
     "insitupy._core.data.InSituData.read",
     "insitupy._core.data.InSituData.saveas",

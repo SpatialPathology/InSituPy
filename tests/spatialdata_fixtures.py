@@ -375,3 +375,129 @@ def roundtrip_through_zarr(sdata, tmp_path, name="roundtrip.zarr"):
     path = tmp_path / name
     sdata.write(path)
     return spatialdata.read_zarr(path)
+
+
+def make_visium_hd_like_sdata(prefix="pre", with_nuclei=True, bin_sizes=(8, 16)):
+    """SpatialData shaped like ``spatialdata_io.visium_hd()`` output (full-res pixel coords).
+
+    Cell shapes are deliberately stored in a different order than the table rows, and
+    bin shapes are indexed 0..N-1 with the table carrying ``location_id`` in shuffled
+    order, so only an instance-key-aware import maps geometries to rows correctly.
+    Cell i (1-based) is a 4x4 square at x = 10*(i-1); the nucleus is a 2x2 square inside it.
+    """
+    rng = np.random.default_rng(0)
+    cell_ids = [f"cellid_{i:09d}-1" for i in (1, 2, 3)]
+
+    def _table(obs_names, instance_key, instance_values, region, with_spatial=None):
+        adata = AnnData(X=rng.poisson(1.0, size=(len(obs_names), 5)).astype(np.float32))
+        adata.obs_names = obs_names
+        adata.var_names = [f"g{j}" for j in range(5)]
+        adata.obs["region"] = pd.Categorical([region] * len(obs_names))
+        adata.obs[instance_key] = instance_values
+        if with_spatial is not None:
+            adata.obsm["spatial"] = with_spatial
+        return TableModel.parse(adata, region=region, region_key="region", instance_key=instance_key)
+
+    shapes, tables = {}, {}
+
+    # cells: shapes in order 3, 1, 2
+    region = f"{prefix}_cell_segmentations"
+    gdf = gpd.GeoDataFrame(
+        {"cell_id": [cell_ids[2], cell_ids[0], cell_ids[1]],
+         "geometry": [poly(20, 0, 4), poly(0, 0, 4), poly(10, 0, 4)]},
+        index=[cell_ids[2], cell_ids[0], cell_ids[1]],
+    )
+    shapes[region] = ShapesModel.parse(gdf)
+    tables["cell_segmentations"] = _table(["c1", "c2", "c3"], "cell_id", cell_ids, region)
+
+    if with_nuclei:
+        region_n = f"{prefix}_nucleus_segmentations"
+        nuc_ids = [cell_ids[1], "cellid_000000099-1", cell_ids[0], cell_ids[2]]
+        offsets = {cell_ids[0]: 0, cell_ids[1]: 10, cell_ids[2]: 20, "cellid_000000099-1": 50}
+        ngdf = gpd.GeoDataFrame(
+            {"cell_id": nuc_ids, "geometry": [poly(offsets[i] + 1, 1, 2) for i in nuc_ids]},
+            index=nuc_ids,
+        )
+        shapes[region_n] = ShapesModel.parse(ngdf)
+        tables["nucleus_segmentations"] = _table(["n1"], "cell_id", [cell_ids[0]], region_n)
+
+    # bins: 4 bins (2x2 grid) at bin size b; table rows in shuffled order
+    for b in bin_sizes:
+        region_b = f"{prefix}_square_{b:03d}um"
+        locs = [2, 0, 3, 1]
+        xy = np.array([(i % 2 * b, i // 2 * b) for i in range(4)], dtype=float)
+        bgdf = gpd.GeoDataFrame({"geometry": [poly(x, y, b) for x, y in xy]}, index=range(4))
+        shapes[region_b] = ShapesModel.parse(bgdf)
+        tables[f"square_{b:03d}um"] = _table(
+            [f"s{b}-{i}" for i in locs], "location_id", locs, region_b,
+            with_spatial=xy[locs] + b / 2,
+        )
+
+    images = {
+        f"{prefix}_hires_image": Image2DModel.parse(np.zeros((3, 20, 20), dtype=np.uint8), dims=("c", "y", "x")),
+        f"{prefix}_lowres_image": Image2DModel.parse(np.zeros((3, 4, 4), dtype=np.uint8), dims=("c", "y", "x")),
+    }
+    return SpatialData(images=images, shapes=shapes, tables=tables)
+
+
+def make_visium_hd_like_sdata(prefix="pre", with_nuclei=True, bin_sizes=(8, 16)):
+    """SpatialData shaped like ``spatialdata_io.visium_hd()`` output (full-res pixel coords).
+
+    Cell shapes are deliberately stored in a different order than the table rows, and
+    bin shapes are indexed 0..N-1 with the table carrying ``location_id`` in shuffled
+    order, so only an instance-key-aware import maps geometries to rows correctly.
+    Cell i (1-based) is a 4x4 square at x = 10*(i-1); the nucleus is a 2x2 square inside it.
+    """
+    rng = np.random.default_rng(0)
+    cell_ids = [f"cellid_{i:09d}-1" for i in (1, 2, 3)]
+
+    def _table(obs_names, instance_key, instance_values, region, with_spatial=None):
+        adata = AnnData(X=rng.poisson(1.0, size=(len(obs_names), 5)).astype(np.float32))
+        adata.obs_names = obs_names
+        adata.var_names = [f"g{j}" for j in range(5)]
+        adata.obs["region"] = pd.Categorical([region] * len(obs_names))
+        adata.obs[instance_key] = instance_values
+        if with_spatial is not None:
+            adata.obsm["spatial"] = with_spatial
+        return TableModel.parse(adata, region=region, region_key="region", instance_key=instance_key)
+
+    shapes, tables = {}, {}
+
+    # cells: shapes in order 3, 1, 2
+    region = f"{prefix}_cell_segmentations"
+    gdf = gpd.GeoDataFrame(
+        {"cell_id": [cell_ids[2], cell_ids[0], cell_ids[1]],
+         "geometry": [poly(20, 0, 4), poly(0, 0, 4), poly(10, 0, 4)]},
+        index=[cell_ids[2], cell_ids[0], cell_ids[1]],
+    )
+    shapes[region] = ShapesModel.parse(gdf)
+    tables["cell_segmentations"] = _table(["c1", "c2", "c3"], "cell_id", cell_ids, region)
+
+    if with_nuclei:
+        region_n = f"{prefix}_nucleus_segmentations"
+        nuc_ids = [cell_ids[1], "cellid_000000099-1", cell_ids[0], cell_ids[2]]
+        offsets = {cell_ids[0]: 0, cell_ids[1]: 10, cell_ids[2]: 20, "cellid_000000099-1": 50}
+        ngdf = gpd.GeoDataFrame(
+            {"cell_id": nuc_ids, "geometry": [poly(offsets[i] + 1, 1, 2) for i in nuc_ids]},
+            index=nuc_ids,
+        )
+        shapes[region_n] = ShapesModel.parse(ngdf)
+        tables["nucleus_segmentations"] = _table(["n1"], "cell_id", [cell_ids[0]], region_n)
+
+    # bins: 4 bins (2x2 grid) at bin size b; table rows in shuffled order
+    for b in bin_sizes:
+        region_b = f"{prefix}_square_{b:03d}um"
+        locs = [2, 0, 3, 1]
+        xy = np.array([(i % 2 * b, i // 2 * b) for i in range(4)], dtype=float)
+        bgdf = gpd.GeoDataFrame({"geometry": [poly(x, y, b) for x, y in xy]}, index=range(4))
+        shapes[region_b] = ShapesModel.parse(bgdf)
+        tables[f"square_{b:03d}um"] = _table(
+            [f"s{b}-{i}" for i in locs], "location_id", locs, region_b,
+            with_spatial=xy[locs] + b / 2,
+        )
+
+    images = {
+        f"{prefix}_hires_image": Image2DModel.parse(np.zeros((3, 20, 20), dtype=np.uint8), dims=("c", "y", "x")),
+        f"{prefix}_lowres_image": Image2DModel.parse(np.zeros((3, 4, 4), dtype=np.uint8), dims=("c", "y", "x")),
+    }
+    return SpatialData(images=images, shapes=shapes, tables=tables)

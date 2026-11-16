@@ -1509,6 +1509,66 @@ def _centroids_from_labels(
     centroids *= pixel_size
     return centroids
 
+def _align_shapes_to_table(shapes, table: AnnData, instance_key: str | None):
+    """Reorder a shapes GeoDataFrame to follow the table's rows via ``instance_key``.
+
+    If ``instance_key`` is set, is a column of ``table.obs`` and all its values occur in
+    ``shapes.index``, return ``shapes.loc[table.obs[instance_key]]`` re-indexed by
+    ``table.obs_names``. Otherwise return ``shapes`` unchanged (positional behaviour).
+    """
+    if instance_key is None or instance_key not in table.obs.columns:
+        return shapes
+    ids = table.obs[instance_key].to_numpy()
+    if not pd.Index(ids).isin(shapes.index).all():
+        # try matching on string representation (e.g. int index vs. str ids)
+        str_index = shapes.index.astype(str)
+        if not pd.Index(ids.astype(str)).isin(str_index).all():
+            return shapes
+        aligned = shapes.copy()
+        aligned.index = str_index
+        aligned = aligned.loc[ids.astype(str)]
+    else:
+        aligned = shapes.loc[ids]
+    aligned = aligned.copy()
+    aligned.index = table.obs_names
+    return aligned
+
+
+def _rasterize_shapes_to_labels(
+    geometries,
+    values: np.ndarray,
+    pixel_size: Number,
+    out_shape: tuple[int, int],
+):
+    """Rasterize polygons (micrometres, origin (0, 0)) into an int32 label mask (dask array).
+
+    Args:
+        geometries: GeoSeries / iterable of shapely geometries in um.
+        values: Integer mask value per geometry (same length and order).
+        pixel_size: um per output pixel.
+        out_shape: ``(n_rows, n_cols)`` of the output raster.
+    """
+    import dask
+    import dask.array as da
+
+    try:
+        from rasterio import Affine
+        from rasterio.features import rasterize
+    except ImportError as e:
+        raise ImportError(
+            "This function requires the rasterio package, please install with `pip install rasterio`."
+        ) from e
+
+    mask = rasterize(
+        list(zip(geometries, (int(v) for v in values), strict=True)),
+        out_shape=out_shape,
+        transform=Affine(pixel_size, 0, 0, 0, pixel_size, 0),
+        fill=0,
+        dtype=np.int32,
+    )
+    return da.from_delayed(dask.delayed(np.asarray)(mask), shape=mask.shape, dtype=mask.dtype)
+
+
 def _validate_foreign_spec(
     spec: dict,
     layer_name: str,

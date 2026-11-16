@@ -11,17 +11,17 @@
     Reduce the dimensionality of data using PCA followed by UMAP or t-SNE.
 
 ## Experiment-level (insitupy.preprocessing.experiment)
-  calculate_qc_metrics(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, percent_top: collections.abc.Collection[int] = None, log1p: bool = False, **kwargs)
+  calculate_qc_metrics(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, percent_top: collections.abc.Collection[int] = None, log1p: bool = False, units_layer: str | None = None, **kwargs)
     Calculate quality control metrics for cells using ``sc.pp.calculate_qc_metrics``.
-  cluster_cells(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['leiden', 'louvain'] = 'leiden', verbose: bool = False)
+  cluster_cells(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['leiden', 'louvain'] = 'leiden', verbose: bool = False, units_layer: str | None = None)
     Performs clustering on the data using the specified method.
-  filter_cells(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, min_counts: int | None = None, min_genes: int | None = None, max_counts: int | None = None, max_genes: int | None = None, mask: numpy.ndarray | list | pandas.core.series.Series | None = None, **kwargs)
+  filter_cells(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, min_counts: int | None = None, min_genes: int | None = None, max_counts: int | None = None, max_genes: int | None = None, mask: numpy.ndarray | list | pandas.core.series.Series | None = None, units_layer: str | None = None, **kwargs)
     Filters cells in the given data based on specified criteria.
-  filter_genes(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, min_counts: int | None = None, min_cells: int | None = None, max_counts: int | None = None, max_cells: int | None = None, **kwargs)
+  filter_genes(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, min_counts: int | None = None, min_cells: int | None = None, max_counts: int | None = None, max_cells: int | None = None, units_layer: str | None = None, **kwargs)
     Filter genes from the cell count matrix based on count and cell thresholds.
-  normalize_and_transform(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, adata_layer: str | None = None, transformation_method: Literal['log1p', 'sqrt'] = 'log1p', target_sum: int = 250, scale: bool = False, assert_integer_counts: bool = True, verbose: bool = False) -> None
+  normalize_and_transform(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, adata_layer: str | None = None, transformation_method: Literal['log1p', 'sqrt'] = 'log1p', target_sum: int = 250, scale: bool = False, assert_integer_counts: bool = True, verbose: bool = False, units_layer: str | None = None) -> None
     Normalize and transform the cell count data for an experiment or sample.
-  reduce_dimensions(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int | None = None)
+  reduce_dimensions(data: insitupy.experiment.data.InSituExperiment | insitupy._core.data.InSituData, cells_layer: str | None = None, method: Literal['umap', 'tsne'] = 'umap', n_neighbors: int = 16, n_pcs: int | None = None, units_layer: str | None = None)
     Perform dimensionality reduction on cell data using UMAP or t-SNE.
 
 ## Filtering (insitupy.preprocessing.filtering)
@@ -29,9 +29,9 @@
     Deprecated. Use :func:`insitupy.experimental.calculate_mad_thresholds`.
 
 ## Pseudobulk (insitupy.preprocessing.pseudobulk)
-  get_neighborhood(exp: insitupy.experiment.data.InSituExperiment, sample_col: str, cells_layer: str | None = None, radius: numbers.Number = 30)
+  get_neighborhood(exp: insitupy.experiment.data.InSituExperiment, sample_col: str, cells_layer: str | None = None, radius: numbers.Number = 30, units_layer: str | None = None)
     Compute spatial neighborhood connectivity matrices for each sample in an experiment.
   neighborhoods_pseudobulk(adata, coords, celltype_col, counts_layer, sample_col, radius: int = 20, mode: Literal['sum', 'mean', 'median'] = 'sum')
     Create pseudobulk profiles for the spatial neighborhood of each cell type.
-  pseudobulk(exp, celltype_col: str, cells_layer: str | None = None, counts_layer: str | None = 'counts', uid_col: str = 'uid', mode: Literal['sum', 'mean', 'median'] = 'sum', calculate_neighbors: bool = False, neighbors_radius: int = 20, metadata_to_transfer: list[str] | str = None, **kwargs)
+  pseudobulk(exp, celltype_col: str, cells_layer: str | None = None, counts_layer: str | None = 'counts', uid_col: str = 'uid', mode: Literal['sum', 'mean', 'median'] = 'sum', calculate_neighbors: bool = False, neighbors_radius: int = 20, metadata_to_transfer: list[str] | str = None, units_layer: str | None = None, **kwargs)
     Aggregate single-cell counts into pseudobulk profiles per cell type and sample.

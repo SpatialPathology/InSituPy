@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from insitupy._core.data import InSituData
-from insitupy.containers._utils import _get_cell_layer
+from insitupy.containers._utils import _get_table_layer
 from insitupy.utils._dge import _check_string_in_assignment
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,8 @@ def calc_distance_of_cells_from(
     region_tuple: tuple[str, str] | None = None,
     region_key: str | None = None,
     region_name: str | None = None,
-    key_to_save: str | None = None
+    key_to_save: str | None = None,
+    units_layer: str | None = None,
     ):
 
     """
@@ -45,6 +46,8 @@ def calc_distance_of_cells_from(
         region_name (str, optional): Deprecated. Use ``region_tuple`` instead.
         key_to_save (str, optional): Key under which to save the calculated distances in
             ``obsm["distance_from"]``. Defaults to None (uses the annotation name).
+        units_layer (str, optional): Units layer to use instead of a cell layer (mutually
+            exclusive with ``cells_layer``). Defaults to None.
 
     Returns:
         None
@@ -73,9 +76,14 @@ def calc_distance_of_cells_from(
     annotation_key_resolved, annotation_name = annotation_tuple
 
     # extract anndata object
-    celldata, cells_layer_name = _get_cell_layer(
-        cells=data.cells, cells_layer=cells_layer, verbose=True, return_layer_name=True
+    celldata, cells_layer_name = _get_table_layer(
+        data, cells_layer=cells_layer, units_layer=units_layer,
+        verbose=True, return_layer_name=True
         )
+    layer_label = "units" if units_layer is not None else "cells"
+    assign_kwargs = (
+        {"cells_layers": [], "units_layers": units_layer} if units_layer is not None else {}
+    )
     adata = celldata.table
 
     if region_tuple is None:
@@ -88,11 +96,11 @@ def calc_distance_of_cells_from(
         try:
             region_df = adata.obsm["regions"]
         except KeyError:
-            data.assign_regions(keys=region_key_resolved)
+            data.assign_regions(keys=region_key_resolved, **assign_kwargs)
             region_df = adata.obsm["regions"]
         else:
             if region_key_resolved not in region_df.columns:
-                data.assign_regions(keys=region_key_resolved)
+                data.assign_regions(keys=region_key_resolved, **assign_kwargs)
 
         # generate mask for selected region. Cells assigned to multiple
         # overlapping regions carry a " & "-joined string (e.g.
@@ -129,9 +137,9 @@ def calc_distance_of_cells_from(
     if "distance_from" in adata.obsm and key_to_save in adata.obsm["distance_from"].columns:
         logger.warning(
             "Overwriting existing distances in "
-            "`.cells['%s'].table.obsm[\"distance_from\"][\"%s\"]`. "
+            "`.%s['%s'].table.obsm[\"distance_from\"][\"%s\"]`. "
             "Pass a distinct `key_to_save` to keep both.",
-            cells_layer_name, key_to_save,
+            layer_label, cells_layer_name, key_to_save,
         )
 
     obsm_keys = adata.obsm.keys()
@@ -140,4 +148,4 @@ def calc_distance_of_cells_from(
         adata.obsm["distance_from"] = pd.DataFrame(index=adata.obs_names)
 
     adata.obsm["distance_from"][key_to_save] = min_dists
-    logger.info('Saved distances to `.cells[%s].table.obsm["distance_from"]["%s"]`', cells_layer_name, key_to_save)
+    logger.info('Saved distances to `.%s[%s].table.obsm["distance_from"]["%s"]`', layer_label, cells_layer_name, key_to_save)

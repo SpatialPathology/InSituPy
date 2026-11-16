@@ -26,7 +26,10 @@ from xarray import DataArray  # noqa: E402
 from insitupy._core.data import InSituData  # noqa: E402
 from insitupy.io.data import _warn_ignored_spatialdata_params  # noqa: E402
 from insitupy.spatialdata import convert_from_foreign_spatialdata  # noqa: E402
-from tests.spatialdata_fixtures import make_foreign_labels_native_sdata  # noqa: E402
+from tests.spatialdata_fixtures import (  # noqa: E402
+    make_foreign_labels_native_sdata,
+    make_visium_hd_like_sdata,
+)
 
 
 class TestSegMaskValueTakenFromInstanceKey:
@@ -482,3 +485,167 @@ class TestWarnIgnoredSpatialdataParams:
                 transcript_mode="dask",
                 restructure_transcripts=False,
             )
+
+
+class TestRasterizeShapesCells:
+    @staticmethod
+    def _cells(**extra):
+        spec = {"table_key": "cell_segmentations", "cells_key": "pre_cell_segmentations",
+                "rasterize_shapes": True, "raster_pixel_size": 1.0}
+        spec.update(extra)
+        return {"main": spec}
+
+    def test_rasterize_shapes_builds_cell_mask_with_table_order_values(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(sdata, cells=self._cells(), verbose=False)
+        cd = data.cells["main"]
+        mask = np.asarray(cd.boundaries["cells"].compute())
+        assert mask.shape == (4, 24)
+        values = list(cd.boundaries.seg_mask_value)
+        # shapes were stored 3,1,2 but the table is 1,2,3: value must follow the table row
+        assert [mask[2, 2], mask[2, 12], mask[2, 22]] == values
+        assert list(cd.matrix.obs_names) == ["c1", "c2", "c3"]
+        # centroids follow the aligned shapes, in table order
+        np.testing.assert_allclose(cd.matrix.obsm["spatial"][:, 0], [2.0, 12.0, 22.0])
+
+    def test_rasterize_shapes_honours_pixel_size(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(
+            sdata, cells=self._cells(raster_pixel_size=2.0), verbose=False)
+        mask = np.asarray(data.cells["main"].boundaries["cells"].compute())
+        assert mask.shape == (2, 12)
+
+    def test_rasterize_shapes_nuclei_parented_and_extra_nuclei_dropped(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(
+            sdata, cells=self._cells(nucleus_shapes_key="pre_nucleus_segmentations"), verbose=False)
+        b = data.cells["main"].boundaries
+        cell_mask = np.asarray(b["cells"].compute())
+        nuc_mask = np.asarray(b["nuclei"].compute())
+        assert nuc_mask.shape == cell_mask.shape
+        assert [nuc_mask[2, 2], nuc_mask[2, 12], nuc_mask[2, 22]] == list(b.seg_mask_value)
+        assert set(np.unique(nuc_mask)) == {0, *np.asarray(b.seg_mask_value).tolist()}
+
+    def test_rasterize_shapes_spec_validation(self):
+        sdata = make_visium_hd_like_sdata()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            convert_from_foreign_spatialdata(
+                sdata, cells=self._cells(cell_boundaries_data=("x", 1.0)), verbose=False)
+        spec = self._cells()
+        del spec["main"]["raster_pixel_size"]
+        with pytest.raises(ValueError, match="raster_pixel_size"):
+            convert_from_foreign_spatialdata(sdata, cells=spec, verbose=False)
+        with pytest.raises(ValueError, match="require rasterize_shapes"):
+            convert_from_foreign_spatialdata(
+                sdata, cells={"main": {"table_key": "cell_segmentations",
+                                       "nucleus_shapes_key": "pre_nucleus_segmentations"}},
+                verbose=False)
+
+    def test_rasterize_shapes_duplicate_nucleus_id_raises(self):
+        sdata = make_visium_hd_like_sdata()
+        nuc = sdata.shapes["pre_nucleus_segmentations"]
+        dup = pd.concat([nuc, nuc.iloc[[0]]])
+        sdata.shapes["pre_nucleus_segmentations"] = ShapesModel.parse(dup)
+        with pytest.raises(ValueError, match="duplicated"):
+            convert_from_foreign_spatialdata(
+                sdata, cells=self._cells(nucleus_shapes_key="pre_nucleus_segmentations"), verbose=False)
+
+
+class TestUnitsShapesAlignedByInstanceKey:
+    def test_units_shapes_aligned_by_instance_key(self, caplog):
+        sdata = make_visium_hd_like_sdata()
+        with caplog.at_level("WARNING"):
+            data = convert_from_foreign_spatialdata(
+                sdata,
+                units={"square_008um": {"table_key": "square_008um", "units_key": "pre_square_008um"}},
+                verbose=False,
+            )
+        su = data.units["square_008um"]
+        table = sdata["square_008um"]
+        # bin i sits at x = 8*(i%2), y = 8*(i//2): its polygon must follow location_id, not row position
+        for name, loc in zip(table.obs_names, table.obs["location_id"], strict=True):
+            minx, miny, _, _ = su.shapes.loc[name].geometry.bounds
+            assert (minx, miny) == (8.0 * (loc % 2), 8.0 * (loc // 2))
+        assert "do not match" not in caplog.text
+
+
+class TestRasterizeShapesCells:
+    @staticmethod
+    def _cells(**extra):
+        spec = {"table_key": "cell_segmentations", "cells_key": "pre_cell_segmentations",
+                "rasterize_shapes": True, "raster_pixel_size": 1.0}
+        spec.update(extra)
+        return {"main": spec}
+
+    def test_rasterize_shapes_builds_cell_mask_with_table_order_values(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(sdata, cells=self._cells(), verbose=False)
+        cd = data.cells["main"]
+        mask = np.asarray(cd.boundaries["cells"].compute())
+        assert mask.shape == (4, 24)
+        values = list(cd.boundaries.seg_mask_value)
+        # shapes were stored 3,1,2 but the table is 1,2,3: value must follow the table row
+        assert [mask[2, 2], mask[2, 12], mask[2, 22]] == values
+        assert list(cd.matrix.obs_names) == ["c1", "c2", "c3"]
+        # centroids follow the aligned shapes, in table order
+        np.testing.assert_allclose(cd.matrix.obsm["spatial"][:, 0], [2.0, 12.0, 22.0])
+
+    def test_rasterize_shapes_honours_pixel_size(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(
+            sdata, cells=self._cells(raster_pixel_size=2.0), verbose=False)
+        mask = np.asarray(data.cells["main"].boundaries["cells"].compute())
+        assert mask.shape == (2, 12)
+
+    def test_rasterize_shapes_nuclei_parented_and_extra_nuclei_dropped(self):
+        sdata = make_visium_hd_like_sdata()
+        data = convert_from_foreign_spatialdata(
+            sdata, cells=self._cells(nucleus_shapes_key="pre_nucleus_segmentations"), verbose=False)
+        b = data.cells["main"].boundaries
+        cell_mask = np.asarray(b["cells"].compute())
+        nuc_mask = np.asarray(b["nuclei"].compute())
+        assert nuc_mask.shape == cell_mask.shape
+        assert [nuc_mask[2, 2], nuc_mask[2, 12], nuc_mask[2, 22]] == list(b.seg_mask_value)
+        assert set(np.unique(nuc_mask)) == {0, *np.asarray(b.seg_mask_value).tolist()}
+
+    def test_rasterize_shapes_spec_validation(self):
+        sdata = make_visium_hd_like_sdata()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            convert_from_foreign_spatialdata(
+                sdata, cells=self._cells(cell_boundaries_data=("x", 1.0)), verbose=False)
+        spec = self._cells()
+        del spec["main"]["raster_pixel_size"]
+        with pytest.raises(ValueError, match="raster_pixel_size"):
+            convert_from_foreign_spatialdata(sdata, cells=spec, verbose=False)
+        with pytest.raises(ValueError, match="require rasterize_shapes"):
+            convert_from_foreign_spatialdata(
+                sdata, cells={"main": {"table_key": "cell_segmentations",
+                                       "nucleus_shapes_key": "pre_nucleus_segmentations"}},
+                verbose=False)
+
+    def test_rasterize_shapes_duplicate_nucleus_id_raises(self):
+        sdata = make_visium_hd_like_sdata()
+        nuc = sdata.shapes["pre_nucleus_segmentations"]
+        dup = pd.concat([nuc, nuc.iloc[[0]]])
+        sdata.shapes["pre_nucleus_segmentations"] = ShapesModel.parse(dup)
+        with pytest.raises(ValueError, match="duplicated"):
+            convert_from_foreign_spatialdata(
+                sdata, cells=self._cells(nucleus_shapes_key="pre_nucleus_segmentations"), verbose=False)
+
+
+class TestUnitsShapesAlignedByInstanceKey:
+    def test_units_shapes_aligned_by_instance_key(self, caplog):
+        sdata = make_visium_hd_like_sdata()
+        with caplog.at_level("WARNING"):
+            data = convert_from_foreign_spatialdata(
+                sdata,
+                units={"square_008um": {"table_key": "square_008um", "units_key": "pre_square_008um"}},
+                verbose=False,
+            )
+        su = data.units["square_008um"]
+        table = sdata["square_008um"]
+        # bin i sits at x = 8*(i%2), y = 8*(i//2): its polygon must follow location_id, not row position
+        for name, loc in zip(table.obs_names, table.obs["location_id"], strict=True):
+            minx, miny, _, _ = su.shapes.loc[name].geometry.bounds
+            assert (minx, miny) == (8.0 * (loc % 2), 8.0 * (loc // 2))
+        assert "do not match" not in caplog.text

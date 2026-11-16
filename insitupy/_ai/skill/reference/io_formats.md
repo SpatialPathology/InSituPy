@@ -13,6 +13,8 @@
 |                     |            | (transcripts.zarr.zip opt-in)            |                  |
 | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData       |
 |                     |            | spatial/tissue_positions.csv, images     |                  |
+| read_visium_hd()    | 10x Visium HD | binned_outputs/square_XXXum/, segmented_outputs/ | InSituData |
+|                     |            | (Space Ranger >= 4), spatial/ images     |                  |
 | read_qupath()       | QuPath     | one exported sample dir (annotation.geojson, | InSituData   |
 |                     |            | measurements.tsv, cells.geojson, image.ome.tif) |           |
 | read_qupath_project() | QuPath   | QuPath project directory (project.qpproj + | InSituExperiment |
