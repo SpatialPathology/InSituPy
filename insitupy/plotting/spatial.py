@@ -877,19 +877,29 @@ class _ColorConfigMultiPlot:
             layer_color_dict = (
                 exp_colors.get(key, cells_layer=cells_layer) if exp_colors is not None else None
             )
+            use_layer_dict = False
             if layer_color_dict is not None:
-                # use color_dict from InSituExperiment (copy: never mutate exp.colors)
-                has_na = any(
-                    pd.isna(_extract_color_values(
+                # resolve the key once per dataset; the experiment colors are only valid
+                # if the key is categorical everywhere it is found (a key that resolves
+                # to a gene must be drawn as expression, not with a categorical palette)
+                resolved = [
+                    _extract_color_values(
                         adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
                         key=key, raw=data_config.raw, layer=data_config.layer
-                    )[0]).any()
+                    )
                     for xd in data_list
-                    if _extract_color_values(
-                        adata=_get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table,
-                        key=key, raw=data_config.raw, layer=data_config.layer
-                    )[0] is not None
-                )
+                ]
+                found = [(values, cat) for values, cat in resolved if values is not None]
+                use_layer_dict = all(cat is True for _, cat in found)
+                if not use_layer_dict:
+                    logger.debug(
+                        "'%s' does not resolve to a categorical obs column in all samples "
+                        "(e.g. it is a gene); ignoring its experiment color dict.", key
+                    )
+
+            if use_layer_dict:
+                # use color_dict from InSituExperiment (copy: never mutate exp.colors)
+                has_na = any(pd.isna(values).any() for values, _ in found)
                 color_entry = {
                     "color_dict": dict(layer_color_dict),
                     "max_value": None,
