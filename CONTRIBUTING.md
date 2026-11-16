@@ -55,7 +55,9 @@ Notes:
 - Prefer running the **targeted** test files for the area you changed while iterating; the full
   suite is slow.
 - Some napari/Qt tests may fail in a headless environment for reasons unrelated to your change -
-  mention it in your PR if you hit those.
+  mention it in your PR if you hit those. The test suite picks offscreen Qt only on headless Linux
+  or when `CI` is set; set `QT_QPA_PLATFORM` yourself to override (for example
+  `QT_QPA_PLATFORM=offscreen` to force headless, `windows` / `cocoa` / `xcb` for a real window).
 
 ## AI-assisted contributions
 
