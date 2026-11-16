@@ -159,6 +159,32 @@ class TestImportFromAnnDataUnchanged:
                 uid_column_adata="uid",
             )
 
+    def test_duplicate_source_names_warn_and_keep_first(self, tmp_path):
+        """A duplicated source cell name must not crash; obs and obsm use the first row."""
+        import anndata as ad
+        exp = _make_experiment_with_path(tmp_path, n_samples=2, n_cells=10, n_genes=5)
+        adata = exp.to_anndata()
+        adata.obs["cluster"] = "first"
+        dup = adata[[0]].copy()
+        dup.obs["cluster"] = "second"
+        dup.obsm["spatial"] = dup.obsm["spatial"] + 1000.0
+        first_xy = adata.obsm["spatial"][0].copy()
+        adata = ad.concat([adata, dup], join="outer")
+
+        with pytest.warns(UserWarning, match="duplicate cell name"):
+            exp.import_from_anndata(
+                adata=adata,
+                uid_column="uid",
+                uid_column_adata="uid",
+                obs_columns_to_transfer=["cluster"],
+                obsm_keys_to_transfer=["spatial"],
+                overwrite=True,
+            )
+
+        tbl = exp._data[0].cells.table
+        assert tbl.obs["cluster"].iloc[0] == "first"
+        np.testing.assert_allclose(tbl.obsm["spatial"][0], first_xy)
+
 
 class TestStripUidPrefixFragility:
     """Regression tests for the self-validating obs_name matching in
@@ -673,6 +699,26 @@ class TestBuildTableMultiLayer:
         tbl_proseg = exp.table["proseg"]
         assert tbl_main.n_obs == 20   # 2 samples × 10 cells
         assert tbl_proseg.n_obs == 16  # 2 samples × 8 cells
+
+    def test_import_from_table_without_layer_uses_built_layer(self, tmp_path):
+        """cells_layer=None auto-resolves proseg.zarr and must write into 'proseg'."""
+        import anndata as ad
+        exp = _make_multilayer_experiment(tmp_path, n_cells_main=10, n_cells_proseg=8)
+        # Same cell names in both layers, so the main layer would silently match.
+        for _, xd in exp.iterdata():
+            main_names = xd.cells["main"].table.obs_names
+            xd.cells["proseg"].table.obs_names = main_names[:8]
+        exp.build_table(cells_layer="proseg")
+
+        zarr_path = tmp_path / "tables" / "proseg.zarr"
+        tbl = ad.read_zarr(zarr_path)
+        tbl.obs["cluster"] = "X"
+        tbl.write_zarr(zarr_path)
+
+        exp.import_from_table(obs_columns=["cluster"])
+        for _, xd in exp.iterdata():
+            assert "cluster" in xd.cells["proseg"].table.obs.columns
+            assert "cluster" not in xd.cells["main"].table.obs.columns
 
     def test_table_none_raises_keyerror_single_layer(self, tmp_path):
         """table[None] raises KeyError even when exactly one layer is built."""

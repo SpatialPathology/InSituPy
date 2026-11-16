@@ -1828,6 +1828,19 @@ class InSituExperiment:
                             )
                         subset.obs_names = best_index
 
+            # Duplicate source names: the obs assignment aligns on the index and
+            # fails on duplicate labels, while the obsm path would keep the last
+            # one. Keep the first occurrence so both agree.
+            if not subset.obs_names.is_unique:
+                dup = subset.obs_names[subset.obs_names.duplicated()].unique()
+                warnings.warn(
+                    f"Dataset '{current_uid}': {len(dup)} duplicate cell name(s) in the "
+                    f"source table (e.g. {list(dup[:3])}); keeping the first occurrence.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                subset = subset[~subset.obs_names.duplicated(keep="first")].copy()
+
             # Check for cell name matches
             matching_cells = celldata.table.obs_names.isin(subset.obs_names)
             n_matching = matching_cells.sum()
@@ -1998,7 +2011,9 @@ class InSituExperiment:
         Args:
             obs_columns: Column names in ``table.obs`` to transfer.
             obsm_keys: Keys in ``table.obsm`` to transfer.
-            cells_layer: Cell layer to transfer data into.
+            cells_layer: Cell layer to read the table from and transfer data
+                into. If None, the table is auto-resolved and data is written
+                into the layer that table was built from.
             overwrite: If True, overwrite existing columns/keys.
 
         Returns:
@@ -2027,8 +2042,24 @@ class InSituExperiment:
         # Load the full table into memory for cell matching
         table_adata = anndata.read_zarr(table_path)
 
-        # Retrieve the label column used during build_table (sidecar JSON takes priority)
-        label_col = self._read_build_params(cells_layer).get("label_col", "uid")
+        # Retrieve the build parameters (embedded in the zarr, sidecar JSON as legacy fallback)
+        params = self._read_build_params(cells_layer)
+        label_col = params.get("label_col", "uid")
+
+        # With cells_layer=None the table was auto-resolved above; write back into
+        # the layer it was built from, not into the main layer.
+        if cells_layer is None:
+            cells_layer = params.get("cells_layer")
+            if not cells_layer:
+                if table_path.stem == "concat":
+                    # Legacy single table: keep writing into the main layer.
+                    logger.debug(
+                        "Legacy table 'concat.zarr' has no recorded cells_layer; "
+                        "importing into the main layer."
+                    )
+                    cells_layer = None
+                else:
+                    cells_layer = table_path.stem
 
         if label_col not in table_adata.obs.columns:
             raise ValueError(
@@ -4193,7 +4224,10 @@ class InSituExperiment:
 
         # Force string-like columns at CSV parse time to preserve values such as
         # leading-zero IDs before post-load casting is applied.
-        read_csv_kwargs: dict[str, Any] = {"comment": "#"}
+        # Only the auto-generated header line is skipped (not every "#"), so values
+        # such as "Patient #3" survive. Read as UTF-8, falling back to the platform
+        # default for older files written with it.
+        csv_dtypes: dict[str, str] = {}
         if dtype_map:
             string_like_dtypes = {"str", "string", "object", "category"}
             csv_dtypes = {
@@ -4201,10 +4235,27 @@ class InSituExperiment:
                 for column, dtype in dtype_map.items()
                 if dtype.lower() in string_like_dtypes
             }
-            if csv_dtypes:
-                read_csv_kwargs["dtype"] = csv_dtypes
 
-        metadata = pd.read_csv(metadata_path, index_col=0, **read_csv_kwargs)
+        def _read_csv(encoding: str) -> pd.DataFrame:
+            kwargs: dict[str, Any] = {"index_col": 0, "encoding": encoding}
+            with open(metadata_path, encoding=encoding) as fh:
+                if fh.readline().startswith("# AUTO-GENERATED"):
+                    kwargs["skiprows"] = 1
+            dtypes = dict(csv_dtypes)
+            # uid values such as "00123" must stay text even without a sidecar.
+            header = pd.read_csv(metadata_path, nrows=0, **kwargs)
+            if "uid" in header.columns or header.index.name == "uid":
+                dtypes["uid"] = "string"
+            if dtypes:
+                kwargs["dtype"] = dtypes
+            return pd.read_csv(metadata_path, **kwargs)
+
+        try:
+            metadata = _read_csv("utf-8")
+        except UnicodeDecodeError:
+            # pandas treats encoding=None as UTF-8, so name the platform default.
+            import locale
+            metadata = _read_csv(locale.getpreferredencoding(False))
 
         if not dtype_map:
             return cls._migrate_legacy_metadata(metadata)

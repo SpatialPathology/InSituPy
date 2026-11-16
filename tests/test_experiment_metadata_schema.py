@@ -96,6 +96,52 @@ def test_legacy_metadata_slide_sample_id_discarded(tmp_path):
     assert "uid" in out.columns
 
 
+_LEGACY_HEADERS = [
+    None,
+    "# AUTO-GENERATED - do not edit; written by InSituPy",
+    "# AUTO-GENERATED — human-readable export only; metadata.parquet is canonical",
+]
+
+
+@pytest.mark.parametrize("header", _LEGACY_HEADERS)
+def test_legacy_csv_keeps_hash_in_values_and_uid_as_text(tmp_path, header):
+    """A '#' inside a value must not truncate the row; numeric-looking uids stay text."""
+    body = (
+        ",uid,patient,n_cells\n"
+        '0,00123,Patient #3,10\n'
+        "1,4500,Patient 4,20\n"
+    )
+    text = body if header is None else header + "\n" + body
+    (tmp_path / "metadata.csv").write_text(text, encoding="utf-8")
+
+    out = InSituExperiment._read_insitupy(tmp_path).metadata
+
+    assert out["uid"].tolist() == ["00123", "4500"]
+    assert is_string_dtype(out["uid"])
+    assert out["patient"].tolist() == ["Patient #3", "Patient 4"]
+    assert out["n_cells"].tolist() == [10, 20]
+
+
+def test_legacy_csv_non_utf8_falls_back_to_platform_encoding(tmp_path):
+    """Old files written with a non-UTF-8 platform encoding still load."""
+    import locale
+    enc = locale.getpreferredencoding(False)
+    text = ",uid,patient\n0,s1,Müller\n"
+    try:
+        raw = text.encode(enc)
+        raw.decode("utf-8")
+    except UnicodeEncodeError:
+        pytest.skip(f"platform encoding {enc} cannot encode the test text")
+    except UnicodeDecodeError:
+        pass
+    else:
+        pytest.skip(f"platform encoding {enc} is UTF-8 compatible here")
+    (tmp_path / "metadata.csv").write_bytes(raw)
+
+    out = InSituExperiment._read_insitupy(tmp_path).metadata
+    assert out["patient"].tolist() == ["Müller"]
+
+
 # ── InSituExperimentView.save_metadata ────────────────────────────────────────
 
 def _make_experiment_on_disk(tmp_path):
