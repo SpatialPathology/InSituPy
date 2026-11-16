@@ -343,3 +343,38 @@ class TestExportSampleSubsetView:
 
         samples = sdata.attrs["insitupy_spatialdata_dialect"]["samples"]
         assert set(samples) == {"sample_0", "sample_1"}
+
+
+# ── default color for shapes without a color column ──────────────────────────
+
+class TestShapesWithoutColorColumn:
+    def test_import_without_color_column_fills_red_without_warning(self):
+        import warnings
+
+        from insitupy._constants import RED
+        from insitupy._core.data import InSituData
+        from insitupy.spatialdata._convert import (
+            _build_annotations_into_insitudata,
+            _build_regions_into_insitudata,
+        )
+
+        def _uncolored(*names):
+            return poly_gdf(*names).drop(columns="color")
+
+        ann = {"a": ("shapes", _uncolored("a0")), "b": ("shapes", _uncolored("b0"))}
+        reg = {"r": ("shapes", _uncolored("r0"))}
+        inputs = [e for _, e in [*ann.values(), *reg.values()]]
+        columns_before = [list(e.columns) for e in inputs]
+
+        data = InSituData(path=None, slide_id="s", sample_id="s", method_name="", method_params={})
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _build_annotations_into_insitudata(data, ann, verbose=False)
+            _build_regions_into_insitudata(data, reg, verbose=False)
+
+        assert not [w for w in caught if "colors to red" in str(w.message)]
+        for container, key in [(data.annotations, "a"), (data.annotations, "b"), (data.regions, "r")]:
+            colors = container[key]["color"].tolist()
+            assert all(list(c) == RED for c in colors)
+        # the caller's GeoDataFrames are not modified
+        assert [list(e.columns) for e in inputs] == columns_before

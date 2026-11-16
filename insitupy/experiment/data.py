@@ -4597,8 +4597,9 @@ class InSituExperiment:
             verbose (bool, optional): Whether to print status messages. Defaults to True.
 
         Note:
-            Keys that are numeric obs columns, genes (found in ``var_names`` but not
-            in obs), or missing entirely are skipped with a warning.
+            Keys that are numeric obs columns, genes (found in ``var_names``, including
+            keys that are also an obs column, because plotting draws those as gene
+            expression), or missing entirely are skipped with a warning.
 
             See `InSituExperimentView`'s class docstring for a caveat about calling
             this on a view: colors sync correctly for that call, but the assignment
@@ -4650,9 +4651,13 @@ class InSituExperiment:
                 ):
                     in_var = True
 
-            if quiet and in_var:
+            if in_var and in_obs:
                 # plotting resolves var_names before obs, so this key is drawn as expression
-                logger.debug(f"Skipping '{obs_col}' in color sync: key is a gene.")
+                _skip_log(
+                    f"Skipping '{obs_col}': key is both an obs column and a gene (found in "
+                    f"var_names). Plotting draws this key as gene expression, so a categorical "
+                    f"color dict would never be used."
+                )
                 continue
 
             if is_numeric:
