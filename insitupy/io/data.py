@@ -659,6 +659,208 @@ def read_visium(
     return data
 
 
+def _read_visium_hd_scalefactors(path: Path) -> dict:
+    """Return scale factors from the first ``scalefactors_json.json`` found in a Visium HD bundle."""
+    candidates = [path / "segmented_outputs" / "spatial" / "scalefactors_json.json"]
+    candidates += sorted((path / "binned_outputs").glob("*/spatial/scalefactors_json.json"))
+    for f in candidates:
+        if f.is_file():
+            return read_json(f)
+    return {}
+
+
+def read_visium_hd(
+    path: str | os.PathLike | Path,
+    bin_size: int | list[int] | None = None,
+    load_segmentation: bool = True,
+    load_nuclei: bool = False,
+    segmentation_pixel_size: Number = 1.0,
+    fullres_pixel_size: Number | None = None,
+    dataset_name: str | None = None,
+    sample_name: str | None = None,
+    verbose: bool = True,
+    **kwargs,
+) -> InSituData:
+    """
+    Reads a `10x Visium HD <https://www.10xgenomics.com/products/visium-hd-spatial-gene-expression>`__
+    Space Ranger output folder using spatialdata-io.
+
+    Binned counts are imported as ``units`` layers (one per bin size, keys ``square_008um`` etc.,
+    square polygons in micrometres), the Space Ranger >= 4 cell segmentation
+    (``segmented_outputs/``) as the main cell layer with rasterized cell boundaries, and the
+    hires/lowres (and full-resolution, if present) tissue images.
+
+    Args:
+        path: Path to the Space Ranger output folder.
+        bin_size: Bin size(s) in micrometres to load, e.g. ``8`` or ``[2, 8, 16]``. Default
+            (None): 8 and 16 um where available (2 um bins are large and therefore opt-in).
+            ``[]`` loads the segmentation only.
+        load_segmentation: Load the cell segmentation, if present. Defaults to True.
+        load_nuclei: Also import nucleus boundaries. Requires ``load_segmentation=True`` and is
+            expensive on full slides (spatialdata-io builds nucleus counts from the 2 um matrix).
+            Defaults to False.
+        segmentation_pixel_size: Micrometres per pixel of the rasterized cell masks.
+            Defaults to 1.0.
+        fullres_pixel_size: Micrometres per full-resolution pixel. Defaults to
+            ``microns_per_pixel`` from ``scalefactors_json.json``.
+        dataset_name: Name for the overarching dataset/slide.
+        sample_name: Name for the individual sample/ROI within the slide.
+        verbose: Whether to print progress messages. Defaults to True.
+        **kwargs: Forwarded to ``spatialdata_io.visium_hd()`` (e.g. ``dataset_id``,
+            ``fullres_image_file``, ``filtered_counts_file``). ``bin_size``,
+            ``load_segmentations_only``, ``load_nucleus_segmentations`` and ``bins_as_squares``
+            are controlled by this reader and raise ``TypeError``.
+
+    Returns:
+        InSituData: Object with ``units`` (bins), ``cells["main"]`` (segmentation) and ``images``.
+
+    Raises:
+        FileNotFoundError: If ``path`` is not a directory.
+        ValueError: If a requested bin size is unavailable, nothing would be loaded, or no pixel
+            size can be determined.
+        TypeError: If a reader-controlled keyword is passed.
+    """
+    import re
+
+    from spatialdata_io import visium_hd
+
+    from insitupy.spatialdata.convert import convert_from_foreign_spatialdata
+
+    path = Path(path)
+    if not path.is_dir():
+        raise FileNotFoundError(f"No such directory found: {str(path)}")
+
+    controlled = {"load_segmentations_only", "load_nucleus_segmentations", "bins_as_squares"}
+    bad = sorted(controlled & set(kwargs))
+    if bad:
+        raise TypeError(f"read_visium_hd controls {bad} itself; do not pass them via kwargs.")
+
+    # available bin sizes
+    available = []
+    for d in sorted((path / "binned_outputs").glob("square_*um")) if (path / "binned_outputs").is_dir() else []:
+        m = re.fullmatch(r"square_0*(\d+)um", d.name)
+        if m and d.is_dir():
+            available.append(int(m.group(1)))
+    available = sorted(set(available))
+
+    if bin_size is None:
+        bins = [b for b in (8, 16) if b in available]
+        if not bins and available:
+            non2 = [b for b in available if b != 2]
+            bins = [non2[0]] if non2 else [available[0]]
+            logger.info(f"Default bin sizes 8/16 um not available - using {bins[0]} um.")
+    else:
+        bins = sorted({int(b) for b in ([bin_size] if isinstance(bin_size, int) else bin_size)})
+        missing = [b for b in bins if b not in available]
+        if missing:
+            raise ValueError(f"Bin size(s) {missing} um not available. Available: {available}.")
+
+    seg_dir = path / "segmented_outputs"
+    seg_present = (
+        (seg_dir / "cell_segmentations.geojson").is_file()
+        and (seg_dir / "filtered_feature_cell_matrix.h5").is_file()
+    )
+    if load_nuclei and not load_segmentation:
+        raise ValueError("load_nuclei=True requires load_segmentation=True.")
+    use_seg = load_segmentation and seg_present
+    if load_segmentation and not seg_present and verbose:
+        logger.info("No segmented_outputs/ found (Space Ranger < 4) - loading bins only.")
+    use_nuclei = load_nuclei and use_seg
+    if use_nuclei and not (seg_dir / "nucleus_segmentations.geojson").is_file():
+        warnings.warn("nucleus_segmentations.geojson not found - nuclei are skipped.")
+        use_nuclei = False
+
+    if not bins and not use_seg:
+        raise ValueError("Nothing to load: no bins selected/available and no segmentation present.")
+
+    # pixel size
+    sf = _read_visium_hd_scalefactors(path)
+    ps = fullres_pixel_size if fullres_pixel_size is not None else sf.get("microns_per_pixel")
+    if ps is None:
+        raise ValueError(
+            "No pixel size available: `microns_per_pixel` not found in scalefactors_json.json. "
+            "Pass `fullres_pixel_size` (micrometres per full-resolution pixel)."
+        )
+    ps = float(ps)
+
+    if verbose:
+        logger.info("Reading Visium HD data with spatialdata-io...")
+    sdata = visium_hd(
+        path,
+        dataset_id=kwargs.pop("dataset_id", None),
+        bin_size=bins,
+        load_segmentations_only=(len(bins) == 0),
+        load_nucleus_segmentations=use_nuclei,
+        bins_as_squares=True,
+        **kwargs,
+    )
+
+    # scale all shapes and bin centroids to micrometres
+    if ps != 1.0:
+        for key in list(sdata.shapes):
+            gdf = sdata.shapes[key]
+            gdf["geometry"] = gdf.geometry.scale(xfact=ps, yfact=ps, origin=(0, 0))
+        for tkey in list(sdata.tables):
+            if "spatial" in sdata.tables[tkey].obsm:
+                sdata.tables[tkey].obsm["spatial"] = sdata.tables[tkey].obsm["spatial"] * ps
+
+    def _region(tkey):
+        region = sdata.tables[tkey].uns["spatialdata_attrs"]["region"]
+        return region[0] if isinstance(region, (list, tuple)) else region
+
+    # units: main first (8 um, else smallest), then ascending
+    order = sorted(bins, key=lambda b: (b != 8, b))
+    units = {}
+    for b in order:
+        tkey = f"square_{b:03d}um"
+        if tkey not in sdata.tables:
+            raise ValueError(f"spatialdata-io did not return table '{tkey}'.")
+        sdata.tables[tkey].uns["bin_size_um"] = int(b)
+        units[tkey] = {"table_key": tkey, "units_key": _region(tkey), "unit_type": "visium_hd_bin"}
+
+    cells = None
+    if use_seg:
+        cell_spec = {
+            "table_key": "cell_segmentations",
+            "cells_key": _region("cell_segmentations"),
+            "rasterize_shapes": True,
+            "raster_pixel_size": float(segmentation_pixel_size),
+        }
+        if use_nuclei:
+            cell_spec["nucleus_shapes_key"] = _region("nucleus_segmentations")
+        cells = {"main": cell_spec}
+
+    # images, resolved by suffix
+    images = {}
+    for name, suffix, scalef_key in (
+        ("hires", "_hires_image", "tissue_hires_scalef"),
+        ("lowres", "_lowres_image", "tissue_lowres_scalef"),
+        ("fullres", "_full_image", None),
+    ):
+        keys = [k for k in sdata.images if k.endswith(suffix)]
+        if len(keys) != 1:
+            continue
+        if scalef_key is None:
+            pixel_size = ps
+        elif scalef_key in sf:
+            pixel_size = ps / sf[scalef_key]
+        else:
+            continue
+        images[name] = {"key": keys[0], "pixel_size": pixel_size, "is_rgb": True}
+
+    return convert_from_foreign_spatialdata(
+        sdata=sdata,
+        images=images or None,
+        cells=cells,
+        units=units or None,
+        transcripts=None,
+        slide_id=dataset_name,
+        sample_id=sample_name,
+        method_name="visium_hd",
+        verbose=verbose,
+    )
+
+
 def read_any(
     cellular_measurements: dict[str, str | Path | os.PathLike],
     cellular_coordinates: str | Path,

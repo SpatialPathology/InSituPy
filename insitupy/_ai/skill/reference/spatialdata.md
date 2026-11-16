@@ -49,7 +49,7 @@ Requires the `spatialdata` package: `pip install spatialdata`
   ``images``, ``cells``, and ``units`` are keyed dicts - one entry per
   InSituData-side image/layer - because ``InSituData`` support
 
-  ... [truncated — full text is 6318 chars]
+  ... [truncated — full text is 7425 chars]
 
 ## Usage
 

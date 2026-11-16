@@ -243,6 +243,7 @@ To read an individual dataset on can use following functions:
     io.read_atera
     io.read_qupath
     io.read_visium
+    io.read_visium_hd
     io.read_xenium
 ```
 

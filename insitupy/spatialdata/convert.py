@@ -23,10 +23,11 @@ from insitupy._constants import (
 )
 from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
-from insitupy.containers import CellData, SpatialUnitsData
+from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
 from insitupy.experiment.data import InSituExperiment, TableAccessor
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata,
+    _align_shapes_to_table,
     _assign_sdata_transcripts,
     _build_insitudata_from_elements,
     _centroids_from_labels,
@@ -35,6 +36,7 @@ from insitupy.spatialdata._convert import (
     _get_base_resolution_array,
     _group_elements_by_sample,
     _merge_dicts_with_warning,
+    _rasterize_shapes_to_labels,
     _transform_annotations_for_spatialdata,
     _transform_cell_boundaries_for_spatialdata,
     _transform_concat_tables_for_spatialdata,
@@ -420,6 +422,60 @@ def _resolve_nucleus_to_cell_map(
     return nucleus_to_cell_map
 
 
+def _rasterize_boundaries_from_shapes(
+    sdata, table, instance_key, cell_shapes, cell_names, seg_mask_value,
+    nucleus_shapes_key, pixel_size,
+) -> BoundariesData:
+    """Rasterize aligned cell (and optionally nucleus) polygons into ``BoundariesData``."""
+    import math
+
+    nuc_gdf = None
+    nuc_values = None
+    if nucleus_shapes_key is not None:
+        ids = (
+            table.obs[instance_key].astype(str).to_numpy()
+            if instance_key is not None and instance_key in table.obs.columns
+            else cell_names.astype(str)
+        )
+        id_to_value = dict(zip(ids, seg_mask_value, strict=True))
+        nuc_all = sdata.shapes[nucleus_shapes_key]
+        nuc_ids = nuc_all.index.astype(str)
+        if nuc_ids.duplicated().any():
+            raise ValueError(
+                f"nucleus shapes '{nucleus_shapes_key}' contain duplicated ids - a 1:1 "
+                "nucleus-to-cell relation is required."
+            )
+        keep = np.array([i in id_to_value for i in nuc_ids], dtype=bool)
+        n_dropped = int((~keep).sum())
+        if n_dropped:
+            logger.info(
+                f"Dropped {n_dropped} nuclei whose cell is not part of this layer "
+                f"({int(keep.sum())} kept)."
+            )
+        nuc_gdf = nuc_all.loc[keep]
+        nuc_values = np.array([id_to_value[i] for i in nuc_ids[keep]], dtype=np.int64)
+
+    maxima = [cell_shapes.geometry.bounds[["maxx", "maxy"]].max()]
+    if nuc_gdf is not None and len(nuc_gdf):
+        maxima.append(nuc_gdf.geometry.bounds[["maxx", "maxy"]].max())
+    xmax = max(m["maxx"] for m in maxima)
+    ymax = max(m["maxy"] for m in maxima)
+    out_shape = (max(1, math.ceil(ymax / pixel_size)), max(1, math.ceil(xmax / pixel_size)))
+
+    cell_mask = _rasterize_shapes_to_labels(cell_shapes.geometry, seg_mask_value, pixel_size, out_shape)
+    nuc_mask = None
+    if nuc_gdf is not None:
+        nuc_mask = _rasterize_shapes_to_labels(nuc_gdf.geometry, nuc_values, pixel_size, out_shape)
+
+    boundaries = BoundariesData(cell_names=cell_names, seg_mask_value=seg_mask_value)
+    boundaries.add_boundaries(
+        cell_boundaries=cell_mask,
+        pixel_size=pixel_size,
+        nuclei_boundaries=nuc_mask,
+    )
+    return boundaries
+
+
 def convert_from_foreign_spatialdata(
     sdata: SpatialData,
     images: dict[str, dict] | None = None,
@@ -498,6 +554,16 @@ def convert_from_foreign_spatialdata(
               else from ``cell_boundaries_data`` labels. ``"labels"``/
               ``"shapes"`` force derivation even when ``obsm["spatial"]``
               already exists; ``"table"`` requires it to already be present.
+            - ``rasterize_shapes`` (bool, optional, default ``False``): build the
+              cell boundary mask by rasterizing the ``cells_key`` polygons
+              (micrometres, origin (0, 0)) instead of reading a labels element.
+              Mask values are 1..N in table order. Requires ``raster_pixel_size``;
+              mutually exclusive with ``cell_boundaries_data`` /
+              ``nucleus_boundaries_data``.
+            - ``raster_pixel_size`` (Number): um per pixel of the rasterized masks.
+            - ``nucleus_shapes_key`` (str, optional): shapes element with nucleus
+              polygons indexed by the parent cell id. Only nuclei whose id is a
+              cell of this layer are rasterized, with the parent cell's mask value.
             - ``label_map`` (str, optional): the nucleus-to-cell map source.
               Either a shapes element indexed by nucleus label with a
               ``cell_id`` column (spatialdata-io's ``nucleus_boundaries``), or
@@ -554,6 +620,18 @@ def convert_from_foreign_spatialdata(
 
             convert_from_foreign_spatialdata(sdata, cells={"main": {"table_key": "table"}})
 
+        Visium HD: segmentation polygons rasterized to a cell mask (1 um/pixel)::
+
+            convert_from_foreign_spatialdata(
+                sdata,
+                cells={"main": {
+                    "table_key": "cell_segmentations",
+                    "cells_key": "cell_segmentations_shapes",
+                    "rasterize_shapes": True,
+                    "raster_pixel_size": 1.0,
+                }},
+            )
+
         Visium, units-only (no cells)::
 
             convert_from_foreign_spatialdata(
@@ -589,6 +667,7 @@ def convert_from_foreign_spatialdata(
                 allowed=(
                     "table_key", "cells_key", "cell_boundaries_data", "nucleus_boundaries_data",
                     "pixel_size", "spatial_source", "label_map",
+                    "rasterize_shapes", "nucleus_shapes_key", "raster_pixel_size",
                 ),
             )
             table_key = spec["table_key"]
@@ -607,6 +686,26 @@ def convert_from_foreign_spatialdata(
             pixel_size_spec = spec.get("pixel_size")
             spatial_source = spec.get("spatial_source")
             label_map_spec = spec.get("label_map")
+            rasterize_shapes = bool(spec.get("rasterize_shapes", False))
+            nucleus_shapes_key = spec.get("nucleus_shapes_key")
+            raster_pixel_size = spec.get("raster_pixel_size")
+
+            if not rasterize_shapes and (nucleus_shapes_key is not None or raster_pixel_size is not None):
+                raise ValueError(
+                    f"cells spec for '{layer_name}': 'nucleus_shapes_key' / 'raster_pixel_size' "
+                    "require rasterize_shapes=True."
+                )
+            if rasterize_shapes:
+                if cell_boundaries_data is not None or nucleus_boundaries_data is not None:
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': rasterize_shapes=True is mutually exclusive "
+                        "with cell_boundaries_data / nucleus_boundaries_data."
+                    )
+                if raster_pixel_size is None or not isinstance(raster_pixel_size, Number) or raster_pixel_size <= 0:
+                    raise ValueError(
+                        f"cells spec for '{layer_name}': rasterize_shapes=True requires a positive "
+                        "numeric 'raster_pixel_size'."
+                    )
 
             if spatial_source is not None and spatial_source not in ("table", "shapes", "labels"):
                 raise ValueError(
@@ -642,10 +741,30 @@ def convert_from_foreign_spatialdata(
 
             cell_names = np.array(table.obs_names)
 
+            if rasterize_shapes and cells_key is None and region is not None and region in sdata.shapes:
+                cells_key = region
+            if rasterize_shapes and not (cells_key and cells_key in sdata.shapes):
+                raise ValueError(
+                    f"cells spec for '{layer_name}': rasterize_shapes=True requires a resolvable "
+                    "'cells_key' shapes element (explicit or the table's declared region)."
+                )
+            if nucleus_shapes_key is not None and nucleus_shapes_key not in sdata.shapes:
+                raise ValueError(
+                    f"cells layer '{layer_name}': nucleus_shapes_key '{nucleus_shapes_key}' not in sdata.shapes."
+                )
+
+            # Cell shapes aligned row-by-row to the table (via instance_key) where possible.
+            cell_shapes = None
+            if cells_key and cells_key in sdata.shapes:
+                cell_shapes = _align_shapes_to_table(sdata.shapes[cells_key], table, instance_key)
+
             # Real segmentation identity: prefer the table's own instance_key column
             # over fabricating a 1..N mapping (only a last resort for stores that don't
             # follow the standard SpatialData table-annotation contract at all).
-            if instance_key is not None and instance_key in table.obs.columns:
+            if rasterize_shapes:
+                # instance ids are cell-id strings here; mask values are 1..N in table order
+                seg_mask_value = np.arange(1, len(cell_names) + 1)
+            elif instance_key is not None and instance_key in table.obs.columns:
                 seg_mask_value = table.obs[instance_key].to_numpy()
             else:
                 logger.warning(
@@ -702,12 +821,12 @@ def convert_from_foreign_spatialdata(
                         f"obsm['{spatial_key}'] to already be present on the table."
                     )
             elif spatial_source == "shapes":
-                if not (cells_key and cells_key in sdata):
+                if cell_shapes is None:
                     raise ValueError(
                         f"cells spec for '{layer_name}': spatial_source='shapes' requires a "
                         "resolvable 'cells_key' shapes element."
                     )
-                table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
+                table.obsm[spatial_key] = cell_shapes.centroid.get_coordinates().values
             elif spatial_source == "labels":
                 if cell_boundaries_data is None:
                     raise ValueError(
@@ -719,8 +838,8 @@ def convert_from_foreign_spatialdata(
                 table.obsm[spatial_key] = _centroids_from_labels(label_array, seg_mask_value, label_pixel_size)
             elif spatial_key in table.obsm:
                 pass  # keep the vendor centroids already on the table (SD-B1 fix)
-            elif cells_key and cells_key in sdata:
-                table.obsm[spatial_key] = sdata[cells_key].centroid.get_coordinates().values
+            elif cell_shapes is not None:
+                table.obsm[spatial_key] = cell_shapes.centroid.get_coordinates().values
             elif cell_boundaries_data is not None:
                 label_key, label_pixel_size = cell_boundaries_data
                 label_array = _get_base_resolution_array(sdata[label_key]).data
@@ -733,7 +852,12 @@ def convert_from_foreign_spatialdata(
 
             # Prepare boundaries if keys resolved (explicit or auto-detected)
             boundaries = None
-            if cell_boundaries_data or nucleus_boundaries_data:
+            if rasterize_shapes:
+                boundaries = _rasterize_boundaries_from_shapes(
+                    sdata, table, instance_key, cell_shapes, cell_names, seg_mask_value,
+                    nucleus_shapes_key, float(raster_pixel_size),
+                )
+            elif cell_boundaries_data or nucleus_boundaries_data:
                 boundaries = _create_boundaries_from_spatialdata(
                     sdata,
                     cell_names,
@@ -767,9 +891,11 @@ def convert_from_foreign_spatialdata(
             if units_key not in sdata.shapes:
                 raise ValueError(f"units layer '{layer_name}': units_key '{units_key}' not in sdata.shapes.")
 
+            unit_table = sdata[table_key]
+            unit_instance_key = (unit_table.uns.get("spatialdata_attrs", {}) or {}).get("instance_key")
             su = SpatialUnitsData(
-                shapes=sdata.shapes[units_key],
-                data=sdata[table_key],
+                shapes=_align_shapes_to_table(sdata.shapes[units_key], unit_table, unit_instance_key),
+                data=unit_table,
                 unit_type=spec.get("unit_type") or "unit",
             )
             data.add_units(su, key=layer_name, is_main=(i == 0))

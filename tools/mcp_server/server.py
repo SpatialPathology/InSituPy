@@ -682,6 +682,8 @@ def get_io_formats() -> str:
     |                     |            | (transcripts.zarr.zip opt-in)            |                  |
     | read_visium()       | 10x Visium | filtered_feature_bc_matrix.h5,           | InSituData       |
     |                     |            | spatial/tissue_positions.csv, images     |                  |
+    | read_visium_hd()    | 10x Visium HD | binned_outputs/square_XXXum/, segmented_outputs/ | InSituData |
+    |                     |            | (Space Ranger >= 4), spatial/ images     |                  |
     | read_qupath()       | QuPath     | one exported sample dir (annotation.geojson, | InSituData   |
     |                     |            | measurements.tsv, cells.geojson, image.ome.tif) |           |
     | read_qupath_project() | QuPath   | QuPath project directory (project.qpproj + | InSituExperiment |
@@ -980,7 +982,7 @@ def get_public_api() -> str:
 
     lines.append("\n## Submodule shorthands\n")
     shorthands = {
-        "insitupy.io": "I/O — read_xenium, read_atera, read_visium, read_qupath, etc.",
+        "insitupy.io": "I/O — read_xenium, read_atera, read_visium, read_visium_hd, read_qupath, etc.",
         "insitupy.pl (plotting)": "Plotting — spatial, umap, volcano, overview, etc.",
         "insitupy.pp (preprocessing)": "Preprocessing — normalize, filter, pseudobulk, etc.",
         "insitupy.tl (tools)": "Analysis — DGE, distance, neighbors, registration, etc.",
