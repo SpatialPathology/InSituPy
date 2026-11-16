@@ -33,6 +33,7 @@ from insitupy._constants import (
     DEFAULT_CHUNK_SIZE_X,
     DEFAULT_CHUNK_SIZE_Y,
     MODALITIES,
+    RED,
     SAMPLE_STR,
     SPATIALDATA_DERIVED_MODALITIES,
 )
@@ -1206,14 +1207,34 @@ def _build_transcripts_into_insitudata(
     _assign_sdata_transcripts(data, transcripts_df)
 
 
+def _fill_default_shape_color(elem, color_col: str):
+    """Return ``(elem, filled)``; adds a red ``color_col`` to a copy if it is missing.
+
+    SpatialData shapes from foreign sources usually carry no color column, which is
+    expected here, so the default is set up front instead of letting
+    ``ShapesData.add_data`` warn once per element. The input is never mutated.
+    """
+    if color_col in elem.columns:
+        return elem, False
+    elem = elem.copy()
+    elem[color_col] = [list(RED)] * len(elem)
+    return elem, True
+
+
 def _build_annotations_into_insitudata(
     data: InSituData,
     annotations_elements: dict[str, tuple[str, object]],
     verbose: bool = True,
     ) -> None:
     """Reconstruct ``ANNOTATIONS.<key>`` elements into an :class:`InSituData`."""
+    uncolored = []
     for key, (_elem_type, elem) in annotations_elements.items():
+        elem, filled = _fill_default_shape_color(elem, data.annotations._color_col)
+        if filled:
+            uncolored.append(key)
         data.annotations.add_data(data=elem, key=key, scale_factor=1.0, verbose=verbose)
+    if uncolored and verbose:
+        logger.info(f"No color column in SpatialData annotations {uncolored}; using red.")
 
 
 def _build_regions_into_insitudata(
@@ -1222,8 +1243,14 @@ def _build_regions_into_insitudata(
     verbose: bool = True,
     ) -> None:
     """Reconstruct ``REGIONS.<key>`` elements into an :class:`InSituData`."""
+    uncolored = []
     for key, (_elem_type, elem) in regions_elements.items():
+        elem, filled = _fill_default_shape_color(elem, data.regions._color_col)
+        if filled:
+            uncolored.append(key)
         data.regions.add_data(data=elem, key=key, scale_factor=1.0, verbose=verbose)
+    if uncolored and verbose:
+        logger.info(f"No color column in SpatialData regions {uncolored}; using red.")
 
 
 def _build_insitudata_from_elements(
