@@ -6,6 +6,8 @@ See .log/reports/260710/boundaries-zarr-save-fix/report-boundaries-zarr-save-fix
 See .log/reports/260715/boundaries-nonpyramid-removal/report-boundaries-nonpyramid-removal.md
 """
 
+import gc
+import sys
 import warnings
 from contextlib import ExitStack
 
@@ -399,3 +401,25 @@ class TestConstructionAndReadGuards:
 
         with pytest.raises(ValueError, match="neither"):
             _read_boundaries_from_celldata_zarr(path)
+
+
+class TestFailingConstructor:
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(cell_names=["a"], seg_mask_value=None),
+            dict(cell_names=["a", "b"], seg_mask_value=[1]),
+        ],
+        ids=["seg_mask_none", "length_mismatch"],
+    )
+    def test_no_unraisable_exception_from_del(self, monkeypatch, kwargs):
+        # a constructor that raises used to leave _store unset, so __del__ -> close() raised an
+        # AttributeError that Python prints as "Exception ignored in __del__"
+        calls = []
+        monkeypatch.setattr(sys, "unraisablehook", calls.append)
+
+        with pytest.raises(ValueError):
+            BoundariesData(**kwargs)
+        gc.collect()
+
+        assert calls == []

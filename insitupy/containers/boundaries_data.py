@@ -82,6 +82,9 @@ class BoundariesData(DeepCopyMixin):
         For more details on how these values are saved in case of Xenium In Situ, see:
         https://www.10xgenomics.com/support/software/xenium-onboard-analysis/latest/tutorials/outputs/xoa-output-zarr
         """
+        # set first: __del__ -> close() reads it even when the validation below raises
+        self._store = None  # zarr store reference for lifecycle management
+
         # guard None before the length comparison, otherwise len(None) raises a confusing
         # TypeError instead of this clear message (io.py hands None here for old stores that
         # lack a seg_mask_value array)
@@ -103,7 +106,6 @@ class BoundariesData(DeepCopyMixin):
         self._nucleus_count = nucleus_count
 
         self._data = dict()
-        self._store = None  # zarr store reference for lifecycle management
 
     def __repr__(self):
         if len(self._data) > 0:
@@ -122,9 +124,11 @@ class BoundariesData(DeepCopyMixin):
 
     def close(self):
         """Close the underlying zarr store if one is attached."""
-        if self._store is not None:
+        # getattr: objects can exist without __init__ (copy, pickle, object.__new__)
+        store = getattr(self, "_store", None)
+        if store is not None:
             try:
-                self._store.close()
+                store.close()
             except Exception:
                 pass
             self._store = None
