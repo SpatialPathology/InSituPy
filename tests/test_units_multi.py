@@ -204,3 +204,92 @@ class TestAlignUnitsPerKeyRelaxation:
 
         with pytest.raises(ValueError, match="no spatial units"):
             xd.align_units(other=other, transformation_matrix=self.IDENTITY, verbose=False)
+
+
+# ── Vectorized geometry ops ───────────────────────────────────────────────────
+
+
+class TestUnitsGeometryVectorized:
+    """`transform`/`crop` use `shapely.transform`; results must match the shapely affinity ops
+    also for polygons with holes and for multi-part geometries."""
+
+    @staticmethod
+    def _units():
+        from shapely.geometry import MultiPolygon
+
+        holed = Polygon(
+            [(0, 0), (10, 0), (10, 10), (0, 10)],
+            holes=[[(2, 2), (4, 2), (4, 4), (2, 4)]],
+        )
+        multi = MultiPolygon([
+            Polygon([(20, 0), (24, 0), (24, 4)]),
+            Polygon([(30, 0), (34, 0), (34, 4), (30, 4)]),
+        ])
+        gdf = gpd.GeoDataFrame({"name": ["holed", "multi"], "geometry": [holed, multi]})
+        return SpatialUnitsData(shapes=gdf, data=None, unit_type="unit")
+
+    def test_transform_matches_affine_transform(self):
+        from shapely import affinity
+
+        su = self._units()
+        M = np.array([[0.9, -0.3, 5.0], [0.2, 1.1, -7.0]])
+        out = su.transform(M)
+        for orig, new in zip(su.shapes.geometry, out.shapes.geometry, strict=True):
+            expected = affinity.affine_transform(orig, [0.9, -0.3, 0.2, 1.1, 5.0, -7.0])
+            assert new.equals_exact(expected, 1e-9)
+        # the source object is not modified
+        assert su.shapes.geometry.iloc[0].bounds == (0, 0, 10, 10)
+
+    def test_crop_translates_like_affinity(self):
+        from shapely import affinity
+
+        su = self._units()
+        out = su.crop(xlim=(1, 40), ylim=(1, 40), verbose=False)
+        assert len(out.shapes) == 2
+        for orig, new in zip(su.shapes.geometry, out.shapes.geometry, strict=True):
+            assert new.equals_exact(affinity.translate(orig, xoff=-1, yoff=-1), 1e-9)
+
+    @staticmethod
+    def _units_with_table():
+        import anndata as ad
+        from shapely import box
+
+        xy = np.array([[10.0, 10.0], [50.0, 50.0], [90.0, 90.0]])
+        gdf = gpd.GeoDataFrame(
+            {"name": list("abc")},
+            geometry=[box(x - 4, y - 4, x + 4, y + 4) for x, y in xy],
+        )
+        table = ad.AnnData(np.ones((3, 2)), obs=pd.DataFrame(index=list("abc")))
+        table.obsm["spatial"] = xy
+        return SpatialUnitsData(shapes=gdf, data=table, unit_type="visium_hd_bin")
+
+    @staticmethod
+    def _centroids(su):
+        return np.c_[su.shapes.centroid.x, su.shapes.centroid.y]
+
+    def test_crop_moves_table_coordinates_with_shapes(self):
+        su = self._units_with_table()
+        out = su.crop(xlim=(40, 100), ylim=(40, 100), verbose=False)
+        np.testing.assert_allclose(out.table.obsm["spatial"], self._centroids(out))
+        # the source object keeps its coordinates
+        np.testing.assert_allclose(su.table.obsm["spatial"][0], (10.0, 10.0))
+
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_transform_moves_table_coordinates_with_shapes(self, inplace):
+        su = self._units_with_table()
+        M = np.array([[0.9, -0.3, 100.0], [0.2, 1.1, -7.0]])
+        out = su.transform(M, inplace=inplace)
+        out = su if inplace else out
+        np.testing.assert_allclose(out.table.obsm["spatial"], self._centroids(out))
+        if not inplace:
+            np.testing.assert_allclose(su.table.obsm["spatial"][0], (10.0, 10.0))
+
+    def test_table_setter_reorders_and_syncs_shapes(self):
+        su = self._units_with_table()
+        # same units, other order -> shapes follow the table order
+        su.table = su.table[["c", "a", "b"]].copy()
+        assert list(su.shapes.index) == ["c", "a", "b"]
+        # subset -> shapes are synced to the table
+        su.table = su.table[["a", "b"]].copy()
+        assert list(su.shapes.index) == ["a", "b"]
+        assert list(su.table.obs_names) == ["a", "b"]

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Literal
 
 import dask.dataframe as dd
+import numpy as np
 import pandas as pd
-from shapely import affinity
 
 from insitupy._core.data import InSituData
 from insitupy._exceptions import InvalidAteraDirectory, InvalidXeniumDirectory
@@ -30,6 +30,7 @@ from insitupy._io._xenium import (
 from insitupy._io.files import read_json
 from insitupy._io.geo import parse_geopandas
 from insitupy.containers.cell_data import CellData
+from insitupy.containers.spatial_units_data import _transform_geoseries
 
 logger = logging.getLogger(__name__)
 
@@ -611,13 +612,15 @@ def read_visium(
 
     if fullres_pixel_size != 1.0:
         # convert spot geometries to microns
-        sdata[dataset_id]['geometry'] = sdata[dataset_id]['geometry'].apply(
-            lambda geom: affinity.scale(
-                geom,
-                xfact=fullres_pixel_size, yfact=fullres_pixel_size,
-                origin=(0, 0)
-                )
-            )
+        sdata[dataset_id]['geometry'] = _transform_geoseries(
+            sdata[dataset_id].geometry, lambda c: c * float(fullres_pixel_size)
+        )
+
+        # the units table must live in the same (micron) coordinates as the shapes
+        for tkey in list(sdata.tables):
+            tab = sdata.tables[tkey]
+            if "spatial" in tab.obsm:
+                tab.obsm["spatial"] = np.asarray(tab.obsm["spatial"], dtype=float) * float(fullres_pixel_size)
 
         if 'radius' in sdata[dataset_id].columns:
             sdata[dataset_id]['radius'] = sdata[dataset_id]['radius'] * fullres_pixel_size

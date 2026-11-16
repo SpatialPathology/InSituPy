@@ -9,7 +9,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
-from shapely import MultiPolygon, Polygon, affinity
+from shapely import MultiPolygon, Polygon
 
 from insitupy._io.files import check_overwrite_and_remove_if_true, write_dict_to_json
 from insitupy._mixins import DeepCopyMixin
@@ -17,6 +17,18 @@ from insitupy._textformat import textformat as tf
 from insitupy._version import __version__
 
 logger = logging.getLogger(__name__)
+
+
+def _transform_geoseries(geoms: gpd.GeoSeries, func) -> gpd.GeoSeries:
+    """Apply a vectorized coordinate function to all geometries of a GeoSeries.
+
+    `func` maps an (N, 2) coordinate array to an (N, 2) array. This is orders of
+    magnitude faster than the per-element geopandas affine methods.
+    """
+    import shapely
+
+    new_geoms = shapely.transform(np.asarray(geoms.values), func)
+    return gpd.GeoSeries(new_geoms, index=geoms.index, crs=geoms.crs)
 
 
 class SpatialUnitsData(DeepCopyMixin):
@@ -177,6 +189,18 @@ class SpatialUnitsData(DeepCopyMixin):
             raise TypeError(f"table must be AnnData object, not {type(value)}")
         self._data = value
 
+        # keep shapes in sync with the table (mirrors CellData); index ops only, no Python
+        # sets - this runs on every assignment and units layers can hold millions of bins
+        if value is not None and len(self._shapes) > 0:
+            shape_idx, obs_names = self._shapes.index, value.obs_names
+            if shape_idx.equals(obs_names):
+                return
+            if len(shape_idx) == len(obs_names) and obs_names.isin(shape_idx).all():
+                # same units, different order
+                self._shapes = self._shapes.loc[obs_names]
+            else:
+                self.sync()
+
     @property
     def unit_type(self) -> str:
         """Type of spatial units stored."""
@@ -252,14 +276,20 @@ class SpatialUnitsData(DeepCopyMixin):
         _self._shapes = _self._shapes[mask].copy()
 
         # Translate to origin
-        _self._shapes["geometry"] = _self._shapes["geometry"].apply(
-            affinity.translate, xoff=-xlim[0], yoff=-ylim[0]
+        offset = np.array([xlim[0], ylim[0]], dtype=float)
+        _self._shapes["geometry"] = _transform_geoseries(
+            _self._shapes.geometry, lambda c: c - offset
         )
 
         # Crop data if present
         if _self._data is not None:
             feature_names = _self._shapes.index.tolist()
             _self._data = _self._data[feature_names, :].copy()
+            # the table coordinates must follow the shapes (as in CellData.crop)
+            if "spatial" in _self._data.obsm:
+                _self._data.obsm["spatial"] = (
+                    np.asarray(_self._data.obsm["spatial"], dtype=float) - offset
+                )
 
         logger.info(f"Cropped to {len(_self._shapes)} features.")
 
@@ -275,17 +305,16 @@ class SpatialUnitsData(DeepCopyMixin):
             logger.info("No data to sync.")
             return
 
-        unit_names = set(self._shapes.index)
-        data_names = set(self._data.obs_names)
-        common_names = unit_names & data_names
+        # keep the order of the table
+        keep = self._data.obs_names[self._data.obs_names.isin(self._shapes.index)]
 
         # Filter units
-        self._shapes = self._shapes.loc[list(common_names)]
+        self._shapes = self._shapes.loc[keep]
 
         # Filter data
-        self._data = self._data[list(common_names), :].copy()
+        self._data = self._data[keep].copy()
 
-        logger.info(f"Synced to {len(common_names)} common features.")
+        logger.info(f"Synced to {len(keep)} common features.")
 
     def transform(
         self,
@@ -361,9 +390,17 @@ class SpatialUnitsData(DeepCopyMixin):
         logger.info(f"Applying transformation (in physical coordinates): "
                     f"a={a}, b={b}, d={d}, e={e}, xoff={xoff}, yoff={yoff}")
 
-        _self._shapes["geometry"] = _self._shapes["geometry"].apply(
-            lambda geom: affinity.affine_transform(geom, [a, b, d, e, xoff, yoff])
+        A = np.array([[a, b], [d, e]], dtype=float)
+        t = np.array([xoff, yoff], dtype=float)
+        _self._shapes["geometry"] = _transform_geoseries(
+            _self._shapes.geometry, lambda c: c @ A.T + t
         )
+
+        # the table coordinates must follow the shapes
+        if _self._data is not None and "spatial" in _self._data.obsm:
+            # assigns a new array (never writes into one shared with the source)
+            coords = np.asarray(_self._data.obsm["spatial"], dtype=float)
+            _self._data.obsm["spatial"] = coords @ A.T + t
 
         logger.info(f"Transformed {len(_self._shapes)} features.")
 
