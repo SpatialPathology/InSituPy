@@ -417,6 +417,43 @@ def test_public_sync_colors_gene_key_warns_accurately(caplog):
     assert "g0" not in exp.colors.layer("main")
 
 
+def _make_clash_experiment():
+    """Plot experiment where 'g0' is both a gene and a categorical obs column."""
+    exp = _make_plot_experiment()
+    for xd in exp.data:
+        table = xd.cells["main"].table
+        table.obs["g0"] = pd.Categorical(["x", "y", "x"][: table.n_obs])
+    return exp
+
+
+def test_public_sync_colors_skips_obs_gene_clash_with_warning(caplog):
+    exp = _make_clash_experiment()
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        exp.sync_colors("g0")
+
+    assert any("gene expression" in m for m in _warning_messages(caplog))
+    assert "g0" not in exp.colors.layer("main")
+
+
+def test_color_config_ignores_experiment_colors_for_gene_key():
+    from insitupy.plotting.spatial import DataConfig, PlotConfig, _ColorConfigMultiPlot
+
+    exp = _make_clash_experiment()
+    # a color dict that exists for the key (e.g. set by hand) must not be applied to a gene
+    exp.colors["g0"] = {"x": "#ff0000", "y": "#00ff00"}
+    exp.colors["celltype"] = {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+
+    cfg = _ColorConfigMultiPlot(
+        exp, DataConfig(), PlotConfig(), keys=["g0", "celltype"]
+    )
+
+    assert cfg["g0"]["is_categorical"] is False
+    assert cfg["g0"]["color_dict"] is None
+    # control: a plain categorical obs key still uses the experiment colors
+    assert cfg["celltype"]["is_categorical"] is True
+    assert cfg["celltype"]["color_dict"] == exp.colors["celltype"]
+
+
 def test_public_sync_colors_missing_key_still_warns(caplog):
     exp = _make_plot_experiment()
     with _capture_insitupy_logs(caplog, logging.WARNING):
