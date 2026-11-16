@@ -154,6 +154,21 @@ class TestReadVisium:
     def test_basic_load(self):
         pytest.skip("requires real Visium dataset")
 
+    def test_units_coordinates_are_in_um_like_the_shapes(self):
+        """The units table's obsm['spatial'] must be scaled like the spot geometries."""
+        import os
+        pytest.importorskip("spatialdata_io")
+        root = Path(os.environ.get(
+            "INSITUPY_VISIUM_TEST_DIR",
+            Path.home() / ".cache/InSituPy/demo_datasets/visium_hbreastcancer"
+            / "CytAssist_FFPE_Human_Breast_Cancer"))
+        if not (root / "spatial").is_dir():
+            pytest.skip("Visium test dataset not available")
+        xd = read_visium(root, dataset_name="v", fullres_pixel_size=0.5, verbose=False)
+        su = xd.units["visium"]
+        centroids = np.c_[su.shapes.centroid.x, su.shapes.centroid.y]
+        np.testing.assert_allclose(su.table.obsm["spatial"], centroids, atol=1.0)
+
 
 # ── read_qupath ───────────────────────────────────────────────────────────────
 
