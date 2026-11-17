@@ -45,7 +45,6 @@ from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment._metadata_frame import _GuardedMetadataFrame
 from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, FilterSpec
-from insitupy.io.data import read_xenium
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils._colors import _parse_unique_categories
@@ -1078,8 +1077,9 @@ class InSituExperiment:
 
     def add(self,
             data: str | os.PathLike | Path | InSituData,
-            mode: Literal["insitupy", "xenium"] = "insitupy",
-            metadata: dict = {}
+            mode: Literal["auto", "insitupy", "xenium", "atera", "visium", "visium_hd"] = "insitupy",
+            metadata: dict = {},
+            **reader_kwargs
             ):
         """
         Add a dataset to the experiment and update metadata.
@@ -1092,27 +1092,40 @@ class InSituExperiment:
 
         Args:
             data (Union[str, os.PathLike, Path, InSituData]): The dataset to add. Can be a path or an InSituData object.
-            mode (Literal["insitupy", "xenium"], optional): The mode for loading the dataset. Defaults to "insitupy".
+            mode (Literal["auto", "insitupy", "xenium", "atera", "visium", "visium_hd"], optional): The reader
+                used when ``data`` is a path: a saved InSituPy project (``"insitupy"``) or one of the readers
+                :func:`~insitupy.io.read_xenium`, :func:`~insitupy.io.read_atera`,
+                :func:`~insitupy.io.read_visium`, :func:`~insitupy.io.read_visium_hd`. ``"auto"`` detects the
+                format from marker files (see :meth:`from_config`). Defaults to "insitupy".
             metadata (dict, optional): Additional metadata to associate with the dataset. Defaults to an empty dictionary.
+            **reader_kwargs: Arguments forwarded to the reader (not allowed with ``mode="insitupy"`` or when
+                ``data`` is an ``InSituData`` object).
+
+        Note:
+            Samples without cell layers (e.g. from ``read_visium``) can be added, but ``build_table`` /
+            ``table`` / DGE across samples use cell layers only.
 
         Raises:
-            ValueError: If the mode is invalid, or if the dataset is already
-                present in this experiment and `metadata` conflicts with its
+            ValueError: If the mode is invalid, if reader arguments are given but not applicable, or if
+                the dataset is already present in this experiment and `metadata` conflicts with its
                 existing values.
             AssertionError: If the loaded dataset is not an InSituData object.
         """
+        from insitupy._io._dispatch import READER_NAMES, _detect_reader, _read_dataset
+
+        if mode != "auto" and mode not in READER_NAMES:
+            raise ValueError(f"Invalid mode '{mode}'. Valid values are: {['auto', *READER_NAMES]}.")
+
         # Check if the dataset is of the correct type
         try:
             data = Path(data)
         except TypeError:
+            if reader_kwargs:
+                raise ValueError("Reader arguments only apply when `data` is a path.") from None
             dataset = data
         else:
-            if mode == "insitupy":
-                dataset = InSituData.read(data, load_all=False)
-            elif mode == "xenium":
-                dataset = read_xenium(data)
-            else:
-                raise ValueError("Invalid mode. Supported modes are 'insitupy' and 'xenium'.")
+            reader = _detect_reader(data) if mode == "auto" else mode
+            dataset = _read_dataset(data, reader, reader_kwargs)
 
         # checks whether dataset is an instance of InSituData or any subclass of it, and avoids issues with direct object identity comparison
         if dataset.__class__ is not InSituData:
@@ -5182,8 +5195,9 @@ class InSituExperiment:
     @classmethod
     def from_config(cls,
                     config: str | os.PathLike | Path | pd.DataFrame,
-                    mode: Literal["insitupy", "xenium", "auto"] = "auto",
+                    mode: Literal["auto", "insitupy", "xenium", "atera", "visium", "visium_hd"] = "auto",
                     collect_warnings_mode: bool = True,
+                    reader_kwargs: dict[str, dict] | None = None,
                     **kwargs
                     ):
         """Create an InSituExperiment object from a configuration file or DataFrame.
@@ -5192,18 +5206,78 @@ class InSituExperiment:
             config (Union[str, os.PathLike, Path, pd.DataFrame]): Configuration specifying the
                 datasets to load. Either a path to a CSV or Excel file, or a :class:`pandas.DataFrame`
                 directly. Must contain a ``'directory'`` column with the path to each dataset.
-                When passing a DataFrame the index is ignored.
-            mode (Literal["insitupy", "xenium", "auto"]): The mode to use for loading the datasets.
+                An optional ``'reader'`` column overrides ``mode`` per row (empty cells fall back
+                to ``mode``). The ``'directory'`` and ``'reader'`` columns are used up; all other
+                columns are kept as sample metadata. When passing a DataFrame the index is ignored.
+            mode (Literal["auto", "insitupy", "xenium", "atera", "visium", "visium_hd"]): The default
+                reader for the datasets.
 
-                - "auto": Automatically detect the format of each directory by looking for ``.ispy``
-                  (InSituPy project) or ``experiment.xenium`` (Xenium output bundle). Raises a
-                  ``ValueError`` if neither marker file is found. Defaults to ``"auto"``.
-                - "insitupy": Load previously saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
-                - "xenium": Load Xenium data bundles directly using :func:`~insitupy.io.read_xenium`.
+                - "auto": Detect the format of each directory from marker files, in this order:
+                  ``.ispy`` -> insitupy; ``experiment.spatial`` or ``morphology_2d/`` -> atera;
+                  ``experiment.xenium`` -> xenium; ``binned_outputs/`` or ``segmented_outputs/`` ->
+                  visium_hd; ``spatial/scalefactors_json.json`` -> visium. A ``ValueError`` is raised
+                  if no marker or markers of several formats are found. Preproduction Atera data
+                  (Xenium-formatted) is detected as xenium; set ``mode`` or the ``reader`` column to
+                  ``"atera"`` to read it with :func:`~insitupy.io.read_atera` and get the Atera label.
+                  Defaults to ``"auto"``.
+                - "insitupy": Load saved InSituPy projects using :meth:`~insitupy._core.data.InSituData.read`.
+                - "xenium": :func:`~insitupy.io.read_xenium`.
+                - "atera": :func:`~insitupy.io.read_atera`.
+                - "visium": :func:`~insitupy.io.read_visium`.
+                - "visium_hd": :func:`~insitupy.io.read_visium_hd`.
 
             collect_warnings_mode (bool): If True, collect warnings during loading and print a summary at the end.
                 This keeps the progress bar clean while still showing important warnings. Defaults to True.
+            reader_kwargs (dict[str, dict], optional): Arguments for the readers, keyed by reader name
+                (``"xenium"``, ``"atera"``, ``"visium"``, ``"visium_hd"``). Each reader receives only its
+                own entry, e.g. ``{"visium": {"fullres_pixel_size": 0.2737}, "visium_hd": {"bin_size": [8, 16]}}``.
+                ``verbose=False`` is passed by default and can be overridden here. The arguments apply to
+                all samples read with that reader; samples that need different arguments (e.g. Visium
+                samples with different ``fullres_pixel_size``) have to be added one by one with :meth:`add`.
+            **kwargs: Deprecated. Plain keyword arguments are forwarded to ``read_xenium``; use
+                ``reader_kwargs={"xenium": {...}}`` instead.
+
+        Note:
+            Samples without cell layers (e.g. from ``read_visium``) load fine, but ``build_table`` /
+            ``table`` / DGE across samples use cell layers only.
+
+        Raises:
+            ValueError: If ``mode``, ``reader_kwargs`` or a ``reader`` value is invalid, or if any row
+                has a missing directory, an unknown reader or an undetectable format. All bad rows
+                are reported in one error before anything is read.
         """
+        from insitupy._io._dispatch import READER_NAMES, _detect_reader, _read_dataset
+
+        # validate mode and reader_kwargs
+        if mode != "auto" and mode not in READER_NAMES:
+            raise ValueError(f"Invalid mode '{mode}'. Valid values are: {['auto', *READER_NAMES]}.")
+
+        valid_kwargs_keys = [r for r in READER_NAMES if r != "insitupy"]
+        reader_kwargs = {} if reader_kwargs is None else reader_kwargs
+        if not isinstance(reader_kwargs, dict):
+            raise ValueError(f"`reader_kwargs` must be a dict keyed by reader name {valid_kwargs_keys}.")
+        for key, value in reader_kwargs.items():
+            if key not in valid_kwargs_keys:
+                raise ValueError(
+                    f"Invalid key '{key}' in `reader_kwargs`. Valid keys are: {valid_kwargs_keys}."
+                )
+            if not isinstance(value, dict):
+                raise ValueError(f"`reader_kwargs['{key}']` must be a dict.")
+        reader_kwargs = dict(reader_kwargs)
+
+        if kwargs:
+            warnings.warn(
+                "Plain keyword arguments of `from_config` are deprecated and will be removed; "
+                "pass reader_kwargs={'xenium': {...}} instead.",
+                FutureWarning, stacklevel=2
+            )
+            if "xenium" in reader_kwargs:
+                raise ValueError(
+                    "Reader arguments were given both as plain keyword arguments and in "
+                    "`reader_kwargs['xenium']`. Use only `reader_kwargs`."
+                )
+            reader_kwargs["xenium"] = dict(kwargs)
+
         if isinstance(config, pd.DataFrame):
             config = config.reset_index(drop=True)
         else:
@@ -5228,45 +5302,69 @@ class InSituExperiment:
         # Create a warning collector if collect_warnings_mode is enabled
         warning_collector = WarningCollector() if collect_warnings_mode else None
 
-        def _resolve_mode(path: Path) -> str:
-            if (path / ISPY_METADATA_FILE).exists():
-                return "insitupy"
-            elif (path / "experiment.xenium").exists():
-                return "xenium"
-            else:
-                raise ValueError(
-                    f"Cannot auto-detect format for '{path}': neither '{ISPY_METADATA_FILE}' "
-                    f"nor 'experiment.xenium' was found. Set 'mode' explicitly."
-                )
-
-        # Iterate over each row in the configuration file
-        for i in tqdm(range(len(config))):
+        # Pass 1: validate every row before anything is read
+        has_reader_col = 'reader' in config.columns
+        plan: list[tuple[Path, str]] = []
+        problems: list[str] = []
+        for i in range(len(config)):
             row = config.iloc[i, :]
-            dataset_path = Path(row['directory'])
-
-            # Check if the path is relative and if so, append the current path
+            directory = row['directory']
+            dataset_path = Path(str(directory))
             if not dataset_path.is_absolute():
                 dataset_path = current_path / dataset_path
 
-            # Check if the directory exists
-            if not dataset_path.exists():
-                raise FileNotFoundError(f"No such directory found: {str(dataset_path)}")
+            row_reader = mode
+            if has_reader_col:
+                value = row['reader']
+                if not pd.isna(value) and str(value).strip() != "":
+                    row_reader = str(value).strip().lower()
 
-            resolved_mode = _resolve_mode(dataset_path) if mode == "auto" else mode
+            try:
+                if not dataset_path.exists():
+                    raise ValueError(f"No such directory found: {str(dataset_path)}")
+                if row_reader != "auto" and row_reader not in READER_NAMES:
+                    raise ValueError(
+                        f"Invalid reader '{row_reader}'. Valid values are: {['auto', *READER_NAMES]}."
+                    )
+                if row_reader == "auto":
+                    row_reader = _detect_reader(dataset_path)
+            except ValueError as e:
+                problems.append(f"row {i} ({directory}): {e}")
+                continue
+            plan.append((dataset_path, row_reader))
+
+        if problems:
+            raise ValueError(
+                "Cannot create experiment, the following rows of the configuration are invalid:\n"
+                + "\n".join(problems)
+            )
+
+        if kwargs and not any(r == "xenium" for _, r in plan):
+            warnings.warn(
+                "Plain keyword arguments were ignored because no sample is read with the 'xenium' reader.",
+                UserWarning, stacklevel=2
+            )
+
+        drop_labels = ['directory'] + (['reader'] if has_reader_col else [])
+
+        # Pass 2: read
+        for i in tqdm(range(len(config))):
+            row = config.iloc[i, :]
+            dataset_path, resolved_reader = plan[i]
+
+            if resolved_reader == "insitupy":
+                read_kwargs = None
+            else:
+                read_kwargs = {"verbose": False, **reader_kwargs.get(resolved_reader, {})}
 
             ctx = collect_warnings(warning_collector) if collect_warnings_mode else contextlib.nullcontext()
             with ctx:
-                if resolved_mode == "insitupy":
-                    dataset = InSituData.read(dataset_path, load_all=False)
-                elif resolved_mode == "xenium":
-                    dataset = read_xenium(dataset_path, verbose=False, **kwargs)
-                else:
-                    raise ValueError(f"Invalid mode '{resolved_mode}'. Supported modes are 'insitupy', 'xenium', and 'auto'.")
+                dataset = _read_dataset(dataset_path, resolved_reader, read_kwargs)
 
             experiment._data.append(dataset)
 
-            # Extract metadata from the row, excluding the 'directory' column
-            metadata = row.drop(labels=['directory']).to_dict()
+            # Extract metadata from the row, excluding the 'directory' (and 'reader') column
+            metadata = row.drop(labels=drop_labels).to_dict()
             slot_uid = str(uuid4()).split("-")[0]
             metadata['uid'] = slot_uid
             dataset._uid = slot_uid
