@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from insitupy._constants import ISPY_METADATA_FILE
 from insitupy._io._atera import ATERA_METADATA_FILE, ATERA_MORPHOLOGY_DIR
@@ -15,7 +15,7 @@ from insitupy._io._atera import ATERA_METADATA_FILE, ATERA_MORPHOLOGY_DIR
 if TYPE_CHECKING:
     from insitupy._core.data import InSituData
 
-ReaderName = Literal["insitupy", "xenium", "atera", "visium", "visium_hd"]
+# Keep in sync with the `mode` Literals of InSituExperiment.add / from_config.
 READER_NAMES: tuple[str, ...] = ("insitupy", "xenium", "atera", "visium", "visium_hd")
 
 XENIUM_METADATA_FILE = "experiment.xenium"
@@ -99,5 +99,5 @@ def _read_dataset(path: Path, reader: str, kwargs: dict | None = None) -> InSitu
     """Read a directory with the named reader."""
     kwargs = dict(kwargs) if kwargs else {}
     if reader == "insitupy" and kwargs:
-        raise ValueError("InSituData.read takes no reader arguments.")
+        raise ValueError(f"InSituData.read takes no reader arguments, got: {sorted(kwargs)}.")
     return _get_reader(reader)(path, **kwargs)

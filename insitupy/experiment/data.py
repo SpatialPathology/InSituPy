@@ -25,7 +25,6 @@ from tqdm import tqdm
 
 from insitupy._constants import (
     DEFAULT_CATEGORICAL_CMAP,
-    ISPY_METADATA_FILE,
     LOAD_FUNCS,
     MODALITIES,
     MODALITIES_ABBR,
@@ -1121,7 +1120,9 @@ class InSituExperiment:
             data = Path(data)
         except TypeError:
             if reader_kwargs:
-                raise ValueError("Reader arguments only apply when `data` is a path.") from None
+                raise ValueError(
+                    f"Reader arguments only apply when `data` is a path, got: {sorted(reader_kwargs)}."
+                ) from None
             dataset = data
         else:
             reader = _detect_reader(data) if mode == "auto" else mode
