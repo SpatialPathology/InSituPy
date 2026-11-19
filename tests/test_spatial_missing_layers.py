@@ -126,6 +126,20 @@ def test_experiment_no_sample_has_layer_raises():
         isp.pl.spatial(exp, keys="val", units_layer=UNITS, show=False)
 
 
+def test_sample_without_layer_is_not_checked_for_the_image():
+    # s0 lacks the units layer (skipped, empty panel); it must not also be reported as
+    # missing the image, and s1, which has both, gets its image
+    s1 = _xd("s1", units=True, bin_size=16)
+    s1.images.add_image(np.zeros((100, 100), dtype=np.uint8), channel_names="he", axes="YX",
+                        pixel_size=1.0, verbose=False)
+    exp = _experiment(_xd("s0"), s1)
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        isp.pl.spatial(exp, keys="val", units_layer=UNITS, image_key="he", show=False)
+    assert not [w for w in rec if "image_key" in str(w.message)]
+    assert sum(len(a.images) for a in plt.gcf().axes) == 1
+
+
 def test_experiment_sample_without_sample_id_gets_a_title():
     # read_visium_hd leaves sample_id None; one key over several samples puts the sample
     # name into the title (`sample_name + "\n" + key`), which raised a TypeError
