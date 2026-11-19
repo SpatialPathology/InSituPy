@@ -810,21 +810,6 @@ def get_plotting_api() -> str:
         except Exception:
             pass
 
-        # FACS — lives in its own submodule, may not be re-exported at pl top-level
-        try:
-            _facs_mod = importlib.import_module("insitupy.plotting.facs")
-            facs_obj = getattr(_facs_mod, "facs", None)
-            if facs_obj is not None:
-                lines.append("## FACS")
-                sig = _format_signature(facs_obj)
-                desc = _short_doc(facs_obj)
-                lines.append(f"  facs{sig}")
-                if desc:
-                    lines.append(f"    {desc}")
-                lines.append("")
-        except Exception:
-            pass
-
     except Exception as exc:
         lines.append(f"(Could not introspect plotting module: {exc})")
 
