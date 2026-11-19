@@ -71,10 +71,11 @@ def plot_qc_metrics(
         )
 
     if isinstance(data, AnnData):
-        adata = data.copy()
+        src = data
     else:
-        celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)
-        adata = celldata.table.copy()
+        src = _get_cell_layer(cells=data.cells, cells_layer=cells_layer).table
+    # only .obs and .var are read below, so skip the (potentially huge) count matrix
+    adata = AnnData(obs=src.obs.copy(), var=src.var.copy())
 
     # Validate batch column exists
     if batch is not None:
@@ -210,6 +211,12 @@ def plot_qc_metrics(
     num_scatter = 1 if (genes_metric in obs_metrics and counts_metric in obs_metrics) else 0
     num_obs_plots = len(obs_metrics) + len(additional_obs_metrics) + num_scatter
     num_var_plots = len(var_metrics) + len(additional_var_metrics)
+
+    if num_obs_plots + num_var_plots == 0:
+        raise ValueError(
+            "No QC metrics found to plot. Run isp.pp.calculate_qc_metrics first, "
+            "or pass additional_obs/additional_var."
+        )
 
     # Determine layout
     if batch is not None:

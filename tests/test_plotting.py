@@ -271,6 +271,30 @@ class TestPlotQcMetrics:
         plot_qc_metrics(adata, plot_var=False)
         plt.close("all")
 
+    def test_plot_qc_metrics_without_metrics_raises(self):
+        rng = np.random.default_rng(0)
+        adata = AnnData(
+            X=rng.integers(1, 50, size=(10, 4)).astype(float),
+            obs=pd.DataFrame(index=[f"c{i}" for i in range(10)]),
+            var=pd.DataFrame(index=[f"g{j}" for j in range(4)]),
+        )
+        plt.close("all")
+        with pytest.raises(ValueError, match="No QC metrics found"):
+            plot_qc_metrics(adata)
+        plt.close("all")
+
+    def test_plot_qc_metrics_does_not_modify_input(self):
+        adata = self._make_adata_with_qc()
+        x_before = adata.X
+        obs_cols = list(adata.obs.columns)
+        var_cols = list(adata.var.columns)
+        plt.close("all")
+        plot_qc_metrics(adata, additional_obs="total_counts")
+        plt.close("all")
+        assert adata.X is x_before
+        assert list(adata.obs.columns) == obs_cols
+        assert list(adata.var.columns) == var_cols
+
 
 # ── pl.facs ─────────────────────────────────────────────────────────────────
 
