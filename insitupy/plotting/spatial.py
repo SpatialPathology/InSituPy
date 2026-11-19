@@ -11,10 +11,12 @@ import dask.array as da
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from anndata import AnnData
 from matplotlib import colors
+from matplotlib.collections import PathCollection
 from matplotlib.colors import ListedColormap
+from matplotlib.markers import MarkerStyle
+from matplotlib.transforms import IdentityTransform
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (
@@ -100,7 +102,8 @@ class PlotConfig(_UpdatablePlottingConfig):
     Attributes:
         xlim (Optional[Tuple[float, float]]): X-axis limits.
         ylim (Optional[Tuple[float, float]]): Y-axis limits.
-        spot_size (float): Size of scatter plot spots (default: 10).
+        spot_size (float): Marker extent in um - diameter of circles, edge of squares
+            (default: 10).
         alpha (float): Transparency level for plotted elements (default: 1.0).
         cmap (str): Colormap for continuous variables.
         palette (str): Color palette for categorical variables.
@@ -364,7 +367,9 @@ def spatial(
         filter_tuple (tuple, optional): Parameters for filtering (depends on ``filter_mode``).
         xlim (tuple of float, optional): X-axis limits.
         ylim (tuple of float, optional): Y-axis limits.
-        spot_size (float): Marker size for cells. Default is 10.
+        spot_size (float): Marker extent in um (diameter of circles, edge of squares),
+            drawn at this true size at any zoom level or dpi; markers smaller than one
+            pixel are drawn at one pixel. Default is 10.
         alpha (float): Transparency for plotted markers. Default is 1.0.
         nan_color (str, optional): Color for cells with missing values (NaN) in
             categorical columns. If None (default), NaN cells are excluded from the
@@ -707,7 +712,8 @@ def _single_spatial(
             region_tuple=data_config.region_tuple,
             xlim=plot_config.xlim, ylim=plot_config.ylim,
             obsm_key=data_config.obsm_key,
-            origin_zero=plot_config.origin_zero
+            origin_zero=plot_config.origin_zero,
+            margin=plot_config.spot_size / 2,
             )
 
         image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = _extract_image_information(
@@ -729,14 +735,6 @@ def _single_spatial(
             plot_config=plot_config, layout_config=layout_config,
             xlim=xlim, ylim=ylim
         )
-
-        # calculate the marker size - must be done AFTER the axes are configured!
-        size = _calculate_marker_size(
-            ax=ax,
-            plot_config=plot_config,
-            fig=fig)
-
-        # size=5
 
         if image is not None:
             # plot image data
@@ -768,15 +766,15 @@ def _single_spatial(
                     color_values = _coerce_na_for_plot(color_values)
                     color_dict = {**color_dict, NA_CATEGORY: plot_config.nan_color}
 
-            sns.scatterplot(
-                x=x_coords, y=y_coords,
-                hue=color_values,
-                marker=plot_config.spot_type,
-                s=size,
-                linewidth=0,
-                palette=color_dict,
-                alpha=plot_config.alpha,
-                ax=ax
+            # one RGBA row per category, indexed by category code (vectorized for millions of bins)
+            codes = pd.Categorical(np.asarray(color_values, dtype=object),
+                                   categories=list(color_dict)).codes
+            if (codes < 0).any():
+                missing = sorted({str(v) for v in np.asarray(color_values, dtype=object)[codes < 0]})
+                raise ValueError(f"No color defined for categories {missing} of key '{key}'.")
+            _scatter_data_units(
+                ax, x_coords, y_coords, plot_config,
+                facecolors=colors.to_rgba_array(list(color_dict.values()))[codes],
                 )
 
             # add legend
@@ -797,20 +795,13 @@ def _single_spatial(
             lax.set_xticks([])
             lax.set_yticks([])
             lax.axis('off')
-
-            # Remove the legend from the main axis
-            ax.legend().remove()
         else:
-            s = ax.scatter(
-                x_coords,
-                y_coords,
-                c=color_values,
-                marker=plot_config.spot_type,
-                s=size,
-                alpha=plot_config.alpha,
-                linewidths=0,
+            # NaN values are masked, i.e. drawn in the colormap's "bad" color (transparent)
+            s = _scatter_data_units(
+                ax, x_coords, y_coords, plot_config,
+                array=np.ma.masked_invalid(np.asarray(color_values, dtype=float).ravel()),
                 cmap=plot_config.cmap,
-                norm=plot_config.normalize
+                norm=plot_config.normalize,
                 )
 
             # divide axis to fit colorbar
@@ -1238,8 +1229,14 @@ def _prepare_limits_and_coordinates(
     xlim,
     ylim,
     obsm_key,
-    origin_zero
+    origin_zero,
+    margin=0.0,
     ):
+    """Return marker coordinates and axis limits in um.
+
+    ``margin`` (um) is added on each side of the data extent for limits that are
+    neither given nor derived from ``region_tuple``.
+    """
 
     # prepare limits using region or lim arguments
     if region_tuple is not None:
@@ -1275,19 +1272,12 @@ def _prepare_limits_and_coordinates(
         if ylim is not None:
             ylim = [ylim[0] - y_offset, ylim[1] - y_offset]
 
+    # default limits: data extent plus a margin, so that edge markers are not cut in half
     if xlim is None:
-        xmin = x_coords.min()
-        xmax = x_coords.max()
-
-        # include margin
-        xlim = (xmin, xmax)
+        xlim = (x_coords.min() - margin, x_coords.max() + margin)
 
     if ylim is None:
-        ymin = y_coords.min()
-        ymax = y_coords.max()
-
-        # include margin
-        ylim = (ymin, ymax)
+        ylim = (y_coords.min() - margin, y_coords.max() + margin)
 
     return x_coords, y_coords, xlim, ylim
 
@@ -1396,17 +1386,70 @@ def _set_units_marker_defaults(data, units_layer, plot_config):
         plot_config.update_values(spot_type="o", spot_size=2 * float(np.sqrt(median_area / np.pi)))
 
 
-def _calculate_marker_size(
-    ax,
-    plot_config,
-    fig
-    ):
-    # calculate marker size
-    pixels_per_unit = ax.transData.transform(
-        [(0, 1), (1, 0)]) - ax.transData.transform((0, 0))
-    # x_ppu = pixels_per_unit[1, 0]
-    y_ppu = pixels_per_unit[0, 1]
-    pxs = y_ppu * plot_config.spot_size
-    size = (72. / fig.dpi * pxs)**2
+class _DataUnitMarkers(PathCollection):
+    """Scatter markers whose size is given in data units (um) instead of points.
 
-    return size
+    Matplotlib sizes scatter markers in points^2, so a size in um has to be converted
+    with the pixels per um of the axes. That value is only final at draw time: the
+    equal aspect shrinks the axes box when the figure is drawn, and colorbar/legend
+    axes appended with ``make_axes_locatable`` take space afterwards. Converting
+    earlier draws the markers too large (1.2-4x, depending on the data aspect ratio),
+    so this collection resets its sizes from the current ``transData`` on every
+    draw. That also keeps them right after zooming, resizing or saving at another dpi.
+
+    Args:
+        ax: Axes to draw into (offsets are in its data coordinates).
+        offsets: (n, 2) marker centers in data units.
+        size: Marker extent in data units - square edge for ``"s"``, diameter for ``"o"``.
+        marker: Matplotlib marker specification.
+        min_px: Lower bound of the drawn marker extent in display pixels, so that
+            markers smaller than a pixel (whole-slide views of small bins) stay visible.
+        **kwargs: Forwarded to :class:`~matplotlib.collections.PathCollection`
+            (``facecolors``, ``array``, ``cmap``, ``norm``, ``alpha``, ...).
+    """
+
+    def __init__(self, ax, offsets, size, marker="o", min_px=1.0, **kwargs):
+        marker_obj = marker if isinstance(marker, MarkerStyle) else MarkerStyle(marker)
+        path = marker_obj.get_path().transformed(marker_obj.get_transform())
+        kwargs.setdefault("linewidths", 0)
+        super().__init__(
+            (path,), sizes=[1.0], offsets=offsets, offset_transform=ax.transData, **kwargs
+        )
+        # marker paths are scaled in display space (as in Axes.scatter); without this,
+        # add_collection would set transData and draw the paths in data units
+        self.set_transform(IdentityTransform())
+        self.marker = marker
+        self.data_size = float(size)
+        self.min_px = float(min_px)
+        self._clamp_logged = False
+
+    def _size_in_px(self):
+        """Marker extent in display pixels for the current axes layout (before clamping)."""
+        trans = self.axes.transData
+        px_per_unit = abs(trans.transform((0, 1))[1] - trans.transform((0, 0))[1])
+        return self.data_size * px_per_unit
+
+    def draw(self, renderer):
+        px = self._size_in_px()
+        if px < self.min_px:
+            if not self._clamp_logged:
+                logger.info(
+                    f"Markers of {self.data_size:g} um are {px:.2f} px wide at this zoom level and "
+                    f"are drawn at {self.min_px:g} px. Zoom in (xlim/ylim), enlarge figsize or "
+                    "save with a higher dpi_save to see them at their true size."
+                )
+                self._clamp_logged = True
+            px = self.min_px
+        # sizes are in points^2; points = pixels * 72 / dpi (dpi is the save dpi while saving)
+        self.set_sizes([(px * 72.0 / self.figure.dpi) ** 2])
+        super().draw(renderer)
+
+
+def _scatter_data_units(ax, x, y, plot_config, **kwargs):
+    """Draw markers of ``plot_config.spot_size`` um at (x, y) and return the collection."""
+    coll = _DataUnitMarkers(
+        ax, np.column_stack([x, y]), size=plot_config.spot_size,
+        marker=plot_config.spot_type, alpha=plot_config.alpha, **kwargs,
+    )
+    ax.add_collection(coll, autolim=False)
+    return coll
