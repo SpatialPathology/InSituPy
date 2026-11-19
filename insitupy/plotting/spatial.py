@@ -351,7 +351,9 @@ def spatial(
             a list of classes) to overlay. Pass just the key as a plain string to
             overlay all classes in that category.
         annotations_key (tuple or str, optional): Deprecated. Use ``annotation_tuple`` instead.
-        image_key (str, optional): Key for associated images to overlay.
+        image_key (str, optional): Key for associated images to overlay. In an experiment, samples
+            without this image are plotted without one (with a warning); a single sample without
+            it raises a ``ValueError``.
         filter_mode (str, optional): Mode used for filtering cells (e.g., "contains", "greater than").
         filter_tuple (tuple, optional): Parameters for filtering (depends on ``filter_mode``).
         xlim (tuple of float, optional): X-axis limits.
@@ -469,6 +471,8 @@ def spatial(
             "figsize sets the total figure size and takes precedence.",
             UserWarning, stacklevel=3,
         )
+
+    _check_image_key(data, data_config.image_key)
 
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
@@ -678,7 +682,7 @@ def _single_spatial(
         crange = color_config[key]["crange"]
         categorical = color_config[key]["is_categorical"] # True if color_dict is not None
 
-        x_coords, y_coords, xlim, ylim = _prepare_limits_and_coordinates(
+        x_coords, y_coords, xlim, ylim, (x_offset, y_offset) = _prepare_limits_and_coordinates(
             adata=adata,
             regions_data=regions_data,
             region_tuple=data_config.region_tuple,
@@ -689,7 +693,9 @@ def _single_spatial(
 
         image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = _extract_image_information(
             image_data, image_key=data_config.image_key,
-            xlim=xlim, ylim=ylim,
+            # the image lives in absolute coordinates: undo the origin_zero shift
+            xlim=(xlim[0] + x_offset, xlim[1] + x_offset),
+            ylim=(ylim[0] + y_offset, ylim[1] + y_offset),
             pixelwidth_per_subplot=plot_config.pixelwidth_per_subplot,
             histogram_setting=plot_config.histogram_setting
         )
@@ -698,6 +704,12 @@ def _single_spatial(
             annotations_data,
             annotations_key=data_config.annotations_key
         )
+        if annotations_df is not None and (x_offset or y_offset):
+            # annotations are stored in um, like the cell coordinates: shift them too
+            annotations_df = annotations_df.copy()
+            annotations_df["geometry"] = annotations_df.geometry.translate(
+                xoff=-x_offset, yoff=-y_offset
+            )
 
         # set the axes (add titles, set limits, etc.)
         _configure_axis_and_title(
@@ -718,10 +730,10 @@ def _single_spatial(
         if image is not None:
             # plot image data
             extent = (
-                pixel_xlim[0] * pixel_size - 0.5,
-                pixel_xlim[1] * pixel_size - 0.5,
-                pixel_ylim[1] * pixel_size - 0.5,
-                pixel_ylim[0] * pixel_size - 0.5
+                pixel_xlim[0] * pixel_size - x_offset,
+                pixel_xlim[1] * pixel_size - x_offset,
+                pixel_ylim[1] * pixel_size - y_offset,
+                pixel_ylim[0] * pixel_size - y_offset
                 )
 
             ax.imshow(
@@ -1177,11 +1189,10 @@ def _get_data(
     else:
         sample_name = meta[data_config.name_column]
 
-    if data_config.image_key is not None:
-        if not xd.images.is_empty:
-            imagedata = xd.images
-        else:
-            imagedata = None
+    # samples without the requested image are plotted without one (spatial() has
+    # already validated the key and warned/raised)
+    if data_config.image_key is not None and data_config.image_key in xd.images:
+        imagedata = xd.images
     else:
         imagedata = None
 
@@ -1198,6 +1209,38 @@ def _get_data(
         # else:
         #     #if ConfigData.categorical:
         #     ax.set_axis_off()
+
+def _check_image_key(data, image_key):
+    """Validate ``image_key`` before plotting.
+
+    A single sample without the image raises. For an experiment, samples without it
+    are plotted without an image and one warning lists them; it raises only if no
+    sample has the image.
+    """
+    if image_key is None:
+        return
+
+    def _not_found(available):
+        msg = f"image_key '{image_key}' not found. Available images: {list(available)}."
+        if not available:
+            msg += " Call load_images() first if the list is empty."
+        return msg
+
+    if _is_experiment(data):
+        missing = [xd.sample_id for xd in data.data if image_key not in xd.images]
+        if len(missing) == len(data.data):
+            available = sorted({k for xd in data.data for k in xd.images.keys()})
+            raise ValueError(_not_found(available) + " No sample has this image.")
+        if missing:
+            warnings.warn(
+                f"image_key '{image_key}' not found in sample(s) {missing}; "
+                "plotting them without an image.",
+                # helper -> spatial -> @with_insitupy_style wrapper -> caller
+                UserWarning, stacklevel=4,
+            )
+    elif image_key not in data.images:
+        raise ValueError(_not_found(data.images.keys()))
+
 
 def _prepare_limits_and_coordinates(
     adata,
@@ -1257,7 +1300,7 @@ def _prepare_limits_and_coordinates(
         # include margin
         ylim = (ymin, ymax)
 
-    return x_coords, y_coords, xlim, ylim
+    return x_coords, y_coords, xlim, ylim, (x_offset, y_offset)
 
 def _extract_image_information(
     ImageDataObject,
@@ -1282,7 +1325,11 @@ def _extract_image_information(
         if not isinstance(img_pyramid, (list, tuple)):
             # a single array (e.g. an image added in memory) is a one-level pyramid
             img_pyramid = [img_pyramid]
-        pixel_sizes_levels = np.array([orig_pixel_size * (2**i) for i in range(len(img_pyramid))])
+        # level pixel sizes from the level widths (not assuming a factor of 2 between levels)
+        base_w = img_pyramid[0].shape[1]
+        pixel_sizes_levels = np.array(
+            [orig_pixel_size * base_w / lvl.shape[1] for lvl in img_pyramid]
+        )
 
         try:
             selected_level = np.where(pixel_sizes_levels <= max_pixel_size)[0][-1].item()
@@ -1311,11 +1358,25 @@ def _extract_image_information(
             pixel_xlim[0]:pixel_xlim[1]
             ]
 
+        # draw at most ~2 pixels per display pixel: stride the array only (the crop
+        # still covers the same area, so pixel size and pixel limits stay unchanged)
+        k = int(max_pixel_size // selected_pixel_size)
+        if k > 1:
+            image = image[::k, ::k]
+
+        if image.size == 0:
+            # limits fully outside the image: nothing to draw
+            return None, selected_pixel_size, None, None, pixel_xlim, pixel_ylim
+
         if histogram_setting is None:
             vmin = vmax = None
         elif histogram_setting == "auto":
-            vmin = da.percentile(image.ravel(), 30).compute().item()
-            vmax = da.percentile(image.ravel(), 99.5).compute().item()
+            if ImageDataObject.metadata[image_key].get("rgb", False):
+                # RGB images are drawn without a value range
+                vmin = vmax = None
+            else:
+                vmin = da.percentile(image.ravel(), 30).compute().item()
+                vmax = da.percentile(image.ravel(), 99.5).compute().item()
         elif isinstance(histogram_setting, tuple):
             vmin = histogram_setting[0]
             vmax = histogram_setting[1]
