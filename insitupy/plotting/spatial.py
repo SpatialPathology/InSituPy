@@ -4,7 +4,7 @@ import gc
 import logging
 import math
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 import dask.array as da
@@ -106,7 +106,9 @@ class PlotConfig(_UpdatablePlottingConfig):
             (default: 10).
         alpha (float): Transparency level for plotted elements (default: 1.0).
         cmap (str): Colormap for continuous variables.
-        palette (str): Color palette for categorical variables.
+        palette (Optional[ListedColormap]): Color palette for categorical variables. ``None``
+            (default) uses complete colors stored in ``uns['{key}_colors']``, else the default
+            categorical palette. An explicit palette always wins.
         spot_type (str): Marker type for scatter plots (default: "o").
         background_color (str): Background color of the plot (default: "white").
         cmap_center (Optional[float]): Center value for diverging colormaps.
@@ -133,7 +135,7 @@ class PlotConfig(_UpdatablePlottingConfig):
     spot_size: float = 10
     alpha: float = 1.0
     cmap: str = DEFAULT_CONTINUOUS_CMAP
-    palette: ListedColormap = field(default_factory=lambda: DEFAULT_CATEGORICAL_CMAP)
+    palette: ListedColormap | None = None
     spot_type: str = "o"
     background_color: str = "white"
     nan_color: str | None = None
@@ -504,7 +506,10 @@ def spatial(
             data._sync_colors(
                 keys=keys,
                 cells_layer=cells_layer,
-                palette=plot_config.palette,
+                palette=(
+                    plot_config.palette if plot_config.palette is not None
+                    else DEFAULT_CATEGORICAL_CMAP
+                ),
                 overwrite=False,
                 quiet=True,
             )
@@ -982,13 +987,13 @@ class _ColorConfigMultiPlot:
             if is_categorical:
                 color_entry["is_categorical"] = True
                 color_entry["has_na"] = bool(pd.isna(color_values).any())
-                # check if colors were saved in uns
-                uns_key = f"{key}_colors"
-                if uns_key in ad.uns.keys() and plot_config.palette is None:
-                    hex_list = ad.uns[uns_key]
-                    color_entry["color_dict"] = {
-                        c: hex_list[i] for i, c in enumerate(color_values.cat.categories)
-                        }
+                # complete colors saved in uns are used unless a palette was given explicitly
+                stored = (
+                    _stored_color_dict(ad, key, color_values)
+                    if plot_config.palette is None else None
+                )
+                if stored is not None:
+                    color_entry["color_dict"] = stored
                 else:
                     # create a new color mapping
                     color_entry["color_dict"] = create_cmap_mapping(
@@ -1014,6 +1019,7 @@ class _ColorConfigMultiPlot:
             value_list = []
             categorical_list = []
             has_na = False
+            stored_dicts = []  # stored uns colors per sample (None if unusable)
             for xd in data_list:
                 celldata = _get_table_layer(
                     xd, cells_layer=cells_layer, units_layer=units_layer
@@ -1029,6 +1035,7 @@ class _ColorConfigMultiPlot:
                     if is_categorical:
                         has_na |= bool(pd.isna(color_values).any())
                         value_list.append(np.asarray(_parse_unique_categories(color_values)))
+                        stored_dicts.append(_stored_color_dict(ad, key, color_values))
                     else:
                         value_list.append(np.asarray(color_values, dtype=float).ravel())
 
@@ -1040,9 +1047,16 @@ class _ColorConfigMultiPlot:
             if np.all(categorical_list):
                 # all values are categorical - concatenate all values
                 all_values = np.unique(np.concatenate(value_list))
-                color_entry["color_dict"] = create_cmap_mapping(
-                    all_values, cmap=plot_config.palette
-                    )
+                merged = (
+                    _merge_stored_color_dicts(stored_dicts, all_values)
+                    if plot_config.palette is None else None
+                )
+                if merged is not None:
+                    color_entry["color_dict"] = merged
+                else:
+                    color_entry["color_dict"] = create_cmap_mapping(
+                        all_values, cmap=plot_config.palette
+                        )
                 color_entry["is_categorical"] = True
                 color_entry["has_na"] = has_na
 
@@ -1063,6 +1077,34 @@ class _ColorConfigMultiPlot:
                 raise ValueError(f"Values found for key {key} showed mixed type (categorical/numeric).")
 
         return color_entry
+
+def _stored_color_dict(adata, key, color_values):
+    """Return ``{category: color}`` from ``adata.uns['{key}_colors']`` or None.
+
+    Only used for categorical obs columns whose stored color list is complete
+    (scanpy convention: colors in ``.cat.categories`` order).
+    """
+    if not isinstance(getattr(color_values, "dtype", None), pd.CategoricalDtype):
+        return None
+    categories = color_values.cat.categories
+    stored = adata.uns.get(f"{key}_colors")
+    if stored is None or len(stored) < len(categories):
+        return None
+    return {cat: stored[i] for i, cat in enumerate(categories)}
+
+
+def _merge_stored_color_dicts(stored_dicts, all_values):
+    """Merge per-sample stored color dicts; None unless all are usable and agree."""
+    if len(stored_dicts) == 0 or any(d is None for d in stored_dicts):
+        return None
+    merged = {}
+    for d in stored_dicts:
+        for cat, color in d.items():
+            color = colors.to_hex(color).lower()
+            if merged.setdefault(cat, color) != color:
+                return None  # same category, different colors across samples
+    return {cat: merged[cat] for cat in all_values if cat in merged}
+
 
 def _get_crange(color_values, crange_type):
     if crange_type == 'max':

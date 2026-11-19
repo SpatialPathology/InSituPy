@@ -18,7 +18,7 @@ import insitupy as isp
 from insitupy._core.data import InSituData
 from insitupy.containers.cell_data import CellData
 from insitupy.plotting.spatial import DataConfig, PlotConfig, _ColorConfigMultiPlot
-from insitupy.utils._colors import _extract_color_values
+from insitupy.utils._colors import _extract_color_values, create_cmap_mapping
 
 
 def _make_xd(values, sample_id="s1", sparse=None, seed=0):
@@ -116,3 +116,76 @@ def test_extract_color_values_returns_copy_of_dense_column():
     values[:] = -1
     np.testing.assert_allclose(xd.cells["main"].table.X[:, 0], dense[:, 0])
     assert not issparse(values)
+
+
+# ---- stored category colors (uns["{key}_colors"]) ----
+
+def _make_cat_xd(sample_id, categories, stored=None, seed=0, as_object=False, n=30):
+    xd, _ = _make_xd(np.arange(n, dtype=float), sample_id, seed=seed)
+    table = xd.cells["main"].table
+    labels = np.array(categories)[np.arange(n) % len(categories)]
+    table.obs["celltype"] = labels if as_object else pd.Categorical(labels, categories=sorted(categories))
+    if stored is not None:
+        table.uns["celltype_colors"] = list(stored)
+    return xd
+
+
+def _color_dict(data, **plot_kwargs):
+    cfg = _ColorConfigMultiPlot(
+        data=data, data_config=DataConfig(), plot_config=PlotConfig(**plot_kwargs),
+        keys=["celltype"],
+    )
+    return cfg["celltype"]["color_dict"]
+
+
+def test_stored_colors_used_by_default():
+    xd = _make_cat_xd("a", ["A", "B", "C"], stored=["#ff0000", "#00ff00", "#0000ff"])
+    assert _color_dict(xd) == {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+
+
+def test_stored_colors_are_drawn():
+    xd = _make_cat_xd("a", ["A", "B"], stored=["#ff0000", "#00ff00"])
+    isp.pl.spatial(xd, keys="celltype", show=False)
+    ax = plt.gcf().axes[0]
+    drawn = {tuple(np.round(fc, 2)) for c in ax.collections for fc in c.get_facecolor()}
+    plt.close("all")
+    assert (1.0, 0.0, 0.0, 1.0) in drawn and (0.0, 1.0, 0.0, 1.0) in drawn
+
+
+def test_explicit_palette_wins_over_stored_colors():
+    from matplotlib.colors import ListedColormap
+    xd = _make_cat_xd("a", ["A", "B"], stored=["#ff0000", "#00ff00"])
+    pal = ListedColormap(["#123456", "#654321"])
+    cd = _color_dict(xd, palette=pal)
+    assert colors_to_hex(cd) == {"A": "#123456", "B": "#654321"}
+
+
+def colors_to_hex(cd):
+    from matplotlib.colors import to_hex
+    return {k: to_hex(v) for k, v in cd.items()}
+
+
+@pytest.mark.parametrize("variant", ["short_list", "object_dtype", "no_stored"])
+def test_unusable_stored_colors_fall_back_to_palette(variant):
+    xd = _make_cat_xd(
+        "a", ["A", "B", "C"],
+        stored=["#ff0000"] if variant == "short_list" else None,
+        as_object=variant == "object_dtype",
+    )
+    cd = _color_dict(xd)
+    assert set(cd) == {"A", "B", "C"}
+    assert "#ff0000" not in colors_to_hex(cd).values()
+
+
+def test_multi_sample_stored_colors_merged_when_consistent():
+    a = _make_cat_xd("a", ["A", "B"], stored=["#ff0000", "#00ff00"])
+    b = _make_cat_xd("b", ["B", "C"], stored=["#00ff00", "#0000ff"], seed=1)
+    assert _color_dict(_experiment(a, b)) == {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+
+
+def test_multi_sample_conflicting_stored_colors_fall_back_to_palette():
+    a = _make_cat_xd("a", ["A", "B"], stored=["#ff0000", "#00ff00"])
+    b = _make_cat_xd("b", ["A", "B"], stored=["#00ff00", "#ff0000"], seed=1)
+    cd = _color_dict(_experiment(a, b))
+    assert set(cd) == {"A", "B"}
+    assert cd == create_cmap_mapping(np.array(["A", "B"]))
