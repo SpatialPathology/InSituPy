@@ -513,7 +513,7 @@ def spatial(
             UserWarning, stacklevel=3,
         )
 
-    _check_image_key(data, data_config.image_key)
+    _check_image_key(data, data_config.image_key, present=present)
 
     # marker defaults for units layers (bins tile as squares, spots are circles)
     if units_layer is not None and spot_size is _UNSET and not user_plot_config:
@@ -1342,12 +1342,13 @@ def _get_data(
         #     #if ConfigData.categorical:
         #     ax.set_axis_off()
 
-def _check_image_key(data, image_key):
+def _check_image_key(data, image_key, present=None):
     """Validate ``image_key`` before plotting.
 
     A single sample without the image raises. For an experiment, samples without it
     are plotted without an image and one warning lists them; it raises only if no
-    sample has the image.
+    sample has the image. Samples skipped for a missing layer (``present[i]`` False)
+    are not plotted and therefore not checked.
     """
     if image_key is None:
         return
@@ -1359,9 +1360,12 @@ def _check_image_key(data, image_key):
         return msg
 
     if _is_experiment(data):
-        missing = [xd.sample_id for xd in data.data if image_key not in xd.images]
-        if len(missing) == len(data.data):
-            available = sorted({k for xd in data.data for k in xd.images.keys()})
+        plotted = [
+            xd for i, xd in enumerate(data.data) if present is None or present[i]
+        ]
+        missing = [xd.sample_id for xd in plotted if image_key not in xd.images]
+        if len(missing) == len(plotted):
+            available = sorted({k for xd in plotted for k in xd.images.keys()})
             raise ValueError(_not_found(available) + " No sample has this image.")
         if missing:
             warnings.warn(
