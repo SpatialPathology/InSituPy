@@ -29,7 +29,7 @@ from insitupy._core._checks import _is_experiment
 from insitupy._core.data import InSituData
 from insitupy._mixins import _UpdatablePlottingConfig
 from insitupy.containers import AnnotationsData, ImageData, RegionsData
-from insitupy.containers._utils import _get_table_layer
+from insitupy.containers._utils import _get_table_layer, _has_table_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.plotting.save import save_and_show_figure
 from insitupy.utils._adata import filter_anndata
@@ -426,7 +426,7 @@ def spatial(
     Examples:
     >>> import insitupy as isp
     >>> isp.pl.spatial(data, keys="GeneA")
-    >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
+    >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/spatial.png")
     """
 
     if annotations_key is not None:
@@ -442,6 +442,26 @@ def spatial(
 
     if cells_layer is not None and units_layer is not None:
         raise ValueError("cells_layer and units_layer are mutually exclusive")
+
+    # experiments: samples without the requested layer are skipped (empty panel, one warning);
+    # single samples keep raising the usual error from the layer lookup
+    present = None
+    if _is_experiment(data):
+        present = [_has_table_layer(xd, cells_layer, units_layer) for xd in data.data]
+        desc = _layer_desc(cells_layer, units_layer)
+        if not any(present):
+            available = {}
+            for xd in data.data:
+                container = xd.units if units_layer is not None else xd.cells
+                available[xd.sample_id] = list(container.keys()) if container is not None else []
+            raise ValueError(f"No sample has {desc}. Available per sample: {available}")
+        if not all(present):
+            missing = [xd.sample_id for xd, p in zip(data.data, present, strict=True) if not p]
+            warnings.warn(
+                f"{desc} not found in sample(s) {missing} (absent or not loaded); "
+                "their panels are left empty.",
+                UserWarning, stacklevel=3,  # spatial is wrapped by @with_insitupy_style
+            )
 
     # whether the caller gave a plot_config (units marker defaults apply only without one)
     user_plot_config = plot_config is not None
@@ -497,7 +517,7 @@ def spatial(
 
     # marker defaults for units layers (bins tile as squares, spots are circles)
     if units_layer is not None and spot_size is _UNSET and not user_plot_config:
-        _set_units_marker_defaults(data, units_layer, plot_config)
+        _set_units_marker_defaults(data, units_layer, plot_config, present=present)
 
     # check whether the data is an InSituExperiment or a single InSituData
     if _is_experiment(data):
@@ -507,7 +527,13 @@ def spatial(
         # numeric or already colored are expected here and need no sync
         # (experiment colors are cells-only, so units layers skip this)
         if units_layer is None:
-            data._sync_colors(
+            # with samples missing the layer, sync on a view of the others (sync loops over
+            # every sample and would raise); the view shares the samples, so their uns
+            # colors are written, only the parent's experiment color store is not updated
+            sync_target = data
+            if not all(present):
+                sync_target = data[[i for i, p in enumerate(present) if p]]
+            sync_target._sync_colors(
                 keys=keys,
                 cells_layer=cells_layer,
                 palette=(
@@ -527,7 +553,8 @@ def spatial(
         units_layer=units_layer,
         keys=keys,
         data_config=data_config,
-        plot_config=plot_config
+        plot_config=plot_config,
+        present=present,
     )
 
     layout_config.calc_subplot_params(
@@ -553,6 +580,7 @@ def spatial(
         data_config,
         color_config,
         units_layer=units_layer,
+        present=present,
     )
 
     save_and_show_figure(
@@ -571,6 +599,13 @@ def plot_spatial(*args, **kwargs):
     """Deprecated. Use :func:`spatial` instead."""
     from insitupy._warnings import plot_functions_deprecations_warning
     plot_functions_deprecations_warning(name="spatial")
+
+def _layer_desc(cells_layer, units_layer) -> str:
+    if units_layer is not None:
+        return f"units_layer '{units_layer}'"
+    if cells_layer is not None:
+        return f"cells_layer '{cells_layer}'"
+    return "a cell layer"
 
 def _setup_subplots(
     layout_config: LayoutConfig,
@@ -618,6 +653,7 @@ def _plot_to_subplots(
     color_config,
     verbose: bool = False,
     units_layer: str | None = None,
+    present: list[bool] | None = None,
 ):
     logger.info("Do plotting.") if verbose else None
 
@@ -630,6 +666,17 @@ def _plot_to_subplots(
     affected_keys = set()
 
     for idx in range(n_data):
+
+        if present is not None and not present[idx]:
+            # sample without the requested layer: empty, titled panel per key
+            sample_name = _sample_name(data, idx, data_config)
+            for idx_key, key in enumerate(keys):
+                ax, _ = _determine_axes(axs, idx, idx_key, layout_config)
+                _set_panel_title(ax, key, idx_key, sample_name, plot_config, layout_config)
+                ax.text(0.5, 0.5, f"no {_layer_desc(cells_layer, units_layer)}",
+                        ha="center", va="center", transform=ax.transAxes)
+                ax.set_axis_off()
+            continue
 
         # retrieve data
         ad, sample_name, image_data, regions_data, annotations_data = _get_data(
@@ -892,12 +939,16 @@ class _ColorConfigMultiPlot:
         cells_layer: str | None = None,
         keys: str | list[str] = None,
         units_layer: str | None = None,
+        present: list[bool] | None = None,
         ):
         # add properties
         self._dict = {}
 
         if _is_experiment(data):
             data_list = data.data
+            if present is not None:
+                # samples without the layer are not plotted and must not be resolved
+                data_list = [xd for xd, p in zip(data_list, present, strict=True) if p]
             # experiment colors are cells-only
             exp_colors = data.colors if units_layer is None else None
             # is_experiment = True
@@ -1163,6 +1214,10 @@ def _configure_axis_and_title(
         ax.set_xlabel('x')
         ax.set_ylabel('y')
 
+    _set_panel_title(ax, key, idx_key, sample_name, plot_config, layout_config)
+
+def _set_panel_title(ax, key, idx_key, sample_name, plot_config, layout_config):
+    """Panel title and (first key) sample label; shared with the empty panels."""
     if layout_config.multidata and not layout_config.multikeys:
         if plot_config.show_title:
             ax.set_title(
@@ -1216,6 +1271,22 @@ def _determine_axes(axs, idx, idx_key, layout_config):
 
     return ax, add_legend
 
+def _sample_name(data, idx, data_config) -> str:
+    """Display name of sample ``idx`` (single InSituData or experiment)."""
+    try:
+        xd = data.data[idx]
+        meta = data._metadata.iloc[idx]
+    except AttributeError:
+        xd = data
+        meta = None
+
+    if data_config.name_column is None or meta is None:
+        name = xd.sample_id
+    else:
+        name = meta[data_config.name_column]
+    # some readers leave sample_id None (e.g. read_visium_hd); titles need a string
+    return f"sample {idx}" if name is None else str(name)
+
 def _get_data(
     data,
     idx,
@@ -1226,10 +1297,8 @@ def _get_data(
     # extract the InSituData object
     try:
         xd = data.data[idx]
-        meta = data._metadata.iloc[idx]
     except AttributeError:
         xd = data
-        meta = None
 
     # retrieve the right cell data
     celldata = _get_table_layer(xd, cells_layer=cells_layer, units_layer=units_layer)
@@ -1250,10 +1319,7 @@ def _get_data(
             adata=adata, filter_mode=data_config.filter_mode, filter_tuple=data_config.filter_tuple
             )
 
-    if data_config.name_column is None or meta is None:
-        sample_name = xd.sample_id
-    else:
-        sample_name = meta[data_config.name_column]
+    sample_name = _sample_name(data, idx, data_config)
 
     # samples without the requested image are plotted without one (spatial() has
     # already validated the key and warned/raised)
@@ -1478,9 +1544,16 @@ def _extract_annotations_information(
 
     return annotations_df
 
-def _set_units_marker_defaults(data, units_layer, plot_config):
-    """Set marker type/size so that units tile the tissue (bins) or match their extent (spots)."""
-    xd = data.data[0] if _is_experiment(data) else data
+def _set_units_marker_defaults(data, units_layer, plot_config, present=None):
+    """Set marker type/size so that units tile the tissue (bins) or match their extent (spots).
+
+    On an experiment the first sample that has the layer (``present[i]``) is used.
+    """
+    if _is_experiment(data):
+        idx = next((i for i, p in enumerate(present) if p), 0) if present is not None else 0
+        xd = data.data[idx]
+    else:
+        xd = data
     layer = _get_table_layer(xd, units_layer=units_layer)
     bin_size = layer.table.uns.get("bin_size_um")
     if bin_size:

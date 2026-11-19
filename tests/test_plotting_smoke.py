@@ -340,6 +340,7 @@ def test_spatial_reused_layout_config_not_mutated_across_calls(monkeypatch):
     class _FakeExp:
         def __init__(self, n_data):
             self._n_data = n_data
+            self.data = [object()] * n_data  # layer presence is stubbed below
 
         def __len__(self):
             return self._n_data
@@ -365,6 +366,7 @@ def test_spatial_reused_layout_config_not_mutated_across_calls(monkeypatch):
         return fig, np.array([ax])
 
     monkeypatch.setattr(spatial_module, "_is_experiment", lambda data: True)
+    monkeypatch.setattr(spatial_module, "_has_table_layer", lambda *a, **k: True)
     monkeypatch.setattr(spatial_module, "_ColorConfigMultiPlot", _FakeColorConfig)
     monkeypatch.setattr(spatial_module, "_setup_subplots", _fake_setup_subplots)
     monkeypatch.setattr(spatial_module, "_plot_to_subplots", lambda *a, **k: None)

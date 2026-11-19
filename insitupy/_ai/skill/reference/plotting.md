@@ -60,8 +60,3 @@
     Fast PCA plot using datashader.
   tsne(adata: 'ad.AnnData', keys: 'str | Sequence[str] | None' = None, color: 'str | Sequence[str] | None' = None, **kwargs) -> 'plt.Figure | hv.Layout | None'
     Fast t-SNE plot using datashader.
-
-## FACS
-  facs(data, gene1: str = 'gene1', gene2: str = 'gene2', cluster_key: str = 'None', t
-
-... [truncated — full text is 10203 chars]

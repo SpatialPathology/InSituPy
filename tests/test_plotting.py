@@ -1,5 +1,5 @@
 """Smoke tests for plotting functions: single_volcano, volcano, go_plot,
-plot_qc_metrics, facs, umap, pca, tsne.
+plot_qc_metrics, umap, pca, tsne.
 
 All tests use the Agg backend so no display is required and plt.show() is a no-op.
 """
@@ -13,15 +13,11 @@ import numpy as np
 import pytest
 import pandas as pd
 import scanpy as sc
-import scipy.sparse as sp
 from anndata import AnnData
 from matplotlib.colors import to_rgb
 
-from insitupy._core.data import InSituData
-from insitupy.containers.cell_data import CellData
 from insitupy.containers.results import DiffExprConfigCollector, DiffExprResults
 from insitupy.plotting.dge import BACKGROUND_ALPHA, dual_foldchange_plot
-from insitupy.plotting.facs import facs
 from insitupy.plotting.go import go_plot
 from insitupy.plotting.qc import plot_qc_metrics
 from insitupy.plotting.scatter import _apply_dim, _apply_highlight, pca, tsne, umap
@@ -79,24 +75,6 @@ def _make_adata_with_embeddings(n_cells=20, n_genes=8, seed=0):
     adata.obsm["X_pca"] = rng.random((n_cells, 4))
     adata.obsm["X_tsne"] = rng.random((n_cells, 2))
     return adata
-
-
-def _make_insitudata_sparse(n_cells=20, n_genes=4, seed=0):
-    """InSituData with a sparse count matrix (required by pl.facs)."""
-    rng = np.random.default_rng(seed)
-    X_sparse = sp.csr_matrix(rng.integers(0, 20, size=(n_cells, n_genes)).astype(float))
-    obs = pd.DataFrame(index=pd.Index([f"cell_{i}" for i in range(n_cells)]))
-    var = pd.DataFrame(index=pd.Index([f"gene_{j}" for j in range(n_genes)]))
-    table = AnnData(X=X_sparse, obs=obs, var=var)
-    table.obsm["spatial"] = rng.random((n_cells, 2)) * 100
-    celldata = CellData(table=table, boundaries=None)
-    xd = InSituData(
-        path=None, metadata=None,
-        slide_id="test", sample_id="s1",
-        method_name="test", method_params={},
-    )
-    xd.cells.add_celldata(cd=celldata, key="main", is_main=True)
-    return xd
 
 
 # ── single_volcano ────────────────────────────────────────────────────────────
@@ -271,33 +249,29 @@ class TestPlotQcMetrics:
         plot_qc_metrics(adata, plot_var=False)
         plt.close("all")
 
-
-# ── pl.facs ─────────────────────────────────────────────────────────────────
-
-class TestFacsPlot:
-    def test_runs_without_error(self):
-        xd = _make_insitudata_sparse(n_genes=4)
-        plt.close("all")
-        facs(xd, gene1="gene_0", gene2="gene_1", cluster_key=None)
-        plt.close("all")
-
-    def test_double_positive_column_added(self):
-        xd = _make_insitudata_sparse(n_genes=4)
-        plt.close("all")
-        facs(
-            xd, gene1="gene_0", gene2="gene_1",
-            cluster_key=None, threshold_gene1=5, threshold_gene2=5,
+    def test_plot_qc_metrics_without_metrics_raises(self):
+        rng = np.random.default_rng(0)
+        adata = AnnData(
+            X=rng.integers(1, 50, size=(10, 4)).astype(float),
+            obs=pd.DataFrame(index=[f"c{i}" for i in range(10)]),
+            var=pd.DataFrame(index=[f"g{j}" for j in range(4)]),
         )
         plt.close("all")
-        assert "gene_0/gene_1 double pos." in xd.cells.table.obs.columns
+        with pytest.raises(ValueError, match="No QC metrics found"):
+            plot_qc_metrics(adata)
+        plt.close("all")
 
-    def test_double_positive_column_is_boolean(self):
-        xd = _make_insitudata_sparse(n_genes=4)
+    def test_plot_qc_metrics_does_not_modify_input(self):
+        adata = self._make_adata_with_qc()
+        x_before = adata.X
+        obs_cols = list(adata.obs.columns)
+        var_cols = list(adata.var.columns)
         plt.close("all")
-        facs(xd, gene1="gene_0", gene2="gene_1", cluster_key=None)
+        plot_qc_metrics(adata, additional_obs="total_counts")
         plt.close("all")
-        col = xd.cells.table.obs["gene_0/gene_1 double pos."]
-        assert col.dtype == bool
+        assert adata.X is x_before
+        assert list(adata.obs.columns) == obs_cols
+        assert list(adata.var.columns) == var_cols
 
 
 # ── umap / pca / tsne wrappers ────────────────────────────────────────────────

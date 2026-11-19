@@ -6,6 +6,12 @@ from insitupy.containers.multi_cell_data import MultiCellData
 
 logger = logging.getLogger(__name__)
 
+_NO_CELLS_MESSAGE = (
+    "This sample has no cell layers (cells not loaded or not part of this data, e.g. Visium). "
+    "Call load_cells() if the sample has cells; for spatial units pass units_layer=... "
+    "(pl.spatial) or use the units table directly (functions that accept an AnnData)."
+)
+
 
 def _get_cell_layer(
     cells: MultiCellData,
@@ -13,6 +19,9 @@ def _get_cell_layer(
     verbose: bool = False,
     return_layer_name: bool = False,
 ):
+    if cells.is_empty:
+        raise ValueError(_NO_CELLS_MESSAGE)
+
     if cells_layer is None:
         cells_layer = cells.main_key
     else:
@@ -47,6 +56,11 @@ def _get_table_layer(
         raise ValueError("cells_layer and units_layer are mutually exclusive")
 
     if units_layer is None:
+        if data.cells.is_empty:
+            msg = _NO_CELLS_MESSAGE
+            if data.units is not None and not data.units.is_empty:
+                msg += f" Units layers: {list(data.units.keys())}."
+            raise ValueError(msg)
         return _get_cell_layer(
             cells=data.cells,
             cells_layer=cells_layer,
@@ -69,3 +83,16 @@ def _get_table_layer(
     if return_layer_name:
         return layer, units_layer
     return layer
+
+
+def _has_table_layer(xd, cells_layer: str | None = None, units_layer: str | None = None) -> bool:
+    """Whether `_get_table_layer` would find the requested layer (never raises)."""
+    if units_layer is not None:
+        units = xd.units
+        return (
+            units is not None
+            and not units.is_empty
+            and units_layer in units.keys()
+            and units[units_layer].table is not None
+        )
+    return not xd.cells.is_empty and (cells_layer is None or cells_layer in xd.cells.keys())
