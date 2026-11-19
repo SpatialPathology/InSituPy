@@ -7,7 +7,7 @@ import dask.array as da
 import numpy as np
 import pandas as pd
 import pytest
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, issparse
 
 from insitupy.utils._checks import (
     _is_list_of_dask_arrays,
@@ -178,6 +178,18 @@ class TestCheckRaw:
         adata.raw = adata  # simplest way to set raw
         X, var, var_names = check_raw(adata, use_raw=True)
         np.testing.assert_array_equal(X, adata.raw.X)
+
+    def test_sparse_X_is_not_densified(self):
+        # A large sparse matrix must be returned as stored, not as a dense copy
+        adata = _make_adata()
+        adata.X = csr_matrix(adata.X)
+        X, _, _ = check_raw(adata, use_raw=False)
+        assert issparse(X)
+
+    def test_use_raw_without_raw_raises(self):
+        adata = _make_adata()
+        with pytest.raises(ValueError, match="no .raw"):
+            check_raw(adata, use_raw=True)
 
 
 class TestCheckZip:

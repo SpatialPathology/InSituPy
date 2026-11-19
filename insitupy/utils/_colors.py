@@ -9,6 +9,7 @@ import pandas as pd
 from matplotlib import cm
 from matplotlib.colors import ListedColormap, rgb2hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
+from scipy.sparse import issparse
 
 from insitupy._constants import DEFAULT_CATEGORICAL_CMAP, DEFAULT_CONTINUOUS_CMAP, NA_CATEGORY
 from insitupy.palettes import CustomPalettes
@@ -28,7 +29,10 @@ def _extract_color_values(adata, key, raw, layer):
     # locate gene in matrix and extract values
     if key in adata_var_names:
         idx = adata_var.index.get_loc(key)
-        color_values = adata_X[:, idx].copy()
+        # slice one column first, densify only that column; np.array copies
+        col = adata_X[:, idx]
+        col = col.toarray() if issparse(col) else col
+        color_values = np.array(col).ravel()
         categorical = False
 
     elif key in adata.obs.columns:
