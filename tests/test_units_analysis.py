@@ -319,36 +319,30 @@ def _plotted_points(fig):
     )
 
 
-@pytest.fixture
-def marker_spy(monkeypatch):
-    import sys
+def _markers(fig):
+    """(marker, size in um) of the data-unit marker collections drawn by pl.spatial."""
+    from insitupy.plotting.spatial import _DataUnitMarkers
 
-    sp = sys.modules["insitupy.plotting.spatial"]
-
-    seen = []
-    orig = sp._calculate_marker_size
-
-    def spy(ax, plot_config, fig):
-        seen.append((plot_config.spot_type, plot_config.spot_size))
-        return orig(ax, plot_config, fig)
-
-    monkeypatch.setattr(sp, "_calculate_marker_size", spy)
-    return seen
+    return [
+        (c.marker, c.data_size)
+        for a in fig.get_axes() for c in a.collections
+        if isinstance(c, _DataUnitMarkers)
+    ]
 
 
-def test_spatial_units_layer_smoke(marker_spy):
+def test_spatial_units_layer_smoke():
     xd = _make_xd()
     plt.close("all")
     isp.pl.spatial(xd, "val", units_layer="square_008um", show=False)
     fig = plt.gcf()
     n_points = _plotted_points(fig)
     assert n_points == N8 * N8
-    assert marker_spy[-1] == ("s", 8.0)   # square markers with the bin edge as size
+    assert _markers(fig) == [("s", 8.0)]   # square markers with the bin edge as size
     plt.close("all")
 
     # categorical key, explicit spot_size is respected
     isp.pl.spatial(xd, "lab", units_layer="square_002um", spot_size=3, show=False)
-    assert marker_spy[-1][1] == 3
+    assert _markers(plt.gcf())[-1][1] == 3
     plt.close("all")
 
     # experiment with two samples
