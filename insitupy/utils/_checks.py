@@ -162,11 +162,17 @@ def check_raw(adata, use_raw, layer=None):
             *use_raw* is True.
 
     Returns:
-        A tuple ``(X, var, var_names)`` where *X* is a dense numpy array
-        and *var* / *var_names* are the corresponding variable metadata.
+        A tuple ``(X, var, var_names)`` where *X* is the matrix as stored
+        (dense or sparse - never densified here) and *var* / *var_names* are
+        the corresponding variable metadata.
+
+    Raises:
+        ValueError: If *use_raw* is True but *adata* has no ``.raw``.
     """
     # check if plotting raw data
     if use_raw:
+        if adata.raw is None:
+            raise ValueError("raw=True but the table has no .raw")
         adata_X = adata.raw.X
         adata_var = adata.raw.var
         adata_var_names = adata.raw.var_names
@@ -174,11 +180,7 @@ def check_raw(adata, use_raw, layer=None):
         if layer is None:
             adata_X = adata.X
         else:
-            #adata_X = adata.layers[layer].toarray()
             adata_X = adata.layers[layer]
-
-        if issparse(adata_X):
-            adata_X = adata_X.toarray()
 
         adata_var = adata.var
         adata_var_names = adata.var_names
