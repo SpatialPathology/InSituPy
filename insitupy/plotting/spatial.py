@@ -997,7 +997,8 @@ class _ColorConfigMultiPlot:
 
             else:
                 # no values are categorical - collect the maximum values
-                color_entry["max_value"] = np.max(color_values)
+                color_values = np.asarray(color_values, dtype=float).ravel()
+                color_entry["max_value"] = np.nanmax(color_values)
                 color_entry["is_categorical"] = False
 
                 if plot_config.crange is not None:
@@ -1029,7 +1030,7 @@ class _ColorConfigMultiPlot:
                         has_na |= bool(pd.isna(color_values).any())
                         value_list.append(np.asarray(_parse_unique_categories(color_values)))
                     else:
-                        value_list.append(np.max(color_values))
+                        value_list.append(np.asarray(color_values, dtype=float).ravel())
 
                 categorical_list.append(is_categorical)
 
@@ -1046,16 +1047,16 @@ class _ColorConfigMultiPlot:
                 color_entry["has_na"] = has_na
 
             elif not np.any(categorical_list):
-                # no values are categorical - collect the maximum values
-                color_entry["max_value"] = np.max(value_list)
+                # no values are categorical - pool the values of all samples
+                pooled = np.concatenate(value_list)
+                color_entry["max_value"] = np.nanmax(pooled)
                 color_entry["is_categorical"] = False
-                # color_entry["crange"] = [0, color_entry["max_value"]]
 
                 if plot_config.crange is not None:
                     color_entry["crange"] = plot_config.crange
                 else:
                     color_entry["crange"] = _get_crange(
-                        color_values=value_list,
+                        color_values=pooled,
                         crange_type=plot_config.crange_type
                         )
             else:
@@ -1065,13 +1066,13 @@ class _ColorConfigMultiPlot:
 
 def _get_crange(color_values, crange_type):
     if crange_type == 'max':
-        crange = [0, np.max(color_values)]
+        crange = [0, np.nanmax(color_values)]
     elif crange_type == 'minmax':
-        crange = [np.min(color_values), np.max(color_values)]
+        crange = [np.nanmin(color_values), np.nanmax(color_values)]
     elif crange_type == 'upper_percentile':
-        crange = [0, np.percentile(color_values, 99)]
+        crange = [0, np.nanpercentile(color_values, 99)]
     elif crange_type == 'percentile':
-        crange = [np.percentile(color_values, 1), np.percentile(color_values, 99)]
+        crange = [np.nanpercentile(color_values, 1), np.nanpercentile(color_values, 99)]
     else:
         raise ValueError(f"Unknown crange_type: {crange_type}. Must be one of 'max', 'minmax', 'upper_percentile' or 'percentile'.")
 
