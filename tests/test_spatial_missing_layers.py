@@ -126,6 +126,15 @@ def test_experiment_no_sample_has_layer_raises():
         isp.pl.spatial(exp, keys="val", units_layer=UNITS, show=False)
 
 
+def test_experiment_sample_without_sample_id_gets_a_title():
+    # read_visium_hd leaves sample_id None; one key over several samples puts the sample
+    # name into the title (`sample_name + "\n" + key`), which raised a TypeError
+    exp = _experiment(_xd(None, units=True, bin_size=16), _xd("s1", units=True, bin_size=16))
+    isp.pl.spatial(exp, keys="val", units_layer=UNITS, show=False)
+    titles = [a.get_title() for a in _marker_axes(plt.gcf())]
+    assert titles == ["sample 0\nval", "s1\nval"]
+
+
 def test_units_marker_defaults_from_first_sample_with_layer():
     exp = _experiment(_xd("s0"), _xd("s1", units=True, bin_size=16))
     with warnings.catch_warnings():

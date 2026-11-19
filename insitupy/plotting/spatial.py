@@ -1226,8 +1226,11 @@ def _sample_name(data, idx, data_config) -> str:
         meta = None
 
     if data_config.name_column is None or meta is None:
-        return xd.sample_id
-    return meta[data_config.name_column]
+        name = xd.sample_id
+    else:
+        name = meta[data_config.name_column]
+    # some readers leave sample_id None (e.g. read_visium_hd); titles need a string
+    return f"sample {idx}" if name is None else str(name)
 
 def _get_data(
     data,
