@@ -44,13 +44,19 @@ def save_and_show_figure(
         fig.tight_layout()
 
     if savepath is not None:
+        if str(savepath).endswith(("/", "\\")) or Path(savepath).is_dir():
+            raise ValueError(
+                "savepath must be a file path (e.g. 'plots/spatial.png'), "
+                f"got a directory: {savepath!r}"
+            )
+
         logger.info("Saving figure to file " + str(savepath)) if verbose else None
 
         # create path if it does not exist
         Path(os.path.dirname(savepath)).mkdir(parents=True, exist_ok=True)
 
-        # save figure
-        plt.savefig(savepath, dpi=dpi_save,
+        # save the given figure (not the current one)
+        fig.savefig(savepath, dpi=dpi_save,
                     facecolor=background_color, bbox_inches='tight')
         logger.info("Saved.") if verbose else None
     if save_only:

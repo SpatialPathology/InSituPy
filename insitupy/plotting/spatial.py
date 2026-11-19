@@ -409,7 +409,7 @@ def spatial(
     Examples:
     >>> import insitupy as isp
     >>> isp.pl.spatial(data, keys="GeneA")
-    >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/")
+    >>> isp.pl.spatial(exp, keys=["GeneA", "GeneB"], image_key="lowres", savepath="plots/spatial.png")
     """
 
     if annotations_key is not None:
