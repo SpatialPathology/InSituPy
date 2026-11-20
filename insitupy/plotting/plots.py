@@ -21,7 +21,11 @@ from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment.data import InSituExperiment
 from insitupy.palettes import map_to_colors
 from insitupy.plotting.save import save_and_show_figure
-from insitupy.utils._colors import _add_colorlegend_to_axis, _data_to_rgba
+from insitupy.utils._colors import (
+    _add_colorlegend_to_axis,
+    _data_to_rgba,
+    _fallback_category_colors,
+)
 from insitupy.utils.utils import (
     convert_to_list,
     get_nrows_maxcols,
@@ -563,6 +567,9 @@ def cellular_composition(
         palette: Color palette for cell types.  Accepts a
             ``ListedColormap``, a list of color strings, a dict mapping
             cell-type names to colors, or None to use the default palette.
+            For an ``InSituExperiment``, ``None`` uses ``exp.colors`` (synced
+            automatically if missing); an explicit palette wins over
+            ``exp.colors`` and is used for this figure only (nothing is saved).
         return_data: If True, return the composition DataFrame after
             plotting.
         save_only: If True, save the figure without displaying it.
@@ -622,15 +629,29 @@ def cellular_composition(
     is_experiment = _is_experiment(data)
     if is_experiment:
         # get colors for plotting
-        color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
-        if color_dict is None:
-            data._sync_colors(cell_type_col, cells_layer=cells_layer, implicit=True)
+        columns = []
+        for _, xd in data.iterdata():
+            obs = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table.obs
+            if cell_type_col in obs.columns:
+                columns.append(obs[cell_type_col])
+        if palette_is_dict:
+            # explicit palette: plot-only, wins over exp.colors (as in pl.spatial)
+            color_dict = palette
+        elif palette is not None:
+            color_dict = _fallback_category_colors(columns, palette)
+        else:
+            # default palette over all categories: the figure-only fallback when stored
+            # uns colors disagree, and the fill for a partial exp.colors dict (same
+            # colors as the write-through stored in uns)
+            default_dict = _fallback_category_colors(columns, DEFAULT_CATEGORICAL_CMAP)
             color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
             if color_dict is None:
-                # stored uns colors disagree across samples: figure-only default palette
-                color_dict = data._create_categorical_color_dict(
-                    cell_type_col, cells_layer=cells_layer, palette=DEFAULT_CATEGORICAL_CMAP
-                )
+                data._sync_colors(cell_type_col, cells_layer=cells_layer, implicit=True)
+                color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
+            # copy: never mutate exp.colors
+            color_dict = dict(color_dict) if color_dict is not None else {}
+            for cat, color in default_dict.items():
+                color_dict.setdefault(cat, color)
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)

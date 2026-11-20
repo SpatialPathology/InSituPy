@@ -47,6 +47,7 @@ from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, Filt
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
 from insitupy.utils._colors import (
+    _fallback_category_colors,
     _merge_available_stored_colors,
     _parse_unique_categories,
     _stored_color_dict,
@@ -5842,16 +5843,8 @@ class InSituExperiment:
             celldata = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer)
             if obs_col not in celldata.table.obs.columns:
                 continue
-            collected.append(_parse_unique_categories(celldata.table.obs[obs_col]))
-        union = set().union(*collected)
-        try:
-            ordered = sorted(union)
-        except TypeError:
-            ordered = sorted(union, key=str)
-        fallback = {
-            c: to_hex(palette(i % palette.N), keep_alpha=False)
-            for i, c in enumerate(ordered)
-        }
+            collected.append(celldata.table.obs[obs_col])
+        fallback = _fallback_category_colors(collected, palette)
 
         uns_key = f"{obs_col}_colors"
         for _, xd in self.iterdata():

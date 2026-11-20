@@ -213,6 +213,21 @@ def _merge_available_stored_colors(stored_dicts):
     return merged, conflict
 
 
+def _fallback_category_colors(columns, palette):
+    """Return ``{category: hex}`` for the union of categories of *columns*.
+
+    A category gets the palette color at its index in the sorted union, so it gets
+    the same color in every sample. This is the rule the experiment color store uses
+    for categories missing from a (partial) color dict.
+    """
+    union = set().union(*(_parse_unique_categories(col) for col in columns))
+    try:
+        ordered = sorted(union)
+    except TypeError:
+        ordered = sorted(union, key=str)
+    return {c: to_hex(palette(i % palette.N), keep_alpha=False) for i, c in enumerate(ordered)}
+
+
 def create_cmap_mapping(
     data,
     cmap: str | ListedColormap | None = None,

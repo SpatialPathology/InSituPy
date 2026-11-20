@@ -20,6 +20,7 @@ from matplotlib.transforms import IdentityTransform
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (
+    DEFAULT_CATEGORICAL_CMAP,
     DEFAULT_CONTINUOUS_CMAP,
     NA_CATEGORY,
     with_insitupy_style,
@@ -36,6 +37,7 @@ from insitupy.utils._colors import (
     _add_colorlegend_to_axis,
     _coerce_na_for_plot,
     _extract_color_values,
+    _fallback_category_colors,
     _merge_stored_color_dicts,
     _parse_unique_categories,
     _rgb2hex_robust,
@@ -987,10 +989,18 @@ class _ColorConfigMultiPlot:
                     )
 
             if use_layer_dict:
-                # use color_dict from InSituExperiment (copy: never mutate exp.colors)
+                # use color_dict from InSituExperiment (copy: never mutate exp.colors);
+                # categories missing from a partial dict get the same fallback colors
+                # that the write-through stored in uns
                 has_na = any(pd.isna(values).any() for values, _ in found)
+                color_dict = dict(layer_color_dict)
+                fallback = _fallback_category_colors(
+                    [values for values, _ in found], DEFAULT_CATEGORICAL_CMAP
+                )
+                for cat, color in fallback.items():
+                    color_dict.setdefault(cat, color)
                 color_entry = {
-                    "color_dict": dict(layer_color_dict),
+                    "color_dict": color_dict,
                     "max_value": None,
                     "is_categorical": True,
                     "crange": None,
