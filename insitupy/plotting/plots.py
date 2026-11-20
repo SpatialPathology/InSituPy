@@ -624,8 +624,13 @@ def cellular_composition(
         # get colors for plotting
         color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
         if color_dict is None:
-            data.sync_colors(cell_type_col, cells_layer=cells_layer)
+            data._sync_colors(cell_type_col, cells_layer=cells_layer, implicit=True)
             color_dict = data.colors.get(cell_type_col, cells_layer=cells_layer)
+            if color_dict is None:
+                # stored uns colors disagree across samples: figure-only default palette
+                color_dict = data._create_categorical_color_dict(
+                    cell_type_col, cells_layer=cells_layer, palette=DEFAULT_CATEGORICAL_CMAP
+                )
     else:
         # assume it is an InSituData object
         celldata = _get_cell_layer(cells=data.cells, cells_layer=cells_layer)

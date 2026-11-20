@@ -46,7 +46,11 @@ from insitupy.experiment._metadata_frame import _GuardedMetadataFrame
 from insitupy.experiment.filters import CompositeFilterSpec, FilterManager, FilterSpec
 from insitupy.palettes import map_to_colors
 from insitupy.utils._adata import _select_anndata_elements
-from insitupy.utils._colors import _parse_unique_categories
+from insitupy.utils._colors import (
+    _merge_available_stored_colors,
+    _parse_unique_categories,
+    _stored_color_dict,
+)
 from insitupy.utils.utils import (
     _crop_transcripts,
     convert_to_list,
@@ -938,7 +942,9 @@ class InSituExperiment:
         immediately writes an aligned hex list into every sample's
         ``.uns[f"{key}_colors"]`` so the colors are picked up by ``pl.spatial``,
         ``pl.cellular_composition``, ``pl.embedding``/``pl.umap``, and napari
-        without any further call. Deletion also clears ``.uns``. Use
+        without any further call. Deletion also clears ``.uns``. Keys enter the store
+        by assignment, ``sync_colors``, or the automatic pre-sync in ``pl.spatial`` /
+        ``show``, which adopts complete, consistent colors already stored in ``uns``. Use
         ``exp.colors.set(...)``/``.get(...)``/``.delete(...)`` with
         ``cells_layer=`` for non-main layers.
 
@@ -4695,11 +4701,14 @@ class InSituExperiment:
         Args:
             index (int): The index of the dataset to display.
             cells_layer: Name of the cell layer to display (defaults to the main layer).
-            auto_sync_colors: If True (default), harmonize categorical colors that were
-                never manually assigned/synced across all samples before opening the
-                viewer, so the same category gets the same color in every sample. Keys
-                already assigned via ``exp.colors[...] = {...}`` or a prior
-                ``sync_colors`` call are already write-through and are left untouched.
+            auto_sync_colors: If True (default), harmonize categorical colors that are not
+                yet in ``exp.colors`` across all samples before opening the viewer, so
+                the same category gets the same color in every sample. Complete colors
+                already stored in the samples' ``uns['{key}_colors']`` are adopted if
+                they agree across samples and are never overwritten; keys whose stored
+                colors disagree are left as they are. Keys already assigned via
+                ``exp.colors[...] = {...}`` or a prior ``sync_colors`` call are already
+                write-through and are left untouched.
                 Set False to skip (e.g. for speed or to preserve per-sample colors).
             verbose (bool, optional): If True, show verbose output. Defaults to False.
             return_viewer: Whether to return the napari viewer instance.
@@ -4720,7 +4729,7 @@ class InSituExperiment:
                 if cat_keys:
                     self._sync_colors(
                         cat_keys, cells_layer=cells_layer,
-                        overwrite=False, verbose=verbose, quiet=True,
+                        overwrite=False, verbose=verbose, implicit=True,
                     )
             except Exception as exc:
                 logger.warning(f"Automatic color synchronization skipped: {exc}")
@@ -4741,7 +4750,7 @@ class InSituExperiment:
         self,
         keys: str | list[str],
         cells_layer: str | None = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        palette: ListedColormap | None = None,
         overwrite: bool = False,
         verbose: bool = False
     ):
@@ -4751,9 +4760,17 @@ class InSituExperiment:
         Args:
             keys (Union[str, List[str]]): The metadata keys to synchronize colors for.
             cells_layer (Optional[str], optional): The layer to access. Defaults to None.
-            palette (ListedColormap, optional): The color palette to use.
+            palette (ListedColormap, optional): The color palette to use. ``None``
+                (default): for a key not yet in ``exp.colors``, use the complete colors
+                stored in the samples' ``uns['{key}_colors']`` if they agree across
+                samples, filling categories without stored colors from the default
+                palette; otherwise the default palette. An explicit palette always wins
+                and is written to every sample's ``uns``. If stored colors disagree
+                across samples, the default palette is used and a warning is logged.
             overwrite (bool, optional): Whether to overwrite existing color
-                dictionaries. Defaults to False.
+                dictionaries. Defaults to False. With ``overwrite=True`` and no
+                palette, the default palette is used (stored ``uns`` colors are not
+                re-read).
             verbose (bool, optional): Whether to print status messages. Defaults to True.
 
         Note:
@@ -4767,28 +4784,31 @@ class InSituExperiment:
         """
         self._sync_colors(
             keys, cells_layer=cells_layer, palette=palette,
-            overwrite=overwrite, verbose=verbose, quiet=False,
+            overwrite=overwrite, verbose=verbose, implicit=False,
         )
 
     def _sync_colors(
         self,
         keys: str | list[str],
         cells_layer: str | None = None,
-        palette: ListedColormap = DEFAULT_CATEGORICAL_CMAP,
+        palette: ListedColormap | None = None,
         overwrite: bool = False,
         verbose: bool = False,
-        quiet: bool = False,
+        implicit: bool = False,
     ):
         """Implementation of :meth:`sync_colors`.
 
-        ``quiet=True`` is for internal, opportunistic pre-syncs (``pl.spatial``,
-        ``show``) that pass keys the user never asked to sync: every "nothing to do"
-        case (gene, numeric, missing, already colored) is logged at debug level
-        instead of as a warning. Keys found in ``var_names`` are skipped even if an
-        obs column of the same name exists, because plotting resolves genes first.
+        ``implicit=True`` is for internal, opportunistic pre-syncs (``pl.spatial``,
+        ``show``, ``pl.cellular_composition``) that pass keys the user never asked to
+        sync: every "nothing to do" case (gene, numeric, missing, already colored) is
+        logged at debug level instead of as a warning, **and** a key whose stored
+        ``uns`` colors disagree across samples is skipped without writing anything
+        (the public call harmonizes it with a warning instead). Keys found in
+        ``var_names`` are skipped even if an obs column of the same name exists,
+        because plotting resolves genes first.
         """
         # log level for "nothing to do" diagnostics
-        _skip_log = logger.debug if quiet else logger.warning
+        _skip_log = logger.debug if implicit else logger.warning
 
         # Make sure obs_cols is a list
         keys = convert_to_list(keys)
@@ -4837,17 +4857,44 @@ class InSituExperiment:
 
             if obs_col not in self.colors.layer(cells_layer) or overwrite:
                 # create a color dictionary with all categories
+                base = palette if palette is not None else DEFAULT_CATEGORICAL_CMAP
                 color_dict = self._create_categorical_color_dict(
                     obs_col=obs_col,
                     cells_layer=cells_layer,
-                    palette=palette
+                    palette=base
                 )
 
+                used_stored = False
+                if (
+                    color_dict is not None
+                    and palette is None
+                    and obs_col not in self.colors.layer(cells_layer)
+                ):
+                    # first time this key enters exp.colors and no palette was given:
+                    # adopt complete colors already stored in the samples' uns
+                    stored, conflict = self._stored_uns_colors(obs_col, cells_layer)
+                    if conflict and implicit:
+                        logger.debug(
+                            f"Stored uns colors for '{obs_col}' disagree across samples; "
+                            f"leaving them unchanged."
+                        )
+                        continue
+                    if conflict:
+                        logger.warning(
+                            f"Stored uns colors for '{obs_col}' disagree across samples; "
+                            f"using the default palette for all samples. Pass `palette=` "
+                            f"or assign `exp.colors['{obs_col}']` to choose."
+                        )
+                    else:
+                        color_dict.update({c: v for c, v in stored.items() if c in color_dict})
+                        used_stored = bool(stored)
+
                 if color_dict is not None:
-                    self._apply_colors(obs_col, color_dict, cells_layer=cells_layer, palette=palette)
+                    self._apply_colors(obs_col, color_dict, cells_layer=cells_layer, palette=base)
 
                     if verbose:
-                        logger.info(f"Synchronized colors for key '{obs_col}' and palette '{palette.name}'.")
+                        source = "stored uns colors" if used_stored else f"palette '{base.name}'"
+                        logger.info(f"Synchronized colors for key '{obs_col}' from {source}.")
                 else:
                     searched_layer = cells_layer
                     available_layers = []
@@ -5894,6 +5941,23 @@ class InSituExperiment:
             return color_dict
         else:
             return None
+
+    def _stored_uns_colors(
+        self,
+        obs_col: str,
+        cells_layer: str | None = None,
+    ) -> tuple[dict, bool]:
+        """Collect complete colors stored in the samples' ``uns['{obs_col}_colors']``.
+
+        Returns ``(merged, conflict)``; samples without usable stored colors (missing,
+        shorter than the categories, or a non-categorical column) are ignored.
+        """
+        collected = []
+        for _, xd in self.iterdata():
+            table = _get_cell_layer(cells=xd.cells, cells_layer=cells_layer).table
+            if obs_col in table.obs.columns:
+                collected.append(_stored_color_dict(table, obs_col, table.obs[obs_col]))
+        return _merge_available_stored_colors(collected)
 
     @staticmethod
     def _normalize_colors_store(raw: dict, default_layer: str) -> dict:
