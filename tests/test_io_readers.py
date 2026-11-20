@@ -169,6 +169,51 @@ class TestReadVisium:
         centroids = np.c_[su.shapes.centroid.x, su.shapes.centroid.y]
         np.testing.assert_allclose(su.table.obsm["spatial"], centroids, atol=1.0)
 
+    def test_default_sample_name_from_real_data(self):
+        """Without sample_name, sample_id comes from the Space Ranger library_ids."""
+        import os
+        pytest.importorskip("spatialdata_io")
+        root = Path(os.environ.get(
+            "INSITUPY_VISIUM_TEST_DIR",
+            Path.home() / ".cache/InSituPy/demo_datasets/visium_hbreastcancer"
+            / "CytAssist_FFPE_Human_Breast_Cancer"))
+        if not (root / "spatial").is_dir():
+            pytest.skip("Visium test dataset not available")
+        xd = read_visium(root, fullres_pixel_size=0.5, verbose=False)
+        assert xd.sample_id == "CytAssist_FFPE_Human_Breast_Cancer"
+
+    @staticmethod
+    def _write_library_ids(h5_path: Path, ids):
+        h5py = pytest.importorskip("h5py")
+        h5_path.parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(h5_path, "w") as h:
+            h.attrs["library_ids"] = np.array(ids, dtype="S")
+
+    def test_default_10x_sample_name_from_library_ids(self, tmp_path):
+        from insitupy.io.data import _default_10x_sample_name
+
+        h5 = tmp_path / "run1" / "filtered_feature_bc_matrix.h5"
+        self._write_library_ids(h5, [b"my_sample"])
+        assert _default_10x_sample_name(h5.parent, [h5]) == "my_sample"
+
+    @pytest.mark.parametrize("sub, expected", [("slideA", "slideA"), ("run42/outs", "run42")])
+    def test_default_10x_sample_name_falls_back_to_folder(self, tmp_path, sub, expected):
+        from insitupy.io.data import _default_10x_sample_name
+
+        root = tmp_path / sub
+        root.mkdir(parents=True)
+        not_h5 = root / "filtered_feature_bc_matrix.h5"
+        not_h5.write_text("")  # unreadable as HDF5
+        assert _default_10x_sample_name(root, [not_h5]) == expected
+
+    def test_default_10x_sample_name_multi_library_falls_back(self, tmp_path):
+        from insitupy.io.data import _default_10x_sample_name
+
+        root = tmp_path / "aggr_run"
+        h5 = root / "filtered_feature_bc_matrix.h5"
+        self._write_library_ids(h5, [b"a", b"b"])
+        assert _default_10x_sample_name(root, [h5]) == "aggr_run"
+
 
 # ── read_qupath ───────────────────────────────────────────────────────────────
 
