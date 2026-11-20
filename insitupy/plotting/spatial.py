@@ -1189,6 +1189,8 @@ def _get_data(
         sample_name = xd.sample_id
     else:
         sample_name = meta[data_config.name_column]
+    # sample_id can be None and name_column values need not be strings; titles need a string
+    sample_name = f"sample {idx}" if sample_name is None else str(sample_name)
 
     # samples without the requested image are plotted without one (spatial() has
     # already validated the key and warned/raised)
