@@ -857,3 +857,91 @@ def test_sync_colors_overwrite_resets_to_palette_not_uns():
     assert got != manual
     for xd in exp.data:
         assert _uns_map(xd) == got
+
+
+# ── Part 5 - partial exp.colors dicts and explicit palettes in other plots ───
+
+
+def _composition_bar_colors(exp, monkeypatch, **kwargs):
+    """Draw pl.cellular_composition and return ``{category: hex}`` of the bars."""
+    from matplotlib.colors import to_hex
+
+    import insitupy.plotting.plots as plots_module
+
+    captured = {}
+    monkeypatch.setattr(
+        plots_module, "save_and_show_figure",
+        lambda fig=None, **kw: captured.setdefault("fig", fig),
+    )
+    plt.close("all")
+    isp.pl.cellular_composition(exp, cell_type_col="celltype", **kwargs)
+    ax = captured["fig"].get_axes()[0]
+    colors = {c.get_label(): to_hex(c.patches[0].get_facecolor()).lower() for c in ax.containers}
+    plt.close("all")
+    return colors
+
+
+def test_spatial_partial_exp_colors_fills_missing_categories():
+    # a partial manual dict must not crash pl.spatial; missing categories get the
+    # same fallback colors that the write-through stored in uns
+    exp = _make_plot_experiment()
+    exp.colors["celltype"] = {"A": "#ff0000"}
+
+    plt.close("all")
+    isp.pl.spatial(exp, keys="celltype", show=False)
+    plt.close("all")
+
+    got = _hex_dict(_color_config_dict(exp))
+    assert got["A"] == "#ff0000"
+    for xd in exp.data:
+        assert {c: got[c] for c in _uns_map(xd)} == _uns_map(xd)
+    assert dict(exp.colors["celltype"]) == {"A": "#ff0000"}  # intent unchanged
+
+
+def test_cellular_composition_partial_exp_colors_fills_missing_categories(monkeypatch):
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    exp.colors["celltype"] = {"A": "#ff0000"}
+
+    got = _composition_bar_colors(exp, monkeypatch)
+
+    assert got["A"] == "#ff0000"
+    for xd in exp.data:
+        assert {c: got[c] for c in _uns_map(xd)} == _uns_map(xd)
+
+
+def test_cellular_composition_explicit_palette_is_plot_only(monkeypatch):
+    from matplotlib.colors import ListedColormap
+
+    pal = ListedColormap(["#ff0000", "#00ff00", "#0000ff"], name="pal")
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    exp.colors["celltype"] = {"A": "#111111", "B": "#222222", "C": "#333333"}
+    colors_before = dict(exp.colors["celltype"])
+    uns_before = [_uns_map(xd) for xd in exp.data]
+
+    got = _composition_bar_colors(exp, monkeypatch, palette=pal)
+
+    assert got == {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+    assert dict(exp.colors["celltype"]) == colors_before
+    assert [_uns_map(xd) for xd in exp.data] == uns_before
+
+
+def test_cellular_composition_explicit_palette_creates_no_entry(monkeypatch):
+    exp = _make_experiment(n=2, categories=("A", "B"))
+
+    _composition_bar_colors(exp, monkeypatch, palette=["#ff0000", "#00ff00"])
+
+    assert "celltype" not in exp.colors
+    for xd in exp.data:
+        assert "celltype_colors" not in xd.cells["main"].table.uns
+
+
+def test_cellular_composition_existing_colors_with_all_nan_sample(monkeypatch):
+    # a sample whose column is all-NaN must not break a plot that already has colors
+    exp = _make_experiment(n=2, categories=("A", "B"))
+    exp.colors["celltype"] = {"A": "#ff0000", "B": "#00ff00"}
+    table = exp.data[1].cells["main"].table
+    table.obs["celltype"] = pd.Categorical([np.nan] * table.n_obs, categories=["A", "B"])
+
+    got = _composition_bar_colors(exp, monkeypatch)
+
+    assert got == {"A": "#ff0000", "B": "#00ff00"}
