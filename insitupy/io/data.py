@@ -559,7 +559,8 @@ def read_visium(
             internally as ``dataset_id`` for spatialdata-io element naming (shapes, images, table keys).
             Defaults to None (falls back to ``"visium"``).
         sample_name (Optional[str], optional): Name for the individual sample/ROI within the slide.
-            Defaults to None.
+            Defaults to None, which uses the Space Ranger sample ID (``library_ids`` in the count
+            matrix), else the folder name.
         slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
         sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
@@ -606,6 +607,13 @@ def read_visium(
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
+
+    if sample_name is None:
+        sample_name = _default_10x_sample_name(
+            path,
+            [path / kwargs.get("counts_file", "filtered_feature_bc_matrix.h5")]
+            + sorted(path.glob("*filtered_feature_bc_matrix.h5")),
+        )
 
     if verbose:
         logger.info("Reading Visium data with spatialdata-io...")
@@ -660,6 +668,36 @@ def read_visium(
     )
 
     return data
+
+
+def _default_10x_sample_name(path: Path, h5_candidates: list[Path]) -> str:
+    """Default sample name for a Space Ranger output folder.
+
+    Returns the single ``library_ids`` entry (the Space Ranger sample ID) of the first candidate
+    count matrix that is readable HDF5 and carries exactly one id. Falls back to the folder name
+    (the parent folder if *path* is Space Ranger's ``outs``). Never raises.
+    """
+    import h5py
+
+    for f in h5_candidates:
+        try:
+            if not Path(f).is_file():
+                continue
+            with h5py.File(f, "r") as h:
+                ids = h.attrs.get("library_ids")
+            if ids is None:
+                continue
+            ids = np.atleast_1d(ids)
+            if len(ids) != 1:
+                continue
+            val = ids[0]
+            val = val.decode() if isinstance(val, bytes) else str(val)
+            if val:
+                return val
+        except Exception:
+            continue
+    path = Path(path).resolve()  # a relative "." has an empty name
+    return path.parent.name if path.name == "outs" else path.name
 
 
 def _read_visium_hd_scalefactors(path: Path) -> dict:
@@ -767,7 +805,9 @@ def read_visium_hd(
             not stored: it is derived from ``array_row``/``array_col`` by integer division.
             Defaults to True.
         dataset_name: Name for the overarching dataset/slide.
-        sample_name: Name for the individual sample/ROI within the slide.
+        sample_name: Name for the individual sample/ROI within the slide. Defaults to None, which
+            uses the Space Ranger sample ID (``library_ids`` in the count matrix), else the
+            folder name.
         verbose: Whether to print progress messages. Defaults to True.
         **kwargs: Forwarded to ``spatialdata_io.visium_hd()`` (e.g. ``dataset_id``,
             ``fullres_image_file``, ``filtered_counts_file``). ``bin_size``,
@@ -846,6 +886,17 @@ def read_visium_hd(
         )
     ps = float(ps)
 
+    # units order: main first (8 um, else smallest), then ascending
+    order = sorted(bins, key=lambda b: (b != 8, b))
+
+    if sample_name is None:
+        h5_candidates = [seg_dir / "filtered_feature_cell_matrix.h5"] if use_seg else []
+        h5_candidates += [
+            path / "binned_outputs" / f"square_{b:03d}um" / "filtered_feature_bc_matrix.h5"
+            for b in order
+        ]
+        sample_name = _default_10x_sample_name(path, h5_candidates)
+
     if verbose:
         logger.info("Reading Visium HD data with spatialdata-io...")
     sdata = visium_hd(
@@ -871,8 +922,6 @@ def read_visium_hd(
         region = sdata.tables[tkey].uns["spatialdata_attrs"]["region"]
         return region[0] if isinstance(region, (list, tuple)) else region
 
-    # units: main first (8 um, else smallest), then ascending
-    order = sorted(bins, key=lambda b: (b != 8, b))
     units = {}
     for b in order:
         tkey = f"square_{b:03d}um"

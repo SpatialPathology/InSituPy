@@ -169,6 +169,19 @@ class TestReadVisium:
         centroids = np.c_[su.shapes.centroid.x, su.shapes.centroid.y]
         np.testing.assert_allclose(su.table.obsm["spatial"], centroids, atol=1.0)
 
+    def test_default_sample_name_from_real_data(self):
+        """Without sample_name, sample_id comes from the Space Ranger library_ids."""
+        import os
+        pytest.importorskip("spatialdata_io")
+        root = Path(os.environ.get(
+            "INSITUPY_VISIUM_TEST_DIR",
+            Path.home() / ".cache/InSituPy/demo_datasets/visium_hbreastcancer"
+            / "CytAssist_FFPE_Human_Breast_Cancer"))
+        if not (root / "spatial").is_dir():
+            pytest.skip("Visium test dataset not available")
+        xd = read_visium(root, fullres_pixel_size=0.5, verbose=False)
+        assert xd.sample_id == "CytAssist_FFPE_Human_Breast_Cancer"
+
 
 # ── read_qupath ───────────────────────────────────────────────────────────────
 
@@ -332,6 +345,53 @@ class TestReadVisiumHD:
 
         monkeypatch.setattr(spatialdata_io, "visium_hd", fake_visium_hd)
         return read_visium_hd(tmp_path, verbose=False, **kwargs)
+
+    @staticmethod
+    def _write_library_ids(h5_path: Path, ids):
+        h5py = pytest.importorskip("h5py")
+        h5_path.parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(h5_path, "w") as h:
+            h.attrs["library_ids"] = np.array(ids, dtype="S")
+
+    def test_default_sample_name_from_library_ids(self, tmp_path, monkeypatch):
+        self._bundle(tmp_path)
+        self._write_library_ids(
+            tmp_path / "binned_outputs" / "square_008um" / "filtered_feature_bc_matrix.h5",
+            [b"my_sample"],
+        )
+        assert self._read_stubbed(tmp_path, monkeypatch).sample_id == "my_sample"
+
+    def test_explicit_sample_name_wins(self, tmp_path, monkeypatch):
+        self._bundle(tmp_path)
+        self._write_library_ids(
+            tmp_path / "binned_outputs" / "square_008um" / "filtered_feature_bc_matrix.h5",
+            [b"my_sample"],
+        )
+        xd = self._read_stubbed(tmp_path, monkeypatch, sample_name="override")
+        assert xd.sample_id == "override"
+
+    @pytest.mark.parametrize("sub, expected", [("slideA", "slideA"), ("run42/outs", "run42")])
+    def test_default_sample_name_falls_back_to_folder(self, tmp_path, monkeypatch, sub, expected):
+        root = tmp_path / sub
+        root.mkdir(parents=True)
+        self._bundle(root)  # seg h5 is empty (not HDF5), no bin h5
+        assert self._read_stubbed(root, monkeypatch).sample_id == expected
+
+    def test_default_10x_sample_name_multi_library_falls_back(self, tmp_path):
+        from insitupy.io.data import _default_10x_sample_name
+
+        root = tmp_path / "aggr_run"
+        h5 = root / "filtered_feature_bc_matrix.h5"
+        self._write_library_ids(h5, [b"a", b"b"])
+        assert _default_10x_sample_name(root, [h5]) == "aggr_run"
+
+    def test_default_10x_sample_name_relative_dot(self, tmp_path, monkeypatch):
+        from insitupy.io.data import _default_10x_sample_name
+
+        root = tmp_path / "slideB"
+        root.mkdir()
+        monkeypatch.chdir(root)
+        assert _default_10x_sample_name(Path("."), []) == "slideB"
 
     def test_bin_mapping_keeps_only_layer_cells_and_parses_grid(self, tmp_path, monkeypatch):
         self._bundle(tmp_path)
