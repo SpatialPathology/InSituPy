@@ -540,7 +540,8 @@ def read_visium(
             internally as ``dataset_id`` for spatialdata-io element naming (shapes, images, table keys).
             Defaults to None (falls back to ``"visium"``).
         sample_name (Optional[str], optional): Name for the individual sample/ROI within the slide.
-            Defaults to None.
+            Defaults to None, which uses the Space Ranger sample ID (``library_ids`` in the count
+            matrix), else the folder name.
         slide_id (str, optional): Deprecated. Use ``dataset_name`` instead.
         sample_id (str, optional): Deprecated. Use ``sample_name`` instead.
         verbose (bool, optional): Whether to print progress messages. Defaults to True.
@@ -587,6 +588,13 @@ def read_visium(
 
     if not path.is_dir():
         raise FileNotFoundError(f"No such directory found: {str(path)}")
+
+    if sample_name is None:
+        sample_name = _default_10x_sample_name(
+            path,
+            [path / kwargs.get("counts_file", "filtered_feature_bc_matrix.h5")]
+            + sorted(path.glob("*filtered_feature_bc_matrix.h5")),
+        )
 
     if verbose:
         logger.info("Reading Visium data with spatialdata-io...")
@@ -641,6 +649,36 @@ def read_visium(
     )
 
     return data
+
+
+def _default_10x_sample_name(path: Path, h5_candidates: list[Path]) -> str:
+    """Default sample name for a Space Ranger output folder.
+
+    Returns the single ``library_ids`` entry (the Space Ranger sample ID) of the first candidate
+    count matrix that is readable HDF5 and carries exactly one id. Falls back to the folder name
+    (the parent folder if *path* is Space Ranger's ``outs``). Never raises.
+    """
+    import h5py
+
+    for f in h5_candidates:
+        try:
+            if not Path(f).is_file():
+                continue
+            with h5py.File(f, "r") as h:
+                ids = h.attrs.get("library_ids")
+            if ids is None:
+                continue
+            ids = np.atleast_1d(ids)
+            if len(ids) != 1:
+                continue
+            val = ids[0]
+            val = val.decode() if isinstance(val, bytes) else str(val)
+            if val:
+                return val
+        except Exception:
+            continue
+    path = Path(path).resolve()  # a relative "." has an empty name
+    return path.parent.name if path.name == "outs" else path.name
 
 
 def read_any(
