@@ -20,7 +20,6 @@ from matplotlib.transforms import IdentityTransform
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from insitupy._constants import (
-    DEFAULT_CATEGORICAL_CMAP,
     DEFAULT_CONTINUOUS_CMAP,
     NA_CATEGORY,
     with_insitupy_style,
@@ -37,8 +36,10 @@ from insitupy.utils._colors import (
     _add_colorlegend_to_axis,
     _coerce_na_for_plot,
     _extract_color_values,
+    _merge_stored_color_dicts,
     _parse_unique_categories,
     _rgb2hex_robust,
+    _stored_color_dict,
     _warn_na_cells_hidden,
     create_cmap_mapping,
 )
@@ -108,7 +109,9 @@ class PlotConfig(_UpdatablePlottingConfig):
         cmap (str): Colormap for continuous variables.
         palette (Optional[ListedColormap]): Color palette for categorical variables. ``None``
             (default) uses complete colors stored in ``uns['{key}_colors']``, else the default
-            categorical palette. An explicit palette always wins.
+            categorical palette. An explicit palette always wins; for an ``InSituExperiment``
+            it also wins over ``exp.colors`` and is used for that figure only (it is not
+            saved - use ``exp.sync_colors(key, palette=...)`` for that).
         spot_type (str): Marker type for scatter plots (default: "o").
         background_color (str): Background color of the plot (default: "white").
         cmap_center (Optional[float]): Center value for diverging colormaps.
@@ -523,10 +526,12 @@ def spatial(
     if _is_experiment(data):
         n_data = len(data)
 
-        # synchronize colors before plotting; quiet because keys that are genes,
-        # numeric or already colored are expected here and need no sync
+        # synchronize colors before plotting; implicit because keys that are genes,
+        # numeric or already colored are expected here and need no sync, and stored
+        # uns colors are adopted, never overwritten. An explicit palette is plot-only
+        # and wins over exp.colors, so it skips the sync.
         # (experiment colors are cells-only, so units layers skip this)
-        if units_layer is None:
+        if units_layer is None and plot_config.palette is None:
             # with samples missing the layer, sync on a view of the others (sync loops over
             # every sample and would raise); the view shares the samples, so their uns
             # colors are written, only the parent's experiment color store is not updated
@@ -536,12 +541,9 @@ def spatial(
             sync_target._sync_colors(
                 keys=keys,
                 cells_layer=cells_layer,
-                palette=(
-                    plot_config.palette if plot_config.palette is not None
-                    else DEFAULT_CATEGORICAL_CMAP
-                ),
+                palette=None,
                 overwrite=False,
-                quiet=True,
+                implicit=True,
             )
     else:
         n_data = 1
@@ -949,8 +951,11 @@ class _ColorConfigMultiPlot:
             if present is not None:
                 # samples without the layer are not plotted and must not be resolved
                 data_list = [xd for xd, p in zip(data_list, present, strict=True) if p]
-            # experiment colors are cells-only
-            exp_colors = data.colors if units_layer is None else None
+            # experiment colors are cells-only; an explicit palette wins over
+            # exp.colors (plot-only, nothing is saved)
+            exp_colors = (
+                data.colors if units_layer is None and plot_config.palette is None else None
+            )
             # is_experiment = True
         else:
             data_list = [data]
@@ -1140,34 +1145,6 @@ class _ColorConfigMultiPlot:
                 raise ValueError(f"Values found for key {key} showed mixed type (categorical/numeric).")
 
         return color_entry
-
-def _stored_color_dict(adata, key, color_values):
-    """Return ``{category: color}`` from ``adata.uns['{key}_colors']`` or None.
-
-    Only used for categorical obs columns whose stored color list is complete
-    (scanpy convention: colors in ``.cat.categories`` order).
-    """
-    if not isinstance(getattr(color_values, "dtype", None), pd.CategoricalDtype):
-        return None
-    categories = color_values.cat.categories
-    stored = adata.uns.get(f"{key}_colors")
-    if stored is None or len(stored) < len(categories):
-        return None
-    return {cat: stored[i] for i, cat in enumerate(categories)}
-
-
-def _merge_stored_color_dicts(stored_dicts, all_values):
-    """Merge per-sample stored color dicts; None unless all are usable and agree."""
-    if len(stored_dicts) == 0 or any(d is None for d in stored_dicts):
-        return None
-    merged = {}
-    for d in stored_dicts:
-        for cat, color in d.items():
-            color = colors.to_hex(color).lower()
-            if merged.setdefault(cat, color) != color:
-                return None  # same category, different colors across samples
-    return {cat: merged[cat] for cat in all_values if cat in merged}
-
 
 def _get_crange(color_values, crange_type):
     if crange_type == 'max':

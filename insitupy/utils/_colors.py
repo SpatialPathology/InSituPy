@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib import cm
-from matplotlib.colors import ListedColormap, rgb2hex
+from matplotlib.colors import ListedColormap, rgb2hex, to_hex
 from pandas.api.types import is_bool_dtype, is_numeric_dtype
 from scipy.sparse import issparse
 
@@ -164,6 +164,53 @@ def _warn_na_cells_hidden(n_hidden, keys):
         UserWarning,
         stacklevel=2,
     )
+
+
+def _stored_color_dict(adata, key, color_values):
+    """Return ``{category: color}`` from ``adata.uns['{key}_colors']`` or None.
+
+    Only used for categorical obs columns whose stored color list is complete
+    (scanpy convention: colors in ``.cat.categories`` order).
+    """
+    if not isinstance(getattr(color_values, "dtype", None), pd.CategoricalDtype):
+        return None
+    categories = color_values.cat.categories
+    stored = adata.uns.get(f"{key}_colors")
+    if stored is None or len(stored) < len(categories):
+        return None
+    return {cat: stored[i] for i, cat in enumerate(categories)}
+
+
+def _merge_stored_color_dicts(stored_dicts, all_values):
+    """Merge per-sample stored color dicts; None unless all are usable and agree."""
+    if len(stored_dicts) == 0 or any(d is None for d in stored_dicts):
+        return None
+    merged = {}
+    for d in stored_dicts:
+        for cat, color in d.items():
+            color = to_hex(color).lower()
+            if merged.setdefault(cat, color) != color:
+                return None  # same category, different colors across samples
+    return {cat: merged[cat] for cat in all_values if cat in merged}
+
+
+def _merge_available_stored_colors(stored_dicts):
+    """Merge the usable per-sample stored color dicts (``None`` entries are ignored).
+
+    Returns ``(merged, conflict)``: ``merged`` maps category -> lowercase hex
+    (empty if nothing is usable); ``conflict`` is True if one category maps to
+    two different colors across samples.
+    """
+    merged = {}
+    conflict = False
+    for d in stored_dicts:
+        if d is None:
+            continue
+        for cat, color in d.items():
+            color = to_hex(color).lower()
+            if merged.setdefault(cat, color) != color:
+                conflict = True
+    return merged, conflict
 
 
 def create_cmap_mapping(

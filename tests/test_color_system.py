@@ -652,3 +652,208 @@ class TestCategoricalRgbaIntegerCategories:
         data = pd.Series(["A", "B", "A"], dtype=object)
         categorical_data_to_rgba(data, cmap=color_dict)
         assert set(color_dict) == {"A", "B"}
+
+
+# ── Part 4 - stored uns colors (adopted, never overwritten implicitly) ───────
+
+_STORED = {"A": "#111111", "B": "#222222", "C": "#333333"}
+_STORED_INT = {0: "#111111", 1: "#222222", 2: "#333333"}
+
+
+def _set_stored(xd, mapping, col="celltype"):
+    """Write scanpy-style ``uns['<col>_colors']`` in ``.cat.categories`` order."""
+    table = xd.cells["main"].table
+    table.uns[f"{col}_colors"] = [mapping[c] for c in table.obs[col].cat.categories]
+
+
+def _uns_map(xd, col="celltype"):
+    """Per-category lowercase hex colors currently stored in a sample's uns."""
+    from matplotlib.colors import to_hex
+
+    table = xd.cells["main"].table
+    cats = table.obs[col].cat.categories
+    return {c: to_hex(v).lower() for c, v in zip(cats, table.uns[f"{col}_colors"], strict=False)}
+
+
+def _hex_dict(color_dict):
+    from matplotlib.colors import to_hex
+
+    return {k: to_hex(v).lower() for k, v in color_dict.items()}
+
+
+def _call_implicit(caller, exp, monkeypatch):
+    plt.close("all")
+    if caller == "spatial":
+        isp.pl.spatial(exp, keys="celltype", show=False)
+        plt.close("all")
+    else:
+        monkeypatch.setattr(InSituData, "show", lambda self, **kwargs: None)
+        exp.show(0)
+
+
+def _color_config_dict(exp, key="celltype", palette=None):
+    from insitupy.plotting.spatial import DataConfig, PlotConfig, _ColorConfigMultiPlot
+
+    pc = PlotConfig() if palette is None else PlotConfig(palette=palette)
+    return _ColorConfigMultiPlot(exp, DataConfig(), pc, keys=[key])[key]["color_dict"]
+
+
+@pytest.mark.parametrize("cats,stored", [
+    (("A", "B", "C"), _STORED),
+    ((0, 1, 2), _STORED_INT),
+])
+def test_sync_colors_seeds_from_consistent_stored_uns(cats, stored):
+    exp = _make_experiment(n=2, categories=cats)
+    for xd in exp.data:
+        _set_stored(xd, stored)
+
+    exp.sync_colors("celltype", verbose=True)
+
+    assert dict(exp.colors.layer("main")["celltype"]) == stored
+    for xd in exp.data:
+        assert _uns_map(xd) == stored
+
+
+@pytest.mark.parametrize("caller", ["spatial", "show"])
+def test_implicit_presync_keeps_stored_uns_colors(caller, monkeypatch):
+    exp = _make_plot_experiment()
+    for xd in exp.data:
+        _set_stored(xd, _STORED)
+
+    _call_implicit(caller, exp, monkeypatch)
+
+    assert dict(exp.colors.layer("main")["celltype"]) == _STORED
+    for xd in exp.data:
+        assert _uns_map(xd) == _STORED
+    if caller == "spatial":
+        assert _hex_dict(_color_config_dict(exp)) == _STORED
+
+
+def test_stored_uns_partial_coverage_seeds_and_fills():
+    exp = _make_experiment(n=2, categories=("A", "B"))
+    # sample 1 has categories B, C and no stored colors
+    exp._data[1] = _make_xd(seed=1, categories=("B", "C"), slide_id="s1")
+    _set_stored(exp.data[0], {"A": "#111111", "B": "#222222"})
+
+    exp.sync_colors("celltype")
+
+    got = dict(exp.colors.layer("main")["celltype"])
+    assert set(got) == {"A", "B", "C"}
+    assert got["A"] == "#111111" and got["B"] == "#222222"
+    assert got["C"] not in ("#111111", "#222222")
+    assert _uns_map(exp.data[0]) == {"A": "#111111", "B": "#222222"}
+    assert _uns_map(exp.data[1]) == {"B": "#222222", "C": got["C"]}
+
+
+def test_incomplete_stored_uns_treated_as_absent():
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    _set_stored(exp.data[0], _STORED)
+    exp.data[1].cells["main"].table.uns["celltype_colors"] = ["#999999"]  # too short
+
+    exp.sync_colors("celltype")
+
+    assert dict(exp.colors.layer("main")["celltype"]) == _STORED
+    assert _uns_map(exp.data[1]) == _STORED
+
+
+_CONFLICT_A = {"A": "#111111", "B": "#222222", "C": "#333333"}
+_CONFLICT_B = {"A": "#111111", "B": "#aaaaaa", "C": "#333333"}
+
+
+def _make_conflict_experiment():
+    exp = _make_plot_experiment()
+    _set_stored(exp.data[0], _CONFLICT_A)
+    _set_stored(exp.data[1], _CONFLICT_B)
+    return exp
+
+
+@pytest.mark.parametrize("caller", ["spatial", "show"])
+def test_implicit_presync_conflicting_stored_uns_left_untouched(caller, monkeypatch):
+    exp = _make_conflict_experiment()
+
+    _call_implicit(caller, exp, monkeypatch)
+
+    assert "celltype" not in exp.colors.layer("main")
+    assert _uns_map(exp.data[0]) == _CONFLICT_A
+    assert _uns_map(exp.data[1]) == _CONFLICT_B
+    if caller == "spatial":
+        # the figure still draws, with the default palette over the union
+        ref = _make_plot_experiment()
+        ref.sync_colors("celltype")
+        assert _hex_dict(_color_config_dict(exp)) == dict(ref.colors.layer("main")["celltype"])
+
+
+def test_public_sync_colors_conflict_harmonizes_with_warning(caplog):
+    exp = _make_conflict_experiment()
+
+    with _capture_insitupy_logs(caplog, logging.WARNING):
+        exp.sync_colors("celltype")
+
+    assert any("disagree" in m for m in _warning_messages(caplog))
+    got = dict(exp.colors.layer("main")["celltype"])
+    assert set(got) == {"A", "B", "C"}
+    for xd in exp.data:
+        assert _uns_map(xd) == got
+    assert got != _CONFLICT_A and got != _CONFLICT_B
+
+
+def test_sync_colors_explicit_palette_wins_over_stored_uns():
+    from matplotlib.colors import ListedColormap
+
+    pal = ListedColormap(["#ff0000", "#00ff00", "#0000ff"], name="pal")
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    for xd in exp.data:
+        _set_stored(xd, _STORED)
+
+    exp.sync_colors("celltype", palette=pal)
+
+    expected = {"A": "#ff0000", "B": "#00ff00", "C": "#0000ff"}
+    assert dict(exp.colors.layer("main")["celltype"]) == expected
+    for xd in exp.data:
+        assert _uns_map(xd) == expected
+
+
+def test_spatial_explicit_palette_is_plot_only():
+    from matplotlib.colors import ListedColormap
+
+    pal = ListedColormap(["#ff0000", "#00ff00", "#0000ff"], name="pal")
+    exp = _make_plot_experiment()
+    for xd in exp.data:
+        table = xd.cells["main"].table
+        table.obs["other"] = pd.Categorical(["X", "Y", "X"][: table.n_obs])
+        _set_stored(xd, _STORED)  # stored colors for "celltype"
+    exp.colors["other"] = {"X": "#abcdef", "Y": "#fedcba"}  # exp.colors entry for "other"
+    colors_before = {k: dict(v) for k, v in exp.colors.layer("main").items()}
+    uns_before = [dict(_uns_map(xd)) for xd in exp.data]
+    other_before = [list(xd.cells["main"].table.uns["other_colors"]) for xd in exp.data]
+
+    from insitupy.plotting.spatial import PlotConfig
+
+    plt.close("all")
+    isp.pl.spatial(exp, keys=["celltype", "other"], show=False, plot_config=PlotConfig(palette=pal))
+    plt.close("all")
+
+    # the figure colors come from the explicit palette, not stored uns or exp.colors
+    assert _hex_dict(_color_config_dict(exp, "celltype", palette=pal)) == {
+        "A": "#ff0000", "B": "#00ff00", "C": "#0000ff",
+    }
+    assert _hex_dict(_color_config_dict(exp, "other", palette=pal)) == {
+        "X": "#ff0000", "Y": "#00ff00",
+    }
+    assert {k: dict(v) for k, v in exp.colors.layer("main").items()} == colors_before
+    assert "celltype" not in exp.colors.layer("main")
+    assert [_uns_map(xd) for xd in exp.data] == uns_before
+    assert [list(xd.cells["main"].table.uns["other_colors"]) for xd in exp.data] == other_before
+
+
+def test_sync_colors_overwrite_resets_to_palette_not_uns():
+    exp = _make_experiment(n=2, categories=("A", "B", "C"))
+    manual = {"A": "#111111", "B": "#222222", "C": "#333333"}
+    exp.colors["celltype"] = manual
+
+    exp.sync_colors("celltype", overwrite=True)
+
+    got = dict(exp.colors.layer("main")["celltype"])
+    assert got != manual
+    for xd in exp.data:
+        assert _uns_map(xd) == got
