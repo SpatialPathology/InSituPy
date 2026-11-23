@@ -37,6 +37,11 @@ that: it returns a plain `AnnData`, not a modification of the reconstructed expe
 
 Current dialect version: **3** (`insitupy._constants.SPATIALDATA_DIALECT_VERSION`).
 
+The per-sample coordinate systems and the `samples[uid]["coordinate_system"]` descriptor key are an
+**additive dialect-3 extension**: stores with and without them are both dialect 3 and both read.
+Dialect 4 (SD-A4, per-raster placement in the transform) will formalise them as required parts of
+the dialect.
+
 Version 3 added the `TABLES.<layer>` concatenated-table element
 (`InSituExperiment.build_table()`'s union table), the `tables` derived modality
 (`insitupy._constants.SPATIALDATA_DERIVED_MODALITIES`), and
@@ -62,6 +67,21 @@ implemented (beta line; no version-1 stores are known to exist outside test runs
 - `<locator>` segments are joined with `.`; `.` and `-` inside a locator name are replaced with
   `_` to satisfy SpatialData's key-naming rules.
 - `TRANSCRIPTS` has no locator (there is at most one transcripts element per sample).
+
+## Coordinate systems
+
+Every element lives in `"global"` (`Scale` for rasters, `Identity` for shapes/points).
+`InSituExperiment` exports additionally register each `SAMPLE.<uid>..` spatial element in a
+coordinate system named `<uid>` (verbatim, the same uid as in the key prefix, not sanitised) with
+the *same* transform as in `"global"`. These systems exist for consumers that show one layer per
+coordinate system (e.g. TissUUmaps) and for `sdata.filter_by_coordinate_system(uid)`. Samples are
+**not** spatially separated in `"global"`; a consumer that wants a side-by-side view arranges them
+itself. Bare `InSituData` exports use `"global"` only. Tables (`TABLES.<layer>` and others) have no
+transform; under `filter_by_coordinate_system(uid)` spatialdata keeps only the table rows that
+annotate the remaining elements, so the union table is reduced to that sample's rows.
+
+The InSituPy reader resolves only `"global"` and ignores the extra systems. A sample uid of
+`"global"` is rejected on export.
 
 ## Emitted patterns
 
@@ -180,7 +200,7 @@ For an `InSituExperiment` (multi-sample) export, sample identity is keyed by `ui
         "modalities": ["cells", "units", "images", "transcripts", "annotations", "regions", "tables"],
         "sample_prefix_pattern": "SAMPLE.<uid>..",
         "samples": {
-            "<uid>": {"slide_id": "...", "sample_id": "..."},
+            "<uid>": {"slide_id": "...", "sample_id": "...", "coordinate_system": "<uid>"},
             ...
         },
     }
@@ -201,6 +221,9 @@ needed), `slide_id`/`sample_id` are flat keys instead:
     }
 }
 ```
+
+The per-sample `coordinate_system` key is optional: it is absent in stores written before it was
+introduced, so readers must use `.get`.
 
 Arbitrary per-sample `metadata` dicts, `method_name`, `method_params`, and `pixel_size` are
 **not** persisted here - an explicit, documented gap, not an oversight. Only `uid` (free from the

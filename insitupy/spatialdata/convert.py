@@ -27,7 +27,9 @@ from insitupy.containers import BoundariesData, CellData, SpatialUnitsData
 from insitupy.experiment.data import InSituExperiment, TableAccessor
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata,
+    _add_per_sample_coordinate_systems,
     _align_shapes_to_table,
+    _assert_no_reserved_sample_uid,
     _assign_sdata_transcripts,
     _build_insitudata_from_elements,
     _centroids_from_labels,
@@ -229,11 +231,20 @@ def convert_to_spatialdata(
             The store also carries a versioned dialect descriptor at
             ``sdata.attrs["insitupy_spatialdata_dialect"]``, including ``uid``/``slide_id``/
             ``sample_id`` identity for each sample (or flat ``slide_id``/``sample_id`` for a
-            bare ``InSituData``).
+            bare ``InSituData``). For an ``InSituExperiment``, each sample's spatial
+            elements are also registered in a coordinate system named by its uid (identical
+            transform to ``"global"``), recorded as ``samples[uid]["coordinate_system"]``;
+            use ``sdata.filter_by_coordinate_system(uid)`` to get one sample.
 
     Raises:
+        InSituPyError: If a sample uid is ``"global"`` (reserved).
         ImportError: If the ``spatialdata`` package is not installed.
     """
+    if _is_experiment(data):
+        # check before the (expensive) conversion, not after it
+        uids = [meta["uid"] for meta, _d in data.iterdata()]
+        _assert_no_reserved_sample_uid(uids)
+
     sd_dict = convert_to_spatialdata_dict(
         data,
         n_pyramids=n_pyramids,
@@ -251,7 +262,11 @@ def convert_to_spatialdata(
 
     if _is_experiment(data):
         dialect_attrs["insitupy_spatialdata_dialect"]["samples"] = {
-            meta["uid"]: {"slide_id": d.slide_id, "sample_id": d.sample_id}
+            meta["uid"]: {
+                "slide_id": d.slide_id,
+                "sample_id": d.sample_id,
+                "coordinate_system": meta["uid"],
+            }
             for meta, d in data.iterdata()
         }
     else:
@@ -262,6 +277,9 @@ def convert_to_spatialdata(
 
     # Check and fix case-insensitive conflicts
     sdata, rename_map = check_and_fix_case_insensitive_conflicts(sdata)
+
+    if _is_experiment(data):
+        _add_per_sample_coordinate_systems(sdata, uids)
 
     return sdata
 
