@@ -11,7 +11,7 @@ else:
         ShapesModel,
         TableModel,
     )
-    from spatialdata.transformations import Identity, Scale, get_transformation, set_transformation
+    from spatialdata.transformations import Identity, Scale, get_transformation
     from spatialdata.transformations.transformations import Scale
 
 import logging
@@ -187,46 +187,6 @@ def _group_elements_by_sample(sdata: SpatialData) -> dict[str | None, dict[str, 
         stripped_key = ".".join([modality, *locator_parts]) if locator_parts else modality
         samples[sample_uid][stripped_key] = (elem_type, elem)
     return dict(samples)
-
-
-def _assert_no_reserved_sample_uid(uids) -> None:
-    """Raise if a sample uid equals the reserved coordinate-system name ``"global"``."""
-    if "global" in [str(u) for u in uids]:
-        raise InSituPyError(
-            "A sample uid of 'global' is reserved: it would merge the per-sample "
-            "coordinate system into the shared 'global' one. Rename the sample uid."
-        )
-
-
-def _shapes_for_parse(gdf):
-    """Return a shallow copy of ``gdf`` without SpatialData transform metadata, ready to parse.
-
-    ``ShapesModel.parse`` returns its input and writes the transform into its ``attrs``, so
-    parsing the user's object directly would leak it there; the copy prevents that. A
-    GeoDataFrame read back from a SpatialData store still carries that store's transforms
-    (e.g. a per-sample coordinate system), and ``ShapesModel.parse`` keeps existing transforms,
-    so they are dropped here: InSituPy shapes always export as ``Identity`` in ``"global"``.
-    """
-    gdf = gdf.copy(deep=False)  # pandas gives the copy its own attrs dict
-    gdf.attrs.pop("transform", None)  # spatialdata's TRANSFORM_KEY
-    return gdf
-
-
-def _add_per_sample_coordinate_systems(sdata: SpatialData, uids: list[str]) -> None:
-    """Register each ``SAMPLE.<uid>..`` spatial element in a coordinate system named ``<uid>``.
-
-    The element keeps its ``"global"`` transform and gets the identical transform in the
-    per-sample system. The whole transformation dict is replaced (``set_all=True``) so no
-    stale system carried in from a previous export can survive. Elements without a sample
-    prefix, and tables, are left alone.
-    """
-    uid_set = set(uids)
-    for _elem_type, key, elem in sdata.gen_spatial_elements():
-        sample_uid, _modality, _loc = _parse_dialect_key(key)
-        if sample_uid is None or sample_uid not in uid_set:
-            continue
-        t = get_transformation(elem, to_coordinate_system="global")
-        set_transformation(elem, {"global": t, sample_uid: t}, set_all=True)
 
 
 def _transform_anndata_for_spatialdata(
@@ -656,7 +616,7 @@ def _transform_units_for_spatialdata(
                 _assert_key_absent(tables, table_dict_key, "units table")
                 _assert_key_absent(unit_shapes, shapes_key, "units shapes")
                 tables[table_dict_key] = TableModel.parse(adata)
-                unit_shapes[shapes_key] = ShapesModel.parse(_shapes_for_parse(sud.shapes))
+                unit_shapes[shapes_key] = ShapesModel.parse(sud.shapes)
     return tables, unit_shapes
 
 
@@ -888,7 +848,7 @@ def _transform_annotations_for_spatialdata(
     if xd.annotations is not None:
         for key in xd.annotations.metadata.keys():
             gdf = ShapesModel.parse(
-                _shapes_for_parse(xd.annotations[key]),
+                xd.annotations[key],
                 )
 
             dict_key = _generate_spatialdata_key(
@@ -921,7 +881,7 @@ def _transform_regions_for_spatialdata(
     if xd.regions is not None:
         for key in xd.regions.metadata.keys():
             gdf = ShapesModel.parse(
-                _shapes_for_parse(xd.regions[key]),
+                xd.regions[key],
                 )
             dict_key = _generate_spatialdata_key(
                 sample_id=sample_id,
@@ -961,9 +921,8 @@ def _extract_pixel_size_from_element(
     ) -> float:
     """Extract the pixel size (µm/pixel) from an already-fetched SpatialData element's transform.
 
-    InSituPy's own writer always resolves in ``"global"``; experiment exports
-    additionally carry one identical per-sample system per uid (ignored by the
-    reader). The transform is a ``Scale`` (or, for untransformed elements, an ``Identity``)
+    InSituPy's own writer always uses a single ``"global"`` coordinate system
+    with a ``Scale`` (or, for untransformed elements, an ``Identity``)
     transformation, so this is unambiguous for InSituPy-dialect stores.
 
     Args:
