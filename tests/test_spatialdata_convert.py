@@ -259,7 +259,11 @@ class TestDialectAttrs:
 
         samples = descriptor["samples"]
         for uid, xd in ((meta["uid"], d) for meta, d in exp.iterdata()):
-            assert samples[uid] == {"slide_id": xd.slide_id, "sample_id": xd.sample_id}
+            assert samples[uid] == {
+                "slide_id": xd.slide_id,
+                "sample_id": xd.sample_id,
+                "coordinate_system": uid,
+            }
 
 
 # ── Real disk round trip (WP5: nothing previously called sdata.write()) ───────
@@ -343,6 +347,139 @@ class TestExportSampleSubsetView:
 
         samples = sdata.attrs["insitupy_spatialdata_dialect"]["samples"]
         assert set(samples) == {"sample_0", "sample_1"}
+        assert set(sdata.coordinate_systems) == {"global", "sample_0", "sample_1"}
+
+
+# -- Per-sample coordinate systems ---------------------------------------------
+
+def _summarize(exp):
+    out = {}
+    for meta, xd in exp.iterdata():
+        s = {}
+        for layer in xd.cells.keys():
+            cd = xd.cells[layer]
+            s[f"cells.{layer}.shape"] = cd.table.shape
+            if cd.boundaries is not None:
+                s[f"cells.{layer}.bnd"] = sorted(cd.boundaries.metadata.keys())
+                s[f"cells.{layer}.px"] = {
+                    k: v.get("pixel_size") for k, v in cd.boundaries.metadata.items()
+                }
+        if xd.images is not None:
+            s["images"] = {n: xd.images.metadata[n]["pixel_size"] for n in xd.images.names}
+        s["transcripts"] = None if xd.transcripts is None else len(xd.transcripts)
+        s["units"] = None if xd.units is None else sorted(xd.units.keys())
+        s["annotations"] = None if xd.annotations is None else sorted(xd.annotations.keys())
+        s["regions"] = None if xd.regions is None else sorted(xd.regions.keys())
+        out[meta["uid"]] = s
+    return out
+
+
+class TestPerSampleCoordinateSystems:
+    def test_experiment_has_one_system_per_sample(self):
+        exp = make_experiment(n_samples=2)
+        sdata = convert_to_spatialdata(exp)
+        uids = [meta["uid"] for meta, _ in exp.iterdata()]
+        assert set(sdata.coordinate_systems) == {"global", *uids}
+        samples = sdata.attrs["insitupy_spatialdata_dialect"]["samples"]
+        for uid in uids:
+            assert samples[uid]["coordinate_system"] == uid
+        assert sdata.attrs["insitupy_spatialdata_dialect"]["version"] == SPATIALDATA_DIALECT_VERSION
+
+    def test_per_sample_transform_equals_global(self):
+        from spatialdata.transformations import get_transformation
+
+        from insitupy.spatialdata._convert import _parse_dialect_key
+
+        sdata = convert_to_spatialdata(make_experiment(n_samples=2))
+        n = 0
+        for _etype, key, elem in sdata.gen_spatial_elements():
+            uid, _mod, _loc = _parse_dialect_key(key)
+            ts = get_transformation(elem, get_all=True)
+            assert set(ts) == {"global", uid}, key
+            assert ts["global"] == ts[uid], key
+            n += 1
+        assert n > 0
+
+    @pytest.mark.parametrize("uids", [["sample_0", "sample_1"], ["a.b", "c-d"]])
+    def test_filter_by_coordinate_system_isolates_sample(self, tmp_path, uids):
+        exp = make_experiment(n_samples=2)
+        exp._metadata["uid"] = uids
+        sdata = roundtrip_through_zarr(convert_to_spatialdata(exp), tmp_path)
+        for uid in uids:
+            expected = {
+                key for _t, key, _e in sdata.gen_spatial_elements()
+                if key.startswith(f"SAMPLE.{uid}..")
+            }
+            assert expected
+            filtered = sdata.filter_by_coordinate_system(uid)
+            got = {key for _t, key, _e in filtered.gen_spatial_elements()}
+            assert got == expected
+
+    def test_reader_output_unchanged_by_per_sample_systems(self, tmp_path):
+        from spatialdata.transformations import get_transformation, set_transformation
+
+        from insitupy.spatialdata import read_spatialdata
+
+        exp = make_experiment(n_samples=2)
+        new = convert_to_spatialdata(exp)
+        new.write(tmp_path / "new.zarr")
+
+        old = convert_to_spatialdata(exp)
+        for _t, _k, elem in old.gen_spatial_elements():
+            g = get_transformation(elem, to_coordinate_system="global")
+            set_transformation(elem, {"global": g}, set_all=True)
+        for entry in old.attrs["insitupy_spatialdata_dialect"]["samples"].values():
+            entry.pop("coordinate_system")
+        assert set(old.coordinate_systems) == {"global"}
+        old.write(tmp_path / "old.zarr")
+
+        r_new = read_spatialdata(tmp_path / "new.zarr", strict=True, verbose=False)
+        r_old = read_spatialdata(tmp_path / "old.zarr", strict=True, verbose=False)
+        assert _summarize(r_new) == _summarize(r_old)
+        assert list(r_new.metadata["uid"]) == list(r_old.metadata["uid"])
+
+    def test_single_sample_export_global_only(self):
+        sdata = convert_to_spatialdata(make_insitudata(n_cells=2, with_image=True))
+        assert list(sdata.coordinate_systems) == ["global"]
+        descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
+        assert "samples" not in descriptor
+        assert "coordinate_system" not in descriptor
+
+    def test_uid_global_rejected(self):
+        from insitupy._exceptions import InSituPyError
+
+        exp = make_experiment(n_samples=2)
+        exp._metadata["uid"] = ["global", "sample_1"]
+        with pytest.raises(InSituPyError, match="global"):
+            convert_to_spatialdata(exp)
+
+    def test_reexport_under_new_uid_has_no_stale_system(self):
+        exp = make_experiment(n_samples=2)
+        ann_attrs_before = [dict(xd.annotations["roi"].attrs) for xd in exp.data]
+        convert_to_spatialdata(exp)
+        # export must not write transform metadata into the user's GeoDataFrames
+        for xd, before in zip(exp.data, ann_attrs_before, strict=True):
+            assert dict(xd.annotations["roi"].attrs) == before
+
+        exp._metadata["uid"] = ["new_0", "new_1"]
+        sdata = convert_to_spatialdata(exp)
+        assert set(sdata.coordinate_systems) == {"global", "new_0", "new_1"}
+
+    def test_reexport_of_read_back_data_has_no_stale_system(self, tmp_path):
+        # shapes read back from a store keep that store's transforms in their attrs;
+        # a re-export must not carry the old per-sample systems along
+        from insitupy.spatialdata import read_spatialdata
+
+        convert_to_spatialdata(make_experiment(n_samples=2)).write(tmp_path / "a.zarr")
+        read_back = read_spatialdata(tmp_path / "a.zarr", strict=True, verbose=False)
+        assert "transform" in read_back.data[0].annotations["roi"].attrs  # precondition
+
+        bare = convert_to_spatialdata(read_back.data[0])
+        assert list(bare.coordinate_systems) == ["global"]
+
+        read_back._metadata["uid"] = ["new_0", "new_1"]
+        sdata = convert_to_spatialdata(read_back)
+        assert set(sdata.coordinate_systems) == {"global", "new_0", "new_1"}
 
 
 # ── default color for shapes without a color column ──────────────────────────
