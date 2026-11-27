@@ -301,7 +301,7 @@ def _explicit_overrides(**kwargs) -> dict:
 @with_insitupy_style
 def spatial(
     data: InSituData | InSituExperiment,
-    keys: str | list[str],
+    keys: str | list[str] | None,
     cells_layer: str | None = None,
     units_layer: str | None = None,
     layer: str | None = _UNSET,
@@ -352,7 +352,14 @@ def spatial(
 
     Args:
         data (InSituData or InSituExperiment): Input dataset or experiment.
-        keys (str or list of str): Feature key(s) to plot (e.g., gene names or annotations).
+        keys (str or list of str or None): Feature key(s) to plot (e.g., gene names or annotations).
+            ``None`` draws only the image (``image_key``) and the annotations/regions without
+            any cells, so no cell layer has to be loaded; one panel per sample. The axis limits
+            then come from ``xlim``/``ylim``, else from ``region_tuple``, else from the image
+            extent, else from the bounds of the drawn annotations. With ``origin_zero=True`` the
+            coordinate origin is moved to the lower-left corner of these limits. ``cells_layer``,
+            ``units_layer``, ``layer`` and the filters have no effect. Raises ``ValueError`` if
+            nothing can be drawn at all.
         cells_layer (str, optional): Name of the cell layer to extract data from.
         units_layer (str, optional): Name of a units layer (e.g. Visium HD bins such as
             ``"square_008um"``, or Visium spots) to plot instead of a cell layer. Mutually exclusive
@@ -442,8 +449,13 @@ def spatial(
         )
         annotation_tuple = annotations_key
 
-    # convert arguments to lists
-    keys = convert_to_list(keys)
+    # keys=None: image/annotations only, no cell table is touched. A single virtual
+    # key keeps the layout code unchanged.
+    image_only = keys is None
+    if image_only:
+        keys = [None]
+    else:
+        keys = convert_to_list(keys)
 
     if cells_layer is not None and units_layer is not None:
         raise ValueError("cells_layer and units_layer are mutually exclusive")
@@ -451,7 +463,7 @@ def spatial(
     # experiments: samples without the requested layer are skipped (empty panel, one warning);
     # single samples keep raising the usual error from the layer lookup
     present = None
-    if _is_experiment(data):
+    if _is_experiment(data) and not image_only:
         present = [_has_table_layer(xd, cells_layer, units_layer) for xd in data.data]
         desc = _layer_desc(cells_layer, units_layer)
         if not any(present):
@@ -521,7 +533,8 @@ def spatial(
     _check_image_key(data, data_config.image_key, present=present)
 
     # marker defaults for units layers (bins tile as squares, spots are circles)
-    if units_layer is not None and spot_size is _UNSET and not user_plot_config:
+    if (units_layer is not None and not image_only
+            and spot_size is _UNSET and not user_plot_config):
         _set_units_marker_defaults(data, units_layer, plot_config, present=present)
 
     # check whether the data is an InSituExperiment or a single InSituData
@@ -533,7 +546,7 @@ def spatial(
         # uns colors are adopted, never overwritten. An explicit palette is plot-only
         # and wins over exp.colors, so it skips the sync.
         # (experiment colors are cells-only, so units layers skip this)
-        if units_layer is None and plot_config.palette is None:
+        if units_layer is None and plot_config.palette is None and not image_only:
             # with samples missing the layer, sync on a view of the others (sync loops over
             # every sample and would raise); the view shares the samples, so their uns
             # colors are written, only the parent's experiment color store is not updated
@@ -551,15 +564,19 @@ def spatial(
         n_data = 1
         # is_experiment = False
 
-    color_config = _ColorConfigMultiPlot(
-        data=data,
-        cells_layer=cells_layer,
-        units_layer=units_layer,
-        keys=keys,
-        data_config=data_config,
-        plot_config=plot_config,
-        present=present,
-    )
+    if image_only:
+        # no color values: behaves like a continuous key for the layout code
+        color_config = {None: {"color_dict": None, "crange": None, "is_categorical": False}}
+    else:
+        color_config = _ColorConfigMultiPlot(
+            data=data,
+            cells_layer=cells_layer,
+            units_layer=units_layer,
+            keys=keys,
+            data_config=data_config,
+            plot_config=plot_config,
+            present=present,
+        )
 
     layout_config.calc_subplot_params(
         keys=keys,
@@ -585,6 +602,7 @@ def spatial(
         color_config,
         units_layer=units_layer,
         present=present,
+        image_only=image_only,
     )
 
     save_and_show_figure(
@@ -658,6 +676,7 @@ def _plot_to_subplots(
     verbose: bool = False,
     units_layer: str | None = None,
     present: list[bool] | None = None,
+    image_only: bool = False,
 ):
     logger.info("Do plotting.") if verbose else None
 
@@ -668,6 +687,27 @@ def _plot_to_subplots(
 
     total_hidden = 0
     affected_keys = set()
+
+    if image_only:
+        n_drawn = 0
+        for idx in range(n_data):
+            xd = data.data[idx] if _is_experiment(data) else data
+            ax, _ = _determine_axes(axs, idx, 0, layout_config)
+            sample_name = _sample_name(data, idx, data_config)
+            drawn = _single_spatial_image_only(
+                xd=xd, name=sample_name, idx_key=0, ax=ax,
+                plot_config=plot_config, layout_config=layout_config,
+                data_config=data_config,
+            )
+            n_drawn += int(drawn)
+        if n_drawn == 0:
+            plt.close(fig)
+            raise ValueError(
+                "Nothing to plot: keys=None draws only images and annotations/regions, but no "
+                "sample has the requested image (image_key) or annotations to draw. "
+                "Pass image_key (and call load_images()), annotation_tuple, or use keys."
+            )
+        return
 
     for idx in range(n_data):
 
@@ -894,45 +934,140 @@ def _single_spatial(
                 crange[1]
                 )
 
-        if annotations_df is not None:
-            # convert rgb colors to hex colors
-            hex_colors = [
-                _rgb2hex_robust(elem, scale_to_one=True, max_value=255)
-                for elem
-                in annotations_df.color
-                ]
-
-            if plot_config.annotations_mode == "outlined":
-                # plot the annotations as outlines
-                annotations_df.plot(
-                    edgecolor=hex_colors,
-                    linewidth=4,
-                    facecolor="none",
-                    ax=ax,
-                    aspect=1
-                    )
-            elif plot_config.annotations_mode == "filled":
-                # plot the annotations filled with transparent colors
-                annotations_df.plot(
-                    color=hex_colors,
-                    edgecolor="none",
-                    alpha=0.3,
-                    ax=ax,
-                    aspect=1
-                    )
-
-                # plot outlines in black
-                annotations_df.plot(
-                    facecolor="none",
-                    edgecolor="black",
-                    linewidth=2,
-                    ax=ax,
-                    aspect=1
-                    )
-            else:
-                raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
+        _draw_annotations(ax, annotations_df, plot_config)
 
     return n_hidden
+
+
+def _draw_annotations(ax, annotations_df, plot_config):
+    """Draw annotation geometries (outlined or filled) onto ``ax``."""
+    if annotations_df is None:
+        return
+
+    # convert rgb colors to hex colors
+    hex_colors = [
+        _rgb2hex_robust(elem, scale_to_one=True, max_value=255)
+        for elem
+        in annotations_df.color
+        ]
+
+    if plot_config.annotations_mode == "outlined":
+        # plot the annotations as outlines
+        annotations_df.plot(
+            edgecolor=hex_colors,
+            linewidth=4,
+            facecolor="none",
+            ax=ax,
+            aspect=1
+            )
+    elif plot_config.annotations_mode == "filled":
+        # plot the annotations filled with transparent colors
+        annotations_df.plot(
+            color=hex_colors,
+            edgecolor="none",
+            alpha=0.3,
+            ax=ax,
+            aspect=1
+            )
+
+        # plot outlines in black
+        annotations_df.plot(
+            facecolor="none",
+            edgecolor="black",
+            linewidth=2,
+            ax=ax,
+            aspect=1
+            )
+    else:
+        raise ValueError(f"Unknown type for annotations_mode: {type(plot_config.annotations_mode)}. Must be a string that is either 'outlined' or 'filled'.")
+
+
+def _single_spatial_image_only(
+    xd,
+    name: str,
+    idx_key: int,
+    ax: plt.Axes,
+    plot_config: PlotConfig,
+    layout_config: LayoutConfig,
+    data_config: DataConfig,
+    ) -> bool:
+    """Draw image and annotations of one sample without any cell table.
+
+    Returns True if something could be drawn; otherwise the panel is left empty
+    (titled, with a note) and False is returned.
+    """
+    has_image = data_config.image_key is not None and data_config.image_key in xd.images
+    image_data = xd.images if has_image else None
+
+    annotations_df = None
+    if data_config.annotations_key is not None and xd.annotations is not None:
+        annotations_df = _extract_annotations_information(
+            xd.annotations, annotations_key=data_config.annotations_key
+        )
+
+    # limits: xlim/ylim or region_tuple, then fall back to the image extent, then to
+    # the bounds of the annotations
+    xlim, ylim = _limits_from_region_or_args(
+        xd.regions, data_config.region_tuple, plot_config.xlim, plot_config.ylim
+    )
+    if xlim is None or ylim is None:
+        fb_x = fb_y = None
+        if has_image:
+            level0 = image_data[data_config.image_key]
+            if isinstance(level0, (list, tuple)):
+                level0 = level0[0]
+            pixel_size = image_data.metadata[data_config.image_key]["pixel_size"]
+            fb_x = [0.0, level0.shape[1] * pixel_size]
+            fb_y = [0.0, level0.shape[0] * pixel_size]
+        elif annotations_df is not None and len(annotations_df) > 0:
+            minx, miny, maxx, maxy = annotations_df.total_bounds
+            fb_x, fb_y = [minx, maxx], [miny, maxy]
+        xlim = xlim if xlim is not None else fb_x
+        ylim = ylim if ylim is not None else fb_y
+
+    if xlim is None or ylim is None:
+        _set_panel_title(ax, None, idx_key, name, plot_config, layout_config)
+        ax.text(0.5, 0.5, "nothing to plot", ha="center", va="center", transform=ax.transAxes)
+        ax.set_axis_off()
+        return False
+
+    # origin_zero: no cells to take the offset from, use the lower-left of the limits
+    if plot_config.origin_zero:
+        x_offset, y_offset = min(xlim), min(ylim)
+    else:
+        x_offset = y_offset = 0
+    shifted_xlim = [xlim[0] - x_offset, xlim[1] - x_offset]
+    shifted_ylim = [ylim[0] - y_offset, ylim[1] - y_offset]
+
+    _configure_axis_and_title(
+        ax=ax, key=None, idx_key=idx_key, sample_name=name,
+        plot_config=plot_config, layout_config=layout_config,
+        xlim=shifted_xlim, ylim=shifted_ylim,
+    )
+
+    image, pixel_size, vmin, vmax, pixel_xlim, pixel_ylim = _extract_image_information(
+        image_data, image_key=data_config.image_key,
+        xlim=xlim, ylim=ylim,
+        pixelwidth_per_subplot=plot_config.pixelwidth_per_subplot,
+        histogram_setting=plot_config.histogram_setting,
+    )
+    if image is not None:
+        extent = (
+            pixel_xlim[0] * pixel_size - x_offset,
+            pixel_xlim[1] * pixel_size - x_offset,
+            pixel_ylim[1] * pixel_size - y_offset,
+            pixel_ylim[0] * pixel_size - y_offset,
+        )
+        ax.imshow(image, extent=extent, origin='upper', cmap='gray', vmin=vmin, vmax=vmax)
+
+    if annotations_df is not None and (x_offset or y_offset):
+        annotations_df = annotations_df.copy()
+        annotations_df["geometry"] = annotations_df.geometry.translate(
+            xoff=-x_offset, yoff=-y_offset
+        )
+    _draw_annotations(ax, annotations_df, plot_config)
+
+    return has_image or annotations_df is not None
 
 class _ColorConfigMultiPlot:
     def __init__(
@@ -1208,13 +1343,13 @@ def _set_panel_title(ax, key, idx_key, sample_name, plot_config, layout_config):
     if layout_config.multidata and not layout_config.multikeys:
         if plot_config.show_title:
             ax.set_title(
-                sample_name + "\n" + key,
+                sample_name if key is None else sample_name + "\n" + key,
                 fontsize=plot_config.title_size, #fontweight='bold',
                 pad=10,
                 rotation=0
                 )
     else:
-        if plot_config.show_title:
+        if plot_config.show_title and key is not None:
         # set titles
             ax.set_title(
                 key,
@@ -1365,6 +1500,20 @@ def _check_image_key(data, image_key, present=None):
         raise ValueError(_not_found(data.images.keys()))
 
 
+def _limits_from_region_or_args(regions_data, region_tuple, xlim, ylim):
+    """Axis limits (as lists, or None) from ``region_tuple`` or the ``xlim``/``ylim`` arguments."""
+    if region_tuple is not None:
+        if xlim is not None or ylim is not None:
+            raise ValueError("If region_tuple is given, xlim and ylim need to be None.")
+        region_df = regions_data[region_tuple[0]]
+        geom = region_df[region_df["name"] == region_tuple[1]]["geometry"].item()
+        return [geom.bounds[0], geom.bounds[2]], [geom.bounds[1], geom.bounds[3]]
+
+    # make sure limits are lists
+    return (list(xlim) if xlim is not None else None,
+            list(ylim) if ylim is not None else None)
+
+
 def _prepare_limits_and_coordinates(
     adata,
     regions_data,
@@ -1382,18 +1531,7 @@ def _prepare_limits_and_coordinates(
     """
 
     # prepare limits using region or lim arguments
-    if region_tuple is not None:
-        if xlim is not None or ylim is not None:
-            raise ValueError("If region_tuple is given, xlim and ylim need to be None.")
-        else:
-            region_df = regions_data[region_tuple[0]]
-            geom = region_df[region_df["name"] == region_tuple[1]]["geometry"].item()
-            xlim = [geom.bounds[0], geom.bounds[2]]
-            ylim = [geom.bounds[1], geom.bounds[3]]
-    else:
-        # make sure limits are lists
-        xlim = list(xlim) if xlim is not None else xlim
-        ylim = list(ylim) if ylim is not None else ylim
+    xlim, ylim = _limits_from_region_or_args(regions_data, region_tuple, xlim, ylim)
 
     ## Extract coordinates
     # extract x and y pixel coordinates and convert to micrometer
