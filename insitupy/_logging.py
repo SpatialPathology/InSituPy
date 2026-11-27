@@ -66,6 +66,79 @@ def _tqdm_output_redirect():
                     _saved_showwarning = None
 
 
+@contextmanager
+def _count_warnings(category: type[Warning]):
+    """
+    Record warnings of ``category`` raised inside the block; re-emit all others unchanged.
+
+    Yields a list that is filled with the recorded warnings once the block has run. The
+    recorded warnings are swallowed (the caller decides how to report them). Every other
+    warning is re-emitted after the block, through the filters and ``showwarning`` that
+    were active outside it. Does not patch ``showwarning`` itself. Not thread-safe
+    (``warnings.catch_warnings`` is process-global).
+    """
+    recorded: list = []
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            yield recorded
+    finally:
+        # runs after catch_warnings has restored the outer filters (also on exceptions)
+        for w in caught:
+            if issubclass(w.category, category):
+                recorded.append(w)
+            else:
+                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+
+
+class _StaleNucleusMapSummary:
+    """
+    Collapse per-dataset ``StaleNucleusMapWarning`` into one summary for a load loop.
+
+    Usage::
+
+        summary = _StaleNucleusMapSummary()
+        for xd in datasets:
+            with summary.watch():
+                xd.load_cells()
+        summary.emit()
+
+    Other warnings raised inside ``watch()`` reach the user unchanged. ``emit()`` warns
+    once (same class, so a user filter silences both) and does nothing if no dataset
+    was affected.
+    """
+
+    def __init__(self):
+        self.n_total = 0
+        self.n_affected = 0
+
+    @contextmanager
+    def watch(self):
+        from insitupy._exceptions import StaleNucleusMapWarning
+
+        self.n_total += 1
+        with _count_warnings(StaleNucleusMapWarning) as recorded:
+            yield
+        # `recorded` is filled when the inner context exits normally; on an exception the
+        # error propagates and the dataset is not counted.
+        if recorded:
+            self.n_affected += 1
+
+    def emit(self):
+        if self.n_affected == 0:
+            return
+        from insitupy._exceptions import StaleNucleusMapWarning
+
+        warnings.warn(
+            StaleNucleusMapWarning(
+                f"Nucleus map dropped in {self.n_affected} of {self.n_total} datasets "
+                "(older InSituPy format); harmless for cell-level analyses, re-read from "
+                "raw data to restore multinucleated-cell mapping."
+            ),
+            stacklevel=3,
+        )
+
+
 def setup_logging():
     """Configure the insitupy package logger with a TqdmLoggingHandler."""
     logger = logging.getLogger('insitupy')
