@@ -47,6 +47,31 @@ class TestSegMaskValueTakenFromInstanceKey:
         assert list(data.cells["main"].boundaries.seg_mask_value.compute()) == expected
 
 
+class TestForeignImportOfInSituPyStore:
+    def test_insitupy_store_imports_with_mask_auto_detected(self, tmp_path):
+        """Real failure-mode: the exported table annotates the cell mask, so the foreign
+        importer finds the boundaries from table_key alone and takes the true
+        (non-contiguous) mask values from the instance column. Pre-change the table's
+        instance_key was the string cell_id, which would have become the mask values."""
+        from insitupy.spatialdata import convert_to_spatialdata
+        from tests.spatialdata_fixtures import make_insitudata, roundtrip_through_zarr
+
+        xd = make_insitudata(n_cells=6, with_boundaries=True, contiguous_seg_mask_value=False)
+        sdata = roundtrip_through_zarr(convert_to_spatialdata(xd), tmp_path, name="foreign.zarr")
+
+        data = convert_from_foreign_spatialdata(
+            sdata, cells={"main": {"table_key": "CELLS.main.table", "pixel_size": 1.0}}, verbose=False,
+        )
+
+        boundaries = data.cells["main"].boundaries
+        assert boundaries is not None
+        np.testing.assert_array_equal(
+            boundaries.seg_mask_value.compute(),
+            xd.cells["main"].boundaries.seg_mask_value.compute(),
+        )
+        assert data.cells["main"].is_synced
+
+
 class TestCellOnlySegmentationImportsWithoutNucleus:
     def test_cell_only_segmentation_imports_without_nucleus(self):
         """Pre-fix: comparing cell/nucleus pixel sizes before a None check raised

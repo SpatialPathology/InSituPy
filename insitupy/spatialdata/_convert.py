@@ -231,20 +231,27 @@ def _add_per_sample_coordinate_systems(sdata: SpatialData, uids: list[str]) -> N
 
 def _transform_anndata_for_spatialdata(
     adata: AnnData,
-    #cells_as_circles: bool = True
-    cells_key: str,
+    circles_key: str,
     cell_area_key: str | None = "cell_area",
-    seg_mask_value: np.ndarray | None = None
+    seg_mask_value: np.ndarray | None = None,
+    labels_key: str | None = None,
     ):
     """Convert an AnnData table to spatialdata-compatible format with circle shapes.
 
     Adds ``spatialdata_attrs`` metadata to ``adata.uns``, creates unit circles
-    for all cells, and — if *cell_area_key* is present in ``obs`` — creates
+    for all cells, and - if *cell_area_key* is present in ``obs`` - creates
     area-sized circles whose radii are derived from the cell area.
+
+    The table annotates the cell mask (*labels_key*, ``instance_key`` =
+    ``_insitupy_seg_mask_value``) when both *labels_key* and *seg_mask_value*
+    are given. This is the layout stock TissUUmaps and spatialdata-io's Xenium
+    reader use. Otherwise it falls back to annotating the circles (*circles_key*,
+    ``instance_key`` = ``cell_id``).
 
     Args:
         adata: AnnData with spatial coordinates in ``obsm["spatial"]``.
-        cells_key: SpatialData element key used for the ``region`` attribute.
+        circles_key: SpatialData key of the unit-radius circles element. Used for
+            the ``region`` attribute when the table cannot annotate the mask.
         cell_area_key: Column in ``adata.obs`` containing cell areas in
             squared pixels.  Used to compute per-cell circle radii.  Pass
             ``None`` to skip sized circles.
@@ -253,6 +260,9 @@ def _transform_anndata_for_spatialdata(
             reserved ``_insitupy_seg_mask_value`` obs column so a reader can
             recover which raster pixel value corresponds to which cell name
             without assuming a contiguous 1..N mapping.
+        labels_key: Optional SpatialData key of the exported cell mask
+            (``CELLS.<key>.boundaries.cells``). Only effective together with
+            *seg_mask_value*.
 
     Returns:
         A tuple ``(adata, circles_sized, circles)`` where *circles_sized* is
@@ -263,18 +273,19 @@ def _transform_anndata_for_spatialdata(
     adata = adata.copy()
     region_str = "region"
     attrs = {}
-    #attrs["instance_key"] = "cell_id" if cells_as_circles else "cell_labels"
-    attrs["instance_key"] = "cell_id"
     adata.obs["cell_id"] = adata.obs.index
-    #attrs[region_str] = "cell_circles" if cells_as_circles else "cell_labels"
-    attrs[region_str] = cells_key
-    adata.obs[region_str] = cells_key
+    if seg_mask_value is not None:
+        adata.obs["_insitupy_seg_mask_value"] = seg_mask_value
+
+    if labels_key is not None and seg_mask_value is not None:
+        region, attrs["instance_key"] = labels_key, "_insitupy_seg_mask_value"
+    else:
+        region, attrs["instance_key"] = circles_key, "cell_id"
+    attrs[region_str] = region
+    adata.obs[region_str] = region
     adata.obs[region_str] = adata.obs[region_str].astype("category")
     attrs["region_key"] = region_str
     adata.uns["spatialdata_attrs"] = attrs
-
-    if seg_mask_value is not None:
-        adata.obs["_insitupy_seg_mask_value"] = seg_mask_value
 
     if cell_area_key is not None:
         try:
@@ -454,6 +465,8 @@ def _transform_table_for_spatialdata(
     :class:`~spatialdata.models.TableModel` and the corresponding cell
     positions into circle :class:`~spatialdata.models.ShapesModel` elements
     (both unit-radius and area-scaled variants when cell areas are available).
+    The table annotates the layer's exported cell mask when there is one
+    (``instance_key`` = ``_insitupy_seg_mask_value``), otherwise the circles.
 
     Args:
         xd: Source :class:`InSituData` object.
@@ -486,13 +499,27 @@ def _transform_table_for_spatialdata(
                 )
 
                 seg_mask_value = None
+                labels_key = None
                 if celldata.boundaries is not None:
                     seg_mask_value = celldata.boundaries.seg_mask_value.compute()
+                    # Only link to the mask if it is actually exported. Same condition as
+                    # _transform_cell_boundaries_for_spatialdata: listed in metadata and not an
+                    # unpopulated slot (a BoundariesData without add_boundaries() has neither).
+                    if (
+                        "cells" in celldata.boundaries.metadata
+                        and celldata.boundaries["cells"] is not None
+                    ):
+                        labels_key = _generate_spatialdata_key(
+                            sample_id=sample_id,
+                            modality="cells",
+                            locator=[cell_key, "boundaries", "cells"]
+                        )
 
                 adata, circles_sized, circles = _transform_anndata_for_spatialdata(
                     celldata.table,
-                    cells_key=circles_dict_key,
-                    seg_mask_value=seg_mask_value
+                    circles_key=circles_dict_key,
+                    seg_mask_value=seg_mask_value,
+                    labels_key=labels_key,
                     )
 
                 # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
@@ -747,6 +774,8 @@ def _transform_concat_tables_for_spatialdata(
         else:
             label_to_uid = {}
 
+        # The per-sample cell tables annotate the cell mask, but this union table deliberately
+        # stays on the per-sample circles: TissUUmaps links no multi-region tables (upstream #406).
         label_to_circles_key = {}
         unresolved = []
         for label in presence_labels:

@@ -91,8 +91,8 @@ becomes:
 | Pattern | Element type | Notes |
 |---|---|---|
 | `IMAGES.<name>` | `Image2DModel` | One entry per named image channel. |
-| `CELLS.<key>.table` | `TableModel` | Cell expression table for cell layer `<key>`. Carries a reserved `_insitupy_seg_mask_value` obs column when boundaries exist (see below). |
-| `CELLS.<key>.circles` | `ShapesModel` (circles) | Unit-radius circles at cell centroids. |
+| `CELLS.<key>.table` | `TableModel` | Cell expression table for cell layer `<key>`. Annotates `CELLS.<key>.boundaries.cells` (`instance_key` = `_insitupy_seg_mask_value`) when the layer has an exported cell mask, else `CELLS.<key>.circles` (`instance_key` = `cell_id`). Carries the reserved `_insitupy_seg_mask_value` obs column when boundaries exist (see below). |
+| `CELLS.<key>.circles` | `ShapesModel` (circles) | Unit-radius circles at cell centroids. Annotated by the cell table only when the layer has no mask; always annotated by `TABLES.<layer>`. |
 | `CELLS.<key>.circles_sized` | `ShapesModel` (circles) | Only if `cell_area` is available in `obs`; radius derived from area. |
 | `CELLS.<key>.boundaries.<name>` | `Labels2DModel` | Segmentation mask, e.g. `boundaries.cells` / `boundaries.nuclei`. |
 | `CELLS.<key>.nucleus_map` | `TableModel` (optional) | One row per nucleus; present only when the cell layer's boundaries carry a populated `nucleus_to_cell_map` (multinucleated-cell support, Xenium v2.0+). See below. |
@@ -112,13 +112,26 @@ synthesized from centroids while units carry their own real polygons.
 `CellData.is_synced` requires `table.obs_names == boundaries.cell_names` in the same order, but
 the writer only exports the boundary *raster* (pixel values = the true segmentation mask ids,
 not necessarily contiguous or 1-based - real Xenium data is not) and the table's own `cell_id`
-(the string cell name, used to link the table to `circles`, not to the raster). Without an
-explicit link, a reader could only guess `seg_mask_value = arange(1, n+1)` - wrong for real,
-non-contiguous segmentation. `_insitupy_seg_mask_value` closes this gap: a reserved obs column
-on `CELLS.<key>.table`, present whenever the cell layer has boundaries, holding each cell's true
-segmentation mask value in `obs` row order. Absent when the cell layer has no boundaries, or on
+(the string cell name, an ordinary data column). Without an explicit link, a reader could only
+guess `seg_mask_value = arange(1, n+1)` - wrong for real, non-contiguous segmentation.
+`_insitupy_seg_mask_value` closes this gap: a reserved obs column on `CELLS.<key>.table`,
+present whenever the cell layer has boundaries, holding each cell's true segmentation mask value
+in `obs` row order. It is also the table's `instance_key` into the cell mask (see "Cell table
+annotation" below). Absent when the cell layer has no boundaries, or on
 a hypothetical pre-version-2 store (in which case the reader falls back to the same
 `arange(1, n+1)` assumption, now as an explicit, logged fallback rather than the only path).
+
+### Cell table annotation
+
+`CELLS.<key>.table` annotates the cell mask: `region` = `CELLS.<key>.boundaries.cells`,
+`region_key` = `region`, `instance_key` = `_insitupy_seg_mask_value`; `cell_id` is an ordinary
+column. This is the layout spatialdata-io's Xenium reader uses, and the one stock TissUUmaps
+needs (it links tables to labels only, not to circles). A layer without an exported cell mask
+(no boundaries, or an unpopulated `cells` slot) keeps the earlier link: `region` =
+`CELLS.<key>.circles`, `instance_key` = `cell_id`. Stores written with either form are dialect 3
+and read identically: InSituPy's reader ignores the cell table's `region`/`instance_key` and uses
+`_insitupy_seg_mask_value` directly. `TABLES.<layer>` (multi-region) stays on the per-sample
+circles, since TissUUmaps links no multi-region tables.
 
 ### `CELLS.<key>.nucleus_map`
 
@@ -127,7 +140,7 @@ v2.0+): several nuclei can map to one cell. Rather than adding more per-cell obs
 would mix per-cell and per-nucleus cardinality into one table), this mapping gets its own
 dedicated table - one row per nucleus - that annotates the cell layer's `boundaries.nuclei`
 `Labels2DModel` raster via SpatialData's own `region`/`instance_key` mechanism (the same
-table-annotates-labels idiom already used for the main cells table -> `circles` link, applied a
+table-annotates-labels idiom already used for the main cells table -> cell mask link, applied a
 second time to a previously-unannotated raster):
 
 - `region` = the `CELLS.<key>.boundaries.nuclei` element key.
