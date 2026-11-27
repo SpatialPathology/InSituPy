@@ -3,11 +3,13 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
-from magicgui import magicgui
 
 from insitupy import WITH_NAPARI
 
 pytestmark = pytest.mark.skipif(not WITH_NAPARI, reason="napari is required for interactive callback tests")
+
+# magicgui ships with the napari "viewer" extra; skip the module without it
+magicgui = pytest.importorskip("magicgui").magicgui
 
 
 from insitupy.interactive._callbacks import (  # noqa: E402

@@ -328,7 +328,11 @@ class ShapesData(DeepCopyMixin):
                     is_not_polygon = np.array([not isinstance(p, Polygon) for p in annot_df.geometry])
                     if np.any(is_not_polygon):
                         annot_df = annot_df.loc[~is_not_polygon]
-                        show_warning(f"Some {self._shape_name} were not shapely.Polygon objects and skipped.")
+                        _skip_msg = f"Some {self._shape_name} were not shapely.Polygon objects and skipped."
+                        if in_napari and WITH_NAPARI:
+                            show_warning(_skip_msg)
+                        else:
+                            warnings.warn(_skip_msg, UserWarning, stacklevel=2)
 
             # check that the dataframe is not empty
             if len(annot_df) > 0:
@@ -337,7 +341,7 @@ class ShapesData(DeepCopyMixin):
 
                 if verbose:
                     # report
-                    if in_napari:
+                    if in_napari and WITH_NAPARI:
                         _show_func = show_info
                     else:
                         _show_func = logger.info

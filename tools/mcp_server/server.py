@@ -974,7 +974,7 @@ def get_public_api() -> str:
         "insitupy.im (images)": "Image utilities — read, transform, etc.",
         "insitupy.utils": "Utilities — XeniumPanels, mock data, DGE helpers, etc.",
         "insitupy.datasets": "Example datasets — download and load sample data.",
-        "insitupy.interactive": "Interactive napari-based visualization widgets.",
+        "insitupy.interactive": "Interactive napari-based visualization widgets (needs the `viewer` extra).",
         "insitupy.spatialdata": "SpatialData conversion — to/from SpatialData format.",
     }
     for key, desc in shorthands.items():
@@ -1419,7 +1419,7 @@ def get_interactive_guide() -> str:
         napari installation requirements, and typical interactive workflow.
     """
     lines: list[str] = ["# InSituPy Interactive Visualization\n"]
-    lines.append('Requires napari: `pip install "napari[all]"`\n')
+    lines.append('Requires the viewer extra (napari): `pip install "insitupy-spatial[viewer]"`\n')
 
     # data.show()
     lines.append("## data.show() — Launch napari viewer")
@@ -1472,11 +1472,8 @@ def get_interactive_guide() -> str:
     ## Installation
 
     ```bash
-    # Full napari installation (recommended)
-    pip install "napari[all]"
-
-    # Or with PyQt5 backend explicitly
-    pip install "napari[pyqt5]"
+    # Viewer extra (napari with Qt, not part of the base install)
+    pip install "insitupy-spatial[viewer]"
     ```
 
     ## Typical Interactive Workflow
@@ -1507,7 +1504,7 @@ def get_interactive_guide() -> str:
     ```
 
     ## Notes
-    - `data.show()` raises ImportError if napari is not installed.
+    - `data.show()` raises ImportError if napari is not installed (install the `viewer` extra).
     - `transcript_lazy_loading=True` reduces memory (~1.5s delay per gene toggle).
     - `return_viewer=True` returns the napari viewer instance for programmatic control.
     """))

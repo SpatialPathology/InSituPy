@@ -8,7 +8,6 @@ if WITH_NAPARI:
     from geopandas import GeoDataFrame
     from napari.layers import Points, Shapes
     from napari.utils.notifications import show_info, show_warning
-    from parse import parse
     from shapely import Point
 
     from insitupy._constants import REGIONS_SYMBOL
@@ -51,6 +50,11 @@ if WITH_NAPARI:
                 behaviour.  Pass an explicit viewer to sync a non-focused
                 window without changing window focus.
         """
+        # imported here, not at module level: `parse` comes with the `viewer` extra, while napari
+        # can also be present without it (e.g. via spatialdata[extra] -> napari-spatialdata), and
+        # this module is imported by `import insitupy` whenever napari is importable
+        from parse import parse
+
         new_pattern = "{type_symbol} {annot_key}"
         old_pattern = "{type_symbol} {class_name} ({annot_key})"
 

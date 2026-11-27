@@ -22,13 +22,6 @@ dependencies = [
     "numpy (>=2.1.3,<3.0.0)",
     "dask>=2025.3.0",
     "dask-image>=2023.8.1",
-    # 0.6.3+ had a lasso-tool edge_width reset bug (napari/napari#8273), fixed in 0.7.0
-    # (napari/napari#8414, merged 2025-12-09). Validated on 0.7.1 2026-07-07, including a
-    # transcript-viewer thread-race and a canvas_size_limits border-rendering regression
-    # found and fixed along the way — see
-    # .log/reports/260706/transcript-viewer-race-fix/report-transcript-viewer-race-fix.md
-    "napari[all] (>=0.7.0,<0.8.0)",
-    "parse>=1.19.1",
     "opencv-python-headless>=4.8.1.78,<5.0.0", # GHSA-qr4w-53vh-m672 (bundled libwebp CVE-2023-4863); headless: no GUI calls used, avoids libGL and the Qt clash with napari (#128)
     "scikit-image (>=0.21.0,<1.0.0)",
     "scipy (>=1.14,<1.17.0)",
@@ -63,7 +56,27 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.0.3", "pytest-qt>=4.2.0"]
+# Interactive viewer (`.show()`). Not part of the base install: keeps headless/HPC environments
+# free of the GUI stack (napari, Qt, vispy, magicgui).
+viewer = [
+    # 0.6.3+ had a lasso-tool edge_width reset bug (napari/napari#8273), fixed in 0.7.0
+    # (napari/napari#8414, merged 2025-12-09). Validated on 0.7.1 2026-07-07, including a
+    # transcript-viewer thread-race and a canvas_size_limits border-rendering regression
+    # found and fixed along the way - see
+    # .log/reports/260706/transcript-viewer-race-fix/report-transcript-viewer-race-fix.md
+    "napari[all] (>=0.7.0,<0.8.0)",
+    "parse>=1.19.1",
+]
+# pytest without pytest-qt: pytest-qt aborts pytest start-up (UsageError) when no Qt binding is
+# installed, so the no-napari CI leg must not install it.
+test = ["pytest>=9.0.3"]
+# Full development environment, including the viewer (pytest-qt needs napari's Qt binding).
+dev = [
+    "pytest>=9.0.3",
+    "pytest-qt>=4.2.0",
+    "napari[all] (>=0.7.0,<0.8.0)",
+    "parse>=1.19.1",
+]
 spatialdata = [
     "spatialdata[extra]>=0.8.0,<0.9.0",
     "spatialdata-io>=0.7.1,<0.8"

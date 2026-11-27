@@ -70,6 +70,48 @@ jobs:
           tests/test_checks.py
           tests/test_exceptions.py
 
+  no-napari:
+    name: py3.12 / no viewer extra
+    # `pip install insitupy-spatial` ships without the GUI stack (napari is the `viewer`
+    # extra). This leg proves the base install imports and the non-viewer tests run without
+    # napari. pytest-qt is deliberately not installed here (it aborts pytest start-up when no
+    # Qt binding is present), hence the `test` extra instead of `dev`. The `spatialdata` extra
+    # is left out too: spatialdata[extra] -> napari-spatialdata -> napari would bring napari
+    # back. Widening this leg toward the full non-viewer suite is the separate "full test CI"
+    # item.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install "poetry==2.4.1"
+
+      - name: Install package (locked deps, no viewer extra)
+        run: poetry install --extras "test"
+
+      - name: Assert napari is absent
+        run: >
+          poetry run python -c
+          "import importlib.util, sys; sys.exit(importlib.util.find_spec('napari') is not None)"
+
+      - name: Run no-napari tests
+        run: >
+          poetry run pytest -v
+          tests/test_no_napari.py
+          tests/test_import.py
+          tests/test_label_alignment.py
+          tests/test_transcript_viewer.py
+          tests/test_version.py
+          tests/test_checks.py
+          tests/test_exceptions.py
+
   skill-reference:
     name: skill reference (drift + symbols + calls)
     # The shipped AI skill / llms.txt / MCP curated text is generated from
