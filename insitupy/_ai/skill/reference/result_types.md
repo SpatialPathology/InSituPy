@@ -15,10 +15,10 @@ Returned by: ispy.tl.dge(), InSituExperiment.dge()
       DGE results comparing condition A cells vs. their neighboring cells (if neighborhood data used).
   ref_neighborhood : Optional[pd.DataFrame]
       DGE results comparing condition B cells vs. their neighboring cells (if neighborhood data used).
-  config : dict
-      Optional metadata about the analysis (e.g., cell type, setup tuple, parameter
+  config : DiffExprConfigCollector or None
+      Optional metadata about the analysis (e.g., cell t
 
-... [truncated — full text is 603 chars]
+... [truncated — full text is 790 chars]
 
 Fields:
   .main                  pd.DataFrame  — DGE results (target vs. reference)

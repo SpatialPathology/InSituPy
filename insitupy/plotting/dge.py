@@ -264,7 +264,10 @@ def dual_foldchange_plot(
             axs[i].set_yticks([])
 
     # Add config table to the right panel
-    if show_config:
+    if show_config and results.config is None:
+        warn("Results have no configuration; config table skipped.", stacklevel=2)
+        ax_config.set_axis_off()
+    elif show_config:
         n_upreg = np.sum((df_main[pval_col] <= significance_threshold) &
                          (df_main[logfoldchanges_col] > logfc_threshold))
         n_downreg = np.sum((df_main[pval_col] <= significance_threshold) &

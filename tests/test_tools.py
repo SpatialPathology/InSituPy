@@ -700,6 +700,59 @@ class TestDiffExprResultsIndexUniqueness:
         assert len(result.main) == 3
 
 
+# ── containers.results.DiffExprResults - results without config ────────────────
+
+def _dge_df():
+    return pd.DataFrame(
+        {"log2foldchange": [1.0, 2.0, 3.0], "padj": [0.1, 0.2, 0.3]},
+        index=["g0", "g1", "g2"],
+    )
+
+
+class TestDiffExprResultsWithoutConfig:
+    def test_roundtrip_without_config(self, tmp_path):
+        result = DiffExprResults(main=_dge_df(), config=None)
+        result.save(tmp_path / "r")
+        assert not (tmp_path / "r" / "config.toml").exists()
+
+        loaded = DiffExprResults.read(tmp_path / "r")
+        assert loaded.config is None
+        loaded.save(tmp_path / "r", overwrite=True)
+        assert (tmp_path / "r" / "main.csv").is_file()
+
+    def test_read_directory_without_config_toml_then_save(self, tmp_path):
+        src = tmp_path / "handmade"
+        src.mkdir()
+        _dge_df().to_csv(src / "main.csv")
+        loaded = DiffExprResults.read(src)
+        assert loaded.config is None
+        loaded.save(tmp_path / "other")
+        assert (tmp_path / "other" / "main.csv").is_file()
+
+    def test_overwrite_keeps_data_when_config_missing(self, tmp_path):
+        src = tmp_path / "handmade"
+        src.mkdir()
+        _dge_df().to_csv(src / "main.csv")
+        DiffExprResults.read(src).save(src, overwrite=True)
+        assert len(pd.read_csv(src / "main.csv", index_col=0)) == 3
+
+    def test_summary_with_and_without_config(self):
+        config = DiffExprConfigCollector(mode="pseudobulk", method_params={})
+        text = DiffExprResults(main=_dge_df(), config=config).summary()
+        assert "Configuration:" in text
+        assert "bound method" not in text
+        assert "pseudobulk" in text
+        assert "Configuration" not in DiffExprResults(main=_dge_df(), config=None).summary()
+
+    def test_empty_dict_config_is_none(self):
+        assert DiffExprResults(main=_dge_df(), config={}).config is None
+
+    @pytest.mark.parametrize("bad", ["x", {"mode": "pseudobulk"}, 3])
+    def test_invalid_config_raises(self, bad):
+        with pytest.raises(TypeError, match="DiffExprConfigCollector"):
+            DiffExprResults(main=_dge_df(), config=bad)
+
+
 # ── tl.pseudobulk_dge ────────────────────────────────────────────────────────
 
 class TestPseudobulkDge:
