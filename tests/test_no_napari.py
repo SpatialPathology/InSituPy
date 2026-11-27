@@ -9,6 +9,8 @@ import subprocess
 import sys
 import textwrap
 
+import pytest
+
 _PRELUDE = """
 import sys
 for _name in ("napari", "magicgui", "qtpy", "vispy", "superqt"):
@@ -61,6 +63,23 @@ def test_show_raises_friendly_import_error():
         else:
             raise AssertionError("expected ImportError")
     """)
+    _assert_ok(proc)
+
+
+def test_import_with_napari_but_without_viewer_extra_deps():
+    """napari can be installed without the `viewer` extra (e.g. via spatialdata[extra] ->
+    napari-spatialdata). `import insitupy` imports `insitupy.interactive` whenever napari is
+    importable, so viewer-only dependencies such as `parse` must not be imported at module level.
+    """
+    pytest.importorskip("napari")
+    code = textwrap.dedent("""
+        import sys
+        sys.modules["parse"] = None
+        import insitupy, insitupy.pl, insitupy.interactive
+        assert insitupy.WITH_NAPARI is True
+        from insitupy.interactive import sync_geometries
+    """)
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300)
     _assert_ok(proc)
 
 

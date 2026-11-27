@@ -21,7 +21,7 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
    pip install insitupy-spatial
    ```
 
-This base installation does not include the interactive viewer (napari, Qt) and is suitable for headless and HPC environments.
+This base installation does not include the interactive viewer (napari, Qt) and is suitable for headless and HPC environments (the `spatialdata` extra brings napari back, see below).
 
 ### Optional: Install the interactive viewer
 
@@ -38,6 +38,8 @@ InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy
    ```bash
    pip install insitupy-spatial[spatialdata]
    ```
+
+Note: the `spatialdata` extra installs `spatialdata[extra]`, which pulls in napari (via `napari-spatialdata`). An environment with this extra therefore is not free of the GUI stack. For the InSituPy viewer, still install the `viewer` extra.
 
 ### Method 2: Installation from Cloned Repository
 

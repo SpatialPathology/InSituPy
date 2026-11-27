@@ -75,8 +75,10 @@ jobs:
     # `pip install insitupy-spatial` ships without the GUI stack (napari is the `viewer`
     # extra). This leg proves the base install imports and the non-viewer tests run without
     # napari. pytest-qt is deliberately not installed here (it aborts pytest start-up when no
-    # Qt binding is present), hence the `test` extra instead of `dev`. Widening this leg
-    # toward the full non-viewer suite is the separate "full test CI" item.
+    # Qt binding is present), hence the `test` extra instead of `dev`. The `spatialdata` extra
+    # is left out too: spatialdata[extra] -> napari-spatialdata -> napari would bring napari
+    # back. Widening this leg toward the full non-viewer suite is the separate "full test CI"
+    # item.
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +94,7 @@ jobs:
         run: pip install "poetry==2.4.1"
 
       - name: Install package (locked deps, no viewer extra)
-        run: poetry install --extras "spatialdata test"
+        run: poetry install --extras "test"
 
       - name: Assert napari is absent
         run: >
