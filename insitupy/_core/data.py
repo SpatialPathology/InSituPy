@@ -2768,12 +2768,15 @@ class InSituData:
             otherwise ``None``.
         """
         # check whether napari is installed
-        try:
-            import napari
+        from insitupy._constants import WITH_NAPARI
 
-            from insitupy._core._napari import _show
-        except ImportError:
-            raise ImportError("Napari is not installed. Please install napari with `pip install napari[all]` to use this functionality.")
+        if not WITH_NAPARI:
+            raise ImportError(
+                "The viewer needs napari. Install it with `pip install \"insitupy-spatial[viewer]\"`."
+            )
+
+        # an ImportError raised in here for another reason propagates unchanged
+        from insitupy._core._napari import _show
 
         return _show(
             data=self,

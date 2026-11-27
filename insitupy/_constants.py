@@ -6,7 +6,7 @@ except ImportError:
     import warnings
     warnings.warn(
         "Napari is not installed. Interactive visualization using `.show()` will not be possible. "
-        "To enable these features, please install napari (for example, with `pip install \"napari[all]\"`).",
+        "To enable these features, install the viewer extra: `pip install \"insitupy-spatial[viewer]\"`.",
         ImportWarning,
         stacklevel=1,
     )
