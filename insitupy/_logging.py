@@ -69,26 +69,36 @@ def _tqdm_output_redirect():
 @contextmanager
 def _count_warnings(category: type[Warning]):
     """
-    Record warnings of ``category`` raised inside the block; re-emit all others unchanged.
+    Record warnings of ``category`` raised inside the block and swallow them.
 
-    Yields a list that is filled with the recorded warnings once the block has run. The
-    recorded warnings are swallowed (the caller decides how to report them). Every other
-    warning is re-emitted after the block, through the filters and ``showwarning`` that
-    were active outside it. Does not patch ``showwarning`` itself. Not thread-safe
-    (``warnings.catch_warnings`` is process-global).
+    Yields a list that is filled with the recorded warnings as they occur. Implemented by
+    temporarily wrapping ``warnings.showwarning``; the warning filters are left untouched
+    (changing them would reset every module's "default"/"once" dedup state). All other
+    warnings therefore go through the normal machinery and are deduplicated as usual, and
+    are then forwarded to the ``showwarning`` that was active before (e.g. the tqdm one).
+
+    Only warnings that pass the active filters are seen, and the producer must not be
+    deduplicated by the filters itself (``StaleNucleusMapWarning`` is emitted with a
+    fresh registry for that reason). Not thread-safe (``showwarning`` is process-global).
     """
     recorded: list = []
+    previous = warnings.showwarning
+
+    def _intercept(message, cat, filename, lineno, file=None, line=None):
+        if issubclass(cat, category):
+            recorded.append(
+                warnings.WarningMessage(message, cat, filename, lineno, file, line)
+            )
+        else:
+            previous(message, cat, filename, lineno, file, line)
+
+    warnings.showwarning = _intercept
     try:
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            yield recorded
+        yield recorded
     finally:
-        # runs after catch_warnings has restored the outer filters (also on exceptions)
-        for w in caught:
-            if issubclass(w.category, category):
-                recorded.append(w)
-            else:
-                warnings.warn_explicit(w.message, w.category, w.filename, w.lineno)
+        # restore only if nobody replaced it meanwhile
+        if warnings.showwarning is _intercept:
+            warnings.showwarning = previous
 
 
 class _StaleNucleusMapSummary:

@@ -57,13 +57,16 @@ def _stale(record):
     return [w for w in record if issubclass(w.category, StaleNucleusMapWarning)]
 
 
+@pytest.mark.parametrize("action", ["always", "default"])
 @pytest.mark.parametrize("method", ["load_cells", "load_all"])
 def test_load_emits_one_summary_instead_of_per_dataset_warnings(
-    experiment_with_two_stale_stores, method
+    experiment_with_two_stale_stores, method, action
 ):
+    # "default" is Python's out-of-the-box action: the per-store warning must still be
+    # counted for every dataset, not deduplicated away before it is counted
     exp = InSituExperiment.read(experiment_with_two_stale_stores)
     with warnings.catch_warnings(record=True) as record:
-        warnings.simplefilter("always")
+        warnings.simplefilter(action)
         getattr(exp, method)()
 
     stale = _stale(record)
@@ -80,6 +83,23 @@ def test_summary_can_be_silenced_by_class(experiment_with_two_stale_stores):
         warnings.filterwarnings("ignore", category=StaleNucleusMapWarning)
         exp.load_cells()
     assert _stale(record) == []
+
+
+def _warn_unrelated():
+    warnings.warn("unrelated", UserWarning)
+
+
+def test_count_warnings_keeps_default_dedup_across_iterations():
+    """An unrelated warning raised once per dataset must still be shown once under the
+    default filter, as it would be without the wrapper (not once per dataset)."""
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("default")
+        for _ in range(3):
+            with _count_warnings(StaleNucleusMapWarning):
+                _warn_unrelated()
+
+    assert len(record) == 1
+    assert str(record[0].message) == "unrelated"
 
 
 def test_count_warnings_reemits_unrelated_warnings():

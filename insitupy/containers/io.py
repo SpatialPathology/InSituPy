@@ -2,6 +2,7 @@ import contextlib
 import logging
 import os
 import shutil
+import sys
 import warnings
 from contextlib import ExitStack
 from numbers import Number
@@ -181,7 +182,11 @@ def _read_boundaries_from_celldata_zarr(
         drop_reason = "inconsistent"
     if drop_reason is not None:
         # message is path-free so that identical warnings can be deduplicated/summarized
-        warnings.warn(
+        # Emitted with a fresh registry (like warnings.warn(..., stacklevel=2) but without
+        # "default"/"module" dedup) so that every stale store is reported and can be counted
+        # by InSituExperiment load loops; a user filter on the class still silences it.
+        caller = sys._getframe(1)
+        warnings.warn_explicit(
             StaleNucleusMapWarning(
                 "Saved nucleus_to_cell_map / nucleus_count does not match the cell table "
                 "(written by an older InSituPy that did not maintain it, or legacy "
@@ -189,7 +194,11 @@ def _read_boundaries_from_celldata_zarr(
                 "Harmless for cell-level analyses; re-read from raw data to restore "
                 "multinucleated-cell mapping."
             ),
-            stacklevel=2,
+            StaleNucleusMapWarning,
+            caller.f_code.co_filename,
+            caller.f_lineno,
+            module=caller.f_globals.get("__name__", "<unknown>"),
+            registry={},
         )
         boundaries._nucleus_to_cell_map = None
         boundaries._nucleus_count = None
