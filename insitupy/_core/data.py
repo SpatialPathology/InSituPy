@@ -1623,7 +1623,12 @@ class InSituData:
             self._annotations.add_data(data=new_annotations[key], key=target_key, scale_factor=1.0)
 
 
-    def load_cells(self, verbose: bool = False):
+    def load_cells(
+        self,
+        verbose: bool = False,
+        keys: str | list[str] | None = None,
+        boundaries: bool = True,
+    ):
         """Load cell data from the project directory into :attr:`cells`.
 
         Reads the committed cells sub-folder (the one the project's ``.ispy``
@@ -1632,12 +1637,26 @@ class InSituData:
         boundaries.  Requires the object to have been loaded from a saved
         project (:attr:`from_insitudata`).
 
+        ``keys`` and ``boundaries`` allow a cheaper, selective load. A selective
+        load is marked as partial and **cannot be saved**: :meth:`save`,
+        :meth:`saveas` and :meth:`save_cells` raise ``ValueError`` until
+        ``load_cells()`` is called again without arguments (which replaces the
+        partial data and clears the mark). The mark is kept by ``copy()`` and
+        ``crop()``. To load everything else but cells selectively, call
+        ``load_all(skip="cells")`` followed by ``load_cells(keys=..., boundaries=False)``.
+
         Args:
             verbose: If ``True``, log progress and emit a warning when no
                 cell data is found. Defaults to ``False``.
+            keys: Cell layer key(s) to load. ``None`` loads all saved layers.
+                Must include the saved main layer.
+            boundaries: If ``False``, skip the segmentation boundaries (and the
+                nucleus-map check) of every loaded layer. Defaults to ``True``.
 
         Raises:
             ProjectDivergedError: If the object was cropped in place after it was read.
+            KeyError: If a key in ``keys`` is not a saved layer.
+            ValueError: If ``keys`` does not include the saved main layer.
         """
         self._raise_if_diverged("load_cells()")
         if verbose:
@@ -1650,7 +1669,7 @@ class InSituData:
                 if verbose:
                     warn(ModalityNotFoundWarning("cells"), stacklevel=2)
             else:
-                self._cells = _read_multicelldata(path=path)
+                self._cells = _read_multicelldata(path=path, keys=keys, boundaries=boundaries)
         else:
             NoProjectLoadWarning()
 
@@ -1949,6 +1968,9 @@ class InSituData:
                 serialization during save.
             verbose: If True, log progress messages.
         """
+        # a partial cell load would write an incomplete copy: refuse before touching anything
+        self._raise_if_cells_partial("saveas()")
+
         # check if the path already exists
         path = Path(path)
 
@@ -2175,6 +2197,10 @@ class InSituData:
             ProjectDivergedError: If the object was cropped in place after it was
                 read from the linked project (use :meth:`saveas` instead).
         """
+        # a partial cell load would overwrite the complete cells on disk (images_only skips cells)
+        if not images_only:
+            self._raise_if_cells_partial("save()")
+
         # check path
         if path is not None:
             path = Path(path)
@@ -2284,6 +2310,16 @@ class InSituData:
             overwrite_images=overwrite,
             verbose=verbose,
         )
+
+    def _raise_if_cells_partial(self, method: str) -> None:
+        """Refuse to write cells that were loaded selectively (``load_cells(keys=..., boundaries=False)``).
+
+        Raises:
+            ValueError: If the cells are partial; nothing has been written at that point.
+        """
+        cells = getattr(self, "_cells", None)
+        if cells is not None and getattr(cells, "is_partial", False):
+            cells._raise_if_partial(method)
 
     def _check_linked_path(self, path: Path, method: str) -> None:
         """Refuse a partial save into a project other than the linked one.
@@ -2397,6 +2433,7 @@ class InSituData:
                 different directory.
             ProjectDivergedError: If the object was cropped in place after it was read.
         """
+        self._raise_if_cells_partial("save_cells()")
         if path is not None:
             path = Path(path)
             self._check_linked_path(path, "save_cells")

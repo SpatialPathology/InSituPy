@@ -36,6 +36,7 @@ from insitupy.images.io import _sorted_pyramid_levels
 from insitupy.utils.utils import (
     _encode_xenium_cell_ids,
     _generate_time_based_uid,
+    convert_to_list,
     glob_visible,
 )
 
@@ -263,6 +264,7 @@ def _read_boundaries_from_celldata_zarr(
 
 def _read_celldata(
     path: str | os.PathLike | Path,
+    boundaries: bool = True,
 ) -> CellData:
     """
     Read CellData from a saved directory.
@@ -271,6 +273,9 @@ def _read_celldata(
     ----------
     path : Union[str, os.PathLike, Path]
         Path to the CellData directory
+    boundaries : bool
+        If False, the segmentation boundaries (including the nucleus map) are not read
+        and the returned CellData has ``boundaries=None``.
 
     Returns
     -------
@@ -287,17 +292,17 @@ def _read_celldata(
     table = _read_table_from_celldata(path, celldata_metadata)
 
     # read boundaries (absent when CellData was saved without boundaries)
-    if "boundaries" in celldata_metadata:
+    if boundaries and "boundaries" in celldata_metadata:
         bound_path = path / celldata_metadata["boundaries"]
-        boundaries = _read_boundaries_from_celldata_zarr(bound_path)
+        boundaries_data = _read_boundaries_from_celldata_zarr(bound_path)
     else:
-        boundaries = None
+        boundaries_data = None
 
     # extract configuration
     config = celldata_metadata.get("config", {})
 
     # create CellData object
-    celldata = CellData(table=table, boundaries=boundaries, config=config)
+    celldata = CellData(table=table, boundaries=boundaries_data, config=config)
 
     return celldata
 
@@ -350,7 +355,16 @@ def _read_multicelldata(
         path: str | os.PathLike | Path,
         path_upper: str | os.PathLike | Path | None = None,
         alt_path_dict: dict | None = None,
+        keys: str | list[str] | None = None,
+        boundaries: bool = True,
     ) -> MultiCellData:
+    """Read a MultiCellData from a saved directory.
+
+    ``keys`` restricts the read to the listed layers (default: all) and ``boundaries=False``
+    skips the segmentation boundaries of every layer. A result that lacks a saved layer or
+    its boundaries is marked partial (``MultiCellData.is_partial``) so that it cannot be
+    saved over the complete data on disk. The saved main layer must be among ``keys``.
+    """
     path = Path(path)
     if os.path.exists(path / ".multicelldata"):
         old = False
@@ -358,20 +372,45 @@ def _read_multicelldata(
         old = True
     else:
         raise FileNotFoundError(f"Metadata file for cells dimension in {path} was not found.")
-    mcd = MultiCellData()
+
+    # layer layout on disk: key -> directory, plus the saved main key
     if not old:
         celldata_metadata = read_json(path / ".multicelldata")
-        for key in celldata_metadata["all_keys"]:
-            cd = _read_celldata(path / key)
-            mcd.add_celldata(cd=cd, key=key, is_main=(key == celldata_metadata["key_main"]))
+        key_main = celldata_metadata["key_main"]
+        layer_paths = {k: path / k for k in celldata_metadata["all_keys"]}
     else:
-        cd = _read_celldata(path)
-        mcd.add_celldata(cd=cd, key="main", is_main=True)
+        key_main = "main"
+        layer_paths = {"main": path}
         if path_upper is not None and alt_path_dict is not None:
             path_upper = Path(path_upper)
             for k, p in alt_path_dict.items():
-                cd = _read_celldata(path=path_upper / p)
-                mcd.add_celldata(cd=cd, key=k)
+                layer_paths[k] = path_upper / p
+
+    # validate the requested keys before anything is read
+    if keys is None:
+        selected = list(layer_paths)
+    else:
+        selected_set = set(convert_to_list(keys))
+        unknown = [k for k in selected_set if k not in layer_paths]
+        if unknown:
+            raise KeyError(
+                f"Cell layer(s) {sorted(unknown)} not found in {path}. "
+                f"Available layers: {list(layer_paths)}."
+            )
+        if key_main not in selected_set:
+            raise ValueError(
+                f"`keys` must include the saved main layer '{key_main}' (got {sorted(selected_set)}). "
+                f"Available layers: {list(layer_paths)}."
+            )
+        selected = [k for k in layer_paths if k in selected_set]
+
+    mcd = MultiCellData()
+    for key in selected:
+        cd = _read_celldata(layer_paths[key], boundaries=boundaries)
+        mcd.add_celldata(cd=cd, key=key, is_main=(key == key_main))
+
+    if len(selected) < len(layer_paths) or not boundaries:
+        mcd._partial = {"keys": list(selected), "boundaries": bool(boundaries)}
     return mcd
 
 

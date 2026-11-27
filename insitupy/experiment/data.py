@@ -3111,13 +3111,51 @@ class InSituExperiment:
         for xd in tqdm(self._data):
             xd.load_annotations()
 
-    def load_cells(self):
-        """Load cells for all datasets."""
+    def load_cells(self,
+                   keys: str | list[str] | None = None,
+                   boundaries: bool = True):
+        """Load cells for all datasets.
+
+        A selective load (``keys`` or ``boundaries=False``) is much cheaper but is marked as
+        partial: ``save()``, ``saveas()`` and ``save_cells()`` of the experiment then raise
+        ``ValueError`` until ``load_cells()`` is called again without arguments. To load
+        everything else but cells selectively, call ``load_all(skip="cells")`` followed by
+        ``load_cells(keys=..., boundaries=False)``.
+
+        Args:
+            keys: Cell layer key(s) to load in every dataset. ``None`` loads all layers.
+                Must include each dataset's saved main layer.
+            boundaries: If ``False``, skip the segmentation boundaries (and the nucleus-map
+                check). Defaults to ``True``.
+        """
         summary = _StaleNucleusMapSummary()
         for xd in tqdm(self._data):
             with summary.watch():
-                xd.load_cells()
+                xd.load_cells(keys=keys, boundaries=boundaries)
         summary.emit()
+
+    def _raise_if_cells_partial(self, method: str) -> None:
+        """Refuse to write when any dataset holds selectively loaded cells.
+
+        Checked for the whole experiment up front, so that no dataset is written (and no
+        path assigned) before the refusal.
+
+        Raises:
+            ValueError: Naming the affected datasets.
+        """
+        partial = [
+            (i, xd) for i, xd in enumerate(self._data)
+            if getattr(getattr(xd, "_cells", None), "is_partial", False)
+        ]
+        if partial:
+            names = ", ".join(f"{i} ({xd.uid})" for i, xd in partial[:5])
+            more = f" and {len(partial) - 5} more" if len(partial) > 5 else ""
+            raise ValueError(
+                f"Cannot {method}: cells of {len(partial)} dataset(s) were loaded partially "
+                f"(load_cells(keys=..., boundaries=False)): {names}{more}. Saving would drop the "
+                "rest of their cell data on disk. Call load_cells() without arguments to load "
+                "everything first."
+            )
 
     def load_images(self,
                     names: Literal["all", "nuclei"] | str = "all",
@@ -3963,6 +4001,10 @@ class InSituExperiment:
         if kwargs.get("zip_output"):
             raise ValueError(_ZIP_OUTPUT_UNSUPPORTED)
 
+        # selectively loaded cells would overwrite the complete cells on disk (images_only skips cells)
+        if not kwargs.get("images_only"):
+            self._raise_if_cells_partial("save()")
+
         if self.is_view:
             if collect_warnings_mode:
                 with collect_warnings() as collector:
@@ -4464,10 +4506,13 @@ class InSituExperiment:
 
         Raises:
             ValueError: If no experiment save path is available or dataset
-                paths are inconsistent.
+                paths are inconsistent, or if any dataset's cells were loaded
+                partially (see :meth:`load_cells`).
         """
 
         dataset_verbose = verbose
+
+        self._raise_if_cells_partial("save_cells()")
 
         if not self.is_view:
             if self.path is None:
@@ -4528,6 +4573,9 @@ class InSituExperiment:
         """
         if kwargs.get("zip_output"):
             raise ValueError(_ZIP_OUTPUT_UNSUPPORTED)
+
+        # refuse before the stale staging dir is cleaned or the target is touched
+        self._raise_if_cells_partial("saveas()")
 
         path = Path(path)
         staging = path.parent / (path.name + ".__ispy_tmp__")

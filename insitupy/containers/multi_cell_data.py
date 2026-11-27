@@ -27,6 +27,24 @@ class MultiCellData(DeepCopyMixin):
     def __init__(self):
         self._layers: dict[str, CellData] = dict()
         self._main_key: str | None = None
+        # Set by a selective read (`keys=` / `boundaries=False`): {"keys": [...], "boundaries": bool}.
+        # A partial object lacks data that still exists on disk and must not be saved.
+        self._partial: dict | None = None
+
+    @property
+    def is_partial(self) -> bool:
+        """True if the object was read selectively (layers or boundaries left out) and cannot be saved."""
+        return getattr(self, "_partial", None) is not None
+
+    def _raise_if_partial(self, action: str = "save") -> None:
+        """Raise ValueError if the object was read selectively (see :attr:`is_partial`)."""
+        partial = getattr(self, "_partial", None)
+        if partial is not None:
+            raise ValueError(
+                f"Cannot {action}: cells were loaded partially (keys={partial['keys']}, "
+                f"boundaries={partial['boundaries']}); saving would drop the rest of the cell "
+                "data on disk. Call load_cells() without arguments to load everything first."
+            )
 
     @classmethod
     def read(cls, path, path_upper=None, alt_path_dict=None):
@@ -371,6 +389,8 @@ class MultiCellData(DeepCopyMixin):
                 downsampling boundary pyramids.  If None, boundaries are
                 saved at their original resolution.
         """
+        # first statement: nothing is created or deleted on disk for a partial object
+        self._raise_if_partial("save cells")
         path = Path(path)
         multicelldata_metadata = {"key_main": self._main_key, "all_keys": list(self._layers.keys())}
         # check if the output file should be overwritten
