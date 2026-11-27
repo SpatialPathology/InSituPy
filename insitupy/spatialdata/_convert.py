@@ -26,6 +26,7 @@ import dask.dataframe as dd
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy import sparse
 from skimage.measure import regionprops_table
 from xarray import DataArray
 
@@ -198,6 +199,22 @@ def _assert_no_reserved_sample_uid(uids) -> None:
         )
 
 
+def _x_to_csc(adata: AnnData) -> None:
+    """Store a sparse ``adata.X`` column-major (CSC), in place.
+
+    TissUUmaps reads matrix columns (one gene for all cells) only from CSC, so gene
+    colouring fails on a CSR export. Same size as CSR; dense ``X`` is left alone.
+    """
+    if sparse.issparse(adata.X) and adata.X.format != "csc":
+        adata.X = adata.X.tocsc()
+
+
+def _x_to_csr(adata: AnnData) -> None:
+    """Undo :func:`_x_to_csc` on read, in place, so in-memory behaviour stays row-major."""
+    if sparse.issparse(adata.X) and adata.X.format == "csc":
+        adata.X = adata.X.tocsr()
+
+
 def _shapes_for_parse(gdf):
     """Return a shallow copy of ``gdf`` without SpatialData transform metadata, ready to parse.
 
@@ -227,6 +244,19 @@ def _add_per_sample_coordinate_systems(sdata: SpatialData, uids: list[str]) -> N
             continue
         t = get_transformation(elem, to_coordinate_system="global")
         set_transformation(elem, {"global": t, sample_uid: t}, set_all=True)
+
+
+def _add_single_sample_coordinate_system(sdata: SpatialData, uid: str) -> None:
+    """Register every spatial element of a bare ``InSituData`` export in a system named ``uid``.
+
+    Single-sample keys carry no ``SAMPLE.<uid>..`` prefix, so all spatial elements belong to the
+    sample. Same transform as in ``"global"``, whole dict replaced (``set_all=True``) as in
+    :func:`_add_per_sample_coordinate_systems`. Consumers that show one layer per coordinate
+    system (TissUUmaps) then get distinct layers when several single-sample stores are combined.
+    """
+    for _elem_type, _key, elem in sdata.gen_spatial_elements():
+        t = get_transformation(elem, to_coordinate_system="global")
+        set_transformation(elem, {"global": t, uid: t}, set_all=True)
 
 
 def _transform_anndata_for_spatialdata(
@@ -498,6 +528,7 @@ def _transform_table_for_spatialdata(
                 # see https://spatialdata.scverse.org/en/latest/tutorials/notebooks/notebooks/examples/tables.html#construct-a-table-annotating-1-or-more-spatialelements
                 _assert_key_absent(tables, tables_key, "cell table")
                 _assert_key_absent(cell_shapes, circles_dict_key, "cell shapes")
+                _x_to_csc(adata)  # adata is the helper's own copy
                 tables[tables_key] = TableModel.parse(adata)
                 cell_shapes[circles_dict_key] = circles
 
@@ -655,6 +686,7 @@ def _transform_units_for_spatialdata(
 
                 _assert_key_absent(tables, table_dict_key, "units table")
                 _assert_key_absent(unit_shapes, shapes_key, "units shapes")
+                _x_to_csc(adata)
                 tables[table_dict_key] = TableModel.parse(adata)
                 unit_shapes[shapes_key] = ShapesModel.parse(_shapes_for_parse(sud.shapes))
     return tables, unit_shapes
@@ -800,6 +832,7 @@ def _transform_concat_tables_for_spatialdata(
             locator=cells_layer,
         )
         _assert_key_absent(tables, key, "concatenated table")
+        _x_to_csc(adata)  # read fresh from disk above, safe to modify
         tables[key] = TableModel.parse(adata)
 
     return tables
@@ -1166,6 +1199,7 @@ def _build_cells_into_insitudata(
         # Drop writer-injected bookkeeping columns/uns before handing the table
         # back to the user - they were never part of the original in-memory table.
         table = table.copy()
+        _x_to_csr(table)
         for col in ("cell_id", "region", "_insitupy_seg_mask_value"):
             if col in table.obs.columns:
                 del table.obs[col]
@@ -1205,6 +1239,7 @@ def _build_units_into_insitudata(
         _, shapes = shapes_entry
 
         table = table.copy()
+        _x_to_csr(table)
         for col in ("unit_id", "region"):
             if col in table.obs.columns:
                 del table.obs[col]

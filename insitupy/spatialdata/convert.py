@@ -15,6 +15,7 @@ from typing import Union
 import numpy as np
 import pandas as pd
 from anndata import AnnData
+from scipy import sparse
 
 from insitupy._constants import (
     MODALITIES,
@@ -28,6 +29,7 @@ from insitupy.experiment.data import InSituExperiment, TableAccessor
 from insitupy.spatialdata._convert import (
     _add_images_to_insitudata,
     _add_per_sample_coordinate_systems,
+    _add_single_sample_coordinate_system,
     _align_shapes_to_table,
     _assert_no_reserved_sample_uid,
     _assign_sdata_transcripts,
@@ -50,6 +52,7 @@ from insitupy.spatialdata._convert import (
     _transform_units_for_spatialdata,
     _validate_boundaries_data_format,
     _validate_foreign_spec,
+    _x_to_csr,
 )
 from insitupy.utils.utils import convert_to_list
 
@@ -234,16 +237,25 @@ def convert_to_spatialdata(
             bare ``InSituData``). For an ``InSituExperiment``, each sample's spatial
             elements are also registered in a coordinate system named by its uid (identical
             transform to ``"global"``), recorded as ``samples[uid]["coordinate_system"]``;
-            use ``sdata.filter_by_coordinate_system(uid)`` to get one sample.
+            use ``sdata.filter_by_coordinate_system(uid)`` to get one sample. A bare
+            ``InSituData`` with a ``uid`` gets the same: all its elements are registered in a
+            system named by its uid, recorded as the flat ``coordinate_system`` key; without
+            a ``uid`` it uses ``"global"`` only.
+
+            Sparse expression matrices (``X`` of cell, units and ``TABLES.<layer>`` tables)
+            are stored as CSC, which TissUUmaps needs to read gene columns. The InSituPy
+            readers convert them back to CSR.
 
     Raises:
         InSituPyError: If a sample uid is ``"global"`` (reserved).
         ImportError: If the ``spatialdata`` package is not installed.
     """
+    # check before the (expensive) conversion, not after it
     if _is_experiment(data):
-        # check before the (expensive) conversion, not after it
         uids = [meta["uid"] for meta, _d in data.iterdata()]
         _assert_no_reserved_sample_uid(uids)
+    elif data.uid is not None:
+        _assert_no_reserved_sample_uid([data.uid])
 
     sd_dict = convert_to_spatialdata_dict(
         data,
@@ -272,6 +284,8 @@ def convert_to_spatialdata(
     else:
         dialect_attrs["insitupy_spatialdata_dialect"]["slide_id"] = data.slide_id
         dialect_attrs["insitupy_spatialdata_dialect"]["sample_id"] = data.sample_id
+        if data.uid is not None:
+            dialect_attrs["insitupy_spatialdata_dialect"]["coordinate_system"] = str(data.uid)
 
     sdata = SpatialData.init_from_elements(sd_dict, attrs=dialect_attrs)
 
@@ -280,6 +294,9 @@ def convert_to_spatialdata(
 
     if _is_experiment(data):
         _add_per_sample_coordinate_systems(sdata, uids)
+    elif data.uid is not None:
+        # no invented name for a sample without a uid (e.g. never saved): "global" only
+        _add_single_sample_coordinate_system(sdata, str(data.uid))
 
     return sdata
 
@@ -1106,7 +1123,7 @@ def convert_table_from_spatialdata(
     else:
         covered_labels, row_filter = convert_to_list(covered_labels), True
 
-    return TableAccessor._reconstruct(
+    table = TableAccessor._reconstruct(
         full,
         covered_labels=covered_labels,
         labels=labels,
@@ -1114,3 +1131,9 @@ def convert_table_from_spatialdata(
         label_col=label_col,
         row_filter=row_filter,
     )
+    # the export stores a sparse X as CSC; copy a view only when it needs converting
+    if sparse.issparse(table.X) and table.X.format == "csc":
+        if table.is_view:
+            table = table.copy()
+        _x_to_csr(table)
+    return table

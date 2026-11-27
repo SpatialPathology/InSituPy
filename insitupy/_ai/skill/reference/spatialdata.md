@@ -19,7 +19,7 @@ Requires the `spatialdata` package: `pip install spatialdata`
           For an ``InSituExperiment``, all samples are merged into one SpatialData
           object with s
 
-  ... [truncated — full text is 2963 chars]
+  ... [truncated — full text is 3410 chars]
 
 ## convert_from_spatialdata(sdata: spatialdata._core.spatialdata.SpatialData, verbose: bool = True, strict: bool = False) -> insitupy._core.data.InSituData | insitupy.experiment.data.InSituExperiment
   Convert an InSituPy-dialect SpatialData object back into an InSituData or InSituExperiment.
