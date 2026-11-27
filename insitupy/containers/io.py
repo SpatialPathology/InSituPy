@@ -19,6 +19,7 @@ import scanpy as sc
 import zarr
 from zarr.errors import ArrayNotFoundError
 
+from insitupy._exceptions import StaleNucleusMapWarning
 from insitupy._io.files import atomic_replace_dir, check_overwrite_and_remove_if_true, read_json
 
 logger = logging.getLogger(__name__)
@@ -129,28 +130,34 @@ def _read_boundaries_from_celldata_zarr(
         root_attrs = dict(zarr.open_group(store=marker_store, mode="r").attrs)
     has_map = bool(root_attrs.get("insitupy_has_nucleus_map", False))
 
-    # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+)
+    # Read nucleus_to_cell_map (for multinucleated cell support, Xenium v2.0+).
+    # drop_reason is set when the saved map is discarded; a single StaleNucleusMapWarning
+    # is emitted for the store after the consistency check below.
+    drop_reason = None
     try:
         # current format (0.12.0b7+): two parallel arrays [nucleus_index] / [cell_name]
         nuc_idx_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map/nucleus_index").compute()
         cell_name_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map/cell_name").compute()
-        nucleus_to_cell_map = {int(i): str(n) for i, n in zip(nuc_idx_arr, cell_name_arr)}
+        nucleus_to_cell_map = dict(zip(
+            np.asarray(nuc_idx_arr).astype(np.int64).tolist(),
+            np.asarray(cell_name_arr).astype(str).tolist(),
+        ))
     except (ArrayNotFoundError, TypeError):
         try:
             # legacy (pre-0.12.0b7) position-based format: flat [[nucleus_idx, row_position], ...]
-            legacy_arr = da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
-            n_cells = len(np.asarray(cell_names))
-            if not all(0 <= int(row[1]) < n_cells for row in legacy_arr):
-                warnings.warn(
-                    "Saved nucleus_to_cell_map uses the legacy position-based format and is "
-                    "inconsistent with the cell table (likely filtered by an older InSituPy "
-                    "that did not maintain it). Dropping it; nuclei will be treated as 1:1 "
-                    "with cells. Re-read from raw data to restore multinucleated-cell mapping.",
-                    stacklevel=2)
-                nucleus_to_cell_map = None
+            legacy_arr = np.asarray(
+                da.from_zarr(bound_path, component="nucleus_to_cell_map").compute()
+            ).reshape(-1, 2)
+            names = np.asarray(cell_names).astype(str)
+            pos = legacy_arr[:, 1].astype(np.int64)
+            if len(pos) == 0 or (pos.min() >= 0 and pos.max() < len(names)):
+                nucleus_to_cell_map = dict(zip(
+                    legacy_arr[:, 0].astype(np.int64).tolist(),
+                    names[pos].tolist(),
+                ))
             else:
-                names = np.asarray(cell_names).astype(str)
-                nucleus_to_cell_map = {int(row[0]): str(names[int(row[1])]) for row in legacy_arr}
+                nucleus_to_cell_map = None
+                drop_reason = "legacy"
         except (ArrayNotFoundError, TypeError):
             # no map arrays on disk: {} when the writer marked a known-empty map,
             # else None (unknown -> assume v1.x 1:1, the older-dataset behaviour)
@@ -170,12 +177,20 @@ def _read_boundaries_from_celldata_zarr(
         nucleus_count=nucleus_count
     )
 
-    if not boundaries.nucleus_map_is_consistent(np.asarray(cell_names)):
+    if drop_reason is None and not boundaries.nucleus_map_is_consistent(np.asarray(cell_names)):
+        drop_reason = "inconsistent"
+    if drop_reason is not None:
+        # message is path-free so that identical warnings can be deduplicated/summarized
         warnings.warn(
-            "Saved nucleus_to_cell_map / nucleus_count is inconsistent with the cell table "
-            "(likely filtered by an older InSituPy that did not maintain it). Dropping it; "
-            "nuclei will be treated as 1:1 with cells. Re-read from raw data to restore "
-            "multinucleated-cell mapping.", stacklevel=2)
+            StaleNucleusMapWarning(
+                "Saved nucleus_to_cell_map / nucleus_count does not match the cell table "
+                "(written by an older InSituPy that did not maintain it, or legacy "
+                "position-based format). Dropped it; nuclei are treated as 1:1 with cells. "
+                "Harmless for cell-level analyses; re-read from raw data to restore "
+                "multinucleated-cell mapping."
+            ),
+            stacklevel=2,
+        )
         boundaries._nucleus_to_cell_map = None
         boundaries._nucleus_count = None
 
