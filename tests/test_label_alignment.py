@@ -182,6 +182,21 @@ def test_label_ids_for_nuclei_resolves_multinucleated_cells_through_the_real_cal
     assert adata_indices == [0, 0, 1, 2, 2]
 
 
+@pytest.mark.parametrize(
+    "nucleus_map, expected",
+    [
+        ({}, True),
+        ({0: "c1", 1: "c1", 2: "c3"}, True),
+        ({0: "c1", 1: "ghost"}, False),
+    ],
+)
+def test_nucleus_map_is_consistent(nucleus_map, expected):
+    boundaries = BoundariesData(
+        cell_names=["c1", "c2", "c3"], seg_mask_value=[1, 2, 3], nucleus_to_cell_map=nucleus_map
+    )
+    assert boundaries.nucleus_map_is_consistent() is expected
+
+
 def test_label_ids_for_falls_back_to_seg_mask_value_without_map():
     """1:1 fallback: with no nucleus_to_cell_map, nuclei labels are seg_mask_value,
     same as cells - no spurious None/unmapped entries."""

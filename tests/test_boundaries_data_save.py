@@ -15,7 +15,7 @@ import dask.array as da
 import numpy as np
 import pytest
 
-from insitupy._exceptions import InvalidFileTypeError
+from insitupy._exceptions import InvalidFileTypeError, StaleNucleusMapWarning
 from insitupy.containers._zarr_compat import (
     ZARR_V3,
     _get_zarr_store,
@@ -192,7 +192,7 @@ class TestLoadInvalidatesInconsistentNucleusMap:
         path = tmp_path / "boundaries.zarr"
         boundaries.save(path=path)
 
-        with pytest.warns(UserWarning, match="inconsistent with the cell table"):
+        with pytest.warns(StaleNucleusMapWarning):
             loaded = _read_boundaries_from_celldata_zarr(path)
 
         assert loaded.nucleus_to_cell_map is None
@@ -248,11 +248,57 @@ class TestLoadInvalidatesInconsistentNucleusMap:
         # positions sized for an original 5-cell table; only 3 cells exist now
         _write_legacy_nucleus_map_to_store(path, {0: 0, 1: 1, 2: 2, 3: 3, 4: 4})
 
-        with pytest.warns(UserWarning, match="legacy position-based format"):
+        with pytest.warns(StaleNucleusMapWarning):
             loaded = _read_boundaries_from_celldata_zarr(path)
 
         assert loaded.nucleus_to_cell_map is None
         assert loaded.nucleus_count is None
+
+    def test_stale_legacy_map_with_wrong_length_count_warns_once(self, tmp_path):
+        """Both the legacy map and the nucleus_count are stale: still one warning per store."""
+        boundaries = _create_boundaries(nucleus_count=np.array([1, 1, 1, 1, 1], dtype=np.int64))
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path)
+        _write_legacy_nucleus_map_to_store(path, {0: 0, 1: 1, 2: 2, 3: 3, 4: 4})
+
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            loaded = _read_boundaries_from_celldata_zarr(path)
+
+        stale = [w for w in record if issubclass(w.category, StaleNucleusMapWarning)]
+        assert len(stale) == 1
+        assert loaded.nucleus_to_cell_map is None
+        assert loaded.nucleus_count is None
+
+    def test_large_legacy_map_converts_correctly(self, tmp_path):
+        """Correctness of the vectorized legacy conversion on a large map (not a timing test)."""
+        n = 200_000
+        names = [f"cell{i}" for i in range(n)]
+        boundaries = BoundariesData(cell_names=names, seg_mask_value=list(range(1, n + 1)))
+        boundaries.add_boundaries(
+            cell_boundaries=np.zeros((2, 2), dtype=np.uint32), nuclei_boundaries=None, pixel_size=1
+        )
+        path = tmp_path / "boundaries.zarr"
+        boundaries.save(path=path)
+
+        # two nuclei per cell, nucleus index != row position
+        positions = np.repeat(np.arange(n), 2)
+        nuc_idx = np.arange(2 * n)[::-1]
+        arr = np.stack([nuc_idx, positions], axis=1).astype(np.int64)
+        with ExitStack() as stack:
+            dirstore = _get_zarr_store(path, mode="a")
+            if not ZARR_V3:
+                dirstore = stack.enter_context(dirstore)
+            _write_dask_array_to_zarr(dirstore, "nucleus_to_cell_map", da.from_array(arr))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            loaded = _read_boundaries_from_celldata_zarr(path)
+
+        m = loaded.nucleus_to_cell_map
+        assert len(m) == 2 * n
+        assert m[2 * n - 1] == "cell0" and m[0] == f"cell{n - 1}"
+        assert m[int(nuc_idx[2 * 12345 + 1])] == "cell12345"
 
 
 class TestSaveRejectsZarrZip:

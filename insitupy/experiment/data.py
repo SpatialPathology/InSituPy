@@ -40,7 +40,12 @@ from insitupy._io.files import (
     read_json,
     write_dict_to_json,
 )
-from insitupy._logging import WarningCollector, _tqdm_output_redirect, collect_warnings
+from insitupy._logging import (
+    WarningCollector,
+    _StaleNucleusMapSummary,
+    _tqdm_output_redirect,
+    collect_warnings,
+)
 from insitupy._textformat import textformat as tf
 from insitupy.containers._utils import _get_cell_layer
 from insitupy.experiment._metadata_frame import _GuardedMetadataFrame
@@ -3068,14 +3073,17 @@ class InSituExperiment:
             skip (Optional[str], optional): A modality to skip during loading. Defaults to None.
         """
 
+        summary = _StaleNucleusMapSummary()
         for xd in tqdm(self._data):
-            for f in LOAD_FUNCS:
-                if skip is None or skip not in f:
-                    func = getattr(xd, f)
-                    try:
-                        func()
-                    except ModalityNotFoundError as err:
-                        logger.warning(str(err))
+            with summary.watch():
+                for f in LOAD_FUNCS:
+                    if skip is None or skip not in f:
+                        func = getattr(xd, f)
+                        try:
+                            func()
+                        except ModalityNotFoundError as err:
+                            logger.warning(str(err))
+        summary.emit()
 
     def load_annotations(self):
         """Load annotations for all datasets."""
@@ -3084,8 +3092,11 @@ class InSituExperiment:
 
     def load_cells(self):
         """Load cells for all datasets."""
+        summary = _StaleNucleusMapSummary()
         for xd in tqdm(self._data):
-            xd.load_cells()
+            with summary.watch():
+                xd.load_cells()
+        summary.emit()
 
     def load_images(self,
                     names: Literal["all", "nuclei"] | str = "all",
@@ -5851,10 +5862,12 @@ class InSituExperiment:
         median_transcripts = []
         num_cells = []
 
+        stale_summary = _StaleNucleusMapSummary()
         for _, dataset in self.iterdata():
             if dataset.cells.is_empty:
                 logger.warning("Cells were not loaded. Loading cells.")
-                dataset.load_cells()
+                with stale_summary.watch():
+                    dataset.load_cells()
 
             celldata = _get_cell_layer(cells=dataset.cells, cells_layer=cells_layer)
             m_genes, m_transcripts = _calculate_single_metrics(
@@ -5863,6 +5876,7 @@ class InSituExperiment:
             median_genes.append(m_genes)
             median_transcripts.append(m_transcripts)
             num_cells.append(celldata.table.n_obs)
+        stale_summary.emit()
 
         # Create column names with optional cells_layer suffix
         suffix = f" ('{cells_layer}')" if cells_layer else ""
@@ -5922,10 +5936,12 @@ class InSituExperiment:
         uids, layer_names = [], []
         n_cells, med_counts, mean_counts, med_genes, mean_genes = [], [], [], [], []
 
+        stale_summary = _StaleNucleusMapSummary()
         for row, dataset in self.iterdata():
             if dataset.cells.is_empty:
                 logger.warning("Cells were not loaded. Loading cells.")
-                dataset.load_cells()
+                with stale_summary.watch():
+                    dataset.load_cells()
 
             celldata, resolved_layer = _get_cell_layer(
                 cells=dataset.cells, cells_layer=cells_layer, return_layer_name=True
@@ -5946,6 +5962,7 @@ class InSituExperiment:
             mean_counts.append(obs["total_counts"].mean())
             med_genes.append(obs["n_genes_by_counts"].median())
             mean_genes.append(obs["n_genes_by_counts"].mean())
+        stale_summary.emit()
 
         summary = pd.DataFrame(
             {

@@ -193,6 +193,17 @@ class ModalityNotFoundError(Exception):
 
 
 
+class StaleNucleusMapWarning(UserWarning):
+    """Saved nucleus_to_cell_map / nucleus_count does not match the cell table.
+
+    Emitted on load when the saved map is in the legacy position-based format or
+    was not maintained by an older InSituPy (e.g. after filtering cells). The map
+    is dropped and nuclei are treated as 1:1 with cells. This is harmless for
+    cell-level analyses; re-read from raw data to restore the multinucleated-cell
+    mapping. Filter by this class to silence it.
+    """
+
+
 class ModalityNotFoundWarning(UserWarning):
     """Warning raised if a certain modality is not found by InSituData read modules.
 
