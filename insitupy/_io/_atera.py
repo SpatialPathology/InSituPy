@@ -54,12 +54,33 @@ def _read_pixel_size_from_ome(path: str | os.PathLike | Path) -> float:
     return float(size) * factor
 
 
+def _packed_rgba_to_hex(values) -> list[str]:
+    """Convert 10x packed ``0xRRGGBBAA`` colors (stored as int32) to ``#rrggbb`` strings.
+
+    The alpha channel is dropped. Negative int32 values (red channel >= 0x80) are handled by
+    masking to the unsigned 32-bit range first.
+    """
+    return [f"#{(int(v) & 0xFFFFFFFF) >> 8:06x}" for v in np.asarray(values).ravel()]
+
+
+def _read_obs_colors(obs_group: zarr.Group) -> dict[str, list[str]]:
+    """Read the optional per-category ``color`` arrays of the categorical ``obs`` columns."""
+    colors = {}
+    for col in obs_group.group_keys():
+        col_group = obs_group[col]
+        if "color" in col_group and "categories" in col_group:
+            colors[col] = _packed_rgba_to_hex(col_group["color"][:])
+    return colors
+
+
 def _read_table_from_atera(path: str | os.PathLike | Path) -> AnnData:
     """Read the cell-by-gene table of an Atera bundle from ``cell_feature_matrix.zarr.zip``.
 
     The store is an AnnData zarr store inside a zip archive. Only "Gene Expression" features are
     kept (as in ``read_xenium``); 10x's flags ``highly_variable`` and ``filtered`` are renamed with
-    an ``atera_`` prefix so that scanpy does not pick them up silently.
+    an ``atera_`` prefix so that scanpy does not pick them up silently. Category colors that 10x
+    stores for categorical ``obs`` columns (e.g. ``azimuth_*``) are kept in
+    ``uns["{column}_colors"]`` as ``#rrggbb``.
     """
     path = Path(path)
     store = _get_zarr_store(path / ATERA_CELL_FEATURE_MATRIX_FILE, mode="r", zipped=True)
@@ -69,6 +90,7 @@ def _read_table_from_atera(path: str | os.PathLike | Path) -> AnnData:
         var = read_elem(group["var"])
         X = read_elem(group["X"])
         obsm = read_elem(group["obsm"]) if "obsm" in group else {}
+        obs_colors = _read_obs_colors(group["obs"])
     finally:
         store.close()
 
@@ -100,6 +122,14 @@ def _read_table_from_atera(path: str | os.PathLike | Path) -> AnnData:
 
     adata = AnnData(X=X, obs=obs, var=var, obsm=dict(obsm))
     adata.var_names_make_unique()
+
+    # 10x category colors -> scanpy convention (uns["{col}_colors"]); only if they match the categories
+    renames = {"cell_id": "atera_cell_id", "filtered": "atera_filtered"}
+    for col, hex_colors in obs_colors.items():
+        col = renames.get(col, col)
+        if col in adata.obs.columns and isinstance(adata.obs[col].dtype, pd.CategoricalDtype):
+            if len(hex_colors) == len(adata.obs[col].cat.categories):
+                adata.uns[f"{col}_colors"] = np.array(hex_colors, dtype=object)
 
     # cell centroids are given in microns
     coord_cols = ["centroid_column", "centroid_row"]
