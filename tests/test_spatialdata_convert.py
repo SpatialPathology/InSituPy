@@ -114,6 +114,79 @@ class TestSegMaskValueColumn:
         assert "_insitupy_seg_mask_value" not in table.obs.columns
 
 
+# ── Cell table annotates the cell mask (TissUUmaps export fix) ─────────────────
+
+class TestCellTableAnnotation:
+    def test_table_annotates_cell_mask_when_boundaries_exist(self, tmp_path):
+        """TissUUmaps links tables only to labels: the table must annotate the mask,
+        with the real (non-contiguous) mask values as instance ids, and survive a disk
+        round trip without spatialdata warnings."""
+        import warnings
+
+        import numpy as np
+
+        xd = make_insitudata(n_cells=6, with_boundaries=True, contiguous_seg_mask_value=False)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            sdata = roundtrip_through_zarr(convert_to_spatialdata(xd), tmp_path, name="mask_link.zarr")
+        # unrelated zarr/anndata deprecation warnings are expected; annotation ones are not
+        annotation_warnings = [
+            str(w.message) for w in caught
+            if any(k in str(w.message).lower() for k in ("instance", "region", "annotat"))
+        ]
+        assert not annotation_warnings
+
+        table = sdata.tables["CELLS.main.table"]
+        attrs = table.uns["spatialdata_attrs"]
+        assert attrs["region"] == "CELLS.main.boundaries.cells"
+        assert attrs["region"] in sdata.labels
+        assert attrs["instance_key"] == "_insitupy_seg_mask_value"
+        assert attrs["region_key"] == "region"
+
+        raster = sdata.labels[attrs["region"]]
+        base = raster["scale0"]["image"] if hasattr(raster, "keys") else raster
+        raster_values = np.unique(np.asarray(base.values))
+        assert np.isin(table.obs["_insitupy_seg_mask_value"].to_numpy(), raster_values).all()
+        assert list(table.obs["cell_id"]) == list(table.obs_names)
+
+    def test_table_annotates_circles_without_boundaries(self):
+        sdata = convert_to_spatialdata(make_insitudata(n_cells=4))
+
+        attrs = sdata.tables["CELLS.main.table"].uns["spatialdata_attrs"]
+        assert attrs["region"] == "CELLS.main.circles"
+        assert attrs["instance_key"] == "cell_id"
+
+    def test_boundaries_without_raster_fall_back_to_circles(self):
+        """A BoundariesData without add_boundaries() exports no labels element, so the
+        table must link to the circles instead of raising or pointing at a missing mask."""
+        import numpy as np
+
+        from insitupy.containers.boundaries_data import BoundariesData
+        from insitupy.containers.cell_data import CellData
+
+        xd = make_insitudata(n_cells=4)
+        table = xd.cells["main"].table
+        empty = BoundariesData(cell_names=np.array(table.obs_names), seg_mask_value=np.arange(1, 5))
+        xd.cells.add_celldata(cd=CellData(table=table, boundaries=empty), key="raw", is_main=False)
+
+        sdata = convert_to_spatialdata(xd)
+
+        attrs = sdata.tables["CELLS.raw.table"].uns["spatialdata_attrs"]
+        assert attrs["region"] == "CELLS.raw.circles"
+        assert attrs["instance_key"] == "cell_id"
+        assert len(sdata.labels) == 0
+
+    def test_multi_sample_tables_annotate_their_own_mask(self):
+        exp = make_experiment(n_samples=2)
+        sdata = convert_to_spatialdata(exp)
+
+        for i in range(2):
+            attrs = sdata.tables[f"SAMPLE.sample_{i}..CELLS.main.table"].uns["spatialdata_attrs"]
+            assert attrs["region"] == f"SAMPLE.sample_{i}..CELLS.main.boundaries.cells"
+            assert attrs["region"] in sdata.labels
+            assert attrs["instance_key"] == "_insitupy_seg_mask_value"
+
+
 # ── Nucleus-to-cell mapping export (WP2) ───────────────────────────────────────
 
 class TestNucleusMapExport:
