@@ -442,6 +442,8 @@ def volcano(
         axs = [axs]  # Make iterable for consistent indexing
 
     config = results.config if show_config else None
+    if show_config and config is None:
+        warn("Results have no configuration; config table skipped.", stacklevel=2)
 
     # Plot main comparison
     single_volcano(
