@@ -68,6 +68,49 @@ def test_10x_flags_do_not_hijack_scanpy(atera_data):
     assert "atera_filtered" in table.obs.columns
 
 
+def test_packed_rgba_to_hex_handles_negative_int32():
+    # 0x80000000 and up are stored as negative int32; alpha is dropped
+    assert _atera._packed_rgba_to_hex(np.array([0x11223344], dtype=np.int64)) == ["#112233"]
+    assert _atera._packed_rgba_to_hex(np.array([-1], dtype=np.int32)) == ["#ffffff"]
+    assert _atera._packed_rgba_to_hex(np.array([0x80000000 - 2**32], dtype=np.int64)) == ["#800000"]
+    assert _atera._packed_rgba_to_hex(np.array([2139062271], dtype=np.int32)) == ["#7f7f7f"]
+
+
+def test_10x_category_colors_are_imported(atera_data, atera_dir):
+    table = atera_data.cells.table
+    store = zarr.storage.ZipStore(atera_dir / "cell_feature_matrix.zarr.zip", mode="r")
+    try:
+        obs = zarr.open_group(store, mode="r")["obs"]
+        with_color = {k: obs[k]["color"][:] for k in obs.group_keys() if "color" in obs[k]}
+        without_color = [k for k in obs.group_keys() if "color" not in obs[k]]
+    finally:
+        store.close()
+
+    assert "azimuth_broad" in with_color
+    for col, packed in with_color.items():
+        cats = list(table.obs[col].cat.categories)
+        stored = list(table.uns[f"{col}_colors"])
+        assert len(stored) == len(cats) == len(packed)
+        assert stored == [f"#{(int(v) & 0xFFFFFFFF) >> 8:06x}" for v in packed]
+        assert all(len(c) == 7 and c.startswith("#") for c in stored)
+    for col in without_color:
+        assert f"{col}_colors" not in table.uns
+
+
+def test_experiment_merges_identical_atera_colors_without_warning(atera_dir, caplog):
+    from insitupy import InSituExperiment
+
+    exp = InSituExperiment()
+    for name in ("a", "b"):
+        exp.add(read_atera(atera_dir), metadata={"uid": name})
+    table = exp.data[0].cells.table
+    with caplog.at_level(logging.WARNING):
+        exp.sync_colors("azimuth_broad")
+    assert not [r for r in caplog.records if "disagree" in r.getMessage()]
+    stored = dict(zip(table.obs["azimuth_broad"].cat.categories, table.uns["azimuth_broad_colors"], strict=True))
+    assert dict(exp.colors["azimuth_broad"]) == stored
+
+
 def test_table_and_segmentation_are_aligned(atera_data, cells_store):
     table = atera_data.cells.table
     boundaries = atera_data.cells.boundaries
