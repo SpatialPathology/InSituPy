@@ -30,6 +30,34 @@ def _built_experiment(tmp_path, n_samples=2):
     return exp
 
 
+class TestConcatTableSparseXStoredAsCsc:
+    def test_union_x_stored_as_csc_and_reconstructed_as_csr(self, tmp_path):
+        """TissUUmaps reads gene columns only from CSC; InSituPy's reader converts back."""
+        import zarr
+        from scipy import sparse
+
+        exp = make_experiment(n_samples=2)
+        for xd in exp.data:
+            xd.cells["main"].table.X = sparse.csr_matrix(xd.cells["main"].table.X)
+        exp._path = tmp_path
+        exp.build_table()
+        expected = exp.table["main"]
+
+        convert_to_spatialdata(exp).write(tmp_path / "concat_csc.zarr")
+        x_attrs = zarr.open_group(tmp_path / "concat_csc.zarr", mode="r")["tables/TABLES.main/X"].attrs
+        assert x_attrs["encoding-type"] == "csc_matrix"
+
+        import spatialdata
+
+        table = convert_table_from_spatialdata(spatialdata.read_zarr(tmp_path / "concat_csc.zarr"), "main")
+        assert table.X.format == "csr"
+        expected_x = expected[table.obs_names, table.var_names].X
+        if hasattr(expected_x, "compute"):  # exp.table is dask-backed
+            expected_x = expected_x.compute()
+        expected_x = expected_x.toarray() if sparse.issparse(expected_x) else np.asarray(expected_x)
+        np.testing.assert_array_equal(table.X.toarray(), expected_x)
+
+
 class TestPresenceMatrixSurvivesZarrRoundtrip:
     def test_presence_matrix_survives_zarr_roundtrip(self, tmp_path):
         """Uses `make_experiment()`'s heterogeneous, partially-overlapping gene

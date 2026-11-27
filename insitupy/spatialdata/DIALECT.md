@@ -37,8 +37,10 @@ that: it returns a plain `AnnData`, not a modification of the reconstructed expe
 
 Current dialect version: **3** (`insitupy._constants.SPATIALDATA_DIALECT_VERSION`).
 
-The per-sample coordinate systems and the `samples[uid]["coordinate_system"]` descriptor key are an
-**additive dialect-3 extension**: stores with and without them are both dialect 3 and both read.
+The per-sample coordinate systems, the `samples[uid]["coordinate_system"]` descriptor key and the
+flat `coordinate_system` key of single-sample stores are an **additive dialect-3 extension**:
+stores with and without them are both dialect 3 and both read. The same holds for CSC-encoded
+expression matrices (see "Expression matrices" below).
 Dialect 4 (SD-A4, per-raster placement in the transform) will formalise them as required parts of
 the dialect.
 
@@ -76,7 +78,11 @@ coordinate system named `<uid>` (verbatim, the same uid as in the key prefix, no
 the *same* transform as in `"global"`. These systems exist for consumers that show one layer per
 coordinate system (e.g. TissUUmaps) and for `sdata.filter_by_coordinate_system(uid)`. Samples are
 **not** spatially separated in `"global"`; a consumer that wants a side-by-side view arranges them
-itself. Bare `InSituData` exports use `"global"` only. Tables (`TABLES.<layer>` and others) have no
+itself. A bare `InSituData` export with a `uid` registers *all* its spatial elements (its keys
+carry no prefix) in a coordinate system named by that uid, so several single-sample stores loaded
+into one consumer arrive as distinct layers instead of several `"global"` ones. A bare
+`InSituData` without a `uid` (e.g. never saved) uses `"global"` only - no name is invented.
+Tables (`TABLES.<layer>` and others) have no
 transform; under `filter_by_coordinate_system(uid)` spatialdata keeps only the table rows that
 annotate the remaining elements, so the union table is reduced to that sample's rows.
 
@@ -218,12 +224,14 @@ needed), `slide_id`/`sample_id` are flat keys instead:
         "sample_prefix_pattern": "SAMPLE.<uid>..",
         "slide_id": "...",
         "sample_id": "...",
+        "coordinate_system": "<uid>",  # only when the InSituData has a uid
     }
 }
 ```
 
-The per-sample `coordinate_system` key is optional: it is absent in stores written before it was
-introduced, so readers must use `.get`.
+The `coordinate_system` keys (per sample, and the flat one) are optional: they are absent in
+stores written before they were introduced and, for a single sample, when it has no `uid`, so
+readers must use `.get`.
 
 Arbitrary per-sample `metadata` dicts, `method_name`, `method_params`, and `pixel_size` are
 **not** persisted here - an explicit, documented gap, not an oversight. Only `uid` (free from the
@@ -233,6 +241,16 @@ This is namespaced under a single key (not written at the top level of `attrs`) 
 `convert_from_spatialdata()` forwards the whole `sdata.attrs` dict into each reconstructed
 `InSituData`'s `method_params`; namespacing keeps the dialect descriptor from polluting that
 dict with unrelated top-level keys.
+
+## Expression matrices
+
+A sparse `X` of `CELLS.<key>.table`, `UNITS.<key>.table` and `TABLES.<layer>` is written as CSC
+(anndata encoding `csc_matrix`), not CSR. TissUUmaps reads matrix columns (one gene for all cells)
+only from CSC, so gene colouring needs it; it is the same size as CSR, and other tools (scanpy,
+napari-spatialdata) read CSC too, with slower row-wise operations. InSituPy's readers
+(`convert_from_spatialdata()`, `convert_table_from_spatialdata()`) convert it back to CSR, so the
+in-memory tables are unchanged. A dense `X` is written as is. Stores written before this change
+carry CSR; both read.
 
 ## Zarr format
 

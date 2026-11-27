@@ -438,12 +438,49 @@ class TestPerSampleCoordinateSystems:
         assert _summarize(r_new) == _summarize(r_old)
         assert list(r_new.metadata["uid"]) == list(r_old.metadata["uid"])
 
-    def test_single_sample_export_global_only(self):
+    def test_single_sample_without_uid_global_only(self):
+        # no uid (never saved): no invented system name
         sdata = convert_to_spatialdata(make_insitudata(n_cells=2, with_image=True))
         assert list(sdata.coordinate_systems) == ["global"]
         descriptor = sdata.attrs["insitupy_spatialdata_dialect"]
         assert "samples" not in descriptor
         assert "coordinate_system" not in descriptor
+
+    def test_single_sample_with_uid_gets_own_system(self, tmp_path):
+        """Several single-sample stores in one TissUUmaps project must not all arrive as
+        an indistinct "global" layer: a sample with a uid gets its own system."""
+        from spatialdata.transformations import get_transformation
+
+        from insitupy.spatialdata import read_spatialdata
+
+        xd = make_insitudata(n_cells=4, with_boundaries=True, with_image=True)
+        xd._uid = "a.b-1"
+        sdata = roundtrip_through_zarr(convert_to_spatialdata(xd), tmp_path)
+
+        assert set(sdata.coordinate_systems) == {"global", "a.b-1"}
+        assert sdata.attrs["insitupy_spatialdata_dialect"]["coordinate_system"] == "a.b-1"
+        n = 0
+        for _etype, key, elem in sdata.gen_spatial_elements():
+            ts = get_transformation(elem, get_all=True)
+            assert set(ts) == {"global", "a.b-1"}, key
+            assert ts["global"] == ts["a.b-1"], key
+            n += 1
+        assert n > 0
+        filtered = sdata.filter_by_coordinate_system("a.b-1")
+        assert filtered.tables["CELLS.main.table"].n_obs == 4
+
+        # the reader resolves "global" only, so the extra system changes nothing
+        read_back = read_spatialdata(tmp_path / "roundtrip.zarr", strict=True, verbose=False)
+        assert read_back.cells["main"].table.shape == xd.cells["main"].table.shape
+        assert read_back.images.metadata["dapi"]["pixel_size"] == 0.5
+
+    def test_single_sample_uid_global_rejected(self):
+        from insitupy._exceptions import InSituPyError
+
+        xd = make_insitudata(n_cells=2)
+        xd._uid = "global"
+        with pytest.raises(InSituPyError, match="global"):
+            convert_to_spatialdata(xd)
 
     def test_uid_global_rejected(self):
         from insitupy._exceptions import InSituPyError
@@ -474,12 +511,59 @@ class TestPerSampleCoordinateSystems:
         read_back = read_spatialdata(tmp_path / "a.zarr", strict=True, verbose=False)
         assert "transform" in read_back.data[0].annotations["roi"].attrs  # precondition
 
+        # a bare sample with a uid gets its own system - under its current uid only
+        assert read_back.data[0].uid == "sample_0"  # precondition: uid survives the read
+        read_back.data[0]._uid = "renamed"
         bare = convert_to_spatialdata(read_back.data[0])
-        assert list(bare.coordinate_systems) == ["global"]
+        assert set(bare.coordinate_systems) == {"global", "renamed"}
 
         read_back._metadata["uid"] = ["new_0", "new_1"]
         sdata = convert_to_spatialdata(read_back)
         assert set(sdata.coordinate_systems) == {"global", "new_0", "new_1"}
+
+
+# ── Sparse X exported as CSC (TissUUmaps reads gene columns only from CSC) ─────
+
+def _x_encoding(store_path, table_key):
+    import zarr
+
+    return zarr.open_group(store_path, mode="r")[f"tables/{table_key}/X"].attrs["encoding-type"]
+
+
+class TestSparseXStoredAsCsc:
+    def test_cell_and_units_x_stored_as_csc_and_read_back_as_csr(self, tmp_path):
+        import numpy as np
+        from scipy import sparse
+
+        from insitupy.spatialdata import read_spatialdata
+
+        xd = make_insitudata(n_cells=6, with_boundaries=True)
+        cell_table = xd.cells["main"].table
+        cell_table.X = sparse.csr_matrix(cell_table.X)
+        expected_cells = cell_table.X.toarray()
+        su = make_units(["u0", "u1", "u2"], unit_type="niche", n_vars=3, seed=7)
+        su.table.X = sparse.csr_matrix(su.table.X)
+        xd.add_units(su)
+        expected_units = xd.units["niche"].table.X.toarray()
+
+        sdata = convert_to_spatialdata(xd)
+        sdata.write(tmp_path / "csc.zarr")
+
+        assert _x_encoding(tmp_path / "csc.zarr", "CELLS.main.table") == "csc_matrix"
+        assert _x_encoding(tmp_path / "csc.zarr", "UNITS.niche.table") == "csc_matrix"
+        assert cell_table.X.format == "csr"  # the user's table is not modified
+
+        read_back = read_spatialdata(tmp_path / "csc.zarr", strict=True, verbose=False)
+        x_cells = read_back.cells["main"].table.X
+        x_units = read_back.units["niche"].table.X
+        assert x_cells.format == "csr" and x_units.format == "csr"
+        np.testing.assert_array_equal(x_cells.toarray(), expected_cells)
+        np.testing.assert_array_equal(x_units.toarray(), expected_units)
+
+    def test_dense_x_stays_dense(self, tmp_path):
+        xd = make_insitudata(n_cells=4)
+        convert_to_spatialdata(xd).write(tmp_path / "dense.zarr")
+        assert _x_encoding(tmp_path / "dense.zarr", "CELLS.main.table") == "array"
 
 
 # ── default color for shapes without a color column ──────────────────────────
