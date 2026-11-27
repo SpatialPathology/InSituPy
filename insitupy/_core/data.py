@@ -1380,9 +1380,7 @@ class InSituData:
 
     def load_all(self,
                  skip: str | None = None,
-                 verbose: bool = False,
-                 cell_keys: str | list[str] | None = None,
-                 cell_boundaries: bool = True,
+                 verbose: bool = False
                  ):
         """Load all available modalities from the project directory.
 
@@ -1396,11 +1394,6 @@ class InSituData:
                 ``"images"``. Defaults to ``None``.
             verbose: If ``True``, log progress for each modality.
                 Defaults to ``False``.
-            cell_keys: Cell layer key(s) to load, forwarded to
-                :meth:`load_cells` as ``keys``. A selective cell load cannot
-                be saved (see :meth:`load_cells`). Defaults to ``None`` (all).
-            cell_boundaries: Forwarded to :meth:`load_cells` as ``boundaries``.
-                Defaults to ``True``.
         """
         # # extract read functions
         # read_funcs = [elem for elem in dir(self) if elem.startswith("load_")]
@@ -1409,10 +1402,7 @@ class InSituData:
             if skip is None or skip not in f:
                 func = getattr(self, f)
                 # try:
-                if f == "load_cells":
-                    func(verbose=verbose, keys=cell_keys, boundaries=cell_boundaries)
-                else:
-                    func(verbose=verbose)
+                func(verbose=verbose)
                 # except ModalityNotFoundError as err:
                 #     if verbose:
                 #         print(err)
@@ -1652,7 +1642,8 @@ class InSituData:
         :meth:`saveas` and :meth:`save_cells` raise ``ValueError`` until
         ``load_cells()`` is called again without arguments (which replaces the
         partial data and clears the mark). The mark is kept by ``copy()`` and
-        ``crop()``.
+        ``crop()``. To load everything else but cells selectively, call
+        ``load_all(skip="cells")`` followed by ``load_cells(keys=..., boundaries=False)``.
 
         Args:
             verbose: If ``True``, log progress and emit a warning when no

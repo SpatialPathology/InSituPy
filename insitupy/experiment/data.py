@@ -3086,18 +3086,12 @@ class InSituExperiment:
 
     def load_all(self,
                  skip: str | None = None,
-                 cell_keys: str | list[str] | None = None,
-                 cell_boundaries: bool = True,
                  ):
         """
         Load all data modalities for all datasets.
 
         Args:
             skip (Optional[str], optional): A modality to skip during loading. Defaults to None.
-            cell_keys: Cell layer key(s) to load, forwarded to :meth:`load_cells` as ``keys``.
-                A selective cell load cannot be saved (see :meth:`load_cells`).
-                Defaults to ``None`` (all layers).
-            cell_boundaries: Forwarded to :meth:`load_cells` as ``boundaries``. Defaults to ``True``.
         """
 
         summary = _StaleNucleusMapSummary()
@@ -3107,10 +3101,7 @@ class InSituExperiment:
                     if skip is None or skip not in f:
                         func = getattr(xd, f)
                         try:
-                            if f == "load_cells":
-                                func(keys=cell_keys, boundaries=cell_boundaries)
-                            else:
-                                func()
+                            func()
                         except ModalityNotFoundError as err:
                             logger.warning(str(err))
         summary.emit()
@@ -3127,7 +3118,9 @@ class InSituExperiment:
 
         A selective load (``keys`` or ``boundaries=False``) is much cheaper but is marked as
         partial: ``save()``, ``saveas()`` and ``save_cells()`` of the experiment then raise
-        ``ValueError`` until ``load_cells()`` is called again without arguments.
+        ``ValueError`` until ``load_cells()`` is called again without arguments. To load
+        everything else but cells selectively, call ``load_all(skip="cells")`` followed by
+        ``load_cells(keys=..., boundaries=False)``.
 
         Args:
             keys: Cell layer key(s) to load in every dataset. ``None`` loads all layers.

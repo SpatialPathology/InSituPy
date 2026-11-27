@@ -131,9 +131,10 @@ class TestLoadCellsSelective:
         assert set(xd.cells.keys()) == {"main", "alt"}
         assert xd.cells["main"].boundaries is not None
 
-    def test_load_all_forwards_cell_arguments(self, saved_xd_dir):
+    def test_load_all_skip_cells_then_selective_load(self, saved_xd_dir):
         xd = InSituData.read(saved_xd_dir)
-        xd.load_all(cell_keys=["main"], cell_boundaries=False)
+        xd.load_all(skip="cells")
+        xd.load_cells(keys=["main"], boundaries=False)
         assert list(xd.cells.keys()) == ["main"]
         assert xd.cells["main"].boundaries is None
 
@@ -247,11 +248,12 @@ class TestExperimentSelective:
         assert len(stale) == 1
         assert "2 of 3" in str(stale[0].message)
 
-    def test_load_all_forwards(self, saved_exp_dir):
+    def test_load_all_skip_cells_then_selective_load(self, saved_exp_dir):
         exp = InSituExperiment.read(saved_exp_dir)
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
-            exp.load_all(cell_keys="main", cell_boundaries=False)
+            exp.load_all(skip="cells")
+            exp.load_cells(keys="main", boundaries=False)
         assert _stale(record) == []
         assert all(list(xd.cells.keys()) == ["main"] for xd in exp.data)
 
