@@ -241,3 +241,88 @@ def test_limits_outside_image_give_no_image():
         pixelwidth_per_subplot=200, histogram_setting="auto",
     )
     assert image is None
+
+
+# ---------------------------------------------------------------------------
+# keys=None: image / annotations only, no cells loaded
+# ---------------------------------------------------------------------------
+
+def _make_cellfree_xd(sample_id="s1", with_image=True, image_shape=(400, 600), pixel_size=0.5):
+    xd = InSituData(
+        path=None, metadata=None, slide_id=sample_id, sample_id=sample_id,
+        method_name="test", method_params={},
+    )
+    assert not list(xd.cells.keys())  # no cell layer at all
+    if with_image:
+        cols = np.tile(np.arange(image_shape[1], dtype=np.uint16), (image_shape[0], 1))
+        xd.images.add_image(
+            da.from_array(cols), channel_names="he", axes="YX",
+            pixel_size=pixel_size, verbose=False,
+        )
+    return xd
+
+
+def _cellfree_experiment(with_image=(True, True)):
+    exp = isp.InSituExperiment()
+    for i, has in enumerate(with_image):
+        exp._data.append(_make_cellfree_xd(sample_id=f"s{i}", with_image=has))
+    exp._metadata = pd.DataFrame({"uid": [f"s{i}" for i in range(len(with_image))]})
+    return exp
+
+
+def test_keys_none_single_sample_uses_image_extent():
+    xd = _make_cellfree_xd()  # 600 x 400 px at 0.5 um -> 300 x 200 um
+    isp.pl.spatial(xd, keys=None, image_key="he", show=False)
+    (ax,) = _image_axes()
+    assert ax.get_xlim() == pytest.approx((0, 300))
+    assert sorted(ax.get_ylim()) == pytest.approx([0, 200])  # y axis is inverted
+    assert ax.images[0].get_extent()[1] == pytest.approx(300, abs=1)
+    plt.close("all")
+
+
+def test_keys_none_experiment_one_panel_per_sample():
+    exp = _cellfree_experiment((True, True))
+    isp.pl.spatial(exp, keys=None, image_key="he", show=False)
+    assert len(_image_axes()) == 2
+    plt.close("all")
+
+
+def test_keys_none_origin_zero_uses_lower_left_of_limits():
+    xd = _make_cellfree_xd()
+    isp.pl.spatial(
+        xd, keys=None, image_key="he", xlim=(50, 150), ylim=(20, 120),
+        plot_config=isp.pl.PlotConfig(origin_zero=True), show=False,
+    )
+    (ax,) = _image_axes()
+    assert ax.get_xlim() == pytest.approx((0, 100))
+    # image crop still starts at the absolute limit (column index * 0.5 um == 50 um -> 100)
+    assert ax.images[0].get_array()[0, 0] == pytest.approx(100, abs=3)
+    assert ax.images[0].get_extent()[0] == pytest.approx(0, abs=1)
+    plt.close("all")
+
+
+def test_keys_none_annotations_without_image_use_their_bounds():
+    import geopandas as gpd
+    from shapely.geometry import Polygon
+
+    xd = _make_cellfree_xd(with_image=False)
+    gdf = gpd.GeoDataFrame({
+        "id": ["A_0"], "name": ["A"], "color": [[255, 0, 0]],
+        "geometry": [Polygon([(400, 410), (450, 410), (450, 470), (400, 470)])],
+    })
+    xd.annotations.add_data(data=gdf, key="zones", scale_factor=1.0)
+    isp.pl.spatial(xd, keys=None, annotation_tuple="zones", show=False)
+    ax = plt.gcf().axes[0]
+    assert ax.get_xlim() == pytest.approx((400, 450))
+    plt.close("all")
+
+
+def test_keys_none_without_image_or_geometry_raises():
+    xd = _make_cellfree_xd(with_image=False)
+    with pytest.raises(ValueError, match="Nothing to plot"):
+        isp.pl.spatial(xd, keys=None, show=False)
+    plt.close("all")
+    exp = _cellfree_experiment((False, False))
+    with pytest.raises(ValueError, match="Nothing to plot"):
+        isp.pl.spatial(exp, keys=None, show=False)
+    plt.close("all")
