@@ -119,6 +119,13 @@ class TestVolcano:
         volcano(results, significance_threshold=0.1, foldchange_threshold=1.5, show=False)
         plt.close("all")
 
+    def test_show_config_without_config_warns(self):
+        results = DiffExprResults(main=_make_dge_df(), config=None)
+        plt.close("all")
+        with pytest.warns(UserWarning, match="no configuration"):
+            volcano(results, show_config=True, show=False)
+        plt.close("all")
+
 
 # ── dual_foldchange_plot ──────────────────────────────────────────────────────
 
@@ -186,6 +193,19 @@ class TestDualFoldchangePlot:
             # axhline spans x in axes coordinates [0, 1]; axvline spans y instead
             hlines = {line.get_ydata()[0] for line in ax.lines if list(line.get_xdata()) == [0, 1]}
             assert hlines == expected
+        plt.close("all")
+
+    def test_show_config_without_config_warns_and_hides_panel(self):
+        base = _make_dge_results_with_neighbors()
+        results = DiffExprResults(main=base.main, config=None,
+                                  target_neighborhood=base.target_neighborhood,
+                                  ref_neighborhood=base.ref_neighborhood)
+        plt.close("all")
+        with pytest.warns(UserWarning, match="no configuration"):
+            dual_foldchange_plot(results, adjust_labels=False, show=False, show_config=True)
+        axs = plt.gcf().axes
+        assert len(axs) == 3
+        assert not axs[2].axison
         plt.close("all")
 
     def test_split_mode_draws_no_gradient_image(self):

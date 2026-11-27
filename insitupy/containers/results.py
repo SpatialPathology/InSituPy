@@ -185,17 +185,26 @@ class DiffExprResults:
         DGE results comparing condition A cells vs. their neighboring cells (if neighborhood data used).
     ref_neighborhood : Optional[pd.DataFrame]
         DGE results comparing condition B cells vs. their neighboring cells (if neighborhood data used).
-    config : dict
+    config : DiffExprConfigCollector or None
         Optional metadata about the analysis (e.g., cell type, setup tuple, parameters).
+        ``None`` for results without configuration (e.g. read from a directory without
+        ``config.toml``). An empty dict is accepted and treated as ``None``.
     """
 
     def __init__(
         self,
         main: pd.DataFrame,
-        config: DiffExprConfigCollector,
+        config: DiffExprConfigCollector | None = None,
         target_neighborhood: pd.DataFrame | None = None,
         ref_neighborhood: pd.DataFrame | None = None,
     ):
+        # an empty dict was what read() used to produce for a missing config.toml
+        if isinstance(config, dict) and len(config) == 0:
+            config = None
+        if config is not None and not isinstance(config, DiffExprConfigCollector):
+            raise TypeError(
+                f"`config` must be a DiffExprConfigCollector or None. Instead got {type(config)}."
+            )
         self.main = main
         self.target_neighborhood = target_neighborhood
         self.ref_neighborhood = ref_neighborhood
@@ -258,9 +267,11 @@ class DiffExprResults:
 
         # Load metadata
         metadata_path = Path(directory) / "config.toml"
-        config = {}
+        config = None
         if metadata_path.is_file():
             config = DiffExprConfigCollector.read_from_toml(metadata_path)
+        else:
+            logger.debug("No config.toml found in '%s'; results have no configuration.", directory)
 
         return cls(
             main=main,
@@ -307,7 +318,8 @@ class DiffExprResults:
             self.ref_neighborhood.to_csv(directory / "ref_neighborhood.csv", index=True)
 
         # Save metadata
-        self.config.save_as_toml(directory / "config.toml")
+        if self.config is not None:
+            self.config.save_as_toml(directory / "config.toml")
 
     def summary(self) -> str:
         """Return a quick summary of available results."""
@@ -315,8 +327,8 @@ class DiffExprResults:
         if self.has_neighbors():
             lines.append(f"Neighbor comparison (A): {len(self.target_neighborhood)} genes")
             lines.append(f"Neighbor comparison (B): {len(self.ref_neighborhood)} genes")
-        if self.config:
-            lines.append(f"Configuration:\n{self.config.__repr__}")
+        if self.config is not None:
+            lines.append(f"Configuration:\n{self.config!r}")
         return "\n".join(lines)
 
     def _validate_df(self, df: pd.DataFrame, name: str, required: set):
