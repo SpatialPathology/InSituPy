@@ -66,6 +66,89 @@ def _tqdm_output_redirect():
                     _saved_showwarning = None
 
 
+@contextmanager
+def _count_warnings(category: type[Warning]):
+    """
+    Record warnings of ``category`` raised inside the block and swallow them.
+
+    Yields a list that is filled with the recorded warnings as they occur. Implemented by
+    temporarily wrapping ``warnings.showwarning``; the warning filters are left untouched
+    (changing them would reset every module's "default"/"once" dedup state). All other
+    warnings therefore go through the normal machinery and are deduplicated as usual, and
+    are then forwarded to the ``showwarning`` that was active before (e.g. the tqdm one).
+
+    Only warnings that pass the active filters are seen, and the producer must not be
+    deduplicated by the filters itself (``StaleNucleusMapWarning`` is emitted with a
+    fresh registry for that reason). Not thread-safe (``showwarning`` is process-global).
+    """
+    recorded: list = []
+    previous = warnings.showwarning
+
+    def _intercept(message, cat, filename, lineno, file=None, line=None):
+        if issubclass(cat, category):
+            recorded.append(
+                warnings.WarningMessage(message, cat, filename, lineno, file, line)
+            )
+        else:
+            previous(message, cat, filename, lineno, file, line)
+
+    warnings.showwarning = _intercept
+    try:
+        yield recorded
+    finally:
+        # restore only if nobody replaced it meanwhile
+        if warnings.showwarning is _intercept:
+            warnings.showwarning = previous
+
+
+class _StaleNucleusMapSummary:
+    """
+    Collapse per-dataset ``StaleNucleusMapWarning`` into one summary for a load loop.
+
+    Usage::
+
+        summary = _StaleNucleusMapSummary()
+        for xd in datasets:
+            with summary.watch():
+                xd.load_cells()
+        summary.emit()
+
+    Other warnings raised inside ``watch()`` reach the user unchanged. ``emit()`` warns
+    once (same class, so a user filter silences both) and does nothing if no dataset
+    was affected.
+    """
+
+    def __init__(self):
+        self.n_total = 0
+        self.n_affected = 0
+
+    @contextmanager
+    def watch(self):
+        from insitupy._exceptions import StaleNucleusMapWarning
+
+        self.n_total += 1
+        with _count_warnings(StaleNucleusMapWarning) as recorded:
+            yield
+        # `recorded` is filled when the inner context exits normally; on an exception the
+        # error propagates and the dataset is not counted.
+        if recorded:
+            self.n_affected += 1
+
+    def emit(self):
+        if self.n_affected == 0:
+            return
+        from insitupy._exceptions import StaleNucleusMapWarning
+
+        warnings.warn(
+            StaleNucleusMapWarning(
+                f"Nucleus map dropped in {self.n_affected} of {self.n_total} datasets "
+                "(older InSituPy format); harmless for cell-level analyses, re-read from "
+                "raw data to restore multinucleated-cell mapping."
+            ),
+            stacklevel=3,
+        )
+
+
 def setup_logging():
     """Configure the insitupy package logger with a TqdmLoggingHandler."""
     logger = logging.getLogger('insitupy')

@@ -190,9 +190,13 @@ class BoundariesData(DeepCopyMixin):
             cell_names = self._cell_names.compute()
         cell_names = np.asarray(cell_names)
         if self._nucleus_to_cell_map is not None:
-            name_set = set(cell_names.astype(str))
-            if not all(v in name_set for v in self._nucleus_to_cell_map.values()):
-                return False
+            if len(self._nucleus_to_cell_map) > 0:
+                values = np.fromiter(
+                    self._nucleus_to_cell_map.values(), dtype=object,
+                    count=len(self._nucleus_to_cell_map),
+                ).astype(str)
+                if not np.isin(values, cell_names.astype(str)).all():
+                    return False
         if self._nucleus_count is not None and len(np.asarray(self._nucleus_count)) != len(cell_names):
             return False
         return True
