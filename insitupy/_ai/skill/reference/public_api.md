@@ -31,5 +31,5 @@
   insitupy.im (images): Image utilities — read, transform, etc.
   insitupy.utils: Utilities — XeniumPanels, mock data, DGE helpers, etc.
   insitupy.datasets: Example datasets — download and load sample data.
-  insitupy.interactive: Interactive napari-based visualization widgets.
+  insitupy.interactive: Interactive napari-based visualization widgets (needs the `viewer` extra).
   insitupy.spatialdata: SpatialData conversion — to/from SpatialData format.

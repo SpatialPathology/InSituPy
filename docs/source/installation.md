@@ -21,7 +21,15 @@ To ensure that the InSituPy package is available as a kernel in Jupyter notebook
    pip install insitupy-spatial
    ```
 
-This base installation includes napari and related visualization dependencies.
+This base installation does not include the interactive viewer (napari, Qt) and is suitable for headless and HPC environments.
+
+### Optional: Install the interactive viewer
+
+To use `.show()` (the napari-based viewer), install the `viewer` extra:
+
+   ```bash
+   pip install "insitupy-spatial[viewer]"
+   ```
 
 InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy zarr v2 workflows are only partially supported and not tested.
 
@@ -67,6 +75,11 @@ InSituPy currently requires `zarr>=3.0.0` and targets the zarr v3 format. Legacy
    ```
 
 ## Upgrading from 0.12
+
+napari is no longer installed with InSituPy by default. Existing environments keep their napari
+until they are recreated, but new environments need `pip install "insitupy-spatial[viewer]"` for
+`.show()`. Without it, `.show()` raises an `ImportError` that names the extra. For development,
+`pip install -e ".[dev]"` includes the viewer.
 
 InSituPy now depends on `opencv-python-headless` instead of `opencv-python`. In an existing
 environment, run `pip uninstall -y opencv-python opencv-python-headless` and then

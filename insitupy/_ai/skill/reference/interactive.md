@@ -2,7 +2,7 @@
 
 # InSituPy Interactive Visualization
 
-Requires napari: `pip install "napari[all]"`
+Requires the viewer extra (napari): `pip install "insitupy-spatial[viewer]"`
 
 ## data.show() — Launch napari viewer
   InSituData.show(self, keys: str | None = None, key_type: Literal['genes', 'obs', 'obsm'] = 'genes', cells_layer: str | None = None, point_size: int = 8, scalebar: bool = True, unit: str = 'µm', return_viewer: bool = False, widgets_max_width: int = 500, verbose: bool = False, show_transcripts: bool = True, transcript_lazy_loading: bool = True, transcript_config=None, transcript_background: Literal['dark', 'light'] = 'dark')
@@ -63,11 +63,8 @@ Requires napari: `pip install "napari[all]"`
 ## Installation
 
 ```bash
-# Full napari installation (recommended)
-pip install "napari[all]"
-
-# Or with PyQt5 backend explicitly
-pip install "napari[pyqt5]"
+# Viewer extra (napari with Qt, not part of the base install)
+pip install "insitupy-spatial[viewer]"
 ```
 
 ## Typical Interactive Workflow
@@ -93,6 +90,6 @@ data.show(
 ispy.interactive.viewer.sync_geometries()
 
 # 5. Assign annotations to cells. By default the result is written to
-#    data.cells.table.obsm["anno
+#    data.cells.table.obsm["an
 
-... [truncated — full text is 4319 chars]
+... [truncated — full text is 4350 chars]
